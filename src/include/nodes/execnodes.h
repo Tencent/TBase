@@ -1966,6 +1966,16 @@ typedef struct ReDistributeState
 #endif
 
 /* ----------------
+ *	 Shared memory container for per-worker sort information
+ * ----------------
+ */
+typedef struct SharedSortInfo
+{
+	int			num_workers;
+	TuplesortInstrumentation sinstrument[FLEXIBLE_ARRAY_MEMBER];
+} SharedSortInfo;
+
+/* ----------------
  *     SortState information
  * ----------------
  */
@@ -1979,6 +1989,8 @@ typedef struct SortState
     bool        bounded_Done;    /* value of bounded we did the sort with */
     int64        bound_Done;        /* value of bound we did the sort with */
     void       *tuplesortstate; /* private state of tuplesort.c */
+	bool		am_worker;		/* are we a worker? */
+	SharedSortInfo *shared_info;	/* one entry per worker */
 #ifdef __TBASE__
     Size            stateLen;
     ReDistributeState *state;

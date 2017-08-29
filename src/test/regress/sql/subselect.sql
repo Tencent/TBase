@@ -728,6 +728,37 @@ DROP TABLE sub_t2;
 DROP TABLE sub_interfere1;
 DROP TABLE sub_interfere2;
 set enable_pullup_subquery to false;
+-- Test that LIMIT can be pushed to SORT through a subquery that just projects
+-- columns.  We check for that having happened by looking to see if EXPLAIN
+-- ANALYZE shows that a top-N sort was used.  We must suppress or filter away
+-- all the non-invariant parts of the EXPLAIN ANALYZE output.
+--
+create table sq_limit (pk int primary key, c1 int, c2 int);
+insert into sq_limit values
+    (1, 1, 1),
+    (2, 2, 2),
+    (3, 3, 3),
+    (4, 4, 4),
+    (5, 1, 1),
+    (6, 2, 2),
+    (7, 3, 3),
+    (8, 4, 4);
+
+create function explain_sq_limit() returns setof text language plpgsql as
+$$
+declare ln text;
+begin
+    for ln in
+        explain (analyze, summary off, timing off, costs off)
+        select * from (select pk,c2 from sq_limit order by c1,pk) as x limit 3
+    loop
+        ln := regexp_replace(ln, 'Memory: \S*',  'Memory: xxx');
+        -- this case might occur if force_parallel_mode is on:
+        ln := regexp_replace(ln, 'Worker 0:  Sort Method',  'Sort Method');
+        return next ln;
+    end loop;
+end;
+$$;
 
 --
 -- Tests for CTE inlining behavior
@@ -849,3 +880,13 @@ select 1
 from date_dim
     join cs on (cs_sold_year=d_year and cs_item_sk=cs_item_sk);
 drop table catalog_sales, catalog_returns, date_dim;
+
+-- not in optimization
+create table notin_t1 (id1 int, num1 int not null);
+create table notin_t2 (id2 int, num2 int not null);
+explain(costs off) select num1 from notin_t1 where num1 not in (select num2 from notin_t2);
+drop table notin_t1;
+drop table notin_t2;
+drop function explain_sq_limit();
+
+drop table sq_limit;
