@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * extensible.h
- *      Definitions for extensible nodes and custom scans
+ *	  Definitions for extensible nodes and custom scans
  *
  *
  * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
@@ -21,7 +21,7 @@
 #include "nodes/relation.h"
 
 /* maximum length of an extensible node identifier */
-#define EXTNODENAME_MAX_LEN                    64
+#define EXTNODENAME_MAX_LEN					64
 
 /*
  * An extensible node is a new type of node defined by an extension.  The
@@ -31,8 +31,8 @@
  */
 typedef struct ExtensibleNode
 {
-    NodeTag        type;
-    const char *extnodename;    /* identifier of ExtensibleNodeMethods */
+	NodeTag		type;
+	const char *extnodename;	/* identifier of ExtensibleNodeMethods */
 } ExtensibleNode;
 
 /*
@@ -59,27 +59,27 @@ typedef struct ExtensibleNode
  */
 typedef struct ExtensibleNodeMethods
 {
-    const char *extnodename;
-    Size        node_size;
-    void        (*nodeCopy) (struct ExtensibleNode *newnode,
-                             const struct ExtensibleNode *oldnode);
-    bool        (*nodeEqual) (const struct ExtensibleNode *a,
-                              const struct ExtensibleNode *b);
-    void        (*nodeOut) (struct StringInfoData *str,
-                            const struct ExtensibleNode *node);
-    void        (*nodeRead) (struct ExtensibleNode *node);
+	const char *extnodename;
+	Size		node_size;
+	void		(*nodeCopy) (struct ExtensibleNode *newnode,
+							 const struct ExtensibleNode *oldnode);
+	bool		(*nodeEqual) (const struct ExtensibleNode *a,
+							  const struct ExtensibleNode *b);
+	void		(*nodeOut) (struct StringInfoData *str,
+							const struct ExtensibleNode *node);
+	void		(*nodeRead) (struct ExtensibleNode *node);
 } ExtensibleNodeMethods;
 
 extern void RegisterExtensibleNodeMethods(const ExtensibleNodeMethods *method);
 extern const ExtensibleNodeMethods *GetExtensibleNodeMethods(const char *name,
-                         bool missing_ok);
+						 bool missing_ok);
 
 /*
  * Flags for custom paths, indicating what capabilities the resulting scan
  * will have.
  */
-#define CUSTOMPATH_SUPPORT_BACKWARD_SCAN    0x0001
-#define CUSTOMPATH_SUPPORT_MARK_RESTORE        0x0002
+#define CUSTOMPATH_SUPPORT_BACKWARD_SCAN	0x0001
+#define CUSTOMPATH_SUPPORT_MARK_RESTORE		0x0002
 
 /*
  * Custom path methods.  Mostly, we just need to know how to convert a
@@ -87,16 +87,16 @@ extern const ExtensibleNodeMethods *GetExtensibleNodeMethods(const char *name,
  */
 typedef struct CustomPathMethods
 {
-    const char *CustomName;
+	const char *CustomName;
 
-    /* Convert Path to a Plan */
-    struct Plan *(*PlanCustomPath) (PlannerInfo *root,
-                                    RelOptInfo *rel,
-                                    struct CustomPath *best_path,
-                                    List *tlist,
-                                    List *clauses,
-                                    List *custom_plans);
-}            CustomPathMethods;
+	/* Convert Path to a Plan */
+	struct Plan *(*PlanCustomPath) (PlannerInfo *root,
+									RelOptInfo *rel,
+									struct CustomPath *best_path,
+									List *tlist,
+									List *clauses,
+									List *custom_plans);
+}			CustomPathMethods;
 
 /*
  * Custom scan.  Here again, there's not much to do: we need to be able to
@@ -104,10 +104,10 @@ typedef struct CustomPathMethods
  */
 typedef struct CustomScanMethods
 {
-    const char *CustomName;
+	const char *CustomName;
 
-    /* Create execution state (CustomScanState) from a CustomScan plan node */
-    Node       *(*CreateCustomScanState) (CustomScan *cscan);
+	/* Create execution state (CustomScanState) from a CustomScan plan node */
+	Node	   *(*CreateCustomScanState) (CustomScan *cscan);
 } CustomScanMethods;
 
 /*
@@ -116,39 +116,42 @@ typedef struct CustomScanMethods
  */
 typedef struct CustomExecMethods
 {
-    const char *CustomName;
+	const char *CustomName;
 
-    /* Required executor methods */
-    void        (*BeginCustomScan) (CustomScanState *node,
-                                    EState *estate,
-                                    int eflags);
-    TupleTableSlot *(*ExecCustomScan) (CustomScanState *node);
-    void        (*EndCustomScan) (CustomScanState *node);
-    void        (*ReScanCustomScan) (CustomScanState *node);
+	/* Required executor methods */
+	void		(*BeginCustomScan) (CustomScanState *node,
+									EState *estate,
+									int eflags);
+	TupleTableSlot *(*ExecCustomScan) (CustomScanState *node);
+	void		(*EndCustomScan) (CustomScanState *node);
+	void		(*ReScanCustomScan) (CustomScanState *node);
 
-    /* Optional methods: needed if mark/restore is supported */
-    void        (*MarkPosCustomScan) (CustomScanState *node);
-    void        (*RestrPosCustomScan) (CustomScanState *node);
+	/* Optional methods: needed if mark/restore is supported */
+	void		(*MarkPosCustomScan) (CustomScanState *node);
+	void		(*RestrPosCustomScan) (CustomScanState *node);
 
-    /* Optional methods: needed if parallel execution is supported */
-    Size        (*EstimateDSMCustomScan) (CustomScanState *node,
-                                          ParallelContext *pcxt);
-    void        (*InitializeDSMCustomScan) (CustomScanState *node,
-                                            ParallelContext *pcxt,
-                                            void *coordinate);
-    void        (*InitializeWorkerCustomScan) (CustomScanState *node,
-                                               shm_toc *toc,
-                                               void *coordinate);
-    void        (*ShutdownCustomScan) (CustomScanState *node);
+	/* Optional methods: needed if parallel execution is supported */
+	Size		(*EstimateDSMCustomScan) (CustomScanState *node,
+										  ParallelContext *pcxt);
+	void		(*InitializeDSMCustomScan) (CustomScanState *node,
+											ParallelContext *pcxt,
+											void *coordinate);
+	void		(*ReInitializeDSMCustomScan) (CustomScanState *node,
+											  ParallelContext *pcxt,
+											  void *coordinate);
+	void		(*InitializeWorkerCustomScan) (CustomScanState *node,
+											   shm_toc *toc,
+											   void *coordinate);
+	void		(*ShutdownCustomScan) (CustomScanState *node);
 
-    /* Optional: print additional information in EXPLAIN */
-    void        (*ExplainCustomScan) (CustomScanState *node,
-                                      List *ancestors,
-                                      ExplainState *es);
+	/* Optional: print additional information in EXPLAIN */
+	void		(*ExplainCustomScan) (CustomScanState *node,
+									  List *ancestors,
+									  ExplainState *es);
 } CustomExecMethods;
 
 extern void RegisterCustomScanMethods(const CustomScanMethods *methods);
 extern const CustomScanMethods *GetCustomScanMethods(const char *CustomName,
-                     bool missing_ok);
+					 bool missing_ok);
 
-#endif                            /* EXTENSIBLE_H */
+#endif							/* EXTENSIBLE_H */

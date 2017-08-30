@@ -1,12 +1,12 @@
 /*--------------------------------------------------------------------
  * execParallel.h
- *        POSTGRES parallel execution interface
+ *		POSTGRES parallel execution interface
  *
  * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *        src/include/executor/execParallel.h
+ *		src/include/executor/execParallel.h
  *--------------------------------------------------------------------
  */
 
@@ -23,15 +23,15 @@ typedef struct SharedExecutorInstrumentation SharedExecutorInstrumentation;
 
 typedef struct ParallelExecutorInfo
 {
-    PlanState  *planstate;
-    ParallelContext *pcxt;
-    BufferUsage *buffer_usage;
-    SharedExecutorInstrumentation *instrumentation;
-    shm_mq_handle **tqueue;
-    dsa_area   *area;
-    bool        finished;
+	PlanState  *planstate;
+	ParallelContext *pcxt;
+	BufferUsage *buffer_usage;
+	SharedExecutorInstrumentation *instrumentation;
+	shm_mq_handle **tqueue;
+	dsa_area   *area;
+	bool		finished;
 #ifdef __TBASE__
-    bool        *executor_done;
+	bool        *executor_done;
 #endif
 } ParallelExecutorInfo;
 
@@ -48,7 +48,8 @@ extern ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate,
 
 extern void ExecParallelFinish(ParallelExecutorInfo *pei);
 extern void ExecParallelCleanup(ParallelExecutorInfo *pei);
-extern void ExecParallelReinitialize(ParallelExecutorInfo *pei);
+extern void ExecParallelReinitialize(PlanState *planstate,
+						 ParallelExecutorInfo *pei);
 
 extern void ParallelQueryMain(dsm_segment *seg, shm_toc *toc);
 #ifdef __TBASE__
@@ -63,4 +64,4 @@ extern bool ParallelError(void);
 
 extern void HandleParallelExecutionError(void);
 #endif
-#endif                            /* EXECPARALLEL_H */
+#endif							/* EXECPARALLEL_H */
