@@ -1952,10 +1952,7 @@ get_partition_for_tuple(PartitionDispatch *pd,
     PartitionDispatch parent;
     Datum        values[PARTITION_MAX_KEYS];
     bool        isnull[PARTITION_MAX_KEYS];
-    int            cur_offset,
-                cur_index;
-    int            i,
-                result;
+	int			result;
     ExprContext *ecxt = GetPerTupleExprContext(estate);
     TupleTableSlot *ecxt_scantuple_old = ecxt->ecxt_scantuple;
 
@@ -1967,6 +1964,7 @@ get_partition_for_tuple(PartitionDispatch *pd,
         PartitionDesc partdesc = parent->partdesc;
         TupleTableSlot *myslot = parent->tupslot;
         TupleConversionMap *map = parent->tupmap;
+		int		cur_index = -1;
 
         if (myslot != NULL && map != NULL)
         {
@@ -1998,12 +1996,38 @@ get_partition_for_tuple(PartitionDispatch *pd,
         ecxt->ecxt_scantuple = slot;
         FormPartitionKeyDatum(parent, slot, estate, values, isnull);
 
-        if (key->strategy == PARTITION_STRATEGY_RANGE)
+		/* Route as appropriate based on partitioning strategy. */
+		switch (key->strategy)
         {
-            /*
-             * Since we cannot route tuples with NULL partition keys through a
-             * range-partitioned table, simply return that no partition exists
-             */
+			case PARTITION_STRATEGY_LIST:
+
+				if (isnull[0])
+				{
+					if (partition_bound_accepts_nulls(partdesc->boundinfo))
+						cur_index = partdesc->boundinfo->null_index;
+				}
+				else
+				{
+					bool		equal = false;
+					int			cur_offset;
+
+					cur_offset = partition_bound_bsearch(key,
+														 partdesc->boundinfo,
+														 values,
+														 false,
+														 &equal);
+					if (cur_offset >= 0 && equal)
+						cur_index = partdesc->boundinfo->indexes[cur_offset];
+				}
+				break;
+
+			case PARTITION_STRATEGY_RANGE:
+				{
+					bool		equal = false;
+					int			cur_offset;
+					int			i;
+
+					/* No range includes NULL. */
             for (i = 0; i < key->partnatts; i++)
             {
                 if (isnull[i])
@@ -2014,46 +2038,26 @@ get_partition_for_tuple(PartitionDispatch *pd,
                     goto error_exit;
                 }
             }
-        }
 
-        /*
-         * A null partition key is only acceptable if null-accepting list
-         * partition exists.
-         */
-        cur_index = -1;
-        if (isnull[0] && partition_bound_accepts_nulls(partdesc->boundinfo))
-            cur_index = partdesc->boundinfo->null_index;
-        else if (!isnull[0])
-        {
-            /* Else bsearch in partdesc->boundinfo */
-            bool        equal = false;
-
-            cur_offset = partition_bound_bsearch(key, partdesc->boundinfo,
-                                                 values, false, &equal);
-            switch (key->strategy)
-            {
-                case PARTITION_STRATEGY_LIST:
-                    if (cur_offset >= 0 && equal)
-                        cur_index = partdesc->boundinfo->indexes[cur_offset];
-                    else
-                        cur_index = -1;
-                    break;
-
-                case PARTITION_STRATEGY_RANGE:
+					cur_offset = partition_bound_bsearch(key,
+														 partdesc->boundinfo,
+														 values,
+														 false,
+														 &equal);
 
                     /*
-                     * Offset returned is such that the bound at offset is
-                     * found to be less or equal with the tuple. So, the bound
-                     * at offset+1 would be the upper bound.
+					 * The offset returned is such that the bound at cur_offset
+					 * is less than or equal to the tuple value, so the bound
+					 * at offset+1 is the upper bound.
                      */
                     cur_index = partdesc->boundinfo->indexes[cur_offset + 1];
+				}
                     break;
 
                 default:
                     elog(ERROR, "unexpected partition strategy: %d",
                          (int) key->strategy);
             }
-        }
 
         /*
          * cur_index < 0 means we failed to find a partition of this parent.
