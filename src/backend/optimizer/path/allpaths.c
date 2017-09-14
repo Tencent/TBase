@@ -1307,14 +1307,35 @@ add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel,
     ListCell   *l;
     List       *partitioned_rels = NIL;
     RangeTblEntry *rte;
+	bool		build_partitioned_rels = false;
 
+	/*
+	 * A plain relation will already have a PartitionedChildRelInfo if it is
+	 * partitioned.  For a subquery RTE, no PartitionedChildRelInfo exists; we
+	 * collect all partitioned_rels associated with any child.  (This assumes
+	 * that we don't need to look through multiple levels of subquery RTEs; if
+	 * we ever do, we could create a PartitionedChildRelInfo with the
+	 * accumulated list of partitioned_rels which would then be found when
+	 * populated our parent rel with paths.  For the present, that appears to
+	 * be unnecessary.)
+	 */
     rte = planner_rt_fetch(rel->relid, root);
+	switch (rte->rtekind)
+	{
+		case RTE_RELATION:
     if (rte->relkind == RELKIND_PARTITIONED_TABLE)
     {
-        partitioned_rels = get_partitioned_child_rels(root, rel->relid);
-        /* The root partitioned table is included as a child rel */
+				partitioned_rels =
+					get_partitioned_child_rels(root, rel->relid);
         Assert(list_length(partitioned_rels) >= 1);
     }
+			break;
+		case RTE_SUBQUERY:
+			build_partitioned_rels = true;
+			break;
+		default:
+			elog(ERROR, "unexpcted rtekind: %d", (int) rte->rtekind);
+	}
 
     /*
      * For every non-dummy child, remember the cheapest path.  Also, identify
@@ -1327,6 +1348,19 @@ add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel,
         ListCell   *lcp;
 
         /*
+		 * If we need to build partitioned_rels, accumulate the partitioned
+		 * rels for this child.
+		 */
+		if (build_partitioned_rels)
+		{
+			List	   *cprels;
+
+			cprels = get_partitioned_child_rels(root, childrel->relid);
+			partitioned_rels = list_concat(partitioned_rels,
+										   list_copy(cprels));
+		}
+
+		/*
          * If child has an unparameterized cheapest-total path, add that to
          * the unparameterized Append path we are constructing for the parent.
          * If not, there's no workable unparameterized path.
