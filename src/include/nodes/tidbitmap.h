@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * tidbitmap.h
- *      PostgreSQL tuple-id (TID) bitmap package
+ *	  PostgreSQL tuple-id (TID) bitmap package
  *
  * This module provides bitmap data structures that are spiritually
  * similar to Bitmapsets, but are specially adapted to store sets of
@@ -39,11 +39,11 @@ typedef struct TBMSharedIterator TBMSharedIterator;
 /* Result structure for tbm_iterate */
 typedef struct
 {
-    BlockNumber blockno;        /* page number containing tuples */
-    int            ntuples;        /* -1 indicates lossy result */
-    bool        recheck;        /* should the tuples be rechecked? */
-    /* Note: recheck is always true if ntuples < 0 */
-    OffsetNumber offsets[FLEXIBLE_ARRAY_MEMBER];
+	BlockNumber blockno;		/* page number containing tuples */
+	int			ntuples;		/* -1 indicates lossy result */
+	bool		recheck;		/* should the tuples be rechecked? */
+	/* Note: recheck is always true if ntuples < 0 */
+	OffsetNumber offsets[FLEXIBLE_ARRAY_MEMBER];
 } TBMIterateResult;
 
 /* function prototypes in nodes/tidbitmap.c */
@@ -53,8 +53,8 @@ extern void tbm_free(TIDBitmap *tbm);
 extern void tbm_free_shared_area(dsa_area *dsa, dsa_pointer dp);
 
 extern void tbm_add_tuples(TIDBitmap *tbm,
-               const ItemPointer tids, int ntids,
-               bool recheck);
+			   const ItemPointer tids, int ntids,
+			   bool recheck);
 extern void tbm_add_page(TIDBitmap *tbm, BlockNumber pageno);
 
 extern void tbm_union(TIDBitmap *a, const TIDBitmap *b);
@@ -69,6 +69,7 @@ extern TBMIterateResult *tbm_shared_iterate(TBMSharedIterator *iterator);
 extern void tbm_end_iterate(TBMIterator *iterator);
 extern void tbm_end_shared_iterate(TBMSharedIterator *iterator);
 extern TBMSharedIterator *tbm_attach_shared_iterate(dsa_area *dsa,
-                          dsa_pointer dp);
+						  dsa_pointer dp);
+extern long tbm_calculate_entries(double maxbytes);
 
-#endif                            /* TIDBITMAP_H */
+#endif							/* TIDBITMAP_H */
