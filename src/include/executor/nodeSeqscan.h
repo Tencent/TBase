@@ -24,6 +24,8 @@ extern void ExecReScanSeqScan(SeqScanState *node);
 /* parallel scan support */
 extern void ExecSeqScanEstimate(SeqScanState *node, ParallelContext *pcxt);
 extern void ExecSeqScanInitializeDSM(SeqScanState *node, ParallelContext *pcxt);
-extern void ExecSeqScanInitializeWorker(SeqScanState *node, shm_toc *toc);
+extern void ExecSeqScanReInitializeDSM(SeqScanState *node, ParallelContext *pcxt);
+extern void ExecSeqScanInitializeWorker(SeqScanState *node,
+							ParallelWorkerContext *pwcxt);
 
-#endif                            /* NODESEQSCAN_H */
+#endif							/* NODESEQSCAN_H */

@@ -26,7 +26,8 @@ extern void ExecReScanSort(SortState *node);
 /* parallel instrumentation support */
 extern void ExecSortEstimate(SortState *node, ParallelContext *pcxt);
 extern void ExecSortInitializeDSM(SortState *node, ParallelContext *pcxt);
-extern void ExecSortInitializeWorker(SortState *node, shm_toc *toc);
+extern void ExecSortReInitializeDSM(SortState *node, ParallelContext *pcxt);
+extern void ExecSortInitializeWorker(SortState *node, ParallelWorkerContext *pwcxt);
 extern void ExecSortRetrieveInstrumentation(SortState *node);
 
 #endif							/* NODESORT_H */

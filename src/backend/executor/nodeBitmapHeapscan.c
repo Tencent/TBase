@@ -1061,12 +1061,13 @@ ExecBitmapHeapInitializeDSM(BitmapHeapScanState *node,
  * ----------------------------------------------------------------
  */
 void
-ExecBitmapHeapInitializeWorker(BitmapHeapScanState *node, shm_toc *toc)
+ExecBitmapHeapInitializeWorker(BitmapHeapScanState *node,
+							   ParallelWorkerContext *pwcxt)
 {
     ParallelBitmapHeapState *pstate;
     Snapshot    snapshot;
 
-    pstate = shm_toc_lookup(toc, node->ss.ps.plan->plan_node_id, false);
+	pstate = shm_toc_lookup(pwcxt->toc, node->ss.ps.plan->plan_node_id, false);
     node->pstate = pstate;
 
     snapshot = RestoreSnapshot(pstate->phs_snapshot_data);

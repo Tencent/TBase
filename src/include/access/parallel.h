@@ -118,6 +118,12 @@ typedef struct ParallelWorkerStatus
 } ParallelWorkerStatus;
 #endif
 
+typedef struct ParallelWorkerContext
+{
+	dsm_segment *seg;
+	shm_toc    *toc;
+} ParallelWorkerContext;
+
 extern volatile bool ParallelMessagePending;
 extern int    ParallelWorkerNumber;
 extern bool InitializingParallelWorker;

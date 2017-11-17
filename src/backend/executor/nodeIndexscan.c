@@ -1777,11 +1777,12 @@ ExecIndexScanInitializeDSM(IndexScanState *node,
  * ----------------------------------------------------------------
  */
 void
-ExecIndexScanInitializeWorker(IndexScanState *node, shm_toc *toc)
+ExecIndexScanInitializeWorker(IndexScanState *node,
+							  ParallelWorkerContext *pwcxt)
 {
     ParallelIndexScanDesc piscan;
 
-    piscan = shm_toc_lookup(toc, node->ss.ps.plan->plan_node_id, false);
+	piscan = shm_toc_lookup(pwcxt->toc, node->ss.ps.plan->plan_node_id, false);
     node->iss_ScanDesc =
         index_beginscan_parallel(node->ss.ss_currentRelation,
                                  node->iss_RelationDesc,

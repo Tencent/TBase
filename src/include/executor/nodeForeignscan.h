@@ -22,11 +22,11 @@ extern void ExecEndForeignScan(ForeignScanState *node);
 extern void ExecReScanForeignScan(ForeignScanState *node);
 
 extern void ExecForeignScanEstimate(ForeignScanState *node,
-                        ParallelContext *pcxt);
+						ParallelContext *pcxt);
 extern void ExecForeignScanInitializeDSM(ForeignScanState *node,
-                             ParallelContext *pcxt);
+							 ParallelContext *pcxt);
 extern void ExecForeignScanInitializeWorker(ForeignScanState *node,
-                                shm_toc *toc);
+								ParallelWorkerContext *pwcxt);
 extern void ExecShutdownForeignScan(ForeignScanState *node);
 
-#endif                            /* NODEFOREIGNSCAN_H */
+#endif							/* NODEFOREIGNSCAN_H */

@@ -1093,8 +1093,8 @@ ExecParallelReportInstrumentation(PlanState *planstate,
  * is allocated and initialized by executor; that is, after ExecutorStart().
  */
 static bool
-ExecParallelInitializeWorker(PlanState *planstate, shm_toc *toc)
-{// #lizard forgives
+ExecParallelInitializeWorker(PlanState *planstate, ParallelWorkerContext *pwcxt)
+{
     if (planstate == NULL)
         return false;
 
@@ -1102,49 +1102,50 @@ ExecParallelInitializeWorker(PlanState *planstate, shm_toc *toc)
         {
             case T_SeqScanState:
 			if (planstate->plan->parallel_aware)
-                ExecSeqScanInitializeWorker((SeqScanState *) planstate, toc);
+				ExecSeqScanInitializeWorker((SeqScanState *) planstate, pwcxt);
                 break;
             case T_IndexScanState:
 			if (planstate->plan->parallel_aware)
-                ExecIndexScanInitializeWorker((IndexScanState *) planstate, toc);
+				ExecIndexScanInitializeWorker((IndexScanState *) planstate,
+											  pwcxt);
                 break;
             case T_IndexOnlyScanState:
 			if (planstate->plan->parallel_aware)
-                ExecIndexOnlyScanInitializeWorker((IndexOnlyScanState *) planstate, toc);
+				ExecIndexOnlyScanInitializeWorker((IndexOnlyScanState *) planstate,
+												  pwcxt);
                 break;
             case T_ForeignScanState:
 			if (planstate->plan->parallel_aware)
                 ExecForeignScanInitializeWorker((ForeignScanState *) planstate,
-                                                toc);
+												pwcxt);
                 break;
             case T_CustomScanState:
 			if (planstate->plan->parallel_aware)
                 ExecCustomScanInitializeWorker((CustomScanState *) planstate,
-                                               toc);
+				                               pwcxt);
                 break;
             case T_BitmapHeapScanState:
 			if (planstate->plan->parallel_aware)
-				ExecBitmapHeapInitializeWorker(
-											   (BitmapHeapScanState *) planstate, toc);
+				ExecBitmapHeapInitializeWorker((BitmapHeapScanState *) planstate, pwcxt);
                 break;
 		case T_SortState:
 			/* even when not parallel-aware */
-			ExecSortInitializeWorker((SortState *) planstate, toc);
+			ExecSortInitializeWorker((SortState *) planstate, pwcxt);
 #ifdef __TBASE__
 			if (planstate->plan->parallel_aware)
-				ReDistributeInitializeWorker(planstate, toc);
+				ReDistributeInitializeWorker(planstate, pwcxt);
 			break;
             case T_RemoteQueryState:
 			if (planstate->plan->parallel_aware)
-                ExecRemoteQueryInitializeDSMWorker((RemoteQueryState *)planstate, toc);
+				ExecRemoteQueryInitializeDSMWorker((RemoteQueryState *)planstate, pwcxt);
                 break;
             case T_RemoteSubplanState: 
             if (planstate->plan->parallel_aware)        
-                ExecRemoteSubPlanInitDSMWorker((RemoteSubplanState *)planstate, toc);
-                break;
-            case T_HashJoinState:
-                if (planstate->plan->parallel_aware)
-                    ExecParallelHashJoinInitWorker((HashJoinState *) planstate, toc);
+				ExecRemoteSubPlanInitializeDSMWorker((RemoteSubplanState *)planstate, pwcxt);
+			break;
+		case T_HashJoinState:
+			if (planstate->plan->parallel_aware)
+				ExecParallelHashJoinInitializeWorker((HashJoinState *) planstate, pwcxt);
                 break;
             case T_AggState:
 			    if (planstate->plan->parallel_aware)
@@ -1152,7 +1153,7 @@ ExecParallelInitializeWorker(PlanState *planstate, shm_toc *toc)
                     AggState *aggstate = (AggState *)planstate;
 
                     if (aggstate->aggstrategy == AGG_HASHED)
-                        ReDistributeInitializeWorker(planstate, toc);
+					ReDistributeInitializeWorker(planstate, pwcxt);
                 }
                 break;
 #endif
@@ -1160,7 +1161,8 @@ ExecParallelInitializeWorker(PlanState *planstate, shm_toc *toc)
                 break;
         }
 
-    return planstate_tree_walker(planstate, ExecParallelInitializeWorker, toc);
+	return planstate_tree_walker(planstate, ExecParallelInitializeWorker,
+								 pwcxt);
 }
 
 /*
@@ -1189,6 +1191,7 @@ ParallelQueryMain(dsm_segment *seg, shm_toc *toc)
     int            instrument_options = 0;
     void       *area_space;
     dsa_area   *area;
+	ParallelWorkerContext pwcxt;
 #ifdef __TBASE__
     int i                               = 0;
     int nWorkers                        = 0;
@@ -1320,6 +1323,9 @@ ParallelQueryMain(dsm_segment *seg, shm_toc *toc)
         }
     }
 #endif
+	pwcxt.toc = toc;
+	pwcxt.seg = seg;
+	ExecParallelInitializeWorker(queryDesc->planstate, &pwcxt);
 
     /* Start up the executor */
     ExecutorStart(queryDesc, 0);

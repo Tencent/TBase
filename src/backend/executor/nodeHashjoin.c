@@ -1422,14 +1422,14 @@ ExecParallelHashJoinInitializeDSM(HashJoinState *node,
  * ----------------------------------------------------------------
  */
 void
-ExecParallelHashJoinInitWorker(HashJoinState *node, shm_toc *toc)
+ExecParallelHashJoinInitWorker(HashJoinState *node, ParallelWorkerContext *pwcxt)
 {
     int offset = 0;
     ParallelHashJoinState *parallelState = NULL;
     volatile ParallelWorkerStatus *numParallelWorkers = NULL;
 
-    parallelState = shm_toc_lookup(toc, node->js.ps.plan->plan_node_id, false);
-    numParallelWorkers = GetParallelWorkerStatusInfo(toc);
+	parallelState = shm_toc_lookup(pwcxt->toc, node->js.ps.plan->plan_node_id, false);
+	numParallelWorkers = GetParallelWorkerStatusInfo(pwcxt->toc);
 
     node->hj_parallelState = (ParallelHashJoinState *)palloc0(sizeof(ParallelHashJoinState));
 

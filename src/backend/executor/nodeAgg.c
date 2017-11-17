@@ -5435,10 +5435,11 @@ ReDistributeInitializeDSM(PlanState *node, ParallelContext *pcxt)
 }
 
 void
-ReDistributeInitializeWorker(PlanState *node, shm_toc *toc)
+ReDistributeInitializeWorker(PlanState *node, ParallelWorkerContext *pwcxt)
 {
     int offset = 0;
     int i = 0;
+	shm_toc *toc = pwcxt->toc;
     ReDistributeState *state = NULL;
     ReDistributeState *rd_state = NULL;
     volatile ParallelWorkerStatus *numParallelWorkers = NULL;

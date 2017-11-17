@@ -31,7 +31,7 @@ extern void ExecParallelHashJoinEstimate(HashJoinState *node, ParallelContext *p
 
 extern void ExecParallelHashJoinInitializeDSM(HashJoinState *node, ParallelContext *pcxt);
 
-extern void ExecParallelHashJoinInitWorker(HashJoinState *node, shm_toc *toc);
+extern void ExecParallelHashJoinInitWorker(HashJoinState *node, ParallelWorkerContext *pwcxt);
 
 extern void ParallelHashJoinEreport(void);
 #endif

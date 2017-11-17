@@ -413,9 +413,9 @@ extern void set_dbcleanup_callback(xact_callback function, void *paraminfo, int 
 extern void ExecRemoteSubPlanInitializeDSM(RemoteSubplanState *node, ParallelContext *pcxt);
 extern void ExecRemoteQueryInitializeDSM(RemoteQueryState *node, ParallelContext *pcxt);
 extern void ExecRemoteSubPlanInitDSMWorker(RemoteSubplanState *node,
-                                                  shm_toc *toc);
+                                                  ParallelWorkerContext *pwcxt);
 extern void ExecRemoteQueryInitializeDSMWorker(RemoteQueryState *node,
-                                                   shm_toc *toc);
+                                               ParallelWorkerContext *pwcxt);
 
 extern bool ExecRemoteDML(ModifyTableState *mtstate, ItemPointer tupleid, HeapTuple oldtuple,
               TupleTableSlot *slot, TupleTableSlot *planSlot, EState *estate, EPQState *epqstate,

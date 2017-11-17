@@ -21,10 +21,10 @@ extern BitmapHeapScanState *ExecInitBitmapHeapScan(BitmapHeapScan *node, EState 
 extern void ExecEndBitmapHeapScan(BitmapHeapScanState *node);
 extern void ExecReScanBitmapHeapScan(BitmapHeapScanState *node);
 extern void ExecBitmapHeapEstimate(BitmapHeapScanState *node,
-                       ParallelContext *pcxt);
+					   ParallelContext *pcxt);
 extern void ExecBitmapHeapInitializeDSM(BitmapHeapScanState *node,
-                            ParallelContext *pcxt);
+							ParallelContext *pcxt);
 extern void ExecBitmapHeapInitializeWorker(BitmapHeapScanState *node,
-                               shm_toc *toc);
+							   ParallelWorkerContext *pwcxt);
 
-#endif                            /* NODEBITMAPHEAPSCAN_H */
+#endif							/* NODEBITMAPHEAPSCAN_H */

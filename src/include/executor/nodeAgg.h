@@ -38,7 +38,7 @@ extern void ReDistributeEstimate(PlanState *node, ParallelContext *pcxt);
 
 extern void ReDistributeInitializeDSM(PlanState *node, ParallelContext *pcxt);
 
-extern void ReDistributeInitializeWorker(PlanState *node, shm_toc *toc);
+extern void ReDistributeInitializeWorker(PlanState *node, ParallelWorkerContext *pwcxt);
 
 extern void InitializeReDistribute(ReDistributeState *state, BufFile ***file);
 

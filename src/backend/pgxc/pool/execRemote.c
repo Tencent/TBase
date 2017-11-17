@@ -12021,7 +12021,7 @@ ExecRemoteQueryInitializeDSM(RemoteQueryState *node,
 
 void
 ExecRemoteSubPlanInitDSMWorker(RemoteSubplanState *node,
-                               shm_toc *toc)
+                               ParallelWorkerContext *pwcxt)
 {
     int32                  i                    = 0;
     int32                  length            = 0;
@@ -12033,7 +12033,7 @@ ExecRemoteSubPlanInitDSMWorker(RemoteSubplanState *node,
     List                     *locla_exec_nodes = NULL;
     ListCell              *node_list_item   = NULL;
 
-    worker_status  = GetParallelWorkerStatusInfo(toc);
+	worker_status  = GetParallelWorkerStatusInfo(pwcxt->toc);
     worker_num = ExecGetForWorkerNumber(worker_status);
     node->parallel_status = worker_status;    
     if (node->execOnAll)
@@ -12083,7 +12083,7 @@ ExecRemoteSubPlanInitDSMWorker(RemoteSubplanState *node,
 }
 void
 ExecRemoteQueryInitializeDSMWorker(RemoteQueryState *node,
-                               shm_toc *toc)
+                                   ParallelWorkerContext *pwcxt)
 {
     int32                 worker_num    = 0;
     ParallelWorkerStatus *worker_status = NULL;
@@ -12092,7 +12092,7 @@ ExecRemoteQueryInitializeDSMWorker(RemoteQueryState *node,
 
     combiner               = (ResponseCombiner *) node;
     step                   = (RemoteQuery *) combiner->ss.ps.plan;
-    worker_status            = GetParallelWorkerStatusInfo(toc);
+	worker_status  		  = GetParallelWorkerStatusInfo(pwcxt->toc);
     worker_num            = ExecGetForWorkerNumber(worker_status);
     node->parallel_status = worker_status;    
     worker_num              = worker_num; /* keep compiler quiet. */
