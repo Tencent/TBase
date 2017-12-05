@@ -869,6 +869,9 @@ ExecShutdownNode(PlanState *node)
 		case T_RemoteSubplanState:
 			ExecShutdownRemoteSubplan((RemoteSubplanState *) node);
 			break;
+		case T_HashState:
+			ExecShutdownHash((HashState *) node);
+			break;
         default:
             break;
     }
