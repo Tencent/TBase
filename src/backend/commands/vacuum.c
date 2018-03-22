@@ -707,7 +707,8 @@ vacuum_set_xid_limits(Relation rel,
  *        we take the old value of pg_class.reltuples as a measurement of the
  *        tuple density in the unscanned pages.
  *
- *        This routine is shared by VACUUM and ANALYZE.
+ *		Note: scanned_tuples should count only *live* tuples, since
+ *		pg_class.reltuples is defined that way.
  */
 double
 vac_estimate_reltuples(Relation relation, bool is_analyze,
@@ -806,6 +807,9 @@ vac_estimate_reltuples(Relation relation, bool is_analyze,
  *        So we refrain from updating the DDL flags if we're inside an outer
  *        transaction.  This is OK since postponing the flag maintenance is
  *        always allowable.
+ *
+ *		Note: num_tuples should count only *live* tuples, since
+ *		pg_class.reltuples is defined that way.
  *
  *        This routine is shared by VACUUM and ANALYZE.
  */
