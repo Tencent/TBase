@@ -7153,7 +7153,7 @@ do { \
 			}
 			break;
 
-		case T_MergeAppend:
+		case T_MergeAppendPath:
 			{
 				MergeAppendPath *mapath;
 
