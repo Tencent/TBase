@@ -508,6 +508,7 @@ keep_going:                        /* We will come back to here until there is
                 while (conn->addr_cur != NULL)
                 {
                     struct addrinfo *addr_cur = conn->addr_cur;
+					int ret  = 0;
 
                     /* Remember current address for possible error msg */
                     memcpy(&conn->raddr.addr, addr_cur->ai_addr,
@@ -547,6 +548,15 @@ keep_going:                        /* We will come back to here until there is
                             continue;
                         }
                     }
+
+					if (!pg_set_noblock(conn->sock))
+					{
+						char sebuf[256];
+						appendGTMPQExpBuffer(&conn->errorMessage,
+										  libpq_gettext("could not set socket to nonblocking mode: %s\n"),
+										  pqStrerror(SOCK_ERRNO, sebuf, sizeof(sebuf)));
+						break;
+					}
 
                     /*
                      * Start/make connection.  This should not block, since we
