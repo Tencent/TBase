@@ -11,7 +11,7 @@ do
    then
        echo $d
        cd $d
-       make clean && make -sj && make install
+       make clean ; make -sj ; make install
        cd ../ && ls
    fi;
 done;
