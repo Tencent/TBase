@@ -1210,6 +1210,8 @@ main(int argc, char **argv)
         exit(1);
     }
 
+	signal(SIGPIPE, SIG_IGN);
+
     /*
      * 'Action' can be before or after args so loop over both. Some
      * getopt_long() implementations will reorder argv[] to place all flags
