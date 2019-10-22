@@ -3146,7 +3146,7 @@ send_message_to_server_log(ErrorData *edata)
         append_with_tabs(&buf, debug_query_string);
         appendStringInfoChar(&buf, '\n');
     }
-#ifdef __TBASE__
+#if 0
     /* for error code contrib */
     if (g_pfErrcodeHook && (false == g_is_in_init_phase) && (NULL != MyProc))
     {
