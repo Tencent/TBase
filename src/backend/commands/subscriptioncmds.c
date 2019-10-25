@@ -2134,24 +2134,15 @@ DropTbaseSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
 
             stmt_drop = (DropSubscriptionStmt *) lfirst(lc);
             
-              PG_TRY();
-            {
-                DropSubscription(stmt_drop, isTopLevel);
-              }
-            PG_CATCH();
-            {
-                HOLD_INTERRUPTS();
-                EmitErrorReport();
-                FlushErrorState();
-                RESUME_INTERRUPTS();
-                /*
-                 * omit errors from input files, PG_exception_stack has been reset.
-                 */
-            }
-            PG_END_TRY();   
-            
-            i_assert++; 
-            Assert(i_assert <= parallel_number);
+			DropSubscription(stmt_drop, isTopLevel);
+
+			i_assert++;
+			Assert(i_assert <= parallel_number);
+
+			if (!(i_assert <= parallel_number))
+			{
+				abort();
+			}
         }
     } while (0);
 
