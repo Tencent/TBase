@@ -5892,8 +5892,14 @@ recoveryStopsBefore(XLogReaderState *record)
         }
         else if (current_track_seg > last_track_seg)
         {
-            max_gts_in_seg = FlushXlogTrack(last_track_seg);
-            XLogArchiveNotifySegGTS(last_track_seg, max_gts_in_seg);
+			XLogSegNo track_seg;
+			
+			for(track_seg = last_track_seg;track_seg < current_track_seg;track_seg++)
+			{
+				max_gts_in_seg = FlushXlogTrack(track_seg);
+				XLogArchiveNotifySegGTS(track_seg, max_gts_in_seg);
+			}
+			
             last_track_seg = current_track_seg;
         }        
     }
@@ -12885,7 +12891,7 @@ void TrackGTS(XlogSegGTSTrack *track_info, XLogSegNo seg, GlobalTimestamp gts)
         if (offset >= track_info->segment_num)
         {
             SpinLockRelease(&track_info->track_lock);
-            elog(PANIC, "TrackGTS too many concurent xlog segments running!");
+			elog(PANIC, "TrackGTS too many concurent xlog segments running! segment_num:%d",track_info->segment_num);
         }
         
         pos = track_info->base_seg_index + offset;
