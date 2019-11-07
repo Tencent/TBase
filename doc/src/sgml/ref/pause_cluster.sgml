@@ -1,0 +1,64 @@
+
+<refentry id="SQL-PAUSECLUSTER">
+ <indexterm zone="sql-pausecluster">
+  <primary>PAUSE CLUSTER</primary>
+ </indexterm>
+
+ <refmeta>
+  <refentrytitle>PAUSE CLUSTER</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>PAUSE CLUSTER</refname>
+  <refpurpose>pause the <productname>Postgres-XL</productname> cluster</refpurpose>
+ </refnamediv>
+
+ <refsynopsisdiv>
+<synopsis>
+PAUSE CLUSTER
+
+</synopsis>
+ </refsynopsisdiv>
+
+ <refsect1>
+  <title>Description</title>
+
+  <para>
+   <command>PAUSE CLUSTER </command> is a SQL command specific
+   to <productname>Postgres-XL</productname> that pauses 
+   cluster operation.
+  </para>
+  <para>
+   Pause blocks any new transactions from starting and waits until
+   existing transactions complete, then returns. Existing sessions 
+   are still connected to Coordinators, it is just that any new statements
+   will be held up and not be executed. 
+   </para>
+
+   <para>
+   The session that paused the cluster can perform tasks exclusively on the 
+   cluster. This is useful for maintenance tasks to resolve a problem, 
+   restart a Datanode, manually failover a Datanode, etc. Applications will
+   not receive error messages unless they themselves timeout, statement execution
+   will just be briefly suspended.
+   </para>
+    
+  <para>
+   Once the DBA has completed whatever tasks were needed, the command <xref linkend="sql-unpausecluster"> can be used.
+  </para>
+
+ </refsect1>
+
+ <refsect1>
+  <title>Compatibility</title>
+  <para>
+   <command>PAUSE CLUSTER</command> does not conform to the <acronym>
+   SQL</acronym> standards, it is a Postgres-XL specific command.
+  </para>
+ </refsect1>
+
+</refentry>
+
+

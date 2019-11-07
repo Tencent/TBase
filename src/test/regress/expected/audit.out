@@ -1,0 +1,2642 @@
+\set ECHO all
+SET client_min_messages = warning;
+SET datestyle TO ISO;
+SET client_encoding = utf8;
+-- prepare
+select current_database();
+ current_database 
+------------------
+ regression
+(1 row)
+
+-- select current_user;
+select rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin, rolreplication, rolbypassrls, rolconnlimit from pg_authid where rolname = 'audit_user' order by rolname;
+ rolname | rolsuper | rolinherit | rolcreaterole | rolcreatedb | rolcanlogin | rolreplication | rolbypassrls | rolconnlimit 
+---------+----------+------------+---------------+-------------+-------------+----------------+--------------+--------------
+(0 rows)
+
+DROP USER IF EXISTS audit_user;
+DROP DATABASE IF EXISTS audit_database;
+CREATE USER audit_user WITH SUPERUSER CREATEDB LOGIN ENCRYPTED PASSWORD 'audit_user';
+CREATE DATABASE audit_database;
+select rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin, rolreplication, rolbypassrls, rolconnlimit from pg_authid where rolname = 'audit_user' order by rolname;
+  rolname   | rolsuper | rolinherit | rolcreaterole | rolcreatedb | rolcanlogin | rolreplication | rolbypassrls | rolconnlimit 
+------------+----------+------------+---------------+-------------+-------------+----------------+--------------+--------------
+ audit_user | t        | t          | f             | t           | t           | f              | f            |           -1
+(1 row)
+
+-- create table
+\c audit_database audit_user
+create table tbl_test(f1 number, f2 timestamp default now(), f3 int) ;
+create table tbl_test0 as select * from tbl_test;
+create view tbl_test_v as select * from tbl_test;
+create materialized view tbl_test_mv as select * from tbl_test;
+create view tbl_test0_v as select * from tbl_test0;
+create materialized view tbl_test0_mv as select * from tbl_test0;
+create schema sc_test;
+create table sc_test.tbl_test(f1 number, f2 timestamp default now(), f3 int) ;
+create table sc_test.tbl_test0 as select * from sc_test.tbl_test;
+create view sc_test.tbl_test_v as select * from sc_test.tbl_test;
+create materialized view sc_test.tbl_test_mv as select * from sc_test.tbl_test;
+create view sc_test.tbl_test0_v as select * from sc_test.tbl_test0;
+create materialized view sc_test.tbl_test0_mv as select * from sc_test.tbl_test0;
+-- create and check audit rules 
+\c audit_database audit_admin
+audit all;
+audit all by audit_user;
+audit all on default;
+audit all on tbl_test;
+audit all on tbl_test_v;
+ERROR:  "tbl_test_v" is not a table
+audit all on view tbl_test_v;
+audit all on tbl_test_mv;
+ERROR:  "tbl_test_mv" is not a table
+audit all on view tbl_test_mv;
+ERROR:  "tbl_test_mv" is not a view
+audit all on materialized view tbl_test_mv;
+audit all on tbl_test0;
+audit all on tbl_test0_v;
+ERROR:  "tbl_test0_v" is not a table
+audit all on view tbl_test0_v;
+audit all on tbl_test0_mv;
+ERROR:  "tbl_test0_mv" is not a table
+audit all on view tbl_test0_mv;
+ERROR:  "tbl_test0_mv" is not a view
+audit all on materialized view tbl_test0_mv;
+audit all on sc_test.tbl_test;
+audit all on sc_test.tbl_test_v;
+ERROR:  "tbl_test_v" is not a table
+audit all on view sc_test.tbl_test_v;
+audit all on sc_test.tbl_test_mv;
+ERROR:  "tbl_test_mv" is not a table
+audit all on view sc_test.tbl_test_mv;
+ERROR:  "tbl_test_mv" is not a view
+audit all on materialized view sc_test.tbl_test_mv;
+audit all on sc_test.tbl_test0;
+audit all on sc_test.tbl_test0_v;
+ERROR:  "tbl_test0_v" is not a table
+audit all on view sc_test.tbl_test0_v;
+audit all on sc_test.tbl_test0_mv;
+ERROR:  "tbl_test0_mv" is not a table
+audit all on view sc_test.tbl_test0_mv;
+ERROR:  "tbl_test0_mv" is not a view
+audit all on materialized view sc_test.tbl_test0_mv;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+   auditor   | object_class |              object_desc               | action_name | action_mode  | action_ison 
+-------------+--------------+----------------------------------------+-------------+--------------+-------------
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Update      | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Update      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Update      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Update      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Alter       | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Audit       | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Comment     | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Delete      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Grant       | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Insert      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Lock        | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Rename      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Select      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Update      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Alter       | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Audit       | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Comment     | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Delete      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Grant       | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Insert      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Lock        | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Rename      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Select      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Update      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Alter       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Audit       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Comment     | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Delete      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Grant       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Insert      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Lock        | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Rename      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Select      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Update      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Alter       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Audit       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Comment     | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Delete      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Grant       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Insert      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Lock        | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Rename      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Select      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Update      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Alter       | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Audit       | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Comment     | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Delete      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Grant       | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Insert      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Rename      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Select      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Update      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Alter       | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Audit       | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Comment     | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Delete      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Grant       | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Insert      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Rename      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Select      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Update      | Audit Always | t
+(104 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+   auditor   | user_name  |       action_name        | action_mode  | action_ison 
+-------------+------------+--------------------------+--------------+-------------
+ audit_admin | audit_user | Add Partitions           | Audit Always | t
+ audit_admin | audit_user | Alter Database           | Audit Always | t
+ audit_admin | audit_user | Alter Extension          | Audit Always | t
+ audit_admin | audit_user | Alter Function           | Audit Always | t
+ audit_admin | audit_user | Alter Index              | Audit Always | t
+ audit_admin | audit_user | Alter Materialized View  | Audit Always | t
+ audit_admin | audit_user | Alter Node               | Audit Always | t
+ audit_admin | audit_user | Alter Role               | Audit Always | t
+ audit_admin | audit_user | Alter Schema             | Audit Always | t
+ audit_admin | audit_user | Alter Sequence           | Audit Always | t
+ audit_admin | audit_user | Alter System             | Audit Always | t
+ audit_admin | audit_user | Alter Table              | Audit Always | t
+ audit_admin | audit_user | Alter Tablespace         | Audit Always | t
+ audit_admin | audit_user | Alter Trigger            | Audit Always | t
+ audit_admin | audit_user | Alter Type               | Audit Always | t
+ audit_admin | audit_user | Alter User               | Audit Always | t
+ audit_admin | audit_user | Alter View               | Audit Always | t
+ audit_admin | audit_user | Comment Table            | Audit Always | t
+ audit_admin | audit_user | Create Database          | Audit Always | t
+ audit_admin | audit_user | Create Extension         | Audit Always | t
+ audit_admin | audit_user | Create Function          | Audit Always | t
+ audit_admin | audit_user | Create Index             | Audit Always | t
+ audit_admin | audit_user | Create Materialized View | Audit Always | t
+ audit_admin | audit_user | Create Node              | Audit Always | t
+ audit_admin | audit_user | Create Node Group        | Audit Always | t
+ audit_admin | audit_user | Create Role              | Audit Always | t
+ audit_admin | audit_user | Create Schema            | Audit Always | t
+ audit_admin | audit_user | Create Sequence          | Audit Always | t
+ audit_admin | audit_user | Create Sharding Group    | Audit Always | t
+ audit_admin | audit_user | Create Table             | Audit Always | t
+ audit_admin | audit_user | Create Tablespace        | Audit Always | t
+ audit_admin | audit_user | Create Trigger           | Audit Always | t
+ audit_admin | audit_user | Create Type              | Audit Always | t
+ audit_admin | audit_user | Create User              | Audit Always | t
+ audit_admin | audit_user | Create View              | Audit Always | t
+ audit_admin | audit_user | Delete Table             | Audit Always | t
+ audit_admin | audit_user | Disable Trigger          | Audit Always | t
+ audit_admin | audit_user | Drop Database            | Audit Always | t
+ audit_admin | audit_user | Drop Extension           | Audit Always | t
+ audit_admin | audit_user | Drop Function            | Audit Always | t
+ audit_admin | audit_user | Drop Index               | Audit Always | t
+ audit_admin | audit_user | Drop Materialized View   | Audit Always | t
+ audit_admin | audit_user | Drop Node                | Audit Always | t
+ audit_admin | audit_user | Drop Node Group          | Audit Always | t
+ audit_admin | audit_user | Drop Role                | Audit Always | t
+ audit_admin | audit_user | Drop Schema              | Audit Always | t
+ audit_admin | audit_user | Drop Sequence            | Audit Always | t
+ audit_admin | audit_user | Drop Sharding in Group   | Audit Always | t
+ audit_admin | audit_user | Drop Table               | Audit Always | t
+ audit_admin | audit_user | Drop Tablespace          | Audit Always | t
+ audit_admin | audit_user | Drop Trigger             | Audit Always | t
+ audit_admin | audit_user | Drop Type                | Audit Always | t
+ audit_admin | audit_user | Drop User                | Audit Always | t
+ audit_admin | audit_user | Drop View                | Audit Always | t
+ audit_admin | audit_user | Enable Trigger           | Audit Always | t
+ audit_admin | audit_user | Grant Function           | Audit Always | t
+ audit_admin | audit_user | Grant Sequence           | Audit Always | t
+ audit_admin | audit_user | Grant Table              | Audit Always | t
+ audit_admin | audit_user | Grant Type               | Audit Always | t
+ audit_admin | audit_user | Insert Table             | Audit Always | t
+ audit_admin | audit_user | Lock Table               | Audit Always | t
+ audit_admin | audit_user | Select Sequence          | Audit Always | t
+ audit_admin | audit_user | Select Table             | Audit Always | t
+ audit_admin | audit_user | Set Role                 | Audit Always | t
+ audit_admin | audit_user | System Audit             | Audit Always | t
+ audit_admin | audit_user | System Grant             | Audit Always | t
+ audit_admin | audit_user | Truncate Table           | Audit Always | t
+ audit_admin | audit_user | Update Table             | Audit Always | t
+(68 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+   auditor   |       action_name        | action_mode  | action_ison 
+-------------+--------------------------+--------------+-------------
+ audit_admin | Add Partitions           | Audit Always | t
+ audit_admin | Alter Database           | Audit Always | t
+ audit_admin | Alter Extension          | Audit Always | t
+ audit_admin | Alter Function           | Audit Always | t
+ audit_admin | Alter Index              | Audit Always | t
+ audit_admin | Alter Materialized View  | Audit Always | t
+ audit_admin | Alter Node               | Audit Always | t
+ audit_admin | Alter Role               | Audit Always | t
+ audit_admin | Alter Schema             | Audit Always | t
+ audit_admin | Alter Sequence           | Audit Always | t
+ audit_admin | Alter System             | Audit Always | t
+ audit_admin | Alter Table              | Audit Always | t
+ audit_admin | Alter Tablespace         | Audit Always | t
+ audit_admin | Alter Trigger            | Audit Always | t
+ audit_admin | Alter Type               | Audit Always | t
+ audit_admin | Alter User               | Audit Always | t
+ audit_admin | Alter View               | Audit Always | t
+ audit_admin | Comment Table            | Audit Always | t
+ audit_admin | Create Database          | Audit Always | t
+ audit_admin | Create Extension         | Audit Always | t
+ audit_admin | Create Function          | Audit Always | t
+ audit_admin | Create Index             | Audit Always | t
+ audit_admin | Create Materialized View | Audit Always | t
+ audit_admin | Create Node              | Audit Always | t
+ audit_admin | Create Node Group        | Audit Always | t
+ audit_admin | Create Role              | Audit Always | t
+ audit_admin | Create Schema            | Audit Always | t
+ audit_admin | Create Sequence          | Audit Always | t
+ audit_admin | Create Sharding Group    | Audit Always | t
+ audit_admin | Create Table             | Audit Always | t
+ audit_admin | Create Tablespace        | Audit Always | t
+ audit_admin | Create Trigger           | Audit Always | t
+ audit_admin | Create Type              | Audit Always | t
+ audit_admin | Create User              | Audit Always | t
+ audit_admin | Create View              | Audit Always | t
+ audit_admin | Delete Table             | Audit Always | t
+ audit_admin | Disable Trigger          | Audit Always | t
+ audit_admin | Drop Database            | Audit Always | t
+ audit_admin | Drop Extension           | Audit Always | t
+ audit_admin | Drop Function            | Audit Always | t
+ audit_admin | Drop Index               | Audit Always | t
+ audit_admin | Drop Materialized View   | Audit Always | t
+ audit_admin | Drop Node                | Audit Always | t
+ audit_admin | Drop Node Group          | Audit Always | t
+ audit_admin | Drop Role                | Audit Always | t
+ audit_admin | Drop Schema              | Audit Always | t
+ audit_admin | Drop Sequence            | Audit Always | t
+ audit_admin | Drop Sharding in Group   | Audit Always | t
+ audit_admin | Drop Table               | Audit Always | t
+ audit_admin | Drop Tablespace          | Audit Always | t
+ audit_admin | Drop Trigger             | Audit Always | t
+ audit_admin | Drop Type                | Audit Always | t
+ audit_admin | Drop User                | Audit Always | t
+ audit_admin | Drop View                | Audit Always | t
+ audit_admin | Enable Trigger           | Audit Always | t
+ audit_admin | Grant Function           | Audit Always | t
+ audit_admin | Grant Sequence           | Audit Always | t
+ audit_admin | Grant Table              | Audit Always | t
+ audit_admin | Grant Type               | Audit Always | t
+ audit_admin | Insert Table             | Audit Always | t
+ audit_admin | Lock Table               | Audit Always | t
+ audit_admin | Select Sequence          | Audit Always | t
+ audit_admin | Select Table             | Audit Always | t
+ audit_admin | Set Role                 | Audit Always | t
+ audit_admin | System Audit             | Audit Always | t
+ audit_admin | System Grant             | Audit Always | t
+ audit_admin | Truncate Table           | Audit Always | t
+ audit_admin | Update Table             | Audit Always | t
+(68 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+   auditor   | action_name | action_mode  | action_ison 
+-------------+-------------+--------------+-------------
+ audit_admin | Alter       | Audit Always | t
+ audit_admin | Audit       | Audit Always | t
+ audit_admin | Comment     | Audit Always | t
+ audit_admin | Delete      | Audit Always | t
+ audit_admin | Grant       | Audit Always | t
+ audit_admin | Insert      | Audit Always | t
+ audit_admin | Lock        | Audit Always | t
+ audit_admin | Rename      | Audit Always | t
+ audit_admin | Select      | Audit Always | t
+ audit_admin | Update      | Audit Always | t
+(10 rows)
+
+noaudit all WHENEVER NOT SUCCESSFUL;
+noaudit all by audit_user WHENEVER NOT SUCCESSFUL;
+noaudit all on default WHENEVER NOT SUCCESSFUL;
+noaudit all on tbl_test WHENEVER NOT SUCCESSFUL;
+noaudit all on tbl_test_v WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test_v" is not a table
+noaudit all on view tbl_test_v WHENEVER NOT SUCCESSFUL;
+noaudit all on tbl_test_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a table
+noaudit all on view tbl_test_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a view
+noaudit all on materialized view tbl_test_mv WHENEVER NOT SUCCESSFUL;
+noaudit all on tbl_test0 WHENEVER NOT SUCCESSFUL;
+noaudit all on tbl_test0_v WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test0_v" is not a table
+noaudit all on view tbl_test0_v WHENEVER NOT SUCCESSFUL;
+noaudit all on tbl_test0_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a table
+noaudit all on view tbl_test0_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a view
+noaudit all on materialized view tbl_test0_mv WHENEVER NOT SUCCESSFUL;
+noaudit all on sc_test.tbl_test WHENEVER NOT SUCCESSFUL;
+noaudit all on sc_test.tbl_test_v WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test_v" is not a table
+noaudit all on view sc_test.tbl_test_v WHENEVER NOT SUCCESSFUL;
+noaudit all on sc_test.tbl_test_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a table
+noaudit all on view sc_test.tbl_test_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a view
+noaudit all on materialized view sc_test.tbl_test_mv WHENEVER NOT SUCCESSFUL;
+noaudit all on sc_test.tbl_test0 WHENEVER NOT SUCCESSFUL;
+noaudit all on sc_test.tbl_test0_v WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test0_v" is not a table
+noaudit all on view sc_test.tbl_test0_v WHENEVER NOT SUCCESSFUL;
+noaudit all on sc_test.tbl_test0_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a table
+noaudit all on view sc_test.tbl_test0_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a view
+noaudit all on materialized view sc_test.tbl_test0_mv WHENEVER NOT SUCCESSFUL;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+   auditor   | object_class |              object_desc               | action_name |    action_mode     | action_ison 
+-------------+--------------+----------------------------------------+-------------+--------------------+-------------
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Alter       | Audit When Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Audit       | Audit When Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Comment     | Audit When Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Grant       | Audit When Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Rename      | Audit When Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Select      | Audit When Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Update      | Audit When Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Alter       | Audit When Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Audit       | Audit When Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Comment     | Audit When Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Grant       | Audit When Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Rename      | Audit When Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Select      | Audit When Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Update      | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Alter       | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Audit       | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Comment     | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Grant       | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Rename      | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Select      | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Update      | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Alter       | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Audit       | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Comment     | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Grant       | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Rename      | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Select      | Audit When Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Update      | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Alter       | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Audit       | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Comment     | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Delete      | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Grant       | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Insert      | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Lock        | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Rename      | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Select      | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Update      | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Alter       | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Audit       | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Comment     | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Delete      | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Grant       | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Insert      | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Lock        | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Rename      | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Select      | Audit When Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Update      | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test                         | Alter       | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test                         | Audit       | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test                         | Comment     | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test                         | Delete      | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test                         | Grant       | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test                         | Insert      | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test                         | Lock        | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test                         | Rename      | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test                         | Select      | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test                         | Update      | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Alter       | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Audit       | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Comment     | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Delete      | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Grant       | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Insert      | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Lock        | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Rename      | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Select      | Audit When Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Update      | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Alter       | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Audit       | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Comment     | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Delete      | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Grant       | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Insert      | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Rename      | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Select      | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Update      | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Alter       | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Audit       | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Comment     | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Delete      | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Grant       | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Insert      | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Rename      | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Select      | Audit When Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Update      | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Alter       | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Audit       | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Comment     | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Delete      | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Grant       | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Insert      | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Rename      | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Select      | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Update      | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Alter       | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Audit       | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Comment     | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Delete      | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Grant       | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Insert      | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Rename      | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Select      | Audit When Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Update      | Audit When Success | t
+(104 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+   auditor   | user_name  |       action_name        |    action_mode     | action_ison 
+-------------+------------+--------------------------+--------------------+-------------
+ audit_admin | audit_user | Add Partitions           | Audit When Success | t
+ audit_admin | audit_user | Alter Database           | Audit When Success | t
+ audit_admin | audit_user | Alter Extension          | Audit When Success | t
+ audit_admin | audit_user | Alter Function           | Audit When Success | t
+ audit_admin | audit_user | Alter Index              | Audit When Success | t
+ audit_admin | audit_user | Alter Materialized View  | Audit When Success | t
+ audit_admin | audit_user | Alter Node               | Audit When Success | t
+ audit_admin | audit_user | Alter Role               | Audit When Success | t
+ audit_admin | audit_user | Alter Schema             | Audit When Success | t
+ audit_admin | audit_user | Alter Sequence           | Audit When Success | t
+ audit_admin | audit_user | Alter System             | Audit When Success | t
+ audit_admin | audit_user | Alter Table              | Audit When Success | t
+ audit_admin | audit_user | Alter Tablespace         | Audit When Success | t
+ audit_admin | audit_user | Alter Trigger            | Audit When Success | t
+ audit_admin | audit_user | Alter Type               | Audit When Success | t
+ audit_admin | audit_user | Alter User               | Audit When Success | t
+ audit_admin | audit_user | Alter View               | Audit When Success | t
+ audit_admin | audit_user | Comment Table            | Audit When Success | t
+ audit_admin | audit_user | Create Database          | Audit When Success | t
+ audit_admin | audit_user | Create Extension         | Audit When Success | t
+ audit_admin | audit_user | Create Function          | Audit When Success | t
+ audit_admin | audit_user | Create Index             | Audit When Success | t
+ audit_admin | audit_user | Create Materialized View | Audit When Success | t
+ audit_admin | audit_user | Create Node              | Audit When Success | t
+ audit_admin | audit_user | Create Node Group        | Audit When Success | t
+ audit_admin | audit_user | Create Role              | Audit When Success | t
+ audit_admin | audit_user | Create Schema            | Audit When Success | t
+ audit_admin | audit_user | Create Sequence          | Audit When Success | t
+ audit_admin | audit_user | Create Sharding Group    | Audit When Success | t
+ audit_admin | audit_user | Create Table             | Audit When Success | t
+ audit_admin | audit_user | Create Tablespace        | Audit When Success | t
+ audit_admin | audit_user | Create Trigger           | Audit When Success | t
+ audit_admin | audit_user | Create Type              | Audit When Success | t
+ audit_admin | audit_user | Create User              | Audit When Success | t
+ audit_admin | audit_user | Create View              | Audit When Success | t
+ audit_admin | audit_user | Delete Table             | Audit When Success | t
+ audit_admin | audit_user | Disable Trigger          | Audit When Success | t
+ audit_admin | audit_user | Drop Database            | Audit When Success | t
+ audit_admin | audit_user | Drop Extension           | Audit When Success | t
+ audit_admin | audit_user | Drop Function            | Audit When Success | t
+ audit_admin | audit_user | Drop Index               | Audit When Success | t
+ audit_admin | audit_user | Drop Materialized View   | Audit When Success | t
+ audit_admin | audit_user | Drop Node                | Audit When Success | t
+ audit_admin | audit_user | Drop Node Group          | Audit When Success | t
+ audit_admin | audit_user | Drop Role                | Audit When Success | t
+ audit_admin | audit_user | Drop Schema              | Audit When Success | t
+ audit_admin | audit_user | Drop Sequence            | Audit When Success | t
+ audit_admin | audit_user | Drop Sharding in Group   | Audit When Success | t
+ audit_admin | audit_user | Drop Table               | Audit When Success | t
+ audit_admin | audit_user | Drop Tablespace          | Audit When Success | t
+ audit_admin | audit_user | Drop Trigger             | Audit When Success | t
+ audit_admin | audit_user | Drop Type                | Audit When Success | t
+ audit_admin | audit_user | Drop User                | Audit When Success | t
+ audit_admin | audit_user | Drop View                | Audit When Success | t
+ audit_admin | audit_user | Enable Trigger           | Audit When Success | t
+ audit_admin | audit_user | Grant Function           | Audit When Success | t
+ audit_admin | audit_user | Grant Sequence           | Audit When Success | t
+ audit_admin | audit_user | Grant Table              | Audit When Success | t
+ audit_admin | audit_user | Grant Type               | Audit When Success | t
+ audit_admin | audit_user | Insert Table             | Audit When Success | t
+ audit_admin | audit_user | Lock Table               | Audit When Success | t
+ audit_admin | audit_user | Select Sequence          | Audit When Success | t
+ audit_admin | audit_user | Select Table             | Audit When Success | t
+ audit_admin | audit_user | Set Role                 | Audit When Success | t
+ audit_admin | audit_user | System Audit             | Audit When Success | t
+ audit_admin | audit_user | System Grant             | Audit When Success | t
+ audit_admin | audit_user | Truncate Table           | Audit When Success | t
+ audit_admin | audit_user | Update Table             | Audit When Success | t
+(68 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+   auditor   |       action_name        |    action_mode     | action_ison 
+-------------+--------------------------+--------------------+-------------
+ audit_admin | Add Partitions           | Audit When Success | t
+ audit_admin | Alter Database           | Audit When Success | t
+ audit_admin | Alter Extension          | Audit When Success | t
+ audit_admin | Alter Function           | Audit When Success | t
+ audit_admin | Alter Index              | Audit When Success | t
+ audit_admin | Alter Materialized View  | Audit When Success | t
+ audit_admin | Alter Node               | Audit When Success | t
+ audit_admin | Alter Role               | Audit When Success | t
+ audit_admin | Alter Schema             | Audit When Success | t
+ audit_admin | Alter Sequence           | Audit When Success | t
+ audit_admin | Alter System             | Audit When Success | t
+ audit_admin | Alter Table              | Audit When Success | t
+ audit_admin | Alter Tablespace         | Audit When Success | t
+ audit_admin | Alter Trigger            | Audit When Success | t
+ audit_admin | Alter Type               | Audit When Success | t
+ audit_admin | Alter User               | Audit When Success | t
+ audit_admin | Alter View               | Audit When Success | t
+ audit_admin | Comment Table            | Audit When Success | t
+ audit_admin | Create Database          | Audit When Success | t
+ audit_admin | Create Extension         | Audit When Success | t
+ audit_admin | Create Function          | Audit When Success | t
+ audit_admin | Create Index             | Audit When Success | t
+ audit_admin | Create Materialized View | Audit When Success | t
+ audit_admin | Create Node              | Audit When Success | t
+ audit_admin | Create Node Group        | Audit When Success | t
+ audit_admin | Create Role              | Audit When Success | t
+ audit_admin | Create Schema            | Audit When Success | t
+ audit_admin | Create Sequence          | Audit When Success | t
+ audit_admin | Create Sharding Group    | Audit When Success | t
+ audit_admin | Create Table             | Audit When Success | t
+ audit_admin | Create Tablespace        | Audit When Success | t
+ audit_admin | Create Trigger           | Audit When Success | t
+ audit_admin | Create Type              | Audit When Success | t
+ audit_admin | Create User              | Audit When Success | t
+ audit_admin | Create View              | Audit When Success | t
+ audit_admin | Delete Table             | Audit When Success | t
+ audit_admin | Disable Trigger          | Audit When Success | t
+ audit_admin | Drop Database            | Audit When Success | t
+ audit_admin | Drop Extension           | Audit When Success | t
+ audit_admin | Drop Function            | Audit When Success | t
+ audit_admin | Drop Index               | Audit When Success | t
+ audit_admin | Drop Materialized View   | Audit When Success | t
+ audit_admin | Drop Node                | Audit When Success | t
+ audit_admin | Drop Node Group          | Audit When Success | t
+ audit_admin | Drop Role                | Audit When Success | t
+ audit_admin | Drop Schema              | Audit When Success | t
+ audit_admin | Drop Sequence            | Audit When Success | t
+ audit_admin | Drop Sharding in Group   | Audit When Success | t
+ audit_admin | Drop Table               | Audit When Success | t
+ audit_admin | Drop Tablespace          | Audit When Success | t
+ audit_admin | Drop Trigger             | Audit When Success | t
+ audit_admin | Drop Type                | Audit When Success | t
+ audit_admin | Drop User                | Audit When Success | t
+ audit_admin | Drop View                | Audit When Success | t
+ audit_admin | Enable Trigger           | Audit When Success | t
+ audit_admin | Grant Function           | Audit When Success | t
+ audit_admin | Grant Sequence           | Audit When Success | t
+ audit_admin | Grant Table              | Audit When Success | t
+ audit_admin | Grant Type               | Audit When Success | t
+ audit_admin | Insert Table             | Audit When Success | t
+ audit_admin | Lock Table               | Audit When Success | t
+ audit_admin | Select Sequence          | Audit When Success | t
+ audit_admin | Select Table             | Audit When Success | t
+ audit_admin | Set Role                 | Audit When Success | t
+ audit_admin | System Audit             | Audit When Success | t
+ audit_admin | System Grant             | Audit When Success | t
+ audit_admin | Truncate Table           | Audit When Success | t
+ audit_admin | Update Table             | Audit When Success | t
+(68 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+   auditor   | action_name |    action_mode     | action_ison 
+-------------+-------------+--------------------+-------------
+ audit_admin | Alter       | Audit When Success | t
+ audit_admin | Audit       | Audit When Success | t
+ audit_admin | Comment     | Audit When Success | t
+ audit_admin | Delete      | Audit When Success | t
+ audit_admin | Grant       | Audit When Success | t
+ audit_admin | Insert      | Audit When Success | t
+ audit_admin | Lock        | Audit When Success | t
+ audit_admin | Rename      | Audit When Success | t
+ audit_admin | Select      | Audit When Success | t
+ audit_admin | Update      | Audit When Success | t
+(10 rows)
+
+noaudit all WHENEVER SUCCESSFUL;
+noaudit all by audit_user WHENEVER SUCCESSFUL;
+noaudit all on default WHENEVER SUCCESSFUL;
+noaudit all on tbl_test WHENEVER SUCCESSFUL;
+noaudit all on tbl_test_v WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test_v" is not a table
+noaudit all on view tbl_test_v WHENEVER SUCCESSFUL;
+noaudit all on tbl_test_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a table
+noaudit all on view tbl_test_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a view
+noaudit all on materialized view tbl_test_mv WHENEVER SUCCESSFUL;
+noaudit all on tbl_test0 WHENEVER SUCCESSFUL;
+noaudit all on tbl_test0_v WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test0_v" is not a table
+noaudit all on view tbl_test0_v WHENEVER SUCCESSFUL;
+noaudit all on tbl_test0_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a table
+noaudit all on view tbl_test0_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a view
+noaudit all on materialized view tbl_test0_mv WHENEVER SUCCESSFUL;
+noaudit all on sc_test.tbl_test WHENEVER SUCCESSFUL;
+noaudit all on sc_test.tbl_test_v WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test_v" is not a table
+noaudit all on view sc_test.tbl_test_v WHENEVER SUCCESSFUL;
+noaudit all on sc_test.tbl_test_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a table
+noaudit all on view sc_test.tbl_test_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a view
+noaudit all on materialized view sc_test.tbl_test_mv WHENEVER SUCCESSFUL;
+noaudit all on sc_test.tbl_test0 WHENEVER SUCCESSFUL;
+noaudit all on sc_test.tbl_test0_v WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test0_v" is not a table
+noaudit all on view sc_test.tbl_test0_v WHENEVER SUCCESSFUL;
+noaudit all on sc_test.tbl_test0_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a table
+noaudit all on view sc_test.tbl_test0_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a view
+noaudit all on materialized view sc_test.tbl_test0_mv WHENEVER SUCCESSFUL;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+   auditor   | object_class |              object_desc               | action_name |    action_mode     | action_ison 
+-------------+--------------+----------------------------------------+-------------+--------------------+-------------
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Alter       | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Audit       | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Comment     | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Grant       | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Rename      | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Select      | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Update      | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Alter       | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Audit       | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Comment     | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Grant       | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Rename      | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Select      | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Update      | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Alter       | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Audit       | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Comment     | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Grant       | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Rename      | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Select      | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Update      | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Alter       | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Audit       | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Comment     | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Grant       | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Rename      | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Select      | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Update      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Alter       | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Audit       | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Comment     | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Delete      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Grant       | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Insert      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Lock        | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Rename      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Select      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Update      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Alter       | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Audit       | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Comment     | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Delete      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Grant       | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Insert      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Lock        | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Rename      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Select      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Update      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Alter       | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Audit       | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Comment     | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Delete      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Grant       | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Insert      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Lock        | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Rename      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Select      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Update      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Alter       | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Audit       | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Comment     | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Delete      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Grant       | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Insert      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Lock        | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Rename      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Select      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Update      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Alter       | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Audit       | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Comment     | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Delete      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Grant       | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Insert      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Rename      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Select      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Update      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Alter       | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Audit       | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Comment     | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Delete      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Grant       | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Insert      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Rename      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Select      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Update      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Alter       | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Audit       | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Comment     | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Delete      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Grant       | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Insert      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Rename      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Select      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Update      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Alter       | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Audit       | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Comment     | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Delete      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Grant       | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Insert      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Rename      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Select      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Update      | Audit When Success | f
+(104 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+   auditor   | user_name  |       action_name        |    action_mode     | action_ison 
+-------------+------------+--------------------------+--------------------+-------------
+ audit_admin | audit_user | Add Partitions           | Audit When Success | f
+ audit_admin | audit_user | Alter Database           | Audit When Success | f
+ audit_admin | audit_user | Alter Extension          | Audit When Success | f
+ audit_admin | audit_user | Alter Function           | Audit When Success | f
+ audit_admin | audit_user | Alter Index              | Audit When Success | f
+ audit_admin | audit_user | Alter Materialized View  | Audit When Success | f
+ audit_admin | audit_user | Alter Node               | Audit When Success | f
+ audit_admin | audit_user | Alter Role               | Audit When Success | f
+ audit_admin | audit_user | Alter Schema             | Audit When Success | f
+ audit_admin | audit_user | Alter Sequence           | Audit When Success | f
+ audit_admin | audit_user | Alter System             | Audit When Success | f
+ audit_admin | audit_user | Alter Table              | Audit When Success | f
+ audit_admin | audit_user | Alter Tablespace         | Audit When Success | f
+ audit_admin | audit_user | Alter Trigger            | Audit When Success | f
+ audit_admin | audit_user | Alter Type               | Audit When Success | f
+ audit_admin | audit_user | Alter User               | Audit When Success | f
+ audit_admin | audit_user | Alter View               | Audit When Success | f
+ audit_admin | audit_user | Comment Table            | Audit When Success | f
+ audit_admin | audit_user | Create Database          | Audit When Success | f
+ audit_admin | audit_user | Create Extension         | Audit When Success | f
+ audit_admin | audit_user | Create Function          | Audit When Success | f
+ audit_admin | audit_user | Create Index             | Audit When Success | f
+ audit_admin | audit_user | Create Materialized View | Audit When Success | f
+ audit_admin | audit_user | Create Node              | Audit When Success | f
+ audit_admin | audit_user | Create Node Group        | Audit When Success | f
+ audit_admin | audit_user | Create Role              | Audit When Success | f
+ audit_admin | audit_user | Create Schema            | Audit When Success | f
+ audit_admin | audit_user | Create Sequence          | Audit When Success | f
+ audit_admin | audit_user | Create Sharding Group    | Audit When Success | f
+ audit_admin | audit_user | Create Table             | Audit When Success | f
+ audit_admin | audit_user | Create Tablespace        | Audit When Success | f
+ audit_admin | audit_user | Create Trigger           | Audit When Success | f
+ audit_admin | audit_user | Create Type              | Audit When Success | f
+ audit_admin | audit_user | Create User              | Audit When Success | f
+ audit_admin | audit_user | Create View              | Audit When Success | f
+ audit_admin | audit_user | Delete Table             | Audit When Success | f
+ audit_admin | audit_user | Disable Trigger          | Audit When Success | f
+ audit_admin | audit_user | Drop Database            | Audit When Success | f
+ audit_admin | audit_user | Drop Extension           | Audit When Success | f
+ audit_admin | audit_user | Drop Function            | Audit When Success | f
+ audit_admin | audit_user | Drop Index               | Audit When Success | f
+ audit_admin | audit_user | Drop Materialized View   | Audit When Success | f
+ audit_admin | audit_user | Drop Node                | Audit When Success | f
+ audit_admin | audit_user | Drop Node Group          | Audit When Success | f
+ audit_admin | audit_user | Drop Role                | Audit When Success | f
+ audit_admin | audit_user | Drop Schema              | Audit When Success | f
+ audit_admin | audit_user | Drop Sequence            | Audit When Success | f
+ audit_admin | audit_user | Drop Sharding in Group   | Audit When Success | f
+ audit_admin | audit_user | Drop Table               | Audit When Success | f
+ audit_admin | audit_user | Drop Tablespace          | Audit When Success | f
+ audit_admin | audit_user | Drop Trigger             | Audit When Success | f
+ audit_admin | audit_user | Drop Type                | Audit When Success | f
+ audit_admin | audit_user | Drop User                | Audit When Success | f
+ audit_admin | audit_user | Drop View                | Audit When Success | f
+ audit_admin | audit_user | Enable Trigger           | Audit When Success | f
+ audit_admin | audit_user | Grant Function           | Audit When Success | f
+ audit_admin | audit_user | Grant Sequence           | Audit When Success | f
+ audit_admin | audit_user | Grant Table              | Audit When Success | f
+ audit_admin | audit_user | Grant Type               | Audit When Success | f
+ audit_admin | audit_user | Insert Table             | Audit When Success | f
+ audit_admin | audit_user | Lock Table               | Audit When Success | f
+ audit_admin | audit_user | Select Sequence          | Audit When Success | f
+ audit_admin | audit_user | Select Table             | Audit When Success | f
+ audit_admin | audit_user | Set Role                 | Audit When Success | f
+ audit_admin | audit_user | System Audit             | Audit When Success | f
+ audit_admin | audit_user | System Grant             | Audit When Success | f
+ audit_admin | audit_user | Truncate Table           | Audit When Success | f
+ audit_admin | audit_user | Update Table             | Audit When Success | f
+(68 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+   auditor   |       action_name        |    action_mode     | action_ison 
+-------------+--------------------------+--------------------+-------------
+ audit_admin | Add Partitions           | Audit When Success | f
+ audit_admin | Alter Database           | Audit When Success | f
+ audit_admin | Alter Extension          | Audit When Success | f
+ audit_admin | Alter Function           | Audit When Success | f
+ audit_admin | Alter Index              | Audit When Success | f
+ audit_admin | Alter Materialized View  | Audit When Success | f
+ audit_admin | Alter Node               | Audit When Success | f
+ audit_admin | Alter Role               | Audit When Success | f
+ audit_admin | Alter Schema             | Audit When Success | f
+ audit_admin | Alter Sequence           | Audit When Success | f
+ audit_admin | Alter System             | Audit When Success | f
+ audit_admin | Alter Table              | Audit When Success | f
+ audit_admin | Alter Tablespace         | Audit When Success | f
+ audit_admin | Alter Trigger            | Audit When Success | f
+ audit_admin | Alter Type               | Audit When Success | f
+ audit_admin | Alter User               | Audit When Success | f
+ audit_admin | Alter View               | Audit When Success | f
+ audit_admin | Comment Table            | Audit When Success | f
+ audit_admin | Create Database          | Audit When Success | f
+ audit_admin | Create Extension         | Audit When Success | f
+ audit_admin | Create Function          | Audit When Success | f
+ audit_admin | Create Index             | Audit When Success | f
+ audit_admin | Create Materialized View | Audit When Success | f
+ audit_admin | Create Node              | Audit When Success | f
+ audit_admin | Create Node Group        | Audit When Success | f
+ audit_admin | Create Role              | Audit When Success | f
+ audit_admin | Create Schema            | Audit When Success | f
+ audit_admin | Create Sequence          | Audit When Success | f
+ audit_admin | Create Sharding Group    | Audit When Success | f
+ audit_admin | Create Table             | Audit When Success | f
+ audit_admin | Create Tablespace        | Audit When Success | f
+ audit_admin | Create Trigger           | Audit When Success | f
+ audit_admin | Create Type              | Audit When Success | f
+ audit_admin | Create User              | Audit When Success | f
+ audit_admin | Create View              | Audit When Success | f
+ audit_admin | Delete Table             | Audit When Success | f
+ audit_admin | Disable Trigger          | Audit When Success | f
+ audit_admin | Drop Database            | Audit When Success | f
+ audit_admin | Drop Extension           | Audit When Success | f
+ audit_admin | Drop Function            | Audit When Success | f
+ audit_admin | Drop Index               | Audit When Success | f
+ audit_admin | Drop Materialized View   | Audit When Success | f
+ audit_admin | Drop Node                | Audit When Success | f
+ audit_admin | Drop Node Group          | Audit When Success | f
+ audit_admin | Drop Role                | Audit When Success | f
+ audit_admin | Drop Schema              | Audit When Success | f
+ audit_admin | Drop Sequence            | Audit When Success | f
+ audit_admin | Drop Sharding in Group   | Audit When Success | f
+ audit_admin | Drop Table               | Audit When Success | f
+ audit_admin | Drop Tablespace          | Audit When Success | f
+ audit_admin | Drop Trigger             | Audit When Success | f
+ audit_admin | Drop Type                | Audit When Success | f
+ audit_admin | Drop User                | Audit When Success | f
+ audit_admin | Drop View                | Audit When Success | f
+ audit_admin | Enable Trigger           | Audit When Success | f
+ audit_admin | Grant Function           | Audit When Success | f
+ audit_admin | Grant Sequence           | Audit When Success | f
+ audit_admin | Grant Table              | Audit When Success | f
+ audit_admin | Grant Type               | Audit When Success | f
+ audit_admin | Insert Table             | Audit When Success | f
+ audit_admin | Lock Table               | Audit When Success | f
+ audit_admin | Select Sequence          | Audit When Success | f
+ audit_admin | Select Table             | Audit When Success | f
+ audit_admin | Set Role                 | Audit When Success | f
+ audit_admin | System Audit             | Audit When Success | f
+ audit_admin | System Grant             | Audit When Success | f
+ audit_admin | Truncate Table           | Audit When Success | f
+ audit_admin | Update Table             | Audit When Success | f
+(68 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+   auditor   | action_name |    action_mode     | action_ison 
+-------------+-------------+--------------------+-------------
+ audit_admin | Alter       | Audit When Success | f
+ audit_admin | Audit       | Audit When Success | f
+ audit_admin | Comment     | Audit When Success | f
+ audit_admin | Delete      | Audit When Success | f
+ audit_admin | Grant       | Audit When Success | f
+ audit_admin | Insert      | Audit When Success | f
+ audit_admin | Lock        | Audit When Success | f
+ audit_admin | Rename      | Audit When Success | f
+ audit_admin | Select      | Audit When Success | f
+ audit_admin | Update      | Audit When Success | f
+(10 rows)
+
+noaudit all;
+noaudit all by audit_user;
+noaudit all on default;
+noaudit all on tbl_test;
+noaudit all on tbl_test_v;
+ERROR:  "tbl_test_v" is not a table
+noaudit all on view tbl_test_v;
+noaudit all on tbl_test_mv;
+ERROR:  "tbl_test_mv" is not a table
+noaudit all on view tbl_test_mv;
+ERROR:  "tbl_test_mv" is not a view
+noaudit all on materialized view tbl_test_mv;
+noaudit all on tbl_test0;
+noaudit all on tbl_test0_v;
+ERROR:  "tbl_test0_v" is not a table
+noaudit all on view tbl_test0_v;
+noaudit all on tbl_test0_mv;
+ERROR:  "tbl_test0_mv" is not a table
+noaudit all on view tbl_test0_mv;
+ERROR:  "tbl_test0_mv" is not a view
+noaudit all on materialized view tbl_test0_mv;
+noaudit all on sc_test.tbl_test;
+noaudit all on sc_test.tbl_test_v;
+ERROR:  "tbl_test_v" is not a table
+noaudit all on view sc_test.tbl_test_v;
+noaudit all on sc_test.tbl_test_mv;
+ERROR:  "tbl_test_mv" is not a table
+noaudit all on view sc_test.tbl_test_mv;
+ERROR:  "tbl_test_mv" is not a view
+noaudit all on materialized view sc_test.tbl_test_mv;
+noaudit all on sc_test.tbl_test0;
+noaudit all on sc_test.tbl_test0_v;
+ERROR:  "tbl_test0_v" is not a table
+noaudit all on view sc_test.tbl_test0_v;
+noaudit all on sc_test.tbl_test0_mv;
+ERROR:  "tbl_test0_mv" is not a table
+noaudit all on view sc_test.tbl_test0_mv;
+ERROR:  "tbl_test0_mv" is not a view
+noaudit all on materialized view sc_test.tbl_test0_mv;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+   auditor   | object_class |              object_desc               | action_name |    action_mode     | action_ison 
+-------------+--------------+----------------------------------------+-------------+--------------------+-------------
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Alter       | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Audit       | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Comment     | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Grant       | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Rename      | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Select      | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Update      | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Alter       | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Audit       | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Comment     | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Grant       | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Rename      | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Select      | Audit When Success | f
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Update      | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Alter       | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Audit       | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Comment     | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Grant       | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Rename      | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Select      | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Update      | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Alter       | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Audit       | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Comment     | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Grant       | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Rename      | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Select      | Audit When Success | f
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Update      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Alter       | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Audit       | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Comment     | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Delete      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Grant       | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Insert      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Lock        | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Rename      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Select      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Update      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Alter       | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Audit       | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Comment     | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Delete      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Grant       | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Insert      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Lock        | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Rename      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Select      | Audit When Success | f
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Update      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Alter       | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Audit       | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Comment     | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Delete      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Grant       | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Insert      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Lock        | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Rename      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Select      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test                         | Update      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Alter       | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Audit       | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Comment     | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Delete      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Grant       | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Insert      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Lock        | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Rename      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Select      | Audit When Success | f
+ audit_admin | pg_class     | table tbl_test0                        | Update      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Alter       | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Audit       | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Comment     | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Delete      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Grant       | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Insert      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Rename      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Select      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Update      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Alter       | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Audit       | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Comment     | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Delete      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Grant       | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Insert      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Rename      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Select      | Audit When Success | f
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Update      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Alter       | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Audit       | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Comment     | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Delete      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Grant       | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Insert      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Rename      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Select      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test0_v                       | Update      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Alter       | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Audit       | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Comment     | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Delete      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Grant       | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Insert      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Rename      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Select      | Audit When Success | f
+ audit_admin | pg_class     | view tbl_test_v                        | Update      | Audit When Success | f
+(104 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+   auditor   | user_name  |       action_name        |    action_mode     | action_ison 
+-------------+------------+--------------------------+--------------------+-------------
+ audit_admin | audit_user | Add Partitions           | Audit When Success | f
+ audit_admin | audit_user | Alter Database           | Audit When Success | f
+ audit_admin | audit_user | Alter Extension          | Audit When Success | f
+ audit_admin | audit_user | Alter Function           | Audit When Success | f
+ audit_admin | audit_user | Alter Index              | Audit When Success | f
+ audit_admin | audit_user | Alter Materialized View  | Audit When Success | f
+ audit_admin | audit_user | Alter Node               | Audit When Success | f
+ audit_admin | audit_user | Alter Role               | Audit When Success | f
+ audit_admin | audit_user | Alter Schema             | Audit When Success | f
+ audit_admin | audit_user | Alter Sequence           | Audit When Success | f
+ audit_admin | audit_user | Alter System             | Audit When Success | f
+ audit_admin | audit_user | Alter Table              | Audit When Success | f
+ audit_admin | audit_user | Alter Tablespace         | Audit When Success | f
+ audit_admin | audit_user | Alter Trigger            | Audit When Success | f
+ audit_admin | audit_user | Alter Type               | Audit When Success | f
+ audit_admin | audit_user | Alter User               | Audit When Success | f
+ audit_admin | audit_user | Alter View               | Audit When Success | f
+ audit_admin | audit_user | Comment Table            | Audit When Success | f
+ audit_admin | audit_user | Create Database          | Audit When Success | f
+ audit_admin | audit_user | Create Extension         | Audit When Success | f
+ audit_admin | audit_user | Create Function          | Audit When Success | f
+ audit_admin | audit_user | Create Index             | Audit When Success | f
+ audit_admin | audit_user | Create Materialized View | Audit When Success | f
+ audit_admin | audit_user | Create Node              | Audit When Success | f
+ audit_admin | audit_user | Create Node Group        | Audit When Success | f
+ audit_admin | audit_user | Create Role              | Audit When Success | f
+ audit_admin | audit_user | Create Schema            | Audit When Success | f
+ audit_admin | audit_user | Create Sequence          | Audit When Success | f
+ audit_admin | audit_user | Create Sharding Group    | Audit When Success | f
+ audit_admin | audit_user | Create Table             | Audit When Success | f
+ audit_admin | audit_user | Create Tablespace        | Audit When Success | f
+ audit_admin | audit_user | Create Trigger           | Audit When Success | f
+ audit_admin | audit_user | Create Type              | Audit When Success | f
+ audit_admin | audit_user | Create User              | Audit When Success | f
+ audit_admin | audit_user | Create View              | Audit When Success | f
+ audit_admin | audit_user | Delete Table             | Audit When Success | f
+ audit_admin | audit_user | Disable Trigger          | Audit When Success | f
+ audit_admin | audit_user | Drop Database            | Audit When Success | f
+ audit_admin | audit_user | Drop Extension           | Audit When Success | f
+ audit_admin | audit_user | Drop Function            | Audit When Success | f
+ audit_admin | audit_user | Drop Index               | Audit When Success | f
+ audit_admin | audit_user | Drop Materialized View   | Audit When Success | f
+ audit_admin | audit_user | Drop Node                | Audit When Success | f
+ audit_admin | audit_user | Drop Node Group          | Audit When Success | f
+ audit_admin | audit_user | Drop Role                | Audit When Success | f
+ audit_admin | audit_user | Drop Schema              | Audit When Success | f
+ audit_admin | audit_user | Drop Sequence            | Audit When Success | f
+ audit_admin | audit_user | Drop Sharding in Group   | Audit When Success | f
+ audit_admin | audit_user | Drop Table               | Audit When Success | f
+ audit_admin | audit_user | Drop Tablespace          | Audit When Success | f
+ audit_admin | audit_user | Drop Trigger             | Audit When Success | f
+ audit_admin | audit_user | Drop Type                | Audit When Success | f
+ audit_admin | audit_user | Drop User                | Audit When Success | f
+ audit_admin | audit_user | Drop View                | Audit When Success | f
+ audit_admin | audit_user | Enable Trigger           | Audit When Success | f
+ audit_admin | audit_user | Grant Function           | Audit When Success | f
+ audit_admin | audit_user | Grant Sequence           | Audit When Success | f
+ audit_admin | audit_user | Grant Table              | Audit When Success | f
+ audit_admin | audit_user | Grant Type               | Audit When Success | f
+ audit_admin | audit_user | Insert Table             | Audit When Success | f
+ audit_admin | audit_user | Lock Table               | Audit When Success | f
+ audit_admin | audit_user | Select Sequence          | Audit When Success | f
+ audit_admin | audit_user | Select Table             | Audit When Success | f
+ audit_admin | audit_user | Set Role                 | Audit When Success | f
+ audit_admin | audit_user | System Audit             | Audit When Success | f
+ audit_admin | audit_user | System Grant             | Audit When Success | f
+ audit_admin | audit_user | Truncate Table           | Audit When Success | f
+ audit_admin | audit_user | Update Table             | Audit When Success | f
+(68 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+   auditor   |       action_name        |    action_mode     | action_ison 
+-------------+--------------------------+--------------------+-------------
+ audit_admin | Add Partitions           | Audit When Success | f
+ audit_admin | Alter Database           | Audit When Success | f
+ audit_admin | Alter Extension          | Audit When Success | f
+ audit_admin | Alter Function           | Audit When Success | f
+ audit_admin | Alter Index              | Audit When Success | f
+ audit_admin | Alter Materialized View  | Audit When Success | f
+ audit_admin | Alter Node               | Audit When Success | f
+ audit_admin | Alter Role               | Audit When Success | f
+ audit_admin | Alter Schema             | Audit When Success | f
+ audit_admin | Alter Sequence           | Audit When Success | f
+ audit_admin | Alter System             | Audit When Success | f
+ audit_admin | Alter Table              | Audit When Success | f
+ audit_admin | Alter Tablespace         | Audit When Success | f
+ audit_admin | Alter Trigger            | Audit When Success | f
+ audit_admin | Alter Type               | Audit When Success | f
+ audit_admin | Alter User               | Audit When Success | f
+ audit_admin | Alter View               | Audit When Success | f
+ audit_admin | Comment Table            | Audit When Success | f
+ audit_admin | Create Database          | Audit When Success | f
+ audit_admin | Create Extension         | Audit When Success | f
+ audit_admin | Create Function          | Audit When Success | f
+ audit_admin | Create Index             | Audit When Success | f
+ audit_admin | Create Materialized View | Audit When Success | f
+ audit_admin | Create Node              | Audit When Success | f
+ audit_admin | Create Node Group        | Audit When Success | f
+ audit_admin | Create Role              | Audit When Success | f
+ audit_admin | Create Schema            | Audit When Success | f
+ audit_admin | Create Sequence          | Audit When Success | f
+ audit_admin | Create Sharding Group    | Audit When Success | f
+ audit_admin | Create Table             | Audit When Success | f
+ audit_admin | Create Tablespace        | Audit When Success | f
+ audit_admin | Create Trigger           | Audit When Success | f
+ audit_admin | Create Type              | Audit When Success | f
+ audit_admin | Create User              | Audit When Success | f
+ audit_admin | Create View              | Audit When Success | f
+ audit_admin | Delete Table             | Audit When Success | f
+ audit_admin | Disable Trigger          | Audit When Success | f
+ audit_admin | Drop Database            | Audit When Success | f
+ audit_admin | Drop Extension           | Audit When Success | f
+ audit_admin | Drop Function            | Audit When Success | f
+ audit_admin | Drop Index               | Audit When Success | f
+ audit_admin | Drop Materialized View   | Audit When Success | f
+ audit_admin | Drop Node                | Audit When Success | f
+ audit_admin | Drop Node Group          | Audit When Success | f
+ audit_admin | Drop Role                | Audit When Success | f
+ audit_admin | Drop Schema              | Audit When Success | f
+ audit_admin | Drop Sequence            | Audit When Success | f
+ audit_admin | Drop Sharding in Group   | Audit When Success | f
+ audit_admin | Drop Table               | Audit When Success | f
+ audit_admin | Drop Tablespace          | Audit When Success | f
+ audit_admin | Drop Trigger             | Audit When Success | f
+ audit_admin | Drop Type                | Audit When Success | f
+ audit_admin | Drop User                | Audit When Success | f
+ audit_admin | Drop View                | Audit When Success | f
+ audit_admin | Enable Trigger           | Audit When Success | f
+ audit_admin | Grant Function           | Audit When Success | f
+ audit_admin | Grant Sequence           | Audit When Success | f
+ audit_admin | Grant Table              | Audit When Success | f
+ audit_admin | Grant Type               | Audit When Success | f
+ audit_admin | Insert Table             | Audit When Success | f
+ audit_admin | Lock Table               | Audit When Success | f
+ audit_admin | Select Sequence          | Audit When Success | f
+ audit_admin | Select Table             | Audit When Success | f
+ audit_admin | Set Role                 | Audit When Success | f
+ audit_admin | System Audit             | Audit When Success | f
+ audit_admin | System Grant             | Audit When Success | f
+ audit_admin | Truncate Table           | Audit When Success | f
+ audit_admin | Update Table             | Audit When Success | f
+(68 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+   auditor   | action_name |    action_mode     | action_ison 
+-------------+-------------+--------------------+-------------
+ audit_admin | Alter       | Audit When Success | f
+ audit_admin | Audit       | Audit When Success | f
+ audit_admin | Comment     | Audit When Success | f
+ audit_admin | Delete      | Audit When Success | f
+ audit_admin | Grant       | Audit When Success | f
+ audit_admin | Insert      | Audit When Success | f
+ audit_admin | Lock        | Audit When Success | f
+ audit_admin | Rename      | Audit When Success | f
+ audit_admin | Select      | Audit When Success | f
+ audit_admin | Update      | Audit When Success | f
+(10 rows)
+
+audit all WHENEVER NOT SUCCESSFUL;
+audit all by audit_user WHENEVER NOT SUCCESSFUL;
+audit all on default WHENEVER NOT SUCCESSFUL;
+audit all on tbl_test WHENEVER NOT SUCCESSFUL;
+audit all on tbl_test_v WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test_v" is not a table
+audit all on view tbl_test_v WHENEVER NOT SUCCESSFUL;
+audit all on tbl_test_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a table
+audit all on view tbl_test_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a view
+audit all on materialized view tbl_test_mv WHENEVER NOT SUCCESSFUL;
+audit all on tbl_test0 WHENEVER NOT SUCCESSFUL;
+audit all on tbl_test0_v WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test0_v" is not a table
+audit all on view tbl_test0_v WHENEVER NOT SUCCESSFUL;
+audit all on tbl_test0_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a table
+audit all on view tbl_test0_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a view
+audit all on materialized view tbl_test0_mv WHENEVER NOT SUCCESSFUL;
+audit all on sc_test.tbl_test WHENEVER NOT SUCCESSFUL;
+audit all on sc_test.tbl_test_v WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test_v" is not a table
+audit all on view sc_test.tbl_test_v WHENEVER NOT SUCCESSFUL;
+audit all on sc_test.tbl_test_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a table
+audit all on view sc_test.tbl_test_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a view
+audit all on materialized view sc_test.tbl_test_mv WHENEVER NOT SUCCESSFUL;
+audit all on sc_test.tbl_test0 WHENEVER NOT SUCCESSFUL;
+audit all on sc_test.tbl_test0_v WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test0_v" is not a table
+audit all on view sc_test.tbl_test0_v WHENEVER NOT SUCCESSFUL;
+audit all on sc_test.tbl_test0_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a table
+audit all on view sc_test.tbl_test0_mv WHENEVER NOT SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a view
+audit all on materialized view sc_test.tbl_test0_mv WHENEVER NOT SUCCESSFUL;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+   auditor   | object_class |              object_desc               | action_name |      action_mode       | action_ison 
+-------------+--------------+----------------------------------------+-------------+------------------------+-------------
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Alter       | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Audit       | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Comment     | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Grant       | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Rename      | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Select      | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Update      | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Alter       | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Audit       | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Comment     | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Grant       | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Rename      | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Select      | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Update      | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Alter       | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Audit       | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Comment     | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Grant       | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Rename      | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Select      | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Update      | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Alter       | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Audit       | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Comment     | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Grant       | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Rename      | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Select      | Audit When Not Success | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Update      | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Alter       | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Audit       | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Comment     | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Delete      | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Grant       | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Insert      | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Lock        | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Rename      | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Select      | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Update      | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Alter       | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Audit       | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Comment     | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Delete      | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Grant       | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Insert      | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Lock        | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Rename      | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Select      | Audit When Not Success | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Update      | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test                         | Alter       | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test                         | Audit       | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test                         | Comment     | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test                         | Delete      | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test                         | Grant       | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test                         | Insert      | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test                         | Lock        | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test                         | Rename      | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test                         | Select      | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test                         | Update      | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Alter       | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Audit       | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Comment     | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Delete      | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Grant       | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Insert      | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Lock        | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Rename      | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Select      | Audit When Not Success | t
+ audit_admin | pg_class     | table tbl_test0                        | Update      | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Alter       | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Audit       | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Comment     | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Delete      | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Grant       | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Insert      | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Rename      | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Select      | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Update      | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Alter       | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Audit       | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Comment     | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Delete      | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Grant       | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Insert      | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Rename      | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Select      | Audit When Not Success | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Update      | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Alter       | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Audit       | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Comment     | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Delete      | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Grant       | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Insert      | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Rename      | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Select      | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Update      | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Alter       | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Audit       | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Comment     | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Delete      | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Grant       | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Insert      | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Rename      | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Select      | Audit When Not Success | t
+ audit_admin | pg_class     | view tbl_test_v                        | Update      | Audit When Not Success | t
+(104 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+   auditor   | user_name  |       action_name        |      action_mode       | action_ison 
+-------------+------------+--------------------------+------------------------+-------------
+ audit_admin | audit_user | Add Partitions           | Audit When Not Success | t
+ audit_admin | audit_user | Alter Database           | Audit When Not Success | t
+ audit_admin | audit_user | Alter Extension          | Audit When Not Success | t
+ audit_admin | audit_user | Alter Function           | Audit When Not Success | t
+ audit_admin | audit_user | Alter Index              | Audit When Not Success | t
+ audit_admin | audit_user | Alter Materialized View  | Audit When Not Success | t
+ audit_admin | audit_user | Alter Node               | Audit When Not Success | t
+ audit_admin | audit_user | Alter Role               | Audit When Not Success | t
+ audit_admin | audit_user | Alter Schema             | Audit When Not Success | t
+ audit_admin | audit_user | Alter Sequence           | Audit When Not Success | t
+ audit_admin | audit_user | Alter System             | Audit When Not Success | t
+ audit_admin | audit_user | Alter Table              | Audit When Not Success | t
+ audit_admin | audit_user | Alter Tablespace         | Audit When Not Success | t
+ audit_admin | audit_user | Alter Trigger            | Audit When Not Success | t
+ audit_admin | audit_user | Alter Type               | Audit When Not Success | t
+ audit_admin | audit_user | Alter User               | Audit When Not Success | t
+ audit_admin | audit_user | Alter View               | Audit When Not Success | t
+ audit_admin | audit_user | Comment Table            | Audit When Not Success | t
+ audit_admin | audit_user | Create Database          | Audit When Not Success | t
+ audit_admin | audit_user | Create Extension         | Audit When Not Success | t
+ audit_admin | audit_user | Create Function          | Audit When Not Success | t
+ audit_admin | audit_user | Create Index             | Audit When Not Success | t
+ audit_admin | audit_user | Create Materialized View | Audit When Not Success | t
+ audit_admin | audit_user | Create Node              | Audit When Not Success | t
+ audit_admin | audit_user | Create Node Group        | Audit When Not Success | t
+ audit_admin | audit_user | Create Role              | Audit When Not Success | t
+ audit_admin | audit_user | Create Schema            | Audit When Not Success | t
+ audit_admin | audit_user | Create Sequence          | Audit When Not Success | t
+ audit_admin | audit_user | Create Sharding Group    | Audit When Not Success | t
+ audit_admin | audit_user | Create Table             | Audit When Not Success | t
+ audit_admin | audit_user | Create Tablespace        | Audit When Not Success | t
+ audit_admin | audit_user | Create Trigger           | Audit When Not Success | t
+ audit_admin | audit_user | Create Type              | Audit When Not Success | t
+ audit_admin | audit_user | Create User              | Audit When Not Success | t
+ audit_admin | audit_user | Create View              | Audit When Not Success | t
+ audit_admin | audit_user | Delete Table             | Audit When Not Success | t
+ audit_admin | audit_user | Disable Trigger          | Audit When Not Success | t
+ audit_admin | audit_user | Drop Database            | Audit When Not Success | t
+ audit_admin | audit_user | Drop Extension           | Audit When Not Success | t
+ audit_admin | audit_user | Drop Function            | Audit When Not Success | t
+ audit_admin | audit_user | Drop Index               | Audit When Not Success | t
+ audit_admin | audit_user | Drop Materialized View   | Audit When Not Success | t
+ audit_admin | audit_user | Drop Node                | Audit When Not Success | t
+ audit_admin | audit_user | Drop Node Group          | Audit When Not Success | t
+ audit_admin | audit_user | Drop Role                | Audit When Not Success | t
+ audit_admin | audit_user | Drop Schema              | Audit When Not Success | t
+ audit_admin | audit_user | Drop Sequence            | Audit When Not Success | t
+ audit_admin | audit_user | Drop Sharding in Group   | Audit When Not Success | t
+ audit_admin | audit_user | Drop Table               | Audit When Not Success | t
+ audit_admin | audit_user | Drop Tablespace          | Audit When Not Success | t
+ audit_admin | audit_user | Drop Trigger             | Audit When Not Success | t
+ audit_admin | audit_user | Drop Type                | Audit When Not Success | t
+ audit_admin | audit_user | Drop User                | Audit When Not Success | t
+ audit_admin | audit_user | Drop View                | Audit When Not Success | t
+ audit_admin | audit_user | Enable Trigger           | Audit When Not Success | t
+ audit_admin | audit_user | Grant Function           | Audit When Not Success | t
+ audit_admin | audit_user | Grant Sequence           | Audit When Not Success | t
+ audit_admin | audit_user | Grant Table              | Audit When Not Success | t
+ audit_admin | audit_user | Grant Type               | Audit When Not Success | t
+ audit_admin | audit_user | Insert Table             | Audit When Not Success | t
+ audit_admin | audit_user | Lock Table               | Audit When Not Success | t
+ audit_admin | audit_user | Select Sequence          | Audit When Not Success | t
+ audit_admin | audit_user | Select Table             | Audit When Not Success | t
+ audit_admin | audit_user | Set Role                 | Audit When Not Success | t
+ audit_admin | audit_user | System Audit             | Audit When Not Success | t
+ audit_admin | audit_user | System Grant             | Audit When Not Success | t
+ audit_admin | audit_user | Truncate Table           | Audit When Not Success | t
+ audit_admin | audit_user | Update Table             | Audit When Not Success | t
+(68 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+   auditor   |       action_name        |      action_mode       | action_ison 
+-------------+--------------------------+------------------------+-------------
+ audit_admin | Add Partitions           | Audit When Not Success | t
+ audit_admin | Alter Database           | Audit When Not Success | t
+ audit_admin | Alter Extension          | Audit When Not Success | t
+ audit_admin | Alter Function           | Audit When Not Success | t
+ audit_admin | Alter Index              | Audit When Not Success | t
+ audit_admin | Alter Materialized View  | Audit When Not Success | t
+ audit_admin | Alter Node               | Audit When Not Success | t
+ audit_admin | Alter Role               | Audit When Not Success | t
+ audit_admin | Alter Schema             | Audit When Not Success | t
+ audit_admin | Alter Sequence           | Audit When Not Success | t
+ audit_admin | Alter System             | Audit When Not Success | t
+ audit_admin | Alter Table              | Audit When Not Success | t
+ audit_admin | Alter Tablespace         | Audit When Not Success | t
+ audit_admin | Alter Trigger            | Audit When Not Success | t
+ audit_admin | Alter Type               | Audit When Not Success | t
+ audit_admin | Alter User               | Audit When Not Success | t
+ audit_admin | Alter View               | Audit When Not Success | t
+ audit_admin | Comment Table            | Audit When Not Success | t
+ audit_admin | Create Database          | Audit When Not Success | t
+ audit_admin | Create Extension         | Audit When Not Success | t
+ audit_admin | Create Function          | Audit When Not Success | t
+ audit_admin | Create Index             | Audit When Not Success | t
+ audit_admin | Create Materialized View | Audit When Not Success | t
+ audit_admin | Create Node              | Audit When Not Success | t
+ audit_admin | Create Node Group        | Audit When Not Success | t
+ audit_admin | Create Role              | Audit When Not Success | t
+ audit_admin | Create Schema            | Audit When Not Success | t
+ audit_admin | Create Sequence          | Audit When Not Success | t
+ audit_admin | Create Sharding Group    | Audit When Not Success | t
+ audit_admin | Create Table             | Audit When Not Success | t
+ audit_admin | Create Tablespace        | Audit When Not Success | t
+ audit_admin | Create Trigger           | Audit When Not Success | t
+ audit_admin | Create Type              | Audit When Not Success | t
+ audit_admin | Create User              | Audit When Not Success | t
+ audit_admin | Create View              | Audit When Not Success | t
+ audit_admin | Delete Table             | Audit When Not Success | t
+ audit_admin | Disable Trigger          | Audit When Not Success | t
+ audit_admin | Drop Database            | Audit When Not Success | t
+ audit_admin | Drop Extension           | Audit When Not Success | t
+ audit_admin | Drop Function            | Audit When Not Success | t
+ audit_admin | Drop Index               | Audit When Not Success | t
+ audit_admin | Drop Materialized View   | Audit When Not Success | t
+ audit_admin | Drop Node                | Audit When Not Success | t
+ audit_admin | Drop Node Group          | Audit When Not Success | t
+ audit_admin | Drop Role                | Audit When Not Success | t
+ audit_admin | Drop Schema              | Audit When Not Success | t
+ audit_admin | Drop Sequence            | Audit When Not Success | t
+ audit_admin | Drop Sharding in Group   | Audit When Not Success | t
+ audit_admin | Drop Table               | Audit When Not Success | t
+ audit_admin | Drop Tablespace          | Audit When Not Success | t
+ audit_admin | Drop Trigger             | Audit When Not Success | t
+ audit_admin | Drop Type                | Audit When Not Success | t
+ audit_admin | Drop User                | Audit When Not Success | t
+ audit_admin | Drop View                | Audit When Not Success | t
+ audit_admin | Enable Trigger           | Audit When Not Success | t
+ audit_admin | Grant Function           | Audit When Not Success | t
+ audit_admin | Grant Sequence           | Audit When Not Success | t
+ audit_admin | Grant Table              | Audit When Not Success | t
+ audit_admin | Grant Type               | Audit When Not Success | t
+ audit_admin | Insert Table             | Audit When Not Success | t
+ audit_admin | Lock Table               | Audit When Not Success | t
+ audit_admin | Select Sequence          | Audit When Not Success | t
+ audit_admin | Select Table             | Audit When Not Success | t
+ audit_admin | Set Role                 | Audit When Not Success | t
+ audit_admin | System Audit             | Audit When Not Success | t
+ audit_admin | System Grant             | Audit When Not Success | t
+ audit_admin | Truncate Table           | Audit When Not Success | t
+ audit_admin | Update Table             | Audit When Not Success | t
+(68 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+   auditor   | action_name |      action_mode       | action_ison 
+-------------+-------------+------------------------+-------------
+ audit_admin | Alter       | Audit When Not Success | t
+ audit_admin | Audit       | Audit When Not Success | t
+ audit_admin | Comment     | Audit When Not Success | t
+ audit_admin | Delete      | Audit When Not Success | t
+ audit_admin | Grant       | Audit When Not Success | t
+ audit_admin | Insert      | Audit When Not Success | t
+ audit_admin | Lock        | Audit When Not Success | t
+ audit_admin | Rename      | Audit When Not Success | t
+ audit_admin | Select      | Audit When Not Success | t
+ audit_admin | Update      | Audit When Not Success | t
+(10 rows)
+
+audit all WHENEVER SUCCESSFUL;
+audit all by audit_user WHENEVER SUCCESSFUL;
+audit all on default WHENEVER SUCCESSFUL;
+audit all on tbl_test WHENEVER SUCCESSFUL;
+audit all on tbl_test_v WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test_v" is not a table
+audit all on view tbl_test_v WHENEVER SUCCESSFUL;
+audit all on tbl_test_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a table
+audit all on view tbl_test_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a view
+audit all on materialized view tbl_test_mv WHENEVER SUCCESSFUL;
+audit all on tbl_test0 WHENEVER SUCCESSFUL;
+audit all on tbl_test0_v WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test0_v" is not a table
+audit all on view tbl_test0_v WHENEVER SUCCESSFUL;
+audit all on tbl_test0_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a table
+audit all on view tbl_test0_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a view
+audit all on materialized view tbl_test0_mv WHENEVER SUCCESSFUL;
+audit all on sc_test.tbl_test WHENEVER SUCCESSFUL;
+audit all on sc_test.tbl_test_v WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test_v" is not a table
+audit all on view sc_test.tbl_test_v WHENEVER SUCCESSFUL;
+audit all on sc_test.tbl_test_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a table
+audit all on view sc_test.tbl_test_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test_mv" is not a view
+audit all on materialized view sc_test.tbl_test_mv WHENEVER SUCCESSFUL;
+audit all on sc_test.tbl_test0 WHENEVER SUCCESSFUL;
+audit all on sc_test.tbl_test0_v WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test0_v" is not a table
+audit all on view sc_test.tbl_test0_v WHENEVER SUCCESSFUL;
+audit all on sc_test.tbl_test0_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a table
+audit all on view sc_test.tbl_test0_mv WHENEVER SUCCESSFUL;
+ERROR:  "tbl_test0_mv" is not a view
+audit all on materialized view sc_test.tbl_test0_mv WHENEVER SUCCESSFUL;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+   auditor   | object_class |              object_desc               | action_name | action_mode  | action_ison 
+-------------+--------------+----------------------------------------+-------------+--------------+-------------
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test0_mv | Update      | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view sc_test.tbl_test_mv  | Update      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv         | Update      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv          | Update      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Alter       | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Audit       | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Comment     | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Delete      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Grant       | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Insert      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Lock        | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Rename      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Select      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test                 | Update      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Alter       | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Audit       | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Comment     | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Delete      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Grant       | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Insert      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Lock        | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Rename      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Select      | Audit Always | t
+ audit_admin | pg_class     | table sc_test.tbl_test0                | Update      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Alter       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Audit       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Comment     | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Delete      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Grant       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Insert      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Lock        | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Rename      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Select      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                         | Update      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Alter       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Audit       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Comment     | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Delete      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Grant       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Insert      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Lock        | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Rename      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Select      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                        | Update      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Alter       | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Audit       | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Comment     | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Delete      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Grant       | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Insert      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Rename      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Select      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test0_v               | Update      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Alter       | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Audit       | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Comment     | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Delete      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Grant       | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Insert      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Rename      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Select      | Audit Always | t
+ audit_admin | pg_class     | view sc_test.tbl_test_v                | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v                       | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                        | Update      | Audit Always | t
+(104 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+   auditor   | user_name  |       action_name        | action_mode  | action_ison 
+-------------+------------+--------------------------+--------------+-------------
+ audit_admin | audit_user | Add Partitions           | Audit Always | t
+ audit_admin | audit_user | Alter Database           | Audit Always | t
+ audit_admin | audit_user | Alter Extension          | Audit Always | t
+ audit_admin | audit_user | Alter Function           | Audit Always | t
+ audit_admin | audit_user | Alter Index              | Audit Always | t
+ audit_admin | audit_user | Alter Materialized View  | Audit Always | t
+ audit_admin | audit_user | Alter Node               | Audit Always | t
+ audit_admin | audit_user | Alter Role               | Audit Always | t
+ audit_admin | audit_user | Alter Schema             | Audit Always | t
+ audit_admin | audit_user | Alter Sequence           | Audit Always | t
+ audit_admin | audit_user | Alter System             | Audit Always | t
+ audit_admin | audit_user | Alter Table              | Audit Always | t
+ audit_admin | audit_user | Alter Tablespace         | Audit Always | t
+ audit_admin | audit_user | Alter Trigger            | Audit Always | t
+ audit_admin | audit_user | Alter Type               | Audit Always | t
+ audit_admin | audit_user | Alter User               | Audit Always | t
+ audit_admin | audit_user | Alter View               | Audit Always | t
+ audit_admin | audit_user | Comment Table            | Audit Always | t
+ audit_admin | audit_user | Create Database          | Audit Always | t
+ audit_admin | audit_user | Create Extension         | Audit Always | t
+ audit_admin | audit_user | Create Function          | Audit Always | t
+ audit_admin | audit_user | Create Index             | Audit Always | t
+ audit_admin | audit_user | Create Materialized View | Audit Always | t
+ audit_admin | audit_user | Create Node              | Audit Always | t
+ audit_admin | audit_user | Create Node Group        | Audit Always | t
+ audit_admin | audit_user | Create Role              | Audit Always | t
+ audit_admin | audit_user | Create Schema            | Audit Always | t
+ audit_admin | audit_user | Create Sequence          | Audit Always | t
+ audit_admin | audit_user | Create Sharding Group    | Audit Always | t
+ audit_admin | audit_user | Create Table             | Audit Always | t
+ audit_admin | audit_user | Create Tablespace        | Audit Always | t
+ audit_admin | audit_user | Create Trigger           | Audit Always | t
+ audit_admin | audit_user | Create Type              | Audit Always | t
+ audit_admin | audit_user | Create User              | Audit Always | t
+ audit_admin | audit_user | Create View              | Audit Always | t
+ audit_admin | audit_user | Delete Table             | Audit Always | t
+ audit_admin | audit_user | Disable Trigger          | Audit Always | t
+ audit_admin | audit_user | Drop Database            | Audit Always | t
+ audit_admin | audit_user | Drop Extension           | Audit Always | t
+ audit_admin | audit_user | Drop Function            | Audit Always | t
+ audit_admin | audit_user | Drop Index               | Audit Always | t
+ audit_admin | audit_user | Drop Materialized View   | Audit Always | t
+ audit_admin | audit_user | Drop Node                | Audit Always | t
+ audit_admin | audit_user | Drop Node Group          | Audit Always | t
+ audit_admin | audit_user | Drop Role                | Audit Always | t
+ audit_admin | audit_user | Drop Schema              | Audit Always | t
+ audit_admin | audit_user | Drop Sequence            | Audit Always | t
+ audit_admin | audit_user | Drop Sharding in Group   | Audit Always | t
+ audit_admin | audit_user | Drop Table               | Audit Always | t
+ audit_admin | audit_user | Drop Tablespace          | Audit Always | t
+ audit_admin | audit_user | Drop Trigger             | Audit Always | t
+ audit_admin | audit_user | Drop Type                | Audit Always | t
+ audit_admin | audit_user | Drop User                | Audit Always | t
+ audit_admin | audit_user | Drop View                | Audit Always | t
+ audit_admin | audit_user | Enable Trigger           | Audit Always | t
+ audit_admin | audit_user | Grant Function           | Audit Always | t
+ audit_admin | audit_user | Grant Sequence           | Audit Always | t
+ audit_admin | audit_user | Grant Table              | Audit Always | t
+ audit_admin | audit_user | Grant Type               | Audit Always | t
+ audit_admin | audit_user | Insert Table             | Audit Always | t
+ audit_admin | audit_user | Lock Table               | Audit Always | t
+ audit_admin | audit_user | Select Sequence          | Audit Always | t
+ audit_admin | audit_user | Select Table             | Audit Always | t
+ audit_admin | audit_user | Set Role                 | Audit Always | t
+ audit_admin | audit_user | System Audit             | Audit Always | t
+ audit_admin | audit_user | System Grant             | Audit Always | t
+ audit_admin | audit_user | Truncate Table           | Audit Always | t
+ audit_admin | audit_user | Update Table             | Audit Always | t
+(68 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+   auditor   |       action_name        | action_mode  | action_ison 
+-------------+--------------------------+--------------+-------------
+ audit_admin | Add Partitions           | Audit Always | t
+ audit_admin | Alter Database           | Audit Always | t
+ audit_admin | Alter Extension          | Audit Always | t
+ audit_admin | Alter Function           | Audit Always | t
+ audit_admin | Alter Index              | Audit Always | t
+ audit_admin | Alter Materialized View  | Audit Always | t
+ audit_admin | Alter Node               | Audit Always | t
+ audit_admin | Alter Role               | Audit Always | t
+ audit_admin | Alter Schema             | Audit Always | t
+ audit_admin | Alter Sequence           | Audit Always | t
+ audit_admin | Alter System             | Audit Always | t
+ audit_admin | Alter Table              | Audit Always | t
+ audit_admin | Alter Tablespace         | Audit Always | t
+ audit_admin | Alter Trigger            | Audit Always | t
+ audit_admin | Alter Type               | Audit Always | t
+ audit_admin | Alter User               | Audit Always | t
+ audit_admin | Alter View               | Audit Always | t
+ audit_admin | Comment Table            | Audit Always | t
+ audit_admin | Create Database          | Audit Always | t
+ audit_admin | Create Extension         | Audit Always | t
+ audit_admin | Create Function          | Audit Always | t
+ audit_admin | Create Index             | Audit Always | t
+ audit_admin | Create Materialized View | Audit Always | t
+ audit_admin | Create Node              | Audit Always | t
+ audit_admin | Create Node Group        | Audit Always | t
+ audit_admin | Create Role              | Audit Always | t
+ audit_admin | Create Schema            | Audit Always | t
+ audit_admin | Create Sequence          | Audit Always | t
+ audit_admin | Create Sharding Group    | Audit Always | t
+ audit_admin | Create Table             | Audit Always | t
+ audit_admin | Create Tablespace        | Audit Always | t
+ audit_admin | Create Trigger           | Audit Always | t
+ audit_admin | Create Type              | Audit Always | t
+ audit_admin | Create User              | Audit Always | t
+ audit_admin | Create View              | Audit Always | t
+ audit_admin | Delete Table             | Audit Always | t
+ audit_admin | Disable Trigger          | Audit Always | t
+ audit_admin | Drop Database            | Audit Always | t
+ audit_admin | Drop Extension           | Audit Always | t
+ audit_admin | Drop Function            | Audit Always | t
+ audit_admin | Drop Index               | Audit Always | t
+ audit_admin | Drop Materialized View   | Audit Always | t
+ audit_admin | Drop Node                | Audit Always | t
+ audit_admin | Drop Node Group          | Audit Always | t
+ audit_admin | Drop Role                | Audit Always | t
+ audit_admin | Drop Schema              | Audit Always | t
+ audit_admin | Drop Sequence            | Audit Always | t
+ audit_admin | Drop Sharding in Group   | Audit Always | t
+ audit_admin | Drop Table               | Audit Always | t
+ audit_admin | Drop Tablespace          | Audit Always | t
+ audit_admin | Drop Trigger             | Audit Always | t
+ audit_admin | Drop Type                | Audit Always | t
+ audit_admin | Drop User                | Audit Always | t
+ audit_admin | Drop View                | Audit Always | t
+ audit_admin | Enable Trigger           | Audit Always | t
+ audit_admin | Grant Function           | Audit Always | t
+ audit_admin | Grant Sequence           | Audit Always | t
+ audit_admin | Grant Table              | Audit Always | t
+ audit_admin | Grant Type               | Audit Always | t
+ audit_admin | Insert Table             | Audit Always | t
+ audit_admin | Lock Table               | Audit Always | t
+ audit_admin | Select Sequence          | Audit Always | t
+ audit_admin | Select Table             | Audit Always | t
+ audit_admin | Set Role                 | Audit Always | t
+ audit_admin | System Audit             | Audit Always | t
+ audit_admin | System Grant             | Audit Always | t
+ audit_admin | Truncate Table           | Audit Always | t
+ audit_admin | Update Table             | Audit Always | t
+(68 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+   auditor   | action_name | action_mode  | action_ison 
+-------------+-------------+--------------+-------------
+ audit_admin | Alter       | Audit Always | t
+ audit_admin | Audit       | Audit Always | t
+ audit_admin | Comment     | Audit Always | t
+ audit_admin | Delete      | Audit Always | t
+ audit_admin | Grant       | Audit Always | t
+ audit_admin | Insert      | Audit Always | t
+ audit_admin | Lock        | Audit Always | t
+ audit_admin | Rename      | Audit Always | t
+ audit_admin | Select      | Audit Always | t
+ audit_admin | Update      | Audit Always | t
+(10 rows)
+
+\c audit_database audit_user
+drop schema sc_test cascade;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to table sc_test.tbl_test
+drop cascades to table sc_test.tbl_test0
+drop cascades to view sc_test.tbl_test_v
+drop cascades to materialized view sc_test.tbl_test_mv
+drop cascades to view sc_test.tbl_test0_v
+drop cascades to materialized view sc_test.tbl_test0_mv
+\c audit_database audit_admin
+clean unknown audit;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+   auditor   | object_class |          object_desc           | action_name | action_mode  | action_ison 
+-------------+--------------+--------------------------------+-------------+--------------+-------------
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Update      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Update      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Alter       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Audit       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Comment     | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Delete      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Grant       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Insert      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Lock        | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Rename      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Select      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Update      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Alter       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Audit       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Comment     | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Delete      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Grant       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Insert      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Lock        | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Rename      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Select      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Update      | Audit Always | t
+(52 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+   auditor   | user_name  |       action_name        | action_mode  | action_ison 
+-------------+------------+--------------------------+--------------+-------------
+ audit_admin | audit_user | Add Partitions           | Audit Always | t
+ audit_admin | audit_user | Alter Database           | Audit Always | t
+ audit_admin | audit_user | Alter Extension          | Audit Always | t
+ audit_admin | audit_user | Alter Function           | Audit Always | t
+ audit_admin | audit_user | Alter Index              | Audit Always | t
+ audit_admin | audit_user | Alter Materialized View  | Audit Always | t
+ audit_admin | audit_user | Alter Node               | Audit Always | t
+ audit_admin | audit_user | Alter Role               | Audit Always | t
+ audit_admin | audit_user | Alter Schema             | Audit Always | t
+ audit_admin | audit_user | Alter Sequence           | Audit Always | t
+ audit_admin | audit_user | Alter System             | Audit Always | t
+ audit_admin | audit_user | Alter Table              | Audit Always | t
+ audit_admin | audit_user | Alter Tablespace         | Audit Always | t
+ audit_admin | audit_user | Alter Trigger            | Audit Always | t
+ audit_admin | audit_user | Alter Type               | Audit Always | t
+ audit_admin | audit_user | Alter User               | Audit Always | t
+ audit_admin | audit_user | Alter View               | Audit Always | t
+ audit_admin | audit_user | Comment Table            | Audit Always | t
+ audit_admin | audit_user | Create Database          | Audit Always | t
+ audit_admin | audit_user | Create Extension         | Audit Always | t
+ audit_admin | audit_user | Create Function          | Audit Always | t
+ audit_admin | audit_user | Create Index             | Audit Always | t
+ audit_admin | audit_user | Create Materialized View | Audit Always | t
+ audit_admin | audit_user | Create Node              | Audit Always | t
+ audit_admin | audit_user | Create Node Group        | Audit Always | t
+ audit_admin | audit_user | Create Role              | Audit Always | t
+ audit_admin | audit_user | Create Schema            | Audit Always | t
+ audit_admin | audit_user | Create Sequence          | Audit Always | t
+ audit_admin | audit_user | Create Sharding Group    | Audit Always | t
+ audit_admin | audit_user | Create Table             | Audit Always | t
+ audit_admin | audit_user | Create Tablespace        | Audit Always | t
+ audit_admin | audit_user | Create Trigger           | Audit Always | t
+ audit_admin | audit_user | Create Type              | Audit Always | t
+ audit_admin | audit_user | Create User              | Audit Always | t
+ audit_admin | audit_user | Create View              | Audit Always | t
+ audit_admin | audit_user | Delete Table             | Audit Always | t
+ audit_admin | audit_user | Disable Trigger          | Audit Always | t
+ audit_admin | audit_user | Drop Database            | Audit Always | t
+ audit_admin | audit_user | Drop Extension           | Audit Always | t
+ audit_admin | audit_user | Drop Function            | Audit Always | t
+ audit_admin | audit_user | Drop Index               | Audit Always | t
+ audit_admin | audit_user | Drop Materialized View   | Audit Always | t
+ audit_admin | audit_user | Drop Node                | Audit Always | t
+ audit_admin | audit_user | Drop Node Group          | Audit Always | t
+ audit_admin | audit_user | Drop Role                | Audit Always | t
+ audit_admin | audit_user | Drop Schema              | Audit Always | t
+ audit_admin | audit_user | Drop Sequence            | Audit Always | t
+ audit_admin | audit_user | Drop Sharding in Group   | Audit Always | t
+ audit_admin | audit_user | Drop Table               | Audit Always | t
+ audit_admin | audit_user | Drop Tablespace          | Audit Always | t
+ audit_admin | audit_user | Drop Trigger             | Audit Always | t
+ audit_admin | audit_user | Drop Type                | Audit Always | t
+ audit_admin | audit_user | Drop User                | Audit Always | t
+ audit_admin | audit_user | Drop View                | Audit Always | t
+ audit_admin | audit_user | Enable Trigger           | Audit Always | t
+ audit_admin | audit_user | Grant Function           | Audit Always | t
+ audit_admin | audit_user | Grant Sequence           | Audit Always | t
+ audit_admin | audit_user | Grant Table              | Audit Always | t
+ audit_admin | audit_user | Grant Type               | Audit Always | t
+ audit_admin | audit_user | Insert Table             | Audit Always | t
+ audit_admin | audit_user | Lock Table               | Audit Always | t
+ audit_admin | audit_user | Select Sequence          | Audit Always | t
+ audit_admin | audit_user | Select Table             | Audit Always | t
+ audit_admin | audit_user | Set Role                 | Audit Always | t
+ audit_admin | audit_user | System Audit             | Audit Always | t
+ audit_admin | audit_user | System Grant             | Audit Always | t
+ audit_admin | audit_user | Truncate Table           | Audit Always | t
+ audit_admin | audit_user | Update Table             | Audit Always | t
+(68 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+   auditor   |       action_name        | action_mode  | action_ison 
+-------------+--------------------------+--------------+-------------
+ audit_admin | Add Partitions           | Audit Always | t
+ audit_admin | Alter Database           | Audit Always | t
+ audit_admin | Alter Extension          | Audit Always | t
+ audit_admin | Alter Function           | Audit Always | t
+ audit_admin | Alter Index              | Audit Always | t
+ audit_admin | Alter Materialized View  | Audit Always | t
+ audit_admin | Alter Node               | Audit Always | t
+ audit_admin | Alter Role               | Audit Always | t
+ audit_admin | Alter Schema             | Audit Always | t
+ audit_admin | Alter Sequence           | Audit Always | t
+ audit_admin | Alter System             | Audit Always | t
+ audit_admin | Alter Table              | Audit Always | t
+ audit_admin | Alter Tablespace         | Audit Always | t
+ audit_admin | Alter Trigger            | Audit Always | t
+ audit_admin | Alter Type               | Audit Always | t
+ audit_admin | Alter User               | Audit Always | t
+ audit_admin | Alter View               | Audit Always | t
+ audit_admin | Comment Table            | Audit Always | t
+ audit_admin | Create Database          | Audit Always | t
+ audit_admin | Create Extension         | Audit Always | t
+ audit_admin | Create Function          | Audit Always | t
+ audit_admin | Create Index             | Audit Always | t
+ audit_admin | Create Materialized View | Audit Always | t
+ audit_admin | Create Node              | Audit Always | t
+ audit_admin | Create Node Group        | Audit Always | t
+ audit_admin | Create Role              | Audit Always | t
+ audit_admin | Create Schema            | Audit Always | t
+ audit_admin | Create Sequence          | Audit Always | t
+ audit_admin | Create Sharding Group    | Audit Always | t
+ audit_admin | Create Table             | Audit Always | t
+ audit_admin | Create Tablespace        | Audit Always | t
+ audit_admin | Create Trigger           | Audit Always | t
+ audit_admin | Create Type              | Audit Always | t
+ audit_admin | Create User              | Audit Always | t
+ audit_admin | Create View              | Audit Always | t
+ audit_admin | Delete Table             | Audit Always | t
+ audit_admin | Disable Trigger          | Audit Always | t
+ audit_admin | Drop Database            | Audit Always | t
+ audit_admin | Drop Extension           | Audit Always | t
+ audit_admin | Drop Function            | Audit Always | t
+ audit_admin | Drop Index               | Audit Always | t
+ audit_admin | Drop Materialized View   | Audit Always | t
+ audit_admin | Drop Node                | Audit Always | t
+ audit_admin | Drop Node Group          | Audit Always | t
+ audit_admin | Drop Role                | Audit Always | t
+ audit_admin | Drop Schema              | Audit Always | t
+ audit_admin | Drop Sequence            | Audit Always | t
+ audit_admin | Drop Sharding in Group   | Audit Always | t
+ audit_admin | Drop Table               | Audit Always | t
+ audit_admin | Drop Tablespace          | Audit Always | t
+ audit_admin | Drop Trigger             | Audit Always | t
+ audit_admin | Drop Type                | Audit Always | t
+ audit_admin | Drop User                | Audit Always | t
+ audit_admin | Drop View                | Audit Always | t
+ audit_admin | Enable Trigger           | Audit Always | t
+ audit_admin | Grant Function           | Audit Always | t
+ audit_admin | Grant Sequence           | Audit Always | t
+ audit_admin | Grant Table              | Audit Always | t
+ audit_admin | Grant Type               | Audit Always | t
+ audit_admin | Insert Table             | Audit Always | t
+ audit_admin | Lock Table               | Audit Always | t
+ audit_admin | Select Sequence          | Audit Always | t
+ audit_admin | Select Table             | Audit Always | t
+ audit_admin | Set Role                 | Audit Always | t
+ audit_admin | System Audit             | Audit Always | t
+ audit_admin | System Grant             | Audit Always | t
+ audit_admin | Truncate Table           | Audit Always | t
+ audit_admin | Update Table             | Audit Always | t
+(68 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+   auditor   | action_name | action_mode  | action_ison 
+-------------+-------------+--------------+-------------
+ audit_admin | Alter       | Audit Always | t
+ audit_admin | Audit       | Audit Always | t
+ audit_admin | Comment     | Audit Always | t
+ audit_admin | Delete      | Audit Always | t
+ audit_admin | Grant       | Audit Always | t
+ audit_admin | Insert      | Audit Always | t
+ audit_admin | Lock        | Audit Always | t
+ audit_admin | Rename      | Audit Always | t
+ audit_admin | Select      | Audit Always | t
+ audit_admin | Update      | Audit Always | t
+(10 rows)
+
+clean statement audit;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+   auditor   | object_class |          object_desc           | action_name | action_mode  | action_ison 
+-------------+--------------+--------------------------------+-------------+--------------+-------------
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Update      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Update      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Alter       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Audit       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Comment     | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Delete      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Grant       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Insert      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Lock        | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Rename      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Select      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Update      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Alter       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Audit       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Comment     | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Delete      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Grant       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Insert      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Lock        | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Rename      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Select      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Update      | Audit Always | t
+(52 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+   auditor   | user_name  |       action_name        | action_mode  | action_ison 
+-------------+------------+--------------------------+--------------+-------------
+ audit_admin | audit_user | Add Partitions           | Audit Always | t
+ audit_admin | audit_user | Alter Database           | Audit Always | t
+ audit_admin | audit_user | Alter Extension          | Audit Always | t
+ audit_admin | audit_user | Alter Function           | Audit Always | t
+ audit_admin | audit_user | Alter Index              | Audit Always | t
+ audit_admin | audit_user | Alter Materialized View  | Audit Always | t
+ audit_admin | audit_user | Alter Node               | Audit Always | t
+ audit_admin | audit_user | Alter Role               | Audit Always | t
+ audit_admin | audit_user | Alter Schema             | Audit Always | t
+ audit_admin | audit_user | Alter Sequence           | Audit Always | t
+ audit_admin | audit_user | Alter System             | Audit Always | t
+ audit_admin | audit_user | Alter Table              | Audit Always | t
+ audit_admin | audit_user | Alter Tablespace         | Audit Always | t
+ audit_admin | audit_user | Alter Trigger            | Audit Always | t
+ audit_admin | audit_user | Alter Type               | Audit Always | t
+ audit_admin | audit_user | Alter User               | Audit Always | t
+ audit_admin | audit_user | Alter View               | Audit Always | t
+ audit_admin | audit_user | Comment Table            | Audit Always | t
+ audit_admin | audit_user | Create Database          | Audit Always | t
+ audit_admin | audit_user | Create Extension         | Audit Always | t
+ audit_admin | audit_user | Create Function          | Audit Always | t
+ audit_admin | audit_user | Create Index             | Audit Always | t
+ audit_admin | audit_user | Create Materialized View | Audit Always | t
+ audit_admin | audit_user | Create Node              | Audit Always | t
+ audit_admin | audit_user | Create Node Group        | Audit Always | t
+ audit_admin | audit_user | Create Role              | Audit Always | t
+ audit_admin | audit_user | Create Schema            | Audit Always | t
+ audit_admin | audit_user | Create Sequence          | Audit Always | t
+ audit_admin | audit_user | Create Sharding Group    | Audit Always | t
+ audit_admin | audit_user | Create Table             | Audit Always | t
+ audit_admin | audit_user | Create Tablespace        | Audit Always | t
+ audit_admin | audit_user | Create Trigger           | Audit Always | t
+ audit_admin | audit_user | Create Type              | Audit Always | t
+ audit_admin | audit_user | Create User              | Audit Always | t
+ audit_admin | audit_user | Create View              | Audit Always | t
+ audit_admin | audit_user | Delete Table             | Audit Always | t
+ audit_admin | audit_user | Disable Trigger          | Audit Always | t
+ audit_admin | audit_user | Drop Database            | Audit Always | t
+ audit_admin | audit_user | Drop Extension           | Audit Always | t
+ audit_admin | audit_user | Drop Function            | Audit Always | t
+ audit_admin | audit_user | Drop Index               | Audit Always | t
+ audit_admin | audit_user | Drop Materialized View   | Audit Always | t
+ audit_admin | audit_user | Drop Node                | Audit Always | t
+ audit_admin | audit_user | Drop Node Group          | Audit Always | t
+ audit_admin | audit_user | Drop Role                | Audit Always | t
+ audit_admin | audit_user | Drop Schema              | Audit Always | t
+ audit_admin | audit_user | Drop Sequence            | Audit Always | t
+ audit_admin | audit_user | Drop Sharding in Group   | Audit Always | t
+ audit_admin | audit_user | Drop Table               | Audit Always | t
+ audit_admin | audit_user | Drop Tablespace          | Audit Always | t
+ audit_admin | audit_user | Drop Trigger             | Audit Always | t
+ audit_admin | audit_user | Drop Type                | Audit Always | t
+ audit_admin | audit_user | Drop User                | Audit Always | t
+ audit_admin | audit_user | Drop View                | Audit Always | t
+ audit_admin | audit_user | Enable Trigger           | Audit Always | t
+ audit_admin | audit_user | Grant Function           | Audit Always | t
+ audit_admin | audit_user | Grant Sequence           | Audit Always | t
+ audit_admin | audit_user | Grant Table              | Audit Always | t
+ audit_admin | audit_user | Grant Type               | Audit Always | t
+ audit_admin | audit_user | Insert Table             | Audit Always | t
+ audit_admin | audit_user | Lock Table               | Audit Always | t
+ audit_admin | audit_user | Select Sequence          | Audit Always | t
+ audit_admin | audit_user | Select Table             | Audit Always | t
+ audit_admin | audit_user | Set Role                 | Audit Always | t
+ audit_admin | audit_user | System Audit             | Audit Always | t
+ audit_admin | audit_user | System Grant             | Audit Always | t
+ audit_admin | audit_user | Truncate Table           | Audit Always | t
+ audit_admin | audit_user | Update Table             | Audit Always | t
+(68 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+ auditor | action_name | action_mode | action_ison 
+---------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+   auditor   | action_name | action_mode  | action_ison 
+-------------+-------------+--------------+-------------
+ audit_admin | Alter       | Audit Always | t
+ audit_admin | Audit       | Audit Always | t
+ audit_admin | Comment     | Audit Always | t
+ audit_admin | Delete      | Audit Always | t
+ audit_admin | Grant       | Audit Always | t
+ audit_admin | Insert      | Audit Always | t
+ audit_admin | Lock        | Audit Always | t
+ audit_admin | Rename      | Audit Always | t
+ audit_admin | Select      | Audit Always | t
+ audit_admin | Update      | Audit Always | t
+(10 rows)
+
+clean user audit by audit_user;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+   auditor   | object_class |          object_desc           | action_name | action_mode  | action_ison 
+-------------+--------------+--------------------------------+-------------+--------------+-------------
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Update      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Update      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Alter       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Audit       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Comment     | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Delete      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Grant       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Insert      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Lock        | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Rename      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Select      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test                 | Update      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Alter       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Audit       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Comment     | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Delete      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Grant       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Insert      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Lock        | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Rename      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Select      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Update      | Audit Always | t
+(52 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+ auditor | user_name | action_name | action_mode | action_ison 
+---------+-----------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+ auditor | action_name | action_mode | action_ison 
+---------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+   auditor   | action_name | action_mode  | action_ison 
+-------------+-------------+--------------+-------------
+ audit_admin | Alter       | Audit Always | t
+ audit_admin | Audit       | Audit Always | t
+ audit_admin | Comment     | Audit Always | t
+ audit_admin | Delete      | Audit Always | t
+ audit_admin | Grant       | Audit Always | t
+ audit_admin | Insert      | Audit Always | t
+ audit_admin | Lock        | Audit Always | t
+ audit_admin | Rename      | Audit Always | t
+ audit_admin | Select      | Audit Always | t
+ audit_admin | Update      | Audit Always | t
+(10 rows)
+
+clean object audit on table tbl_test;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+   auditor   | object_class |          object_desc           | action_name | action_mode  | action_ison 
+-------------+--------------+--------------------------------+-------------+--------------+-------------
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Update      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Update      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Alter       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Audit       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Comment     | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Delete      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Grant       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Insert      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Lock        | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Rename      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Select      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test_v                | Update      | Audit Always | t
+(42 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+ auditor | user_name | action_name | action_mode | action_ison 
+---------+-----------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+ auditor | action_name | action_mode | action_ison 
+---------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+   auditor   | action_name | action_mode  | action_ison 
+-------------+-------------+--------------+-------------
+ audit_admin | Alter       | Audit Always | t
+ audit_admin | Audit       | Audit Always | t
+ audit_admin | Comment     | Audit Always | t
+ audit_admin | Delete      | Audit Always | t
+ audit_admin | Grant       | Audit Always | t
+ audit_admin | Insert      | Audit Always | t
+ audit_admin | Lock        | Audit Always | t
+ audit_admin | Rename      | Audit Always | t
+ audit_admin | Select      | Audit Always | t
+ audit_admin | Update      | Audit Always | t
+(10 rows)
+
+clean object audit on view tbl_test_v;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+   auditor   | object_class |          object_desc           | action_name | action_mode  | action_ison 
+-------------+--------------+--------------------------------+-------------+--------------+-------------
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Update      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test_mv  | Update      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Alter       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Audit       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Comment     | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Delete      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Grant       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Insert      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Lock        | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Rename      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Select      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Update      | Audit Always | t
+(33 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+ auditor | user_name | action_name | action_mode | action_ison 
+---------+-----------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+ auditor | action_name | action_mode | action_ison 
+---------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+   auditor   | action_name | action_mode  | action_ison 
+-------------+-------------+--------------+-------------
+ audit_admin | Alter       | Audit Always | t
+ audit_admin | Audit       | Audit Always | t
+ audit_admin | Comment     | Audit Always | t
+ audit_admin | Delete      | Audit Always | t
+ audit_admin | Grant       | Audit Always | t
+ audit_admin | Insert      | Audit Always | t
+ audit_admin | Lock        | Audit Always | t
+ audit_admin | Rename      | Audit Always | t
+ audit_admin | Select      | Audit Always | t
+ audit_admin | Update      | Audit Always | t
+(10 rows)
+
+clean object audit on materialized view tbl_test_mv;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+   auditor   | object_class |          object_desc           | action_name | action_mode  | action_ison 
+-------------+--------------+--------------------------------+-------------+--------------+-------------
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Alter       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Audit       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Comment     | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Grant       | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Rename      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Select      | Audit Always | t
+ audit_admin | pg_class     | materialized view tbl_test0_mv | Update      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Alter       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Audit       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Comment     | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Delete      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Grant       | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Insert      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Lock        | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Rename      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Select      | Audit Always | t
+ audit_admin | pg_class     | table tbl_test0                | Update      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Alter       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Audit       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Comment     | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Delete      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Grant       | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Insert      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Rename      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Select      | Audit Always | t
+ audit_admin | pg_class     | view tbl_test0_v               | Update      | Audit Always | t
+(26 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+ auditor | user_name | action_name | action_mode | action_ison 
+---------+-----------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+ auditor | action_name | action_mode | action_ison 
+---------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+   auditor   | action_name | action_mode  | action_ison 
+-------------+-------------+--------------+-------------
+ audit_admin | Alter       | Audit Always | t
+ audit_admin | Audit       | Audit Always | t
+ audit_admin | Comment     | Audit Always | t
+ audit_admin | Delete      | Audit Always | t
+ audit_admin | Grant       | Audit Always | t
+ audit_admin | Insert      | Audit Always | t
+ audit_admin | Lock        | Audit Always | t
+ audit_admin | Rename      | Audit Always | t
+ audit_admin | Select      | Audit Always | t
+ audit_admin | Update      | Audit Always | t
+(10 rows)
+
+clean object audit;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+ auditor | object_class | object_desc | action_name | action_mode | action_ison 
+---------+--------------+-------------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+ auditor | user_name | action_name | action_mode | action_ison 
+---------+-----------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+ auditor | action_name | action_mode | action_ison 
+---------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+   auditor   | action_name | action_mode  | action_ison 
+-------------+-------------+--------------+-------------
+ audit_admin | Alter       | Audit Always | t
+ audit_admin | Audit       | Audit Always | t
+ audit_admin | Comment     | Audit Always | t
+ audit_admin | Delete      | Audit Always | t
+ audit_admin | Grant       | Audit Always | t
+ audit_admin | Insert      | Audit Always | t
+ audit_admin | Lock        | Audit Always | t
+ audit_admin | Rename      | Audit Always | t
+ audit_admin | Select      | Audit Always | t
+ audit_admin | Update      | Audit Always | t
+(10 rows)
+
+clean object audit on default;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+ auditor | object_class | object_desc | action_name | action_mode | action_ison 
+---------+--------------+-------------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+ auditor | user_name | action_name | action_mode | action_ison 
+---------+-----------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+ auditor | action_name | action_mode | action_ison 
+---------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+ auditor | action_name | action_mode | action_ison 
+---------+-------------+-------------+-------------
+(0 rows)
+
+clean all audit;
+select * from pg_audit_obj_conf_detail order by auditor, object_class, object_desc, action_name, action_mode;
+ auditor | object_class | object_desc | action_name | action_mode | action_ison 
+---------+--------------+-------------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_user_conf_detail order by auditor, user_name, action_name, action_mode;
+ auditor | user_name | action_name | action_mode | action_ison 
+---------+-----------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_stmt_conf_detail order by auditor, action_name, action_mode;
+ auditor | action_name | action_mode | action_ison 
+---------+-------------+-------------+-------------
+(0 rows)
+
+select * from pg_audit_obj_def_opts_detail order by auditor, action_name;
+ auditor | action_name | action_mode | action_ison 
+---------+-------------+-------------+-------------
+(0 rows)
+
+\c audit_database audit_user
+drop table tbl_test cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view tbl_test_v
+drop cascades to materialized view tbl_test_mv
+drop table tbl_test0 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to view tbl_test0_v
+drop cascades to materialized view tbl_test0_mv
+\c regression audit_user
+drop database audit_database;
+reset client_min_messages;
+reset datestyle;
+reset client_encoding;

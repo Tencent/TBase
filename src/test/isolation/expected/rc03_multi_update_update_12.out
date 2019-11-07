@@ -1,0 +1,32 @@
+Parsed test spec with 3 sessions
+
+starting permutation: s1_begin s1_select s1_update s1_select s2_update s1_select s1_abort s1_select
+step s1_begin: begin;
+step s1_select: select i,j from tbl_xx order by i;
+i              j              
+
+1              3              
+3              1              
+5              2              
+step s1_update: update tbl_xx set j = 11 where i <= 3;
+step s1_select: select i,j from tbl_xx order by i;
+i              j              
+
+1              11             
+3              11             
+5              2              
+step s2_update: update tbl_xx set j = 22 where i >= 3; <waiting ...>
+step s1_select: select i,j from tbl_xx order by i;
+i              j              
+
+1              11             
+3              11             
+5              2              
+step s1_abort: abort;
+step s2_update: <... completed>
+step s1_select: select i,j from tbl_xx order by i;
+i              j              
+
+1              3              
+3              22             
+5              22             

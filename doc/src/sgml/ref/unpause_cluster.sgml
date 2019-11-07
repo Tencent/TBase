@@ -1,0 +1,49 @@
+
+<refentry id="SQL-UNPAUSECLUSTER">
+ <indexterm zone="sql-pausecluster">
+  <primary>UNPAUSE CLUSTER</primary>
+ </indexterm>
+
+ <refmeta>
+  <refentrytitle>UNPAUSE CLUSTER</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>UNPAUSE CLUSTER</refname>
+  <refpurpose>unpause the <productname>Postgres-XL</productname> cluster</refpurpose>
+ </refnamediv>
+
+ <refsynopsisdiv>
+<synopsis>
+UNPAUSE CLUSTER
+
+</synopsis>
+ </refsynopsisdiv>
+
+ <refsect1>
+  <title>Description</title>
+
+  <para>
+   <command>UNPAUSE CLUSTER </command> is a SQL command specific
+   to <productname>Postgres-XL</productname> that unpauses 
+   cluster operation.
+  </para>
+
+  <para>
+   If the DBA previously paused the cluster via the command <xref linkend="sql-pausecluster">, the DBA can resume operation vi <command>UNPAUSE CLUSTER</command>.
+  </para>
+ </refsect1>
+
+ <refsect1>
+  <title>Compatibility</title>
+  <para>
+   <command>UNPAUSE CLUSTER</command> does not conform to the <acronym>
+   SQL</acronym> standards, it is a Postgres-XL specific command.
+  </para>
+ </refsect1>
+
+</refentry>
+
+

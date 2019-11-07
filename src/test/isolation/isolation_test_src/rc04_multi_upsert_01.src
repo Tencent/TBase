@@ -1,0 +1,45 @@
+#there are three records initialized
+#diskey for node1/node2/node3 is 3/5/1 accordingly
+
+setup
+{
+    create table tbl_xx (i int primary key, j int) distribute by shard(i);
+}
+setup
+{
+    insert into tbl_xx values (3, 1), (5, 2), (1, 3);
+}
+
+teardown
+{
+    DROP TABLE tbl_xx;
+}
+
+session "s1"
+step "s1_begin"     { begin; }
+step "s1_update"    { update tbl_xx set j = 11 where i = diskey1; }
+step "s1_select"    { select i,j from tbl_xx order by i; }
+step "s1_delete"    { delete from tbl_xx ; }
+step "s1_commit"    { commit; }
+step "s1_abort"     { abort; }
+
+
+session "s2"
+step "s2_begin"     { begin; }
+step "s2_select"    { select i,j from tbl_xx order by i;}
+step "s2_update"    { update tbl_xx set j = 22 where i = diskey1; }
+step "s2_update2"    { update tbl_xx set j = j+2 ; }
+step "s2_upsert"    { insert into tbl_xx values(diskey1,11) on conflict(i) do update set j = 111 ; }
+step "s2_commit"    { commit; }
+
+session "s3"
+step "s3_begin"     { begin; }
+step "s3_select"    { select i,j from tbl_xx order by i; }
+step "s3_update"    { update tbl_xx set j = 33 where i = diskey3; }
+step "s3_commit"    { commit; }
+
+
+permutation "s1_begin" "s1_delete" "s2_upsert" "s1_select" "s1_commit" "s1_select"
+
+
+

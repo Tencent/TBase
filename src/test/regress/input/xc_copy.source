@@ -1,0 +1,26 @@
+--
+-- XC_COPY
+--
+
+-- Tests related to COPY for a Postgres-XL cluster
+-- Create a table not using the first node of cluster
+SELECT create_table_nodes('xc_copy_1(a int, b int)', '{2}'::int[], 'replication', NULL);
+INSERT INTO xc_copy_1 VALUES (1,23),(34,5),(9,11);
+-- Extract its data
+COPY xc_copy_1 TO STDOUT;
+DROP TABLE xc_copy_1;
+
+-- Quoted table
+-- check for correct remote query generation
+CREATE TABLE "Xc_copy_2" (a int, b int);
+COPY "Xc_copy_2" FROM STDIN DELIMITER ',';
+1,2
+3,4
+\.
+COPY "Xc_copy_2" TO STDOUT;
+DROP TABLE "Xc_copy_2";
+
+-- Table with no locator data
+CREATE TABLE xc_copy_3 (c1 int) DISTRIBUTE BY HASH(c1);
+COPY (SELECT pclocatortype,pcattnum,pchashalgorithm,pchashbuckets FROM pgxc_class WHERE pgxc_class.pcrelid = 'xc_copy_3'::regclass) TO stdout;
+DROP TABLE xc_copy_3;

@@ -1,0 +1,366 @@
+
+<refentry id="APP-GTM-PROXY">
+ <indexterm zone="app-gtm-proxy">
+  <primary>gtm_proxy</primary>
+ </indexterm>
+
+ <refmeta>
+  <refentrytitle>gtm_proxy</refentrytitle>
+  <manvolnum>1</manvolnum>
+  <refmiscinfo>Application</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>gtm_proxy</refname>
+  <refpurpose>
+   Proxy to <command>gtm</command>, <productname>Postgres-XL</productname> Global Transaction Manager
+  </refpurpose>
+ </refnamediv>
+
+ <refsynopsisdiv>
+  <cmdsynopsis>
+   <command>gtm_proxy</command>
+   <arg rep="repeat"><replaceable>option</></arg>
+  </cmdsynopsis>
+ </refsynopsisdiv>
+
+ <refsect1 id="R1-APP-GTM-PROXY-1">
+  <title>
+   Description
+  </title>
+  <para>
+   The Gtm proxy provides proxy feature from Postgres-XL Coordinator and
+   Datanode to gtm. Gtm proxy groups connections and interactions
+   between gtm and other Postgres-XL components to reduce both the
+   number of interactions and the size of messages. Performance tests
+   have shown greater performance with high concurrency workloads as a result.
+  </para>
+
+  <para>
+   It is highly advised to start and stop gtm_proxy with gtm_ctl(8).
+  </para>
+
+  <para>
+   You must provide a gtm configuration
+   file <filename>gtm_proxy.conf</filename> placed at the gtm working directory
+   as specified by <literal>-D</literal> command line option.  The
+   configuration file specifies gtm running environment and resources.
+  </para>
+
+  <para>
+   Some of the parameters specified in the control file can be overridden by 
+   command line options.
+  </para>
+
+ </refsect1>
+
+<refsect1>
+  <title>Configuration File</title>
+
+  <para>
+   <literal>GTM-Proxy</literal> configuration parameters are specified in the configuration file
+   <filename>gtm_proxy.conf</filename><indexterm><primary>gtm_proxy.conf</></> placed in the working directory
+   specified as <literal>-D</literal> option
+   of <application>gtm_proxy</application> command line option as described
+   in the next section.
+  </para>
+
+  <para>
+   The format of the configuration file is the same as <filename>postgresql.conf</filename>.
+   Options are as follows.
+  </para>
+
+<!-- Add description of each gtm.conf entry -->
+<!-- Notice                                                                                                           
+   The following options are found in the source code (gtm_opt.c) but is only for                                     
+   internal use and will not be presented in the following list.                                                      
+                                                                                                                      
+    1. data_dir
+    2. config_file
+
+   Also the following options are for high-availability hook.  This will be
+   documented later.
+   1. error_reporter
+   2. status_reader
+-->
+  <variablelist>
+
+   <varlistentry id="gtm-proxy-opt-gtm-connect-retry-interval" xreflabel="gtm_proxy_opt_gtm_connect_retry_interval">
+    <term><varname>gtm_connect_retry_interval</varname> (<type>integer</type>)
+     <indexterm>
+      <primary><varname>gtm_connect_retry_interval</varname> configuration parameter</primary>
+     </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Specifies how long in seconds GTM-Proxy waits between each retry to connect to GTM when
+      communication error with GTM is detected.
+      Default value is 60.
+      Refer to <varname>gtm_connect_retry_count</varname> and <varname>gtm_connect_retry_idle</varname>.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="gtm-proxy-opt-gtm-host" xreflabel="gtm_proxy_opt_gtm_host">
+    <term><varname>gtm_host</varname> (<type>string</type>)
+     <indexterm>
+      <primary><varname>gtm_host</varname> configuration parameter</primary>
+     </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Specifies listen addresses (host name or IP address) of <application>gtm</application>.
+      There is no default value for this parameter.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="gtm-proxy-opt-gtm-port" xreflabel="gtm_proxy_opt_gtm_port">
+    <term><varname>gtm_port</varname> (<type>integer</type>)
+     <indexterm>
+      <primary><varname>gtm_port</varname> configuration parameter</primary>
+     </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Specifies the port number of <application>gtm</application>.
+      There is no default value for this parameter.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="gtm-proxy-opt-keepalives-count" xreflabel="gtm_proxy_opt_keepalives_count">
+    <term><varname>keepalives_count</varname> (<type>integer</type>)
+     <indexterm>
+      <primary><varname>keepalives_count</varname> (<type>integer</type>)</primary>
+     </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Specifies <literal>keepalives_count</literal> option for the
+      connection to <application>gtm</application>.
+      Default value is zero and keepalives feature is disabled.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="gtm-proxy-opt-keepalives-idle" xreflabel="gtm_proxy_opt_keepalives_idle">
+    <term><varname>keepalives_idle</varname> (<type>integer</type>)
+     <indexterm>
+      <primary><varname>keepalives_idle</varname> (<type>integer</type>)</primary>
+     </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Specifies <literal>keepalives_idle</literal> option for the
+      connection to <application>gtm</application>.
+      Default value is zero and keepalives feature is disabled.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="gtm-proxy-opt-keepalives-interval" xreflabel="gtm_proxy_opt_keepalives_interval">
+    <term><varname>keepalives_interval</varname> (<type>integer</type>)
+     <indexterm>
+      <primary><varname>keepalives_interval</varname> (<type>integer</type>)</primary>
+     </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Specifies <literal>keepalives_interval</literal> option for the
+      connection to <application>gtm</application>.
+      Default value is zero and keepalives feature is disabled.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="gtm-proxy-opt-log-file" xreflabel="gtm_proxy_opt_log_file">
+    <term><varname>log_file</varname> (<type>string</type>)
+     <indexterm>
+      <primary><varname>log_file</varname> configuration parameter</primary>
+     </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Specifies <filename>log</filename> file name.  This file will be
+      created in the working directory of
+      this <application>gtm_proxy</application> as specified
+      by <literal>-D</literal> command line option.
+      The default is <filename>gtm_proxy.log</filename>.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="gtm-proxy-opt-log-min-messages" xreflabel="gtm_proxy_opt_log_min_messages">
+    <term><varname>log_min_messages</varname> (<type>enum</type>)
+     <indexterm>
+      <primary><varname>log_min_messages</varname> configuration parameter</primary>
+     </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Controls which message levels are written to the log.
+      Valid values are <literal>DEBUG</literal>, <literal>DEBUG5</literal>,
+      <literal>DEBUG4</literal>, <literal>DEBUG3</literal>, <literal>DEBUG2</literal>,
+      <literal>DEBUG1</literal>, <literal>INFO</literal>, <literal>NOTICE</literal>,
+      <literal>WARNING</literal>, <literal>ERROR</literal>, <literal>LOG</literal>,
+      <literal>FATAL</literal> and <literal>PANIC</literal>.
+      Each level includes all the levels that follow it.
+      The later the level, the fewer messages are sent.
+      The default is <literal>WARNING</literal>.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="gtm-proxy-opt-listen-addresses" xreflabel="gtm_proxy_opt_listen_addresses">
+    <term><varname>listen_addresses</varname> (<type>string</type>)
+     <indexterm>
+      <primary><varname>listen_addresses</varname> configuration parameter</primary>
+     </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Specifies listen addresses (host name or IP address) of
+      this <application>gtm_proxy</application>.
+      Default value is '*'.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="gtm-proxy-opt-nodename" xreflabel="gtm_proxy_opt_nodename">
+    <term><varname>nodename</varname> (<type>string</type>)
+     <indexterm>
+      <primary><varname>nodename</varname> configuration parameter</primary>
+     </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Specifies the name of this <application>gtm_proxy</application>.
+      There is no default value for this parameter.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="gtm-proxy-opt-port" xreflabel="gtm_proxy_opt_port">
+    <term><varname>port</varname> (<type>integer</type>)
+     <indexterm>
+      <primary><varname>port</varname> configuration parameter</primary>
+     </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Specifies the port number of this <application>gtm_proxy</application>.
+      The default port value is 6666.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry id="gtm-proxy-opt-worker-threads" xreflabel="gtm_proxy_opt_worker_threads">
+    <term><varname>worker_threads</varname> (<type>integer</type>)
+     <indexterm>
+      <primary><varname>worker_threads</varname> configuration parameter</primary>
+     </indexterm>
+    </term>
+    <listitem>
+     <para>
+      Specifies the number of worker threads for this <literal>gtm_proxy</literal>.
+      The default value is 1.
+     </para>
+    </listitem>
+   </varlistentry>
+
+  </variablelist>
+
+ </refsect1>
+
+ <refsect1>
+  <title>Options</title>
+
+  <para>
+   Options are specified with preceding '<literal>-</literal>', each
+   option may be associated with a value. They can be specified
+   in <literal>-o</literal> option of gtm_ctl(8).
+  </para>
+
+  <para>
+   Options are as follows:
+  </para>
+
+  <para>
+   <variablelist>
+    <varlistentry>
+     <term><option>D</option></term>
+     <listitem>
+      <para>
+       Specify a directory which holds data for <command>gtm_proxy</command>
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry>
+     <term><option>l</option></term>
+     <listitem>
+      <para>
+       Specify a log file for <command>gtm_ctl</command>.
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry>
+     <term><option>h</option></term>
+     <listitem>
+      <para>
+       Specify host name or IP address used by the <command>gtm_proxy</command>.
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry>
+     <term><option>p</option></term>
+     <listitem>
+      <para>
+       Specify port number to listen on.
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry>
+     <term><option>i</option></term>
+     <listitem>
+      <para>
+       Specify gtm_proxy id, which is registered to gtm.
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry>
+     <term><option>n</option></term>
+     <listitem>
+      <para>
+       Specify number of worker threads of gtm_proxy.
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry>
+     <term><option>s</option></term>
+     <listitem>
+      <para>
+       Specify host name or IP address of target gtm.
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry>
+     <term><option>t</option></term>
+     <listitem>
+      <para>
+       Specify port number of target gtm.
+      </para>
+     </listitem>
+    </varlistentry>
+
+   </variablelist>
+  </para>
+ </refsect1>
+</refentry>

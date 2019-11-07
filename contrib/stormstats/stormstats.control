@@ -1,0 +1,5 @@
+# stormstats extension
+comment = 'collect deeper database stats for StormDB'
+default_version = '1.0'
+module_pathname = '$libdir/stormstats'
+relocatable = true

@@ -1,0 +1,774 @@
+--
+-- XC_FOR_UPDATE
+--
+set enable_fast_query_shipping=true;
+-- create some tables
+create table t1(val int, val2 int);
+create table t2(val int, val2 int);
+create table t3(val int, val2 int);
+create table p1(a int, b int);
+create table c1(d int, e int) inherits (p1);
+-- insert some rows in them
+insert into t1 values(1,11),(2,11);
+insert into t2 values(3,11),(4,11);
+insert into t3 values(5,11),(6,11);
+insert into p1 values(55,66),(77,88);
+insert into c1 values(111,222,333,444),(123,345,567,789);
+select * from t1 order by val;
+ val | val2 
+-----+------
+   1 |   11
+   2 |   11
+(2 rows)
+
+select * from t2 order by val;
+ val | val2 
+-----+------
+   3 |   11
+   4 |   11
+(2 rows)
+
+select * from t3 order by val;
+ val | val2 
+-----+------
+   5 |   11
+   6 |   11
+(2 rows)
+
+select * from p1 order by a;
+  a  |  b  
+-----+-----
+  55 |  66
+  77 |  88
+ 111 | 222
+ 123 | 345
+(4 rows)
+
+select * from c1 order by a;
+  a  |  b  |  d  |  e  
+-----+-----+-----+-----
+ 111 | 222 | 333 | 444
+ 123 | 345 | 567 | 789
+(2 rows)
+
+-- create a view too
+create view v1 as select * from t1 for update;
+-- test a few queries with row marks
+select * from t1 order by 1 for update of t1 nowait;
+ val | val2 
+-----+------
+   1 |   11
+   2 |   11
+(2 rows)
+
+select * from t1, t2, t3 order by 1 for update;
+ERROR:  could not read block 0 in file "base/16387/28180": read only 0 of 8192 bytes
+-- drop objects created
+drop table c1;
+drop table p1;
+drop view v1;
+drop table t1;
+drop table t2;
+drop table t3;
+---------------------------------------------------
+-- updatable_views
+-- WITH CHECK OPTION with subquery
+CREATE TABLE base_tbl (a int) DISTRIBUTE BY REPLICATION;
+CREATE TABLE ref_tbl (a int PRIMARY KEY) DISTRIBUTE BY REPLICATION;
+INSERT INTO ref_tbl SELECT * FROM generate_series(1,10);
+CREATE VIEW rw_view1 AS
+  SELECT * FROM base_tbl b
+  WHERE EXISTS(SELECT 1 FROM ref_tbl r WHERE r.a = b.a)
+  WITH CHECK OPTION;
+INSERT INTO rw_view1 VALUES (5); -- ok
+ERROR:  Failed to close remote subplan
+drop view rw_view1;
+drop table ref_tbl;
+drop table base_tbl;
+--------------------------------------------------
+-- from xc_remote test
+-- Test for remote DML on different tables
+CREATE TABLE rel_rep (a int, b int) DISTRIBUTE BY REPLICATION;
+CREATE TABLE rel_hash (a int, b int) DISTRIBUTE BY HASH (a);
+CREATE TABLE rel_rr (a int, b int) DISTRIBUTE BY ROUNDROBIN;
+CREATE SEQUENCE seqtest START 10;
+CREATE SEQUENCE seqtest2 START 100;
+-- INSERT cases
+INSERT INTO rel_rep VALUES (1,1);
+INSERT INTO rel_hash VALUES (1,1);
+INSERT INTO rel_rr VALUES (1,1);
+-- Multiple entries with non-shippable expressions
+INSERT INTO rel_rep VALUES (nextval('seqtest'), nextval('seqtest')), (1, nextval('seqtest'));
+INSERT INTO rel_rep VALUES (nextval('seqtest'), 1), (nextval('seqtest'), nextval('seqtest2'));
+INSERT INTO rel_hash VALUES (nextval('seqtest'), nextval('seqtest')), (1, nextval('seqtest'));
+INSERT INTO rel_hash VALUES (nextval('seqtest'), 1), (nextval('seqtest'), nextval('seqtest2'));
+INSERT INTO rel_rr VALUES (nextval('seqtest'), nextval('seqtest')), (1, nextval('seqtest'));
+INSERT INTO rel_rr VALUES (nextval('seqtest'), 1), (nextval('seqtest'), nextval('seqtest2'));
+-- Global check
+SELECT a, b FROM rel_rep ORDER BY 1,2;
+ a  |  b  
+----+-----
+  1 |   1
+  1 |  12
+ 10 |  11
+ 13 |   1
+ 14 | 100
+(5 rows)
+
+SELECT a, b FROM rel_hash ORDER BY 1,2;
+ a  |  b  
+----+-----
+  1 |   1
+  1 |  17
+ 15 |  16
+ 18 |   1
+ 19 | 101
+(5 rows)
+
+SELECT a, b FROM rel_rr ORDER BY 1,2;
+ a  |  b  
+----+-----
+  1 |   1
+  1 |  22
+ 20 |  21
+ 23 |   1
+ 24 | 102
+(5 rows)
+
+-- Some SELECT queries with some quals
+-- Coordinator quals first
+SELECT a, b FROM rel_rep WHERE a <= currval('seqtest') - 15 ORDER BY 1,2;
+ERROR:  currval of sequence "seqtest" is not yet defined in this session
+DROP TABLE rel_rep;
+DROP TABLE rel_hash;
+DROP TABLE rel_rr ;
+DROP SEQUENCE seqtest;
+DROP SEQUENCE seqtest2;
+--------------------------------
+-- from plpgsql test
+create temp table foo (f1 int);
+create function subxact_rollback_semantics() returns int as $$
+declare x int;
+begin
+  x := 1;
+  insert into foo values(x);
+  begin
+    x := x + 1;
+    insert into foo values(x);
+    raise exception 'inner';
+  exception
+    when others then
+      x := x * 10;
+  end;
+  insert into foo values(x);
+  return x;
+end$$ language plpgsql;
+ERROR:  function "subxact_rollback_semantics" already exists with same argument types
+select subxact_rollback_semantics();
+ERROR:  could not determine data type of parameter $1
+CONTEXT:  SQL statement "insert into foo values(x)"
+PL/pgSQL function subxact_rollback_semantics() line 5 at SQL statement
+drop function subxact_rollback_semantics();
+------------------------------------------
+-- from xc_misc
+-- Test an SQL function with multiple statements in it including a utility statement.
+create table my_tab1 (a int);
+insert into my_tab1 values(1);
+create function f1 () returns setof my_tab1 as $$ create table my_tab2 (a int); select * from my_tab1; $$ language sql;
+SET check_function_bodies = false;
+create function f1 () returns setof my_tab1 as $$ create table my_tab2 (a int); select * from my_tab1; $$ language sql;
+ERROR:  function "f1" already exists with same argument types
+select f1();
+ERROR:  Unexpected response from Datanode
+CONTEXT:  SQL function "f1" statement 1
+SET check_function_bodies = true;
+drop function f1();
+ERROR:  cannot execute DROP FUNCTION in a locked cluster
+drop table my_tab1;
+ERROR:  cannot drop table my_tab1 because other objects depend on it
+DETAIL:  function f1() depends on type my_tab1
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+--------------------------------------------------
+-- 
+-- versions
+--
+-- Bugs related to pushing down volatile functions to datanodes - copied from
+-- misc.sql
+--
+-- postquel functions
+--
+--
+-- mike does post_hacking,
+-- joe and sally play basketball, and
+-- everyone else does nothing.
+--
+SELECT p.name, name(p.hobbies) FROM ONLY person p ORDER BY 1,2;
+ name |    name     
+------+-------------
+ mike | posthacking
+(1 row)
+
+--
+-- as above, but jeff also does post_hacking.
+--
+SELECT p.name, name(p.hobbies) FROM person* p ORDER BY 1,2;
+ name |    name     
+------+-------------
+ mike | posthacking
+(1 row)
+
+--
+-- the next two queries demonstrate how functions generate bogus duplicates.
+-- this is a "feature" ..
+--
+SELECT DISTINCT hobbies_r.name, name(hobbies_r.equipment) FROM hobbies_r
+  ORDER BY 1,2;
+ name | name 
+------+------
+(0 rows)
+
+SELECT hobbies_r.name, (hobbies_r.equipment).name FROM hobbies_r ORDER BY 1,2;
+ name | name 
+------+------
+(0 rows)
+
+--
+-- mike needs advil and peet's coffee,
+-- joe and sally need hightops, and
+-- everyone else is fine.
+--
+SELECT p.name, name(p.hobbies), name(equipment(p.hobbies)) FROM ONLY person p ORDER BY 1,2,3;
+ name | name | name 
+------+------+------
+(0 rows)
+
+--
+-- as above, but jeff needs advil and peet's coffee as well.
+--
+SELECT p.name, name(p.hobbies), name(equipment(p.hobbies)) FROM person* p ORDER BY 1,2,3;
+ name | name | name 
+------+------+------
+(0 rows)
+
+--
+-- just like the last two, but make sure that the target list fixup and
+-- unflattening is being done correctly.
+--
+SELECT name(equipment(p.hobbies)), p.name, name(p.hobbies) FROM ONLY person p ORDER BY 1,2,3;
+ name | name | name 
+------+------+------
+(0 rows)
+
+SELECT (p.hobbies).equipment.name, p.name, name(p.hobbies) FROM person* p ORDER BY 1,2,3;
+ name | name | name 
+------+------+------
+(0 rows)
+
+SELECT (p.hobbies).equipment.name, name(p.hobbies), p.name FROM ONLY person p ORDER BY 1,2,3;
+ name | name | name 
+------+------+------
+(0 rows)
+
+SELECT name(equipment(p.hobbies)), name(p.hobbies), p.name FROM person* p ORDER BY 1,2,3;
+ name | name | name 
+------+------+------
+(0 rows)
+
+SELECT user_relns() AS user_relns
+   ORDER BY user_relns;
+         user_relns          
+-----------------------------
+ a
+ a_star
+ abstime_tbl
+ aggtest
+ aggtype
+ array_index_op_test
+ array_op_test
+ arrtest
+ atim_tab
+ b
+ b_star
+ bb
+ bo_tab
+ box_tbl
+ bprime
+ brinopers
+ brintest
+ bt_f8_heap
+ bt_i4_heap
+ bt_name_heap
+ bt_txt_heap
+ btree_tall_tbl
+ c
+ c_star
+ cantcompare
+ char_tbl
+ check2_tbl
+ check_con_tbl
+ check_seq
+ check_tbl
+ circle_tbl
+ city
+ clstr_tst_s
+ clstr_tst_s_rf_a_seq
+ comment_test
+ complex
+ copy_tbl
+ credit_card
+ credit_usage
+ customer
+ d
+ d_star
+ date_tab
+ date_tbl
+ default_seq
+ default_tbl
+ defaultexpr_tbl
+ dept
+ depth0
+ depth1
+ depth2
+ domain_test
+ domcontest
+ domnotnull
+ domtab
+ domview
+ dropcolumn
+ dropcolumnanother
+ dropcolumnchild
+ dropcolumnexists
+ dropped_objects
+ dupindexcols
+ e_star
+ ec0
+ ec1
+ ec2
+ emp
+ equipment_r
+ event_trigger_test
+ f_star
+ fast_emp4000
+ float4_tbl
+ float8_tbl
+ foo
+ foo_f1_seq
+ foo_rescan_t
+ foobar
+ found_test_tbl
+ func_index_heap
+ gin_test_tbl
+ gist_point_tbl
+ hash_f8_heap
+ hash_i4_heap
+ hash_name_heap
+ hash_txt_heap
+ hobbies_r
+ hslot
+ hub
+ i2_tab
+ i4_tab
+ iexit
+ iface
+ ihighway
+ inet_tbl
+ inhf
+ inhx
+ insert_seq
+ insert_tbl
+ int2_tbl
+ int4_tbl
+ int8_tbl
+ interval_tbl
+ iportaltest
+ jbpop
+ jpop
+ jpop2
+ kd_point_tbl
+ line_tbl
+ log_table
+ lseg_tbl
+ main_table
+ money_data
+ my_credit_card_normal
+ my_credit_card_secure
+ my_credit_card_usage_normal
+ my_credit_card_usage_secure
+ my_property_normal
+ my_property_secure
+ my_rr_tab
+ no_oids
+ num_data
+ num_exp_add
+ num_exp_div
+ num_exp_ln
+ num_exp_log10
+ num_exp_mul
+ num_exp_power_10_ln
+ num_exp_sqrt
+ num_exp_sub
+ num_input_test
+ num_result
+ nums
+ nv_child_2009
+ nv_child_2010
+ nv_child_2011
+ nv_parent
+ onek
+ onek2
+ path_tbl
+ person
+ pfield
+ pfield_v1
+ phone
+ pline
+ point_tbl
+ polygon_tbl
+ pslot
+ quad
+ quad_point_tbl
+ query
+ radix_text_tbl
+ ramp
+ random_tbl
+ rc_test
+ real_city
+ record_type
+ reltime_tbl
+ renamecolumn
+ renamecolumnanother
+ renamecolumnchild
+ rewritemetoo1
+ rewritemetoo2
+ rewritemetoo3
+ rewritetype
+ rls_tbl
+ rls_tbl_force
+ road
+ room
+ rtest_admin
+ rtest_comp
+ rtest_emp
+ rtest_emplog
+ rtest_empmass
+ rtest_interface
+ rtest_nothn1
+ rtest_nothn2
+ rtest_nothn3
+ rtest_nothn4
+ rtest_order1
+ rtest_order2
+ rtest_person
+ rtest_seq
+ rtest_system
+ rtest_t1
+ rtest_t2
+ rtest_t3
+ rtest_t4
+ rtest_t5
+ rtest_t6
+ rtest_t7
+ rtest_t8
+ rtest_t9
+ rtest_unitfact
+ rtest_v1
+ rtest_vcomp
+ rtest_view1
+ rtest_view2
+ rtest_view3
+ rtest_view4
+ rtest_vview1
+ rtest_vview2
+ rtest_vview3
+ rtest_vview4
+ rtest_vview5
+ rtim_tab
+ rule_and_refint_t1
+ rule_and_refint_t2
+ rule_and_refint_t3
+ rules_log
+ rules_src
+ ruletest_tbl
+ ruletest_tbl2
+ sequence_test2
+ shighway
+ shoe
+ shoe_data
+ shoe_ready
+ shoelace
+ shoelace_arrive
+ shoelace_candelete
+ shoelace_data
+ shoelace_log
+ shoelace_obsolete
+ shoelace_ok
+ slow_emp4000
+ spgist_point_tbl
+ spgist_text_tbl
+ street
+ stud_emp
+ student
+ subselect_tbl
+ sums_1_100
+ system
+ t
+ tab1
+ tab2
+ tab3_mod
+ tenk1
+ tenk2
+ test1
+ test2
+ test3
+ test_inh_check
+ test_inh_check_child
+ test_range_excl
+ test_range_gist
+ test_range_spgist
+ test_storage
+ test_tablesample
+ test_tablesample_v1
+ test_tablesample_v2
+ test_tbl1
+ test_tbl2
+ test_tbl3
+ test_tsquery
+ test_tsvector
+ test_type1
+ test_type2
+ test_type3
+ testjsonb
+ text_tbl
+ thethings
+ time_tbl
+ timestamp_tbl
+ timestamptz_tbl
+ timetz_tbl
+ tinterval_tbl
+ tm
+ tmm
+ toyemp
+ tstz_tab_h
+ tt
+ tt0
+ tt1
+ tt2
+ tt3
+ tt4
+ tt5
+ tt6
+ tt7
+ tt_f1_seq
+ tt_t0
+ tt_t1
+ tv
+ tvm
+ tvmm
+ tvv
+ tvvm
+ tvvmv
+ undroppable_objs
+ unit
+ varchar_tbl
+ wslot
+ xacttest
+ xl_cons_hash2
+ xl_cons_modulo2
+ xmltest
+ xmlview1
+ xmlview5
+(299 rows)
+
+SELECT name(equipment(hobby_construct(text 'skywalking', text 'mer')));
+ name 
+------
+ guts
+(1 row)
+
+SELECT name(equipment(hobby_construct_named(text 'skywalking', text 'mer')));
+ name 
+------
+ guts
+(1 row)
+
+SELECT name(equipment_named(hobby_construct_named(text 'skywalking', text 'mer')));
+ name 
+------
+ guts
+(1 row)
+
+SELECT name(equipment_named_ambiguous_1a(hobby_construct_named(text 'skywalking', text 'mer')));
+ name 
+------
+ guts
+(1 row)
+
+SELECT name(equipment_named_ambiguous_1b(hobby_construct_named(text 'skywalking', text 'mer')));
+ name 
+------
+ guts
+(1 row)
+
+SELECT name(equipment_named_ambiguous_1c(hobby_construct_named(text 'skywalking', text 'mer')));
+ name 
+------
+ guts
+(1 row)
+
+SELECT name(equipment_named_ambiguous_2a(text 'skywalking'));
+ name 
+------
+ guts
+(1 row)
+
+SELECT name(equipment_named_ambiguous_2b(text 'skywalking')) ORDER BY 1;
+     name      
+---------------
+ advil
+ guts
+ hightops
+ peet's coffee
+(4 rows)
+
+SELECT hobbies_by_name('basketball');
+ hobbies_by_name 
+-----------------
+ joe
+(1 row)
+
+SELECT name, overpaid(emp.*) FROM emp ORDER BY 1,2;
+  name  | overpaid 
+--------+----------
+ bill   | t
+ cim    | f
+ jeff   | f
+ linda  | f
+ sam    | t
+ sharon | t
+(6 rows)
+
+--
+-- Try a few cases with SQL-spec row constructor expressions
+--
+SELECT * FROM equipment(ROW('skywalking', 'mer'));
+ name |   hobby    
+------+------------
+ guts | skywalking
+(1 row)
+
+SELECT name(equipment(ROW('skywalking', 'mer')));
+ name 
+------
+ guts
+(1 row)
+
+SELECT *, name(equipment(h.*)) FROM hobbies_r h ORDER BY 1,2,3;
+ name | person | name 
+------+--------+------
+(0 rows)
+
+SELECT *, (equipment(CAST((h.*) AS hobbies_r))).name FROM hobbies_r h ORDER BY 1,2,3;
+ name | person | name 
+------+--------+------
+(0 rows)
+
+------------------------------------------
+-- from tablesample
+select pct, count(unique1) from
+  (values (0),(100)) v(pct),
+  lateral (select * from tenk1 tablesample bernoulli (pct)) ss
+  group by pct;
+ pct | count 
+-----+-------
+ 100 | 10000
+(1 row)
+
+select pct, count(unique1) from
+  (values (0),(100)) v(pct),
+  lateral (select * from tenk1 tablesample system (pct)) ss
+  group by pct;
+ pct | count 
+-----+-------
+ 100 | 10000
+(1 row)
+
+------------------------------------------
+-- Issue #34 - Insensitive cursors
+-- insensitive cursor would be insensitive to updates happening to the table
+-- right now it is sensitive which is a bug (34) in Postgres-XL issue tracker sheet.
+create table xl_PLine (
+    slotname	char(20),
+    phonenumber	char(20),
+    comment	text,
+    backlink	char(20)
+);
+create unique index xl_PLine_n on xl_PLine using btree (slotname bpchar_ops);
+insert into  xl_PLine values ('PL.029', '-502', 'Fax first floor', 'PS.first.ta1');
+insert into  xl_PLine values ('PL.030', '-367', '', 'PS.first.tb6');
+BEGIN;
+declare xl_ins_cur INSENSITIVE CURSOR for select * from xl_Pline order by slotname desc;
+FETCH FIRST xl_ins_cur;
+       slotname       |     phonenumber      | comment |       backlink       
+----------------------+----------------------+---------+----------------------
+ PL.030               | -367                 |         | PS.first.tb6        
+(1 row)
+
+delete from xl_Pline where slotname in ('PL.030');
+FETCH FIRST xl_ins_cur;
+       slotname       |     phonenumber      |     comment     |       backlink       
+----------------------+----------------------+-----------------+----------------------
+ PL.030               | -367                 |         | PS.first.tb6        
+(1 row)
+
+delete from xl_Pline where slotname in ('PL.029');
+FETCH FIRST xl_ins_cur;
+ slotname | phonenumber | comment | backlink 
+----------+-------------+---------+----------
+ PL.030               | -367                 |         | PS.first.tb6        
+(1 row)
+
+COMMIT;
+drop table xl_PLine;
+------------------------------------------
+-- Issue #38 - complex update
+-- In complex update using FROM list with explicit join, equation clause ‘=’ for integer is not supported
+-- distributed by default by HASH(tmpunique1)
+CREATE TABLE xl_tmp (
+tmpunique1 int4,
+stringu1 name,
+stringu2 name,
+string4 name
+);
+-- distributed by default by HASH(unique1)
+CREATE TABLE xl_onek (
+unique1 int4,
+unique2 int4,
+two int4,
+four int4,
+stringu1 name,
+stringu2 name,
+string4 name
+);
+UPDATE xl_tmp
+   SET stringu1 = xl_onek.stringu1
+   FROM xl_onek
+   WHERE xl_onek.unique1 <= 3 and
+	  xl_onek.unique1 = xl_tmp.tmpunique1;
+UPDATE xl_tmp
+   SET stringu1 = xl_onek.stringu1
+   FROM xl_onek
+   WHERE xl_onek.unique1 = 3 and
+	  xl_onek.unique1 = xl_tmp.tmpunique1;
+UPDATE xl_tmp
+   SET stringu1 = xl_onek.stringu1
+   FROM xl_onek
+   WHERE xl_tmp.tmpunique1 <= 3 and
+	  xl_onek.unique1 = xl_tmp.tmpunique1;
+UPDATE xl_tmp
+   SET stringu1 = xl_onek.stringu1
+   FROM xl_onek
+   WHERE xl_tmp.tmpunique1 = 3 and
+	  xl_onek.unique1 = xl_tmp.tmpunique1;
+drop table xl_tmp;
+drop table xl_onek;
+------------------------------------------

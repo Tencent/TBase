@@ -1,0 +1,20 @@
+Parsed test spec with 3 sessions
+
+starting permutation: s1_begin s1_select s1_delete s2_upsert s1_abort s1_select
+step s1_begin: begin;
+step s1_select: select i,j from tbl_xx order by i;
+i              j              
+
+1              3              
+3              1              
+5              2              
+step s1_delete: delete from tbl_xx where i <= 3;
+step s2_upsert: insert into tbl_xx values(3,11) on conflict(i) do update set j = 111 ; <waiting ...>
+step s1_abort: abort;
+step s2_upsert: <... completed>
+step s1_select: select i,j from tbl_xx order by i;
+i              j              
+
+1              3              
+3              111            
+5              2              

@@ -1,0 +1,30 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_begin s1_select s2_select s1_update s1_select s2_select s1_commit s1_select s2_select
+step s1_begin: begin;
+step s1_select: select i,j from tbl_xx where i = 3;
+i              j              
+
+3              1              
+step s2_select: select i,j from tbl_xx where i = 3;
+i              j              
+
+3              1              
+step s1_update: update tbl_xx set j = 11 where i = 3;
+step s1_select: select i,j from tbl_xx where i = 3;
+i              j              
+
+3              11             
+step s2_select: select i,j from tbl_xx where i = 3;
+i              j              
+
+3              1              
+step s1_commit: commit;
+step s1_select: select i,j from tbl_xx where i = 3;
+i              j              
+
+3              11             
+step s2_select: select i,j from tbl_xx where i = 3;
+i              j              
+
+3              11             

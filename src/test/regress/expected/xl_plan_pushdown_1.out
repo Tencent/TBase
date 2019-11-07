@@ -1,0 +1,243 @@
+--ensure that the plans are being pushed to the right subset of nodes
+--Sometimes plans get pushed down to more nodes than they really need to.
+CREATE TABLE xl_pp (a bigint, b int) DISTRIBUTE BY HASH(a);
+INSERT INTO xl_pp SELECT generate_series(1,100), 20;
+EXPLAIN VERBOSE SELECT * FROM xl_pp WHERE a = 100;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_pp.a, xl_pp.b
+   Node/s: datanode_2
+   Remote query: SELECT a, b FROM xl_pp WHERE (a = 100)
+   ->  Seq Scan on public.xl_pp  (cost=0.00..25.88 rows=6 width=12)
+         Output: a, b
+         Filter: (xl_pp.a = 100)
+(7 rows)
+
+EXPLAIN VERBOSE SELECT * FROM xl_pp WHERE a = 100::bigint;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_pp.a, xl_pp.b
+   Node/s: datanode_2
+   Remote query: SELECT a, b FROM xl_pp WHERE (a = (100)::bigint)
+   ->  Seq Scan on public.xl_pp  (cost=0.00..25.88 rows=6 width=12)
+         Output: a, b
+         Filter: (xl_pp.a = '100'::bigint)
+(7 rows)
+
+EXPLAIN VERBOSE INSERT INTO xl_pp (a, b) VALUES (200, 1) ;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: 200, 1
+   Node expr: 200
+   Remote query: INSERT INTO xl_pp (a, b) VALUES (200, 1)
+   ->  Insert on public.xl_pp  (cost=0.00..0.01 rows=1 width=12)
+         ->  Result  (cost=0.00..0.01 rows=1 width=12)
+               Output: '200'::bigint, 1
+(7 rows)
+
+EXPLAIN VERBOSE INSERT INTO xl_pp (a, b) VALUES (201::bigint, 1) ;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: (201)::bigint, 1
+   Node expr: (201)::bigint
+   Remote query: INSERT INTO xl_pp (a, b) VALUES ((201)::bigint, 1)
+   ->  Insert on public.xl_pp  (cost=0.00..0.01 rows=1 width=12)
+         ->  Result  (cost=0.00..0.01 rows=1 width=12)
+               Output: '201'::bigint, 1
+(7 rows)
+
+EXPLAIN VERBOSE UPDATE xl_pp SET b=2 where a=200;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_pp.a, 2, xl_pp.xc_node_id, xl_pp.ctid, xl_pp.shardid
+   Node/s: datanode_1
+   Remote query: UPDATE xl_pp SET b = 2 WHERE (a = 200)
+   ->  Update on public.xl_pp  (cost=0.00..25.88 rows=6 width=22)
+         ->  Seq Scan on public.xl_pp  (cost=0.00..25.88 rows=6 width=22)
+               Output: a, 2, ctid, shardid
+               Filter: (xl_pp.a = 200)
+(8 rows)
+
+EXPLAIN VERBOSE UPDATE xl_pp SET b=2 where a=200::bigint;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_pp.a, 2, xl_pp.xc_node_id, xl_pp.ctid, xl_pp.shardid
+   Node/s: datanode_1
+   Remote query: UPDATE xl_pp SET b = 2 WHERE (a = (200)::bigint)
+   ->  Update on public.xl_pp  (cost=0.00..25.88 rows=6 width=22)
+         ->  Seq Scan on public.xl_pp  (cost=0.00..25.88 rows=6 width=22)
+               Output: a, 2, ctid, shardid
+               Filter: (xl_pp.a = '200'::bigint)
+(8 rows)
+
+EXPLAIN VERBOSE DELETE FROM xl_pp where a=200;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_pp.xc_node_id, xl_pp.ctid, xl_pp.shardid, xl_pp.a
+   Node/s: datanode_1
+   Remote query: DELETE FROM xl_pp WHERE (a = 200)
+   ->  Delete on public.xl_pp  (cost=0.00..25.88 rows=6 width=10)
+         ->  Seq Scan on public.xl_pp  (cost=0.00..25.88 rows=6 width=10)
+               Output: ctid, shardid
+               Filter: (xl_pp.a = 200)
+(8 rows)
+
+SELECT * from xl_pp where a=200;
+ a | b 
+---+---
+(0 rows)
+
+SELECT * from xl_pp where a=200::bigint;
+ a | b 
+---+---
+(0 rows)
+
+EXPLAIN VERBOSE DELETE FROM xl_pp where a=200;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_pp.xc_node_id, xl_pp.ctid, xl_pp.shardid, xl_pp.a
+   Node/s: datanode_1
+   Remote query: DELETE FROM xl_pp WHERE (a = 200)
+   ->  Delete on public.xl_pp  (cost=0.00..25.88 rows=6 width=10)
+         ->  Seq Scan on public.xl_pp  (cost=0.00..25.88 rows=6 width=10)
+               Output: ctid, shardid
+               Filter: (xl_pp.a = 200)
+(8 rows)
+
+EXPLAIN VERBOSE DELETE FROM xl_pp where a=200::bigint;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_pp.xc_node_id, xl_pp.ctid, xl_pp.shardid, xl_pp.a
+   Node/s: datanode_1
+   Remote query: DELETE FROM xl_pp WHERE (a = (200)::bigint)
+   ->  Delete on public.xl_pp  (cost=0.00..25.88 rows=6 width=10)
+         ->  Seq Scan on public.xl_pp  (cost=0.00..25.88 rows=6 width=10)
+               Output: ctid, shardid
+               Filter: (xl_pp.a = '200'::bigint)
+(8 rows)
+
+--Testing with MODULO distribution
+CREATE TABLE xl_ppm (a INT2, b int) DISTRIBUTE BY MODULO(a);
+INSERT INTO xl_ppm SELECT generate_series(1,100), 20;
+EXPLAIN VERBOSE SELECT * FROM xl_ppm WHERE a = 100;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_ppm.a, xl_ppm.b
+   Node/s: datanode_1
+   Remote query: SELECT a, b FROM xl_ppm WHERE (a = 100)
+   ->  Seq Scan on public.xl_ppm  (cost=0.00..27.50 rows=7 width=6)
+         Output: a, b
+         Filter: (xl_ppm.a = 100)
+(7 rows)
+
+EXPLAIN VERBOSE SELECT * FROM xl_ppm WHERE a = 100::INT2;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_ppm.a, xl_ppm.b
+   Node/s: datanode_1
+   Remote query: SELECT a, b FROM xl_ppm WHERE (a = (100)::smallint)
+   ->  Seq Scan on public.xl_ppm  (cost=0.00..27.50 rows=7 width=6)
+         Output: a, b
+         Filter: (xl_ppm.a = '100'::smallint)
+(7 rows)
+
+EXPLAIN VERBOSE INSERT INTO xl_ppm (a, b) VALUES (201::INT2, 1) ;
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: (201)::smallint, 1
+   Node expr: (201)::smallint
+   Remote query: INSERT INTO xl_ppm (a, b) VALUES ((201)::smallint, 1)
+   ->  Insert on public.xl_ppm  (cost=0.00..0.01 rows=1 width=6)
+         ->  Result  (cost=0.00..0.01 rows=1 width=6)
+               Output: '201'::smallint, 1
+(7 rows)
+
+EXPLAIN VERBOSE UPDATE xl_ppm SET b=2 where a=200;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_ppm.a, 2, xl_ppm.xc_node_id, xl_ppm.ctid, xl_ppm.shardid
+   Node/s: datanode_1
+   Remote query: UPDATE xl_ppm SET b = 2 WHERE (a = 200)
+   ->  Update on public.xl_ppm  (cost=0.00..27.50 rows=7 width=16)
+         ->  Seq Scan on public.xl_ppm  (cost=0.00..27.50 rows=7 width=16)
+               Output: a, 2, ctid, shardid
+               Filter: (xl_ppm.a = 200)
+(8 rows)
+
+EXPLAIN VERBOSE UPDATE xl_ppm SET b=2 where a=200::INT2;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_ppm.a, 2, xl_ppm.xc_node_id, xl_ppm.ctid, xl_ppm.shardid
+   Node/s: datanode_1
+   Remote query: UPDATE xl_ppm SET b = 2 WHERE (a = (200)::smallint)
+   ->  Update on public.xl_ppm  (cost=0.00..27.50 rows=7 width=16)
+         ->  Seq Scan on public.xl_ppm  (cost=0.00..27.50 rows=7 width=16)
+               Output: a, 2, ctid, shardid
+               Filter: (xl_ppm.a = '200'::smallint)
+(8 rows)
+
+EXPLAIN VERBOSE DELETE FROM xl_ppm where a=200;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_ppm.xc_node_id, xl_ppm.ctid, xl_ppm.shardid, xl_ppm.a
+   Node/s: datanode_1
+   Remote query: DELETE FROM xl_ppm WHERE (a = 200)
+   ->  Delete on public.xl_ppm  (cost=0.00..27.50 rows=7 width=10)
+         ->  Seq Scan on public.xl_ppm  (cost=0.00..27.50 rows=7 width=10)
+               Output: ctid, shardid
+               Filter: (xl_ppm.a = 200)
+(8 rows)
+
+SELECT * from xl_ppm where a=200;
+ a | b 
+---+---
+(0 rows)
+
+SELECT * from xl_ppm where a=200::INT2;
+ a | b 
+---+---
+(0 rows)
+
+EXPLAIN VERBOSE DELETE FROM xl_ppm where a=200;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_ppm.xc_node_id, xl_ppm.ctid, xl_ppm.shardid, xl_ppm.a
+   Node/s: datanode_1
+   Remote query: DELETE FROM xl_ppm WHERE (a = 200)
+   ->  Delete on public.xl_ppm  (cost=0.00..27.50 rows=7 width=10)
+         ->  Seq Scan on public.xl_ppm  (cost=0.00..27.50 rows=7 width=10)
+               Output: ctid, shardid
+               Filter: (xl_ppm.a = 200)
+(8 rows)
+
+EXPLAIN VERBOSE DELETE FROM xl_ppm where a=200::INT2;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Output: xl_ppm.xc_node_id, xl_ppm.ctid, xl_ppm.shardid, xl_ppm.a
+   Node/s: datanode_1
+   Remote query: DELETE FROM xl_ppm WHERE (a = (200)::smallint)
+   ->  Delete on public.xl_ppm  (cost=0.00..27.50 rows=7 width=10)
+         ->  Seq Scan on public.xl_ppm  (cost=0.00..27.50 rows=7 width=10)
+               Output: ctid, shardid
+               Filter: (xl_ppm.a = '200'::smallint)
+(8 rows)
+
+DROP TABLE xl_pp;
+DROP TABLE xl_ppm;

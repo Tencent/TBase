@@ -1,0 +1,41 @@
+CREATE TABLE xl_join_t1 (val1 int, val2 int);
+CREATE TABLE xl_join_t2 (val1 int, val2 int);
+CREATE TABLE xl_join_t3 (val1 int, val2 int);
+INSERT INTO xl_join_t1 VALUES (1,10),(2,20);
+INSERT INTO xl_join_t2 VALUES (3,30),(4,40);
+INSERT INTO xl_join_t3 VALUES (5,50),(6,60);
+EXPLAIN (COSTS OFF)
+SELECT * FROM xl_join_t1
+	INNER JOIN xl_join_t2 ON xl_join_t1.val1 = xl_join_t2.val2 
+	INNER JOIN xl_join_t3 ON xl_join_t1.val1 = xl_join_t3.val1;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   ->  Merge Join
+         Merge Cond: (xl_join_t3.val1 = xl_join_t1.val1)
+         ->  Sort
+               Sort Key: xl_join_t3.val1
+               ->  Seq Scan on xl_join_t3
+         ->  Materialize
+               ->  Merge Join
+                     Merge Cond: (xl_join_t2.val2 = xl_join_t1.val1)
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: val2
+                           ->  Sort
+                                 Sort Key: xl_join_t2.val2
+                                 ->  Seq Scan on xl_join_t2
+                     ->  Sort
+                           Sort Key: xl_join_t1.val1
+                           ->  Seq Scan on xl_join_t1
+(17 rows)
+
+SELECT * FROM xl_join_t1
+	INNER JOIN xl_join_t2 ON xl_join_t1.val1 = xl_join_t2.val2 
+	INNER JOIN xl_join_t3 ON xl_join_t1.val1 = xl_join_t3.val1;
+ val1 | val2 | val1 | val2 | val1 | val2 
+------+------+------+------+------+------
+(0 rows)
+
+DROP TABLE xl_join_t1;
+DROP TABLE xl_join_t2;
+DROP TABLE xl_join_t3;

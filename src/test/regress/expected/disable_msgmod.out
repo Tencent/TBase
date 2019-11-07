@@ -1,0 +1,12 @@
+      
+SELECT r.nodename, r.status
+	FROM execute_on_all_nodes('SELECT pg_msgmodule_disable_all()')
+AS r(nodename text, status bool);
+  nodename  | status 
+------------+--------
+ coord1     | t
+ coord2     | t
+ datanode_1 | t
+ datanode_2 | t
+(4 rows)
+

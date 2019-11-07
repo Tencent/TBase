@@ -1,0 +1,206 @@
+\set ECHO all
+SET client_min_messages = warning;
+SET datestyle TO ISO;
+SET client_encoding = utf8;
+-- prepare
+DROP USER IF EXISTS audit_fga_user;
+DROP DATABASE IF EXISTS audit_fga_database;
+CREATE USER audit_fga_user WITH SUPERUSER CREATEDB LOGIN ENCRYPTED PASSWORD 'audit_fga_user';
+CREATE DATABASE audit_fga_database;
+create user audit_sup superuser;
+\c audit_fga_database audit_sup;
+create extension pg_fga;
+-- create table
+\c audit_fga_database audit_fga_user
+create table foo(idx bigint, str text);
+create table bar(idx bigint, str text);
+insert into foo values(1, 'a');
+insert into bar values(1, 'a');
+select * from foo;
+ idx | str 
+-----+-----
+   1 | a
+(1 row)
+
+select * from bar;
+ idx | str 
+-----+-----
+   1 | a
+(1 row)
+
+\c audit_fga_database audit_admin
+-- add_policy
+select add_policy(object_schema:='public', object_name:='foo', audit_columns:='idx',policy_name:='poli', audit_condition:='idx > 1');
+ add_policy 
+------------
+ t
+(1 row)
+
+select add_policy(object_schema:='public', object_name:='bar', audit_columns:='idx',policy_name:='poli3', audit_condition:='idx > 1', handler_schema:='pg_catalog', handler_module:='remove_valid_fga_policy');
+ add_policy 
+------------
+ t
+(1 row)
+
+select add_policy(object_schema:='public', object_name:='bar', audit_columns:='idx',policy_name:='poli4', audit_condition:='idx > 1', handler_schema:='pg_catalog', handler_module:='remove_valid_fga_policy');
+ add_policy 
+------------
+ t
+(1 row)
+
+select * from pg_audit_fga_conf;
+ auditor_id | object_schema | object_id | policy_name | audit_column_ids | audit_columns |                                                                                                                                                                                       audit_condition                                                                                                                                                                                        | audit_condition_str | handler_schema | handler_module | audit_enable | statement_types | audit_column_opts 
+------------+---------------+-----------+-------------+------------------+---------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------+----------------+----------------+--------------+-----------------+-------------------
+       6116 |          2200 |     16394 | poli        | 1                | idx           | {OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 31} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location 37 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location 35} | idx > 1             |                |                | t            | select          | f
+       6116 |          2200 |     16400 | poli3       | 1                | idx           | {OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 31} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location 37 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location 35} | idx > 1             |             11 |          16393 | t            | select          | f
+       6116 |          2200 |     16400 | poli4       | 1                | idx           | {OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 31} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location 37 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location 35} | idx > 1             |             11 |          16393 | t            | select          | f
+(3 rows)
+
+select * from pg_audit_fga_conf_detail ;
+   auditor   | object_schema | object_name | policy_name | audit_columns | audit_condition | audit_enable | statement_types | audit_column_opts | handler_schema |     handler_module      
+-------------+---------------+-------------+-------------+---------------+-----------------+--------------+-----------------+-------------------+----------------+-------------------------
+ audit_admin | public        | foo         | poli        | idx           | idx > 1         | t            | select          | f                 |                | 
+ audit_admin | public        | bar         | poli3       | idx           | idx > 1         | t            | select          | f                 | pg_catalog     | remove_valid_fga_policy
+ audit_admin | public        | bar         | poli4       | idx           | idx > 1         | t            | select          | f                 | pg_catalog     | remove_valid_fga_policy
+(3 rows)
+
+select *from pg_audit_fga_policy_columns_detail;
+   auditor   | object_schema | object_name | policy_name | audit_columns 
+-------------+---------------+-------------+-------------+---------------
+ audit_admin | public        | foo         | poli        | idx
+ audit_admin | public        | bar         | poli3       | idx
+ audit_admin | public        | bar         | poli4       | idx
+(3 rows)
+
+-- drop_policy
+select drop_policy(object_schema:='public', object_name:='bar', policy_name:='poli4');
+ drop_policy 
+-------------
+ t
+(1 row)
+
+select * from pg_audit_fga_conf;
+ auditor_id | object_schema | object_id | policy_name | audit_column_ids | audit_columns |                                                                                                                                                                                       audit_condition                                                                                                                                                                                        | audit_condition_str | handler_schema | handler_module | audit_enable | statement_types | audit_column_opts 
+------------+---------------+-----------+-------------+------------------+---------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------+----------------+----------------+--------------+-----------------+-------------------
+       6116 |          2200 |     16394 | poli        | 1                | idx           | {OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 31} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location 37 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location 35} | idx > 1             |                |                | t            | select          | f
+       6116 |          2200 |     16400 | poli3       | 1                | idx           | {OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 31} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location 37 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location 35} | idx > 1             |             11 |          16393 | t            | select          | f
+(2 rows)
+
+select * from pg_audit_fga_conf_detail ;
+   auditor   | object_schema | object_name | policy_name | audit_columns | audit_condition | audit_enable | statement_types | audit_column_opts | handler_schema |     handler_module      
+-------------+---------------+-------------+-------------+---------------+-----------------+--------------+-----------------+-------------------+----------------+-------------------------
+ audit_admin | public        | foo         | poli        | idx           | idx > 1         | t            | select          | f                 |                | 
+ audit_admin | public        | bar         | poli3       | idx           | idx > 1         | t            | select          | f                 | pg_catalog     | remove_valid_fga_policy
+(2 rows)
+
+select *from pg_audit_fga_policy_columns_detail;
+   auditor   | object_schema | object_name | policy_name | audit_columns 
+-------------+---------------+-------------+-------------+---------------
+ audit_admin | public        | foo         | poli        | idx
+ audit_admin | public        | bar         | poli3       | idx
+(2 rows)
+
+-- disable_policy
+select disable_policy(object_schema:='public', object_name:='foo', policy_name:='poli3');
+ disable_policy 
+----------------
+ t
+(1 row)
+
+select * from pg_audit_fga_conf;
+ auditor_id | object_schema | object_id | policy_name | audit_column_ids | audit_columns |                                                                                                                                                                                       audit_condition                                                                                                                                                                                        | audit_condition_str | handler_schema | handler_module | audit_enable | statement_types | audit_column_opts 
+------------+---------------+-----------+-------------+------------------+---------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------+----------------+----------------+--------------+-----------------+-------------------
+       6116 |          2200 |     16394 | poli        | 1                | idx           | {OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 31} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location 37 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location 35} | idx > 1             |                |                | t            | select          | f
+       6116 |          2200 |     16400 | poli3       | 1                | idx           | {OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 31} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location 37 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location 35} | idx > 1             |             11 |          16393 | f            | select          | f
+(2 rows)
+
+select * from pg_audit_fga_conf_detail ;
+   auditor   | object_schema | object_name | policy_name | audit_columns | audit_condition | audit_enable | statement_types | audit_column_opts | handler_schema |     handler_module      
+-------------+---------------+-------------+-------------+---------------+-----------------+--------------+-----------------+-------------------+----------------+-------------------------
+ audit_admin | public        | foo         | poli        | idx           | idx > 1         | t            | select          | f                 |                | 
+ audit_admin | public        | bar         | poli3       | idx           | idx > 1         | f            | select          | f                 | pg_catalog     | remove_valid_fga_policy
+(2 rows)
+
+select *from pg_audit_fga_policy_columns_detail;
+   auditor   | object_schema | object_name | policy_name | audit_columns 
+-------------+---------------+-------------+-------------+---------------
+ audit_admin | public        | foo         | poli        | idx
+ audit_admin | public        | bar         | poli3       | idx
+(2 rows)
+
+-- enable_policy
+select enable_policy(object_schema:='public', object_name:='foo', policy_name:='poli3');
+ enable_policy 
+---------------
+ t
+(1 row)
+
+select * from pg_audit_fga_conf;
+ auditor_id | object_schema | object_id | policy_name | audit_column_ids | audit_columns |                                                                                                                                                                                       audit_condition                                                                                                                                                                                        | audit_condition_str | handler_schema | handler_module | audit_enable | statement_types | audit_column_opts 
+------------+---------------+-----------+-------------+------------------+---------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------+----------------+----------------+--------------+-----------------+-------------------
+       6116 |          2200 |     16394 | poli        | 1                | idx           | {OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 31} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location 37 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location 35} | idx > 1             |                |                | t            | select          | f
+       6116 |          2200 |     16400 | poli3       | 1                | idx           | {OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 31} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location 37 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location 35} | idx > 1             |             11 |          16393 | t            | select          | f
+(2 rows)
+
+select * from pg_audit_fga_conf_detail ;
+   auditor   | object_schema | object_name | policy_name | audit_columns | audit_condition | audit_enable | statement_types | audit_column_opts | handler_schema |     handler_module      
+-------------+---------------+-------------+-------------+---------------+-----------------+--------------+-----------------+-------------------+----------------+-------------------------
+ audit_admin | public        | foo         | poli        | idx           | idx > 1         | t            | select          | f                 |                | 
+ audit_admin | public        | bar         | poli3       | idx           | idx > 1         | t            | select          | f                 | pg_catalog     | remove_valid_fga_policy
+(2 rows)
+
+select *from pg_audit_fga_policy_columns_detail;
+   auditor   | object_schema | object_name | policy_name | audit_columns 
+-------------+---------------+-------------+-------------+---------------
+ audit_admin | public        | foo         | poli        | idx
+ audit_admin | public        | bar         | poli3       | idx
+(2 rows)
+
+-- remove invalid policy
+\c audit_fga_database audit_fga_user
+drop table if exists foo;
+\c audit_fga_database audit_admin
+select * from pg_audit_fga_conf;
+ auditor_id | object_schema | object_id | policy_name | audit_column_ids | audit_columns |                                                                                                                                                                                       audit_condition                                                                                                                                                                                        | audit_condition_str | handler_schema | handler_module | audit_enable | statement_types | audit_column_opts 
+------------+---------------+-----------+-------------+------------------+---------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------+----------------+----------------+--------------+-----------------+-------------------
+       6116 |          2200 |     16394 | poli        | 1                | idx           | {OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 31} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location 37 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location 35} | idx > 1             |                |                | t            | select          | f
+       6116 |          2200 |     16400 | poli3       | 1                | idx           | {OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 31} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location 37 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location 35} | idx > 1             |             11 |          16393 | t            | select          | f
+(2 rows)
+
+select * from pg_audit_fga_conf_detail ;
+   auditor   | object_schema | object_name | policy_name | audit_columns | audit_condition | audit_enable | statement_types | audit_column_opts | handler_schema |     handler_module      
+-------------+---------------+-------------+-------------+---------------+-----------------+--------------+-----------------+-------------------+----------------+-------------------------
+ audit_admin | public        | bar         | poli3       | idx           | idx > 1         | t            | select          | f                 | pg_catalog     | remove_valid_fga_policy
+(1 row)
+
+select *from pg_audit_fga_policy_columns_detail;
+   auditor   | object_schema | object_name | policy_name | audit_columns 
+-------------+---------------+-------------+-------------+---------------
+ audit_admin | public        | bar         | poli3       | idx
+(1 row)
+
+select remove_valid_fga_policy();
+NOTICE:  sql: select pg_execute_query_on_all_nodes($$DELETE FROM pg_audit_fga_conf where object_id = 16394$$)
+ remove_valid_fga_policy 
+-------------------------
+ t
+(1 row)
+
+select * from pg_audit_fga_conf;
+ auditor_id | object_schema | object_id | policy_name | audit_column_ids | audit_columns |                                                                                                                                                                                       audit_condition                                                                                                                                                                                        | audit_condition_str | handler_schema | handler_module | audit_enable | statement_types | audit_column_opts 
+------------+---------------+-----------+-------------+------------------+---------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------+----------------+----------------+--------------+-----------------+-------------------
+       6116 |          2200 |     16400 | poli3       | 1                | idx           | {OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({VAR :varno 1 :varattno 1 :vartype 20 :vartypmod -1 :varcollid 0 :varlevelsup 0 :varnoold 1 :varoattno 1 :location 31} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location 37 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location 35} | idx > 1             |             11 |          16393 | t            | select          | f
+(1 row)
+
+select * from pg_audit_fga_conf_detail ;
+   auditor   | object_schema | object_name | policy_name | audit_columns | audit_condition | audit_enable | statement_types | audit_column_opts | handler_schema |     handler_module      
+-------------+---------------+-------------+-------------+---------------+-----------------+--------------+-----------------+-------------------+----------------+-------------------------
+ audit_admin | public        | bar         | poli3       | idx           | idx > 1         | t            | select          | f                 | pg_catalog     | remove_valid_fga_policy
+(1 row)
+
+select *from pg_audit_fga_policy_columns_detail;
+   auditor   | object_schema | object_name | policy_name | audit_columns 
+-------------+---------------+-------------+-------------+---------------
+ audit_admin | public        | bar         | poli3       | idx
+(1 row)
+
