@@ -17,7 +17,7 @@ Users always connect to the CoordinateNodes, which divides up the query into fra
 
 The latest version of this software may be obtained at:
 
-	http://github.com/tencent/TBase
+	http://github.com/Tencent/TBase
 	 
 For more information look at our web site located at:    
 	
@@ -40,11 +40,12 @@ For more information look at our web site located at:
 ```
 
 ## Install
-利用PGXC\_CTL工具搭建集群，示例为具有一个全局事务管理节点(GTM)、一个协调节点(COORDINATOR)和两个数据节点(DATANODE)的集群
-![topology](images/topology.png)
-#### 准备工作  
+Use PGXC\_CTL tool to build a cluster, for example: a cluster with a global transaction management node (GTM), a coordinator(COORDINATOR) and two data nodes (DATANODE)
 
-1. 安装pgxc，将pgxc安装包的路径导入到环境变量中
+![topology](images/topology.png)
+#### Preparation 
+
+1. Install pgxc and import the path of pgxc installation package into environment variable
 
 
     ```
@@ -54,23 +55,24 @@ For more information look at our web site located at:
 	export LC_ALL=C
     ```
 
-2. 打通安装集群节点的机器之间的ssh免密码登陆，后面deploy和init会ssh到各个节点的机器，打通后不用输入密码。
+2. Get through the SSH password free login between the machines where the cluster node is installed, and then deploy and init will SSH to the machines of each node. After getting through, you do not need to enter the password.
 
     ```
 	ssh-keygen -t rsa
-	ssh-copy-id -i ~/.ssh/id_rsa.pub 目的机器user@目的机器主机server
+	ssh-copy-id -i ~/.ssh/id_rsa.pub destination-user@destination-server
     ```
     
-#### 集群启动步骤  
+#### Cluster startup steps  
 
-1. 生成并填写配置文件pgxc\_ctl.conf。pgxc\_ctl工具可以生成配置文件的模板，需要在模板中填写集群的节点信。pgxc\_ctl工具启动后，会在当前用户home目录生成一个pgxc\_ctl目录及配置文件的模板，可以直接修改此模板。  
-	* 配置文件开始处的pgxcInstallDir指的是pgxc的安装包位置，数据库用户根据自己的需求进行设置。
+1. Generate and fill in configuration file pgxc\_ctl.conf. pgxc\_ctl tool can generate a template for the configuration file. You need to fill in the cluster node information in the template. After the pgxc\_ctl tool is started, a template of pgxc\_ctl directory and configuration file will be generated in the current user's home directory, which can be modified directly.  
+  
+	* The pgxcInstallDir at the beginning of the configuration file refers to the installation package location of pgxc. The database user can set it according to his own needs.  
 	
 	```
 	pgxcInstallDir=${INSTALL_PATH}/tbase_bin_v2.0
 	```
 	
-	* 对GTM，需要配置节点名称，ip，端口以及节点目录等
+	* For GTM, you need to configure the node name, IP, port and node directory  
 		
 	```
 	#---- GTM ----------
@@ -80,16 +82,15 @@ For more information look at our web site located at:
 	gtmMasterDir=${GTM_MASTER_DATA_DIR}/data/gtm_master
 	```
 
-	* 如果不需要gtmSlave以及gtmProxy，可以后面相应节点的配置处，直接设置为n
+	* If you do not need gtmSlave, you can directly set it to 'n' in the configuration of the corresponding node  
 	
 	```
-	gtmSlave=n   
-	gtmProxy=n   
+	gtmSlave=n  
 	```
 	
-	如果需要gtmSlave以及gtmProxy，则根据配置文件的说明进行配置   
+	If you need gtmSlave, configure it according to the instructions in the configuration file     
 	
-	* 协调节点coordinator，需要配置ip，端口，目录等
+	* Coordination node, which needs to be configured with IP, port, directory, etc  
 
 	```
 	coordNames=(cn001)
@@ -101,7 +102,7 @@ For more information look at our web site located at:
 	coordMasterDirs=(${COORD_MASTER_DATA_DIR}/data/cn_master/cn001)
 	```	
 	
-	* 数据节点datanode，与上面节点类似，ip，端口以及目录等。（由于数据节点有两个，所以需要配置与节点数目相同的信息。）
+	* Data node, similar to the above nodes: IP, port, directory, etc. (since there are two data nodes, you need to configure the same information as the number of nodes.)  
 	
 	```  
 	primaryDatanode=dn001
@@ -114,14 +115,16 @@ For more information look at our web site located at:
 	datanodeMasterDirs=(${DATANODE_MASTER_DATA_DIR}/data/dn_master/dn001 ${DATANODE_MASTER_DATA_DIR}/data/dn_master/dn002)
 	```
 	
-	协调节点和数据节点也存在对应的coordSlave和datanodeSlave，如果不需要就直接配置成n；否则根据配置文件说明进行配置。  
-	另外，对于coordinator和datanode都需要配置两种端口poolerPort以及port。poolerPort是节点用来和其他节点之间通信的。而port是用来登陆节点的端口。这里poolerPort和port必须配置不一样，否则会起冲突，无法启动集群。  
-	各个节点需要有自己的目录，不能创建在同一个目录。
+	There are coordSlave and datanodeSlave corresponding to the coordination node and data node. If not, configure them as 'n'; otherwise, configure them according to the configuration file.    
+	
+	In addition, two type ports: poolerPort and port, need to be configured for coordinator node and datanode. poolerPort is used by nodes to communicate with other nodes. port is the port used to login to the node. Here, poolerPort and port must be configured differently, otherwise there will be conflicts and the cluster cannot be started.   
+	
+	Each node needs to have its own directory and cannot be created in the same directory.  
 
-2.	安装包的分发(deploy all)。配置文件填写完成之后，运行pgxc\_ctl工具，然后键入命令deploy all，将安装包分发到各个节点所在ip的机器上。
+2.	Distribution of installation package(deploy all)。After filling in the configuration file, run the pgxc\_ctl tool，and then input "deploy all" command  to distribute the installation package to the IP machine of each node.  
 ![topology](images/deploy.png)
 
-3. 初始化集群各个节点(init all)。安装包分发完成之后，在pgxc\_ctl中运行init all命令，对配置文件pgxc\_ctl.conf所有节点进行初始化，并启动集群。至此，集群已经启动完毕。  
+3. Initialize each node of the cluster(init all)。After the distribution of the installation package is completed, input "init all" command in pgxc\_ctl tool to initialize all the nodes in the configuration file pgxc\_ctl.conf and start the cluster. So far, the cluster has started.  
 ![topology](images/init.png)
 
 ## Usage  
