@@ -1858,6 +1858,7 @@ FinishPreparedTransaction(const char *gid, bool isCommit)
                 gid, (g_twophase_state.is_readonly) ? "true" : "false", (g_twophase_state.is_after_prepare) ? "true" : "false");
         }
     }
+
     
     if (!g_twophase_state.is_start_node && 
         !g_twophase_state.is_readonly && 
@@ -1866,6 +1867,10 @@ FinishPreparedTransaction(const char *gid, bool isCommit)
             (g_twophase_state.in_pg_clean && 
             g_twophase_state.is_after_prepare)))
     {
+        if (g_twophase_state.in_pg_clean)
+        {
+            record_2pc_involved_nodes_xid(gid, g_twophase_state.start_node_name, g_twophase_state.start_xid, g_twophase_state.participants, xid);
+        }
         record_2pc_commit_timestamp(gid, GetGlobalCommitTimestamp());
     }
 
