@@ -1043,6 +1043,10 @@ _copyAgg(const Agg *from)
     COPY_BITMAPSET_FIELD(aggParams);
     COPY_NODE_FIELD(groupingSets);
     COPY_NODE_FIELD(chain);
+#ifdef __TBASE__
+	COPY_SCALAR_FIELD(entrySize);
+	COPY_SCALAR_FIELD(hybrid);
+#endif
 
     return newnode;
 }

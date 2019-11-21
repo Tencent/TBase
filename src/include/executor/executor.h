@@ -583,5 +583,10 @@ extern void CheckCmdReplicaIdentity(Relation rel, CmdType cmd);
 
 extern void CheckSubscriptionRelkind(char relkind, const char *nspname,
                           const char *relname);
-
+#ifdef __TBASE__
+extern void OptimizeHybridHashtableSize(TupleHashTable hashtable, uint32 entrySize, double numGroups);
+extern void DumpHybridHashtable(AggState *aggstate, TupleHashTable hashtable);
+extern void LoadHybridHashtable(AggState *aggstate, TupleHashTable hashtable, TupleHashIterator *hashiter);
+extern void ResetHybridHashtable(TupleHashTable hashtable);
+#endif
 #endif                            /* EXECUTOR_H  */

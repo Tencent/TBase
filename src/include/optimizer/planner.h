@@ -127,6 +127,8 @@ extern void preprocess_rowmarks(PlannerInfo *root);
 
 #ifdef __TBASE__
 extern bool olap_optimizer;
+extern Size estimate_hashagg_entrysize(Path *path, const AggClauseCosts *agg_costs,
+						   						double dNumGroups);
 #endif
 
 

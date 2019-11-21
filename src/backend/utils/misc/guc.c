@@ -143,6 +143,7 @@
 #endif
 #ifdef __COLD_HOT__
 #include "utils/ruleutils.h"
+#include "executor/nodeAgg.h"
 #include "catalog/pg_partition_interval.h"
 #endif
 
@@ -2258,6 +2259,26 @@ static struct config_bool ConfigureNamesBool[] =
         true,
         NULL, NULL, NULL
     },
+
+	{
+		{"hybrid_hash_agg", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("enable hybrid-hash agg."),
+			NULL
+		},
+		&g_hybrid_hash_agg,
+		false,
+		NULL, NULL, NULL
+	},	
+
+	{
+		{"hybrid_hash_agg_debug", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("enable hybrid-hash agg debug."),
+			NULL
+		},
+		&g_hybrid_hash_agg_debug,
+		false,
+		NULL, NULL, NULL
+	},
 #endif
 
 #ifdef _MIGRATE_
@@ -4387,6 +4408,16 @@ static struct config_int ConfigureNamesInt[] =
         1, 0, INT_MAX,
         NULL, NULL, NULL
     },
+	
+	{
+		{"default_hashagg_nbatches", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("number of batch files in hybrid-hash agg."),
+			NULL
+		},
+		&g_default_hashagg_nbatches,
+		32, 1, INT_MAX,
+		NULL, NULL, NULL
+	},
 #endif
 #ifdef __TWO_PHASE_TESTS__
     {

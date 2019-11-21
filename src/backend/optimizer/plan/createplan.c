@@ -76,6 +76,7 @@
 #include "audit/audit_fga.h"
 #endif
 
+#include "executor/nodeAgg.h"
 /*
  * Flag bits that can appear in the flags argument of create_plan_recurse().
  * These can be OR-ed together.
@@ -2187,6 +2188,22 @@ create_agg_plan(PlannerInfo *root, AggPath *best_path)
                     subplan);
 
     copy_generic_path_info(&plan->plan, (Path *) best_path);
+#ifdef __TBASE__
+	/* set entry size of hashtable using by hashagg */
+	if (g_hybrid_hash_agg)
+	{
+		if (best_path->aggstrategy == AGG_HASHED)
+		{
+			plan->entrySize = best_path->entrySize;
+			plan->hybrid = best_path->hybrid;
+
+			if (plan->entrySize == 0)
+			{
+				elog(ERROR, "Invalid hashtable entry size %u", plan->entrySize);
+			}
+		}
+	}
+#endif
 
     return plan;
 }
@@ -7805,7 +7822,10 @@ make_agg(List *tlist, List *qual,
     node->aggParams = NULL;        /* SS_finalize_plan() will fill this */
     node->groupingSets = groupingSets;
     node->chain = chain;
-
+#ifdef __TBASE__
+	node->hybrid = false;
+	node->entrySize = 0;
+#endif
     plan->qual = qual;
     plan->targetlist = tlist;
     plan->lefttree = lefttree;

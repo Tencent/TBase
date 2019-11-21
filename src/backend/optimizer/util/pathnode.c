@@ -43,6 +43,7 @@
 #include "catalog/pgxc_key_values.h"
 #include "pgxc/pgxcnode.h"
 #include "optimizer/pgxcship.h"
+#include "executor/nodeAgg.h"
 #endif
 
 #ifdef _MIGRATE_
@@ -5720,6 +5721,10 @@ create_agg_path(PlannerInfo *root,
     pathnode->numGroups = numGroups;
     pathnode->groupClause = groupClause;
     pathnode->qual = qual;
+#ifdef __TBASE__
+	pathnode->hybrid = false;
+	pathnode->entrySize = 0;
+#endif
 
     cost_agg(&pathnode->path, root,
              aggstrategy, aggcosts,
@@ -5731,6 +5736,17 @@ create_agg_path(PlannerInfo *root,
     pathnode->path.startup_cost += target->cost.startup;
     pathnode->path.total_cost += target->cost.startup +
         target->cost.per_tuple * pathnode->path.rows;
+
+#ifdef __TBASE__
+	/* estimate entry size for hashtable used by hashagg */
+	if (g_hybrid_hash_agg)
+	{
+		if (aggstrategy == AGG_HASHED)
+		{
+			pathnode->entrySize = estimate_hashagg_entrysize(subpath, aggcosts, numGroups);
+		}
+	}
+#endif
 
     return pathnode;
 }
@@ -5889,6 +5905,16 @@ create_groupingsets_path(PlannerInfo *root,
             pathnode->path.total_cost += agg_path.total_cost;
             pathnode->path.rows += agg_path.rows;
         }
+
+#ifdef __TBASE__
+		if (g_hybrid_hash_agg)
+		{
+			if (rollup->is_hashed)
+			{
+				rollup->entrySize = estimate_hashagg_entrysize(subpath, agg_costs, numGroups);
+			}
+		}
+#endif
     }
 
     /* add tlist eval cost for each output row */

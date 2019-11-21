@@ -72,7 +72,10 @@
 /* function declarations */
 #define SH_CREATE SH_MAKE_NAME(create)
 #define SH_DESTROY SH_MAKE_NAME(destroy)
+#define SH_RESET SH_MAKE_NAME(reset)
+#define SH_SET_HYBRID SH_MAKE_NAME(set_hybrid)
 #define SH_INSERT SH_MAKE_NAME(insert)
+#define SH_INSERT_WITH_KEY SH_MAKE_NAME(insert_with_key)
 #define SH_DELETE SH_MAKE_NAME(delete)
 #define SH_LOOKUP SH_MAKE_NAME(lookup)
 #define SH_GROW SH_MAKE_NAME(grow)
@@ -121,6 +124,16 @@ typedef struct SH_TYPE
 
     /* user defined data, useful for callbacks */
     void       *private_data;
+
+	/* used for hybrid-hash */
+	/* hybrid-hash? */
+	bool       hybrid;
+
+	/* max number of batch files */
+	int        nbatches;
+
+	/* max buckets in hash */
+	uint32     max_buckets;
 }            SH_TYPE;
 
 typedef enum SH_STATUS
@@ -140,8 +153,11 @@ typedef struct SH_ITERATOR
 SH_SCOPE    SH_TYPE *SH_CREATE(MemoryContext ctx, uint32 nelements,
           void *private_data);
 SH_SCOPE void SH_DESTROY(SH_TYPE * tb);
+SH_SCOPE void SH_RESET(SH_TYPE * tb);
+SH_SCOPE void SH_SET_HYBRID(SH_TYPE * tb, uint32 max_buckets, int nbatches, bool hybrid);
 SH_SCOPE void SH_GROW(SH_TYPE * tb, uint32 newsize);
 SH_SCOPE    SH_ELEMENT_TYPE *SH_INSERT(SH_TYPE * tb, SH_KEY_TYPE key, bool *found);
+SH_SCOPE	SH_ELEMENT_TYPE *SH_INSERT_WITH_KEY(SH_TYPE * tb, SH_KEY_TYPE key, bool *found, uint32 hashkey);
 SH_SCOPE    SH_ELEMENT_TYPE *SH_LOOKUP(SH_TYPE * tb, SH_KEY_TYPE key);
 SH_SCOPE bool SH_DELETE(SH_TYPE * tb, SH_KEY_TYPE key);
 SH_SCOPE void SH_START_ITERATE(SH_TYPE * tb, SH_ITERATOR * iter);
@@ -333,6 +349,7 @@ SH_CREATE(MemoryContext ctx, uint32 nelements, void *private_data)
     tb = MemoryContextAllocZero(ctx, sizeof(SH_TYPE));
     tb->ctx = ctx;
     tb->private_data = private_data;
+	tb->hybrid = false;
 
     /* increase nelements by fillfactor, want to store nelements elements */
     size = Min((double) SH_MAX_SIZE, ((double) nelements) / SH_FILLFACTOR);
@@ -350,6 +367,23 @@ SH_DESTROY(SH_TYPE * tb)
 {
     SH_FREE(tb, tb->data);
     pfree(tb);
+}
+
+/* reset the contents of a previously created hash table */
+SH_SCOPE void
+SH_RESET(SH_TYPE * tb)
+{
+	memset(tb->data, 0, sizeof(SH_ELEMENT_TYPE) * tb->size);
+	tb->members = 0;
+}
+
+/* flag created hash table as hybrid-hash */
+SH_SCOPE void
+SH_SET_HYBRID(SH_TYPE * tb, uint32 max_buckets, int nbatches, bool hybrid)
+{
+	tb->max_buckets = max_buckets;
+	tb->nbatches = nbatches;
+	tb->hybrid = hybrid;
 }
 
 /*
@@ -519,6 +553,204 @@ restart:
         /* any empty bucket can directly be used */
         if (entry->status == SH_STATUS_EMPTY)
         {
+			/*
+			 * In hybrid-hash agg, return null if reach the limitations
+			 */
+			if (tb->hybrid)
+			{
+				if (tb->members >= tb->max_buckets)
+				{
+					*found = false;
+					return NULL;
+				}
+			}
+
+			tb->members++;
+			entry->SH_KEY = key;
+#ifdef SH_STORE_HASH
+			SH_GET_HASH(tb, entry) = hash;
+#endif
+			entry->status = SH_STATUS_IN_USE;
+			*found = false;
+			return entry;
+		}
+
+		/*
+		 * If the bucket is not empty, we either found a match (in which case
+		 * we're done), or we have to decide whether to skip over or move the
+		 * colliding entry. When the colliding element's distance to its
+		 * optimal position is smaller than the to-be-inserted entry's, we
+		 * shift the colliding entry (and its followers) forward by one.
+		 */
+
+		if (SH_COMPARE_KEYS(tb, hash, key, entry))
+		{
+			Assert(entry->status == SH_STATUS_IN_USE);
+			*found = true;
+			return entry;
+		}
+
+		curhash = SH_ENTRY_HASH(tb, entry);
+		curoptimal = SH_INITIAL_BUCKET(tb, curhash);
+		curdist = SH_DISTANCE_FROM_OPTIMAL(tb, curoptimal, curelem);
+
+		if (insertdist > curdist)
+		{
+			SH_ELEMENT_TYPE *lastentry = entry;
+			uint32		emptyelem = curelem;
+			uint32		moveelem;
+			int32		emptydist = 0;
+
+			/*
+			 * In hybrid-hash agg, return null if reach the limitations
+			 */
+			if (tb->hybrid)
+			{
+				if (tb->members >= tb->max_buckets)
+				{
+					*found = false;
+					return NULL;
+				}
+			}
+
+			/* find next empty bucket */
+			while (true)
+			{
+				SH_ELEMENT_TYPE *emptyentry;
+
+				emptyelem = SH_NEXT(tb, emptyelem, startelem);
+				emptyentry = &data[emptyelem];
+
+				if (emptyentry->status == SH_STATUS_EMPTY)
+				{
+					lastentry = emptyentry;
+					break;
+				}
+
+				/*
+				 * To avoid negative consequences from overly imbalanced
+				 * hashtables, grow the hashtable if collisions would require
+				 * us to move a lot of entries.  The most likely cause of such
+				 * imbalance is filling a (currently) small table, from a
+				 * currently big one, in hash-table order.
+				 */
+				if (++emptydist > SH_GROW_MAX_MOVE)
+				{
+					tb->grow_threshold = 0;
+					goto restart;
+				}
+			}
+
+			/* shift forward, starting at last occupied element */
+
+			/*
+			 * TODO: This could be optimized to be one memcpy in may cases,
+			 * excepting wrapping around at the end of ->data. Hasn't shown up
+			 * in profiles so far though.
+			 */
+			moveelem = emptyelem;
+			while (moveelem != curelem)
+			{
+				SH_ELEMENT_TYPE *moveentry;
+
+				moveelem = SH_PREV(tb, moveelem, startelem);
+				moveentry = &data[moveelem];
+
+				memcpy(lastentry, moveentry, sizeof(SH_ELEMENT_TYPE));
+				lastentry = moveentry;
+			}
+
+			/* and fill the now empty spot */
+			tb->members++;
+
+			entry->SH_KEY = key;
+#ifdef SH_STORE_HASH
+			SH_GET_HASH(tb, entry) = hash;
+#endif
+			entry->status = SH_STATUS_IN_USE;
+			*found = false;
+			return entry;
+		}
+
+		curelem = SH_NEXT(tb, curelem, startelem);
+		insertdist++;
+
+		/*
+		 * To avoid negative consequences from overly imbalanced hashtables,
+		 * grow the hashtable if collisions lead to large runs. The most
+		 * likely cause of such imbalance is filling a (currently) small
+		 * table, from a currently big one, in hash-table order.
+		 */
+		if (insertdist > SH_GROW_MAX_DIB)
+		{
+			tb->grow_threshold = 0;
+			goto restart;
+		}
+	}
+}
+
+
+SH_SCOPE	SH_ELEMENT_TYPE *
+SH_INSERT_WITH_KEY(SH_TYPE * tb, SH_KEY_TYPE key, bool *found, uint32 hashkey)
+{
+	uint32		hash = hashkey;
+	uint32		startelem;
+	uint32		curelem;
+	SH_ELEMENT_TYPE *data;
+	uint32		insertdist;
+
+restart:
+	insertdist = 0;
+	
+	/*
+	 * We do the grow check even if the key is actually present, to avoid
+	 * doing the check inside the loop. This also lets us avoid having to
+	 * re-find our position in the hashtable after resizing.
+	 *
+	 * Note that this also reached when resizing the table due to
+	 * SH_GROW_MAX_DIB / SH_GROW_MAX_MOVE.
+	 */
+	if (unlikely(tb->members >= tb->grow_threshold))
+	{
+		if (tb->size == SH_MAX_SIZE)
+		{
+			elog(ERROR, "hash table size exceeded");
+		}
+
+		/*
+		 * When optimizing, it can be very useful to print these out.
+		 */
+		/* SH_STAT(tb); */
+		SH_GROW(tb, tb->size * 2);
+		/* SH_STAT(tb); */
+	}
+
+	/* perform insert, start bucket search at optimal location */
+	data = tb->data;
+	startelem = SH_INITIAL_BUCKET(tb, hash);
+	curelem = startelem;
+	while (true)
+	{
+		uint32		curdist;
+		uint32		curhash;
+		uint32		curoptimal;
+		SH_ELEMENT_TYPE *entry = &data[curelem];
+
+		/* any empty bucket can directly be used */
+		if (entry->status == SH_STATUS_EMPTY)
+		{
+			/*
+			 * In hybrid-hash agg, return null if reach the limitations
+			 */
+			if (tb->hybrid)
+			{
+				if (tb->members >= tb->max_buckets)
+				{
+					*found = false;
+					return NULL;
+				}
+			}
+
             tb->members++;
             entry->SH_KEY = key;
 #ifdef SH_STORE_HASH
@@ -554,6 +786,18 @@ restart:
             uint32        emptyelem = curelem;
             uint32        moveelem;
             int32        emptydist = 0;
+
+			/*
+			 * In hybrid-hash agg, return null if reach the limitations
+			 */
+			if (tb->hybrid)
+			{
+				if (tb->members >= tb->max_buckets)
+				{
+					*found = false;
+					return NULL;
+				}
+			}
 
             /* find next empty bucket */
             while (true)

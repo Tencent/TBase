@@ -851,6 +851,10 @@ typedef struct Agg
     /* Note: planner provides numGroups & aggParams only in HASHED/MIXED case */
     List       *groupingSets;    /* grouping sets to use */
     List       *chain;            /* chained Agg/Sort nodes */
+#ifdef __TBASE__
+	uint32     entrySize;
+	bool       hybrid;
+#endif
 } Agg;
 
 /* ----------------
