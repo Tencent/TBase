@@ -1326,6 +1326,10 @@ _outAgg(StringInfo str, const Agg *node)
     WRITE_BITMAPSET_FIELD(aggParams);
     WRITE_NODE_FIELD(groupingSets);
     WRITE_NODE_FIELD(chain);
+#ifdef __TBASE__
+	WRITE_UINT_FIELD(entrySize);
+	WRITE_BOOL_FIELD(hybrid);
+#endif
 }
 
 static void
@@ -3286,6 +3290,10 @@ _outAggPath(StringInfo str, const AggPath *node)
     WRITE_FLOAT_FIELD(numGroups, "%.0f");
     WRITE_NODE_FIELD(groupClause);
     WRITE_NODE_FIELD(qual);
+#ifdef __TBASE__
+	WRITE_UINT_FIELD(entrySize);
+	WRITE_BOOL_FIELD(hybrid);
+#endif
 }
 
 static void

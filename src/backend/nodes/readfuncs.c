@@ -3247,6 +3247,10 @@ _readAgg(void)
     READ_BITMAPSET_FIELD(aggParams);
     READ_NODE_FIELD(groupingSets);
     READ_NODE_FIELD(chain);
+#ifdef __TBASE__
+	READ_UINT_FIELD(entrySize);
+	READ_BOOL_FIELD(hybrid);
+#endif
 
     READ_DONE();
 }

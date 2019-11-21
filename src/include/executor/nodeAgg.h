@@ -19,6 +19,12 @@
 #include "executor/execParallel.h"
 #endif
 
+#ifdef __TBASE__
+extern bool g_hybrid_hash_agg;
+extern bool g_hybrid_hash_agg_debug;
+extern int  g_default_hashagg_nbatches;
+#endif
+
 extern AggState *ExecInitAgg(Agg *node, EState *estate, int eflags);
 extern void ExecEndAgg(AggState *node);
 extern void ExecReScanAgg(AggState *node);
