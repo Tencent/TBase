@@ -804,7 +804,10 @@ AlterSubscription_refresh(Subscription *sub, bool copy_data)
                      list_length(pubrel_names), sizeof(Oid), oid_cmp))
         {
             RemoveSubscriptionRel(sub->oid, relid);
-
+#ifdef __STORAGE_SCALABLE__
+            /* remove subscription / table mapping with publication */
+            RemoveSubscriptionTable(sub->oid, relid);
+#endif
             logicalrep_worker_stop_at_commit(sub->oid, relid);
 
             ereport(DEBUG1,

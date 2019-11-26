@@ -2870,6 +2870,10 @@ heap_drop_with_catalog(Oid relid)
      */
     RemoveSubscriptionRel(InvalidOid, relid);
 
+#ifdef __STORAGE_SCALABLE__
+    /* remove subscription / table mapping with publication */
+    RemoveSubscriptionTable(InvalidOid, relid);
+#endif
     /*
      * Forget any ON COMMIT action for the rel
      */
