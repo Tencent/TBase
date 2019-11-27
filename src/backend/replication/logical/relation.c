@@ -690,7 +690,7 @@ logicalrep_statis_update_for_apply(Oid subid, char *subname)
 }
 #endif
 
-//#ifdef __SUBSCRIPTION__
+#ifdef __SUBSCRIPTION__
 bool AmTbaseSubscriptionApplyWorker(void)
 {
     return IS_PGXC_DATANODE && g_am_tbase_logical_apply_worker;
