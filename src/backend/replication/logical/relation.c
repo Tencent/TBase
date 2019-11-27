@@ -690,7 +690,7 @@ logicalrep_statis_update_for_apply(Oid subid, char *subname)
 }
 #endif
 
-#ifdef __SUBSCRIPTION__
+//#ifdef __SUBSCRIPTION__
 bool AmTbaseSubscriptionApplyWorker(void)
 {
     return IS_PGXC_DATANODE && g_am_tbase_logical_apply_worker;
@@ -782,6 +782,7 @@ logical_apply_slot_fill_defaults(Relation rel,
     int           *defmap = NULL;
     ExprState **defexprs = NULL;
     ExprContext *econtext = NULL;
+	int         upstream_att_index = 0;
 
     econtext = GetPerTupleExprContext(estate);
     defmap = (int *) palloc(num_phys_attrs * sizeof(int));
@@ -791,8 +792,14 @@ logical_apply_slot_fill_defaults(Relation rel,
     {
         Expr       *defexpr = NULL;
 
-        if (desc->attrs[attnum]->attisdropped || values[attnum] != NULL)
+		if (desc->attrs[attnum]->attisdropped)
             continue;
+
+		if (values[upstream_att_index] != NULL)
+		{
+			upstream_att_index++;
+			continue;
+		}
 
         defexpr = (Expr *) build_column_default(rel, attnum + 1);
 
@@ -825,6 +832,7 @@ logical_apply_slot_store_cstrings(TupleTableSlot *slot,
 {
     int            natts = slot->tts_tupleDescriptor->natts;
     int            i = 0;
+	int         upstream_att_index = 0;
 
     ExecClearTuple(slot);
 
@@ -833,17 +841,19 @@ logical_apply_slot_store_cstrings(TupleTableSlot *slot,
     {
         Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
 
-        if (!att->attisdropped && values[i] != NULL)
+		if (!att->attisdropped && values[upstream_att_index] != NULL)
         {
             Oid            typinput = InvalidOid;
             Oid            typioparam = InvalidOid;
 
             getTypeInputInfo(att->atttypid, &typinput, &typioparam);
             slot->tts_values[i] = OidInputFunctionCall(typinput,
-                                                       values[i],
+													   values[upstream_att_index],
                                                        typioparam,
                                                        att->atttypmod);
             slot->tts_isnull[i] = false;
+
+			upstream_att_index++;
         }
         else
         {
@@ -874,6 +884,7 @@ logical_apply_slot_modify_cstrings(TupleTableSlot *slot,
 {
     int            natts = slot->tts_tupleDescriptor->natts;
     int            i = 0;
+	int         upstream_att_index = 0;
 
     slot_getallattrs(slot);
     ExecClearTuple(slot);
@@ -883,20 +894,27 @@ logical_apply_slot_modify_cstrings(TupleTableSlot *slot,
     {
         Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
 
-        if (!replaces[i])
+		if (att->attisdropped)
             continue;
 
-        if (values[i] != NULL)
+		if (!replaces[upstream_att_index])
+		{
+			upstream_att_index++;
+			continue;
+		}
+
+		if (values[upstream_att_index] != NULL)
         {
             Oid            typinput = InvalidOid;
             Oid            typioparam = InvalidOid;
 
             getTypeInputInfo(att->atttypid, &typinput, &typioparam);
             slot->tts_values[i] = OidInputFunctionCall(typinput,
-                                                       values[i],
+													   values[upstream_att_index],
                                                        typioparam,
                                                        att->atttypmod);
             slot->tts_isnull[i] = false;
+			upstream_att_index++;
         }
         else
         {
