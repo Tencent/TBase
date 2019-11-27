@@ -1060,6 +1060,8 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
             {
                 Relation    rel;
                 WalRcvExecResult *res;
+				bool origin_startpos_is_greater = true;
+
 #ifdef __STORAGE_SCALABLE__
                 List        *shards = NULL;
                 uint64      nTups_copy = 0;
@@ -1175,7 +1177,6 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
                 /* Wait for main apply worker to tell us to catchup. */
                 wait_for_worker_state_change(SUBREL_STATE_CATCHUP);
 
-				bool origin_startpos_is_greater = true;
 
 #ifdef __SUBSCRIPTION__
 
