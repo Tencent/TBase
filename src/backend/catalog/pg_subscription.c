@@ -1439,12 +1439,11 @@ GetTbaseSubscriptnParallelChild(Oid subid)
 		parent_oid = DatumGetObjectId(fastgetattr(tuple, Anum_tbase_subscription_parallel_sub_parent, desc, &isnull));
 		if (false == isnull && sub_parent_oid == parent_oid)
 		{
-			Oid *sub_child_oid;
-			sub_child_oid = (Oid *) palloc(sizeof(Oid));
+			Oid sub_child_oid;
 
-			*sub_child_oid = DatumGetObjectId(fastgetattr(tuple, Anum_tbase_subscription_parallel_sub_child, desc, &isnull));
+			sub_child_oid = DatumGetObjectId(fastgetattr(tuple, Anum_tbase_subscription_parallel_sub_child, desc, &isnull));
 
-			res = lappend(res, sub_child_oid);
+			res = lappend_oid(res, sub_child_oid);
 		}
 	}
 	/* Cleanup */
@@ -1489,6 +1488,8 @@ GetTbaseSubscriptnParallelWorker(Oid subid)
 
 	}
 	LWLockRelease(LogicalRepWorkerLock);
+
+	list_free_deep(parallel_childids_list);
 
 	return res;
 }

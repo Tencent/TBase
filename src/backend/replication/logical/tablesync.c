@@ -321,6 +321,8 @@ process_syncing_tables_for_sync(XLogRecPtr current_lsn)
 			SpinLockRelease(&sub_worker->relmutex);
 		}
 
+ 	   list_free(parallel_sub_workers_list);
+
 	}
 
 #endif
@@ -619,6 +621,8 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
 								}
 							}
 						}
+
+						list_free_deep(parallel_childids_list);
 					}
 #endif
                 }
@@ -1201,6 +1205,8 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
 	        		   }
 	        		   SpinLockRelease(&sub_worker->relmutex);
 	        	   }
+
+	        	   list_free(parallel_sub_workers_list);
 
 	           }
 
