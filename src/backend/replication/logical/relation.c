@@ -813,6 +813,7 @@ logical_apply_slot_fill_defaults(Relation rel,
             defmap[num_defaults] = attnum;
             num_defaults++;
         }
+		upstream_att_index++;
     }
 
     for (i = 0; i < num_defaults; i++)
@@ -841,7 +842,19 @@ logical_apply_slot_store_cstrings(TupleTableSlot *slot,
     {
         Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
 
-		if (!att->attisdropped && values[upstream_att_index] != NULL)
+		if (att->attisdropped)
+		{
+			/*
+			 * We assign NULL to dropped attributes, NULL values, and missing
+			 * values (missing values should be later filled using
+			 * logical_apply_slot_fill_defaults).
+			 */
+			slot->tts_values[i] = (Datum) 0;
+			slot->tts_isnull[i] = true;
+			continue;
+		}
+
+		if (values[upstream_att_index] != NULL)
         {
             Oid            typinput = InvalidOid;
             Oid            typioparam = InvalidOid;
@@ -853,7 +866,6 @@ logical_apply_slot_store_cstrings(TupleTableSlot *slot,
                                                        att->atttypmod);
             slot->tts_isnull[i] = false;
 
-			upstream_att_index++;
         }
         else
         {
@@ -865,6 +877,9 @@ logical_apply_slot_store_cstrings(TupleTableSlot *slot,
             slot->tts_values[i] = (Datum) 0;
             slot->tts_isnull[i] = true;
         }
+
+		upstream_att_index++;
+
     }
 
     ExecStoreVirtualTuple(slot);
@@ -914,13 +929,14 @@ logical_apply_slot_modify_cstrings(TupleTableSlot *slot,
                                                        typioparam,
                                                        att->atttypmod);
             slot->tts_isnull[i] = false;
-			upstream_att_index++;
         }
         else
         {
             slot->tts_values[i] = (Datum) 0;
             slot->tts_isnull[i] = true;
         }
+
+		upstream_att_index++;
     }
 
     ExecStoreVirtualTuple(slot);
