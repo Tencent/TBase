@@ -1489,7 +1489,7 @@ GetTbaseSubscriptnParallelWorker(Oid subid)
 	}
 	LWLockRelease(LogicalRepWorkerLock);
 
-	list_free_deep(parallel_childids_list);
+	list_free(parallel_childids_list);
 
 	return res;
 }
