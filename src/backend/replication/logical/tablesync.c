@@ -596,12 +596,12 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
 
 						foreach (lc_simple, parallel_childids_list)
 						{
-							Oid *sub_oid = (Oid *) lfirst(lc_simple);
-							if (*sub_oid != MySubscription->oid)
+							Oid sub_oid = lfirst_oid(lc_simple);
+							if (sub_oid != MySubscription->oid)
 							{
 							 	List * notready_list = NIL;
 
-								notready_list =  GetSubscriptionNotReadyRelations(*sub_oid);
+								notready_list =  GetSubscriptionNotReadyRelations(sub_oid);
 								if (notready_list != NIL)
 								{
 									foreach (notready_simple, notready_list)
@@ -612,7 +612,7 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
 											/*
 											 * just process the worker's state is <= SUBREL_STATE_SYNCDONE
 											 */
-											SetSubscriptionRelState(*sub_oid,
+											SetSubscriptionRelState(sub_oid,
 													rstate->relid,
 													SUBREL_STATE_SYNCDONE,
 													rstate->lsn, true, false);

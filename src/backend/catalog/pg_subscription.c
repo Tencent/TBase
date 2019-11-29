@@ -1475,10 +1475,10 @@ GetTbaseSubscriptnParallelWorker(Oid subid)
 
 	foreach (lc_simple, parallel_childids_list)
 	{
-		Oid *sub_oid = (Oid *) lfirst(lc_simple);
-		if (*sub_oid != subid)
+		Oid sub_oid = lfirst_oid(lc_simple);
+		if (sub_oid != subid)
 		{
-			syncworker = logicalrep_worker_find(*sub_oid, InvalidOid, false);
+			syncworker = logicalrep_worker_find(sub_oid, InvalidOid, false);
 
 			if (syncworker)
 			{
