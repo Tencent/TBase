@@ -4348,14 +4348,17 @@ create_grouping_paths(PlannerInfo *root,
                         else
                             path = create_remotesubplan_path(root, path, NULL);
 
-                        if (!is_sorted && agg_costs->hasOnlyDistinct && olap_optimizer &&
+						if (agg_costs->hasOnlyDistinct && olap_optimizer &&
                             !has_cold_hot_table)
                         {
-                            path = (Path *) create_sort_path(root,
-                                             grouped_rel,
-                                             path,
-                                             root->group_pathkeys,
-                                             -1.0);
+							if (root->group_pathkeys)
+							{
+								path = (Path *) create_sort_path(root,
+												 grouped_rel,
+												 path,
+												 root->group_pathkeys,
+												 -1.0);
+							}
                         }
                     }
                     else
