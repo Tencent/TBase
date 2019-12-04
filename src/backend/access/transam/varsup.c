@@ -366,7 +366,7 @@ GetNewTransactionId(bool isSubXact)
              * start a new transaction and associate it with a global session
              * identifier which is guaranteed to be unique across the cluster
              */
-            sprintf(global_session, "%s_%d_%d", get_pgxc_nodename(MyCoordId), MyCoordPid,
+			sprintf(global_session, "%s_%d_%u", get_pgxc_nodename(MyCoordId), MyCoordPid,
                     MyCoordLxid);
             xid = (TransactionId) BeginTranGTM(timestamp, global_session);
             if (TransactionIdIsValid(xid))

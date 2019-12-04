@@ -4554,7 +4554,7 @@ static struct config_uint ConfigureNamesUInt[] =
             GUC_IS_NAME | GUC_REPORT | GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE | GUC_NOT_WHILE_SEC_REST
         },
         &MyCoordLxid,
-        0, 0, INT_MAX,
+		0, 0, UINT_MAX,
         NULL, NULL, NULL
     },
 
@@ -7694,7 +7694,7 @@ parse_uint(const char *value, uint *result, int flags, const char **hintmsg)
     if (endptr == value)
         return false;            /* no HINT for integer syntax error */
 
-    if (errno == ERANGE || val != (int64) ((int32) val))
+	if (errno == ERANGE || val != (uint64) ((uint32) val))
     {
         if (hintmsg)
             *hintmsg = gettext_noop("Value exceeds integer range.");
@@ -7742,7 +7742,7 @@ parse_uint(const char *value, uint *result, int flags, const char **hintmsg)
         }
 
         /* Check for overflow due to units conversion */
-        if (val != (int64) ((int32) val))
+		if (val != (uint64) ((uint32) val))
         {
             if (hintmsg)
                 *hintmsg = gettext_noop("Value exceeds integer range.");
@@ -7976,12 +7976,12 @@ parse_and_validate_value(struct config_generic *record,
                     return false;
                 }
 
-                if (newval->intval < conf->min || newval->intval > conf->max)
+				if (newval->uintval < conf->min || newval->uintval > conf->max)
                 {
                     ereport(elevel,
                             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                              errmsg("%d is outside the valid range for parameter \"%s\" (%d .. %d)",
-                                    newval->intval, name,
+									newval->uintval, name,
                                     conf->min, conf->max)));
                     return false;
                 }
