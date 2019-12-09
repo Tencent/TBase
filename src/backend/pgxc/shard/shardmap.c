@@ -4033,6 +4033,11 @@ pg_clear_cold_access(void)
 {
     char   returnstr[MAXPGPATH] = {0};
     struct stat stat_buf;    
+
+	if(!IS_PGXC_DATANODE)
+	{
+		elog(ERROR, "can only called on datanode");
+	}	
     
     /* remove dual write info from share memory */
     g_AccessCtl->needlock = true;
