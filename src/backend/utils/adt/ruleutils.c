@@ -12124,8 +12124,8 @@ pruning_walker(Relation rel, Node *expr)
 				RestrictInfo *restrict_info = (RestrictInfo *)expr;
 				result = pruning_walker(rel, (Node *)restrict_info->clause);
 #else
-                RestrictInfo *restrict = (RestrictInfo *)expr;
-                result = pruning_walker(rel, (Node *)restrict->clause);
+				RestrictInfo *restrict = (RestrictInfo *)expr;
+				result = pruning_walker(rel, (Node *)restrict->clause);
 #endif
             }
             break;
