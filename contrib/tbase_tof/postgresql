@@ -1,0 +1,3 @@
+#%PAM-1.0
+auth		required        /lib/tbase_tof.so url=http://test.api.tof.oa.com appkey=0637a92a289f4fbe96169af38ffbb1cb  sysid=23985
+account    required     pam_permit.so
