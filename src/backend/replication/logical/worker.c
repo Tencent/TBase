@@ -95,6 +95,8 @@
 #include "pgxc/execRemote.h"
 #endif
 
+#include "commands/dbcommands.h"
+
 #define NAPTIME_PER_CYCLE 1000    /* max sleep time between cycles (1s) */
 
 typedef struct FlushPosition
@@ -933,12 +935,12 @@ apply_handle_insert(StringInfo s)
     EState       *estate;
     TupleTableSlot *remoteslot;
     MemoryContext oldctx;
-	char *npname[1] = {NULL};
-	char *tbname[1] = {NULL};
+	char *npname = NULL;
+	char *tbname = NULL;
 
     ensure_transaction();
 
-	relid = logicalrep_read_insert(s, npname, tbname, NULL, &newtup);
+	relid = logicalrep_read_insert(s, &npname, &tbname, NULL, &newtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
     if (!should_apply_changes_for_rel(rel))
     {
@@ -962,7 +964,7 @@ apply_handle_insert(StringInfo s)
 
             /* send insert to DN and wait exec finish */
             exec_nodes = apply_get_exec_nodes(rel, &newtup, RELATION_ACCESS_INSERT);
-			apply_exec_on_nodes(s, npname, tbname, exec_nodes);
+			apply_exec_on_nodes(s, &npname, &tbname, exec_nodes);
             FreeExecNodes(&exec_nodes);
         }
 
@@ -1068,12 +1070,12 @@ apply_handle_update(StringInfo s)
     TupleTableSlot *remoteslot;
     bool        found;
     MemoryContext oldctx;
-	char *npname[1] = {NULL};
-	char *tbname[1] = {NULL};
+	char *npname = NULL;
+	char *tbname = NULL;
 
     ensure_transaction();
 
-	relid = logicalrep_read_update(s, npname, tbname, NULL,
+	relid = logicalrep_read_update(s, &npname, &tbname, NULL,
                                    &has_oldtup, &oldtup,
                                    &newtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
@@ -1103,7 +1105,7 @@ apply_handle_update(StringInfo s)
             /* send update to DN and wait exec finish */
             exec_nodes = apply_get_exec_nodes(rel, has_oldtup ? &oldtup : &newtup,
                                                 RELATION_ACCESS_UPDATE);
-			apply_exec_on_nodes(s, npname, tbname, exec_nodes);
+			apply_exec_on_nodes(s, &npname, &tbname, exec_nodes);
             FreeExecNodes(&exec_nodes);    
         }
 
@@ -1229,12 +1231,12 @@ apply_handle_delete(StringInfo s)
     TupleTableSlot *localslot;
     bool        found;
     MemoryContext oldctx;
-	char *npname[1] = {NULL};
-	char *tbname[1] = {NULL};
+	char *npname = NULL;
+	char *tbname = NULL;
 
     ensure_transaction();
 
-	relid = logicalrep_read_delete(s, npname, tbname, NULL, &oldtup);
+	relid = logicalrep_read_delete(s, &npname, &tbname, NULL, &oldtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
     if (!should_apply_changes_for_rel(rel))
     {
@@ -1261,7 +1263,7 @@ apply_handle_delete(StringInfo s)
 
             /* send delete to DN and wait exec finish */
             exec_nodes = apply_get_exec_nodes(rel, &oldtup, RELATION_ACCESS_UPDATE);
-			apply_exec_on_nodes(s, npname, tbname, exec_nodes);
+			apply_exec_on_nodes(s, &npname, &tbname, exec_nodes);
             FreeExecNodes(&exec_nodes);
         }
 
