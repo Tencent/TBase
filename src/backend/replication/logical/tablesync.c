@@ -554,6 +554,8 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
                 /* If we told worker to catch up, wait for it. */
                 if (rstate->state == SUBREL_STATE_SYNCWAIT)
                 {
+					bool is_syncdone = false;
+
                     /* Signal the sync worker, as it may be waiting for us. */
                     if (syncworker->proc)
                         logicalrep_worker_wakeup_ptr(syncworker);
@@ -571,7 +573,7 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
                         started_tx = true;
                     }
 
-					bool is_syncdone = wait_for_relation_state_change(rstate->relid,
+					is_syncdone = wait_for_relation_state_change(rstate->relid,
                                                    SUBREL_STATE_SYNCDONE);
 #ifdef __SUBSCRIPTION__
 					/* make parallel_index != 0 other sub_child worker's state about rstate->relid to SUBREL_STATE_SYNCDONE.
