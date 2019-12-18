@@ -3088,6 +3088,13 @@ handle_response(PGXCNodeHandle *conn, ResponseCombiner *combiner)
         {
             PGXCNodeSetConnectionState(conn,
                     DN_CONNECTION_STATE_ERROR_FATAL);
+#ifdef __TBASE__
+			elog(DEBUG5, "handle_response, fatal_conn=%p, fatal_conn->nodename=%s, fatal_conn->sock=%d, "
+				"fatal_conn->read_only=%d, fatal_conn->transaction_status=%c, "
+				"fatal_conn->sock_fatal_occurred=%d, conn->backend_pid=%d, fatal_conn->error=%s", 
+				conn, conn->nodename, conn->sock, conn->read_only, conn->transaction_status,
+				conn->sock_fatal_occurred, conn->backend_pid,  conn->error);
+#endif
             closesocket(conn->sock);
             conn->sock = NO_SOCKET;
 			conn->sock_fatal_occurred = true;
@@ -7686,18 +7693,22 @@ IsTwoPhaseCommitRequired(bool localWrite)
 	{
 		PGXCNodeHandle *conn = handles->datanode_handles[i];
 
-		elog(LOG, "IsTwoPhaseCommitRequired, fatal_conn->nodename=%s, fatal_conn->sock=%d, "
-			"fatal_conn->read_only=%d, fatal_conn->transaction_status=%c, fatal_conn->error=%s", 
-			conn->nodename, conn->sock, conn->read_only, conn->transaction_status, conn->error);
+		elog(LOG, "IsTwoPhaseCommitRequired, fatal_conn=%p, fatal_conn->nodename=%s, fatal_conn->sock=%d, "
+			"fatal_conn->read_only=%d, fatal_conn->transaction_status=%c, "
+			"fatal_conn->sock_fatal_occurred=%d, conn->backend_pid=%d, fatal_conn->error=%s", 
+			conn, conn->nodename, conn->sock, conn->read_only, conn->transaction_status,
+			conn->sock_fatal_occurred, conn->backend_pid,  conn->error);
 	}
 
 	for (i = 0; i < handles->co_conn_count; i++)
 	{
 		PGXCNodeHandle *conn = handles->coord_handles[i];
 
-		elog(LOG, "IsTwoPhaseCommitRequired, fatal_conn->nodename=%s, fatal_conn->sock=%d, "
-			"fatal_conn->read_only=%d, fatal_conn->transaction_status=%c, fatal_conn->error=%s", 
-			conn->nodename, conn->sock, conn->read_only, conn->transaction_status, conn->error);
+		elog(LOG, "IsTwoPhaseCommitRequired, fatal_conn=%p, fatal_conn->nodename=%s, fatal_conn->sock=%d, "
+			"fatal_conn->read_only=%d, fatal_conn->transaction_status=%c, "
+			"fatal_conn->sock_fatal_occurred=%d, conn->backend_pid=%d, fatal_conn->error=%s", 
+			conn, conn->nodename, conn->sock, conn->read_only, conn->transaction_status,
+			conn->sock_fatal_occurred, conn->backend_pid,  conn->error);
 	}
 	pfree_pgxc_all_handles(handles);
 
