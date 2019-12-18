@@ -1183,6 +1183,13 @@ retry:
                 PGXCNodeSetConnectionState(conn,
                         DN_CONNECTION_STATE_ERROR_FATAL);    /* No more connection to
                                                             * backend */
+#ifdef __TBASE__
+				elog(DEBUG5, "pgxc_node_read_data, fatal_conn=%p, fatal_conn->nodename=%s, fatal_conn->sock=%d, "
+					"fatal_conn->read_only=%d, fatal_conn->transaction_status=%c, "
+					"fatal_conn->sock_fatal_occurred=%d, conn->backend_pid=%d, fatal_conn->error=%s", 
+					conn, conn->nodename, conn->sock, conn->read_only, conn->transaction_status,
+					conn->sock_fatal_occurred, conn->backend_pid,  conn->error);
+#endif
                 closesocket(conn->sock);
                 conn->sock = NO_SOCKET;
 #ifdef __TBASE__
