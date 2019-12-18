@@ -634,11 +634,10 @@ static void apply_exec_on_nodes(StringInfo s, char *nspname, char *relname, Exec
     } 
     else if (!validate_combiner(&combiner))
     {
-		elog(LOG, "logical apply found that %s, on table %s.%s in database %s",
-				combiner.errorMessage, nspname, relname, get_database_name(MyDatabaseId));
         ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("apply_exec_on_nodes validate_combiner responese of APPLY failed")));
+	                (errcode(ERRCODE_INTERNAL_ERROR),
+                        errmsg("apply_exec_on_nodes validate_combiner responese of APPLY failed: %s, on table %s.%s in database %s",
+                        combiner.errorMessage, nspname, relname, get_database_name(MyDatabaseId))));
         
     }    
 
