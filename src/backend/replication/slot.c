@@ -1594,6 +1594,20 @@ RestoreSlotFromDisk(const char *name)
 
     slot->in_use                    = true;
     slot->active_pid                = 0;
+#ifdef __TBASE__
+	slot->pgoutput = false;
+	slot->subid = InvalidOid;
+	slot->relid = InvalidOid;
+	slot->shards = NULL;
+	slot->npubs = 0;
+	slot->alltables = NULL;
+	slot->pubshards = NULL;
+	slot->tables = NULL;
+	slot->ntups_insert = 0;
+	slot->ntups_delete = 0;
+	slot->checksum_insert = 0;
+	slot->checksum_delete = 0;
+#endif
 
     return;
 #endif
