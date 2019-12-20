@@ -6618,6 +6618,7 @@ static void pooler_async_ping_node(Oid node)
     while (-1 == PipePut(g_AsynUtilityPipeSender, (void*)asyncInfo))
     {
         elog(LOG, POOL_MGR_PREFIX"fail to async ping node:%u", node);
+	    pg_usleep(1000000L);
     }
     
     ThreadSemaUp(&g_AsnyUtilitysem);
