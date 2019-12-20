@@ -312,7 +312,7 @@ process_syncing_tables_for_sync(XLogRecPtr current_lsn)
 		{
 			LogicalRepWorker *sub_worker = (LogicalRepWorker *) lfirst(lc_simple);
 			SpinLockAcquire(&sub_worker->relmutex);
-			if (current_lsn < sub_worker->relstate_lsn)
+			if (current_lsn < sub_worker->reply_lsn)
 			{
 				/* must bigger than other parallel worker's lsn, else return */
 				SpinLockRelease(&sub_worker->relmutex);
@@ -1131,11 +1131,20 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
                  * decoding.
                  */
 #ifdef __STORAGE_SCALABLE__
-                walrcv_create_slot(wrconn, slotname, true,
-                                   CRS_USE_SNAPSHOT, origin_startpos, 
-                                   MySubscription->name, MySubscription->oid,
-                                   get_namespace_name(RelationGetNamespace(rel)),
-                                   RelationGetRelationName(rel));
+				if (shards)
+				{
+					walrcv_create_slot(wrconn, slotname, true,
+									   CRS_USE_SNAPSHOT, origin_startpos,
+									   MySubscription->name, MySubscription->oid,
+									   get_namespace_name(RelationGetNamespace(rel)),
+									   RelationGetRelationName(rel));
+				}
+				else
+				{
+					walrcv_create_slot(wrconn, slotname, true,
+									   CRS_USE_SNAPSHOT, origin_startpos,
+									   NULL, InvalidOid, NULL, NULL);
+				}
 
                 UpdateSubTableStatistics(MyLogicalRepWorker->subid, MyLogicalRepWorker->relid,
                                          0, 0, 0, 0, 0, STATE_DATACOPY, true);
@@ -1198,7 +1207,7 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
 	        	   {
 	        		   LogicalRepWorker *sub_worker = (LogicalRepWorker *) lfirst(lc_simple);
 	        		   SpinLockAcquire(&sub_worker->relmutex);
-	        		   if (*origin_startpos < sub_worker->relstate_lsn)
+	        		   if (*origin_startpos < sub_worker->reply_lsn)
 	        		   {
 	        			   /* must greater than other parallel worker's lsn, else return */
 	        			   SpinLockRelease(&sub_worker->relmutex);

@@ -621,8 +621,16 @@ CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
 
 #ifdef __STORAGE_SCALABLE__
                 /* send subscription's name and oid addition additionally */
-                walrcv_create_slot(wrconn, slotname, false,
-                                   CRS_NOEXPORT_SNAPSHOT, &lsn, slotname, subid, NULL, NULL);
+				if (shards)
+				{
+					walrcv_create_slot(wrconn, slotname, false,
+									   CRS_NOEXPORT_SNAPSHOT, &lsn, slotname, subid, NULL, NULL);
+				}
+				else
+				{
+					walrcv_create_slot(wrconn, slotname, false,
+									   CRS_NOEXPORT_SNAPSHOT, &lsn, NULL, InvalidOid, NULL, NULL);
+				}
 #else
                 walrcv_create_slot(wrconn, slotname, false,
                                    CRS_NOEXPORT_SNAPSHOT, &lsn);
