@@ -668,6 +668,10 @@ compute_hash(Oid type, Datum value, char locator)
 
         case NUMERICOID:
             return DirectFunctionCall1(hash_numeric, value);
+#ifdef __TBASE__
+		case JSONBOID:
+		    return DirectFunctionCall1(jsonb_hash, value);
+#endif
         default:
             ereport(ERROR,(errmsg("Unhandled datatype:%d for modulo or hash distribution in compute_hash", type)));
     }
@@ -749,6 +753,10 @@ get_compute_hash_function(Oid type, char locator)
             return "timetz_hash";
         case NUMERICOID:
             return "hash_numeric";
+#ifdef __TBASE__
+		case JSONBOID:
+		    return "jsonb_hash";
+#endif
         default:
             ereport(ERROR,(errmsg("Unhandled datatype:%d for modulo or hash distribution in get_compute_hash_function", type)));
     }
