@@ -2917,17 +2917,9 @@ reconnect:
             CopyXLogRecordToBuff(res->gr_resdata.grd_xlog_data.xlog_data,start_pos,end_pos,(uint64)size);
             NotifyReplication(end_pos);
             UpdateStandbyWriteBuffPos(end_pos);
+			XLogFlush(end_pos);
         }
 
-        if(res->gr_resdata.grd_xlog_data.flush != InvalidXLogRecPtr)
-        {
-            flush_pos = res->gr_resdata.grd_xlog_data.flush;
-            if(end_pos < flush_pos)
-               flush_pos = end_pos;
-
-            XLogFlush(flush_pos);
-        }
-            
         if(res->gr_resdata.grd_xlog_data.reply)
         {
             WaitSyncComplete(flush_pos);
