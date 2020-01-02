@@ -1547,9 +1547,10 @@ RelationBuildDesc(Oid targetRelId, bool insertIt)
 
 #ifdef _MIGRATE_
     if ((IS_PGXC_COORDINATOR || IS_PGXC_DATANODE)&&
-        relation->rd_id >= FirstNormalObjectId &&
-        !IsAutoVacuumWorkerProcess())
+		relation->rd_id >= FirstNormalObjectId)
+	{
         RelationBuildLocator(relation);
+	}
 #else
     if (IS_PGXC_COORDINATOR &&
         relation->rd_id >= FirstNormalObjectId)
