@@ -111,6 +111,10 @@
 #include "replication/slot.h"
 #include "miscadmin.h"
 #endif
+#ifdef _PUB_SUB_RELIABLE_
+#include "replication/walsender_private.h"
+#endif
+
 
 #ifdef __STORAGE_SCALABLE__
 static HTAB *confirmHash = NULL;
@@ -367,6 +371,18 @@ DecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
                 xl_xact_commit *xlrec;
                 xl_xact_parsed_commit parsed;
                 TransactionId xid;
+
+#ifdef _PUB_SUB_RELIABLE_
+				/*
+				 * Make sure we sync current transaction to synchronous standbys
+				 * before commit to avoid data lost in master-master replication.
+				 *
+				 * NB: this goes effect under async replication,thus sync replicaton   
+				 * is not protected which need to be consider later.
+				 */
+				if(MyWalSnd->sync_standby_priority == 0)
+					SyncRepWaitForLSN(buf->endptr, true);
+#endif
 
                 xlrec = (xl_xact_commit *) XLogRecGetData(r);
                 ParseCommitRecord(XLogRecGetInfo(buf->record), xlrec, &parsed);
