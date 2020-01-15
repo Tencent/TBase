@@ -512,8 +512,10 @@ gather_merge_clear_slots(GatherMergeState *gm_state)
 
     /* Free tuple array as we don't need it any more */
     pfree(gm_state->gm_tuple_buffers);
+	gm_state->gm_tuple_buffers = NULL;
     /* Free the binaryheap, which was created for sort */
     binaryheap_free(gm_state->gm_heap);
+	gm_state->gm_heap = NULL;
 }
 
 /*
@@ -542,6 +544,10 @@ gather_merge_getnext(GatherMergeState *gm_state)
          * the heap, because it might now compare differently against the
          * other elements of the heap.
          */
+		if (gm_state->gm_heap == NULL)
+		{
+			return NULL;
+		}
         i = DatumGetInt32(binaryheap_first(gm_state->gm_heap));
 
         if (gather_merge_readnext(gm_state, i, false))
