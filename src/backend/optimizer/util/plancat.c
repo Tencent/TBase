@@ -417,10 +417,10 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
                     else
 #endif
                         info->pages = RelationGetNumberOfBlocks(indexRelation);
-                    info->tuples = rel->tuples;
 #ifdef __TBASE__
                 }
 #endif
+				info->tuples = rel->tuples;
             }
             else
             {
