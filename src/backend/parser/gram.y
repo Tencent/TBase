@@ -307,7 +307,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 		CreatePublicationStmt AlterPublicationStmt
 		CreateSubscriptionStmt AlterSubscriptionStmt DropSubscriptionStmt
 		CreateShardStmt MoveDataStmt DropShardStmt CleanShardingStmt CreateKeyValuesStmt
-		AlterNodeGroupStmt LockNodeStmt 
+		AlterNodeGroupStmt LockNodeStmt SampleStmt
 
 %type <node>	select_no_parens select_with_parens select_clause
 				simple_select values_clause
@@ -725,7 +725,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	RESET RESTART RESTRICT RETURNING RETURNS REVOKE RIGHT ROLE ROLLBACK ROLLBACK_SUBTXN ROLLUP
 	ROW ROWS RULE
 
-	SAVEPOINT SCHEMA SCHEMAS SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
+	SAMPLE SAVEPOINT SCHEMA SCHEMAS SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SESSIONTIMEZONE SET SETS SETOF SHARDING SHARE SHOW
 	SIMILAR SIMPLE SKIP SMALLINT SNAPSHOT SOME SQL_P STABLE STANDALONE_P
 	START STATEMENT STATISTICS STDIN STDOUT STEP STORAGE STRICT_P STRIP_P
@@ -1004,6 +1004,7 @@ stmt :
 			| RevokeStmt
 			| RevokeRoleStmt
 			| RuleStmt
+			| SampleStmt
 			| SecLabelStmt
 			| SelectStmt
 			| TransactionStmt
@@ -11355,6 +11356,22 @@ CleanAuditStmt:
 
 /* __AUDIT__ END */
 
+
+/* _SAMPLE_ BEGIN */
+SampleStmt:
+			SAMPLE qualified_name '(' Iconst ')'
+				{
+					SampleStmt *n = makeNode(SampleStmt);
+					
+					n->relation = $2;
+					n->rownum = $4;
+					
+					$$ = (Node *)n;
+				}
+			;
+
+/* _SAMPLE_ END */
+
 /* PGXC_BEGIN */
 PauseStmt: PAUSE CLUSTER
 				{
@@ -16661,6 +16678,7 @@ unreserved_keyword:
 			| ROLLUP
 			| ROWS
 			| RULE
+			| SAMPLE
 			| SAVEPOINT
 			| SCHEMA
 			| SCHEMAS

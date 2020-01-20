@@ -129,6 +129,7 @@ typedef enum NodeTag
 #endif
 #ifdef __TBASE__
     T_LockNodeStmt,
+	T_SampleStmt,
 #endif
 
     /* these aren't subclasses of Plan: */
