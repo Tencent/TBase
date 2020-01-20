@@ -785,6 +785,7 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 #endif
 #ifdef __TBASE__
         case T_LockNodeStmt:
+		case T_SampleStmt:
 #endif
         case T_ReindexStmt:
         case T_GrantStmt:
@@ -1286,6 +1287,7 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 #endif
 #ifdef __TBASE__
         case T_LockNodeStmt:
+		case T_SampleStmt:
 #endif
         case T_DropStmt:
         case T_RenameStmt:
@@ -2942,6 +2944,13 @@ standard_ProcessUtility(PlannedStmt *pstmt,
             
             break;
         }
+		case T_SampleStmt:
+		{
+			SampleStmt * stmt = (SampleStmt * )parsetree;
+
+			ExecSample(stmt, dest);
+			break;
+		}
 #endif
         case T_AlterNodeStmt:
         case T_CreateNodeStmt:
@@ -5584,6 +5593,11 @@ CreateCommandTag(Node *parsetree)
                 tag = "UNLOCK NODE";
             break;
         }
+		case T_SampleStmt:
+		{
+			tag = "SAMPLE";
+			break;
+		}
 #endif
 
 #ifdef __AUDIT__
@@ -6159,6 +6173,9 @@ GetCommandLogLevel(Node *parsetree)
         case T_LockNodeStmt:
             lev = LOGSTMT_DDL;
             break;
+		case T_SampleStmt:
+			lev = LOGSTMT_ALL;
+			break;
 #endif
 #ifdef __AUDIT__
         case T_AuditStmt:

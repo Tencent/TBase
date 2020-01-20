@@ -78,6 +78,7 @@
 #include "access/htup.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_type.h"
+#include "executor/executor.h"
 #include "nodes/parsenodes.h"
 #include "storage/buf.h"
 #include "storage/lock.h"
@@ -270,6 +271,16 @@ typedef struct
     AnalyzeInfo info;
 }    AnalyzeInfoEntry;
 
+typedef struct 
+{
+	double samplenum;
+	double totalnum;
+	double deadnum;
+	HeapTuple *rows;
+}SampleRowsContext;
+
+
+
 #endif
 
 /* in commands/vacuum.c */
@@ -350,6 +361,8 @@ extern AnalyzeInfoEntry *FetchAllQueryAnalyzeInfo(HASH_SEQ_STATUS *status, bool 
 extern void ClearQueryAnalyzeInfo(void);
 
 extern char *GetAnalyzeInfo(int nodeid, char *key);
+
+extern void ExecSample(SampleStmt *stmt, DestReceiver *dest);
 #endif
 
 #endif                            /* VACUUM_H */

@@ -73,6 +73,7 @@
 #include "utils/snapmgr.h"
 #endif
 #ifdef __TBASE__
+#include "funcapi.h"
 #include "nodes/nodes.h"
 #include "utils/ruleutils.h"
 #endif
@@ -142,6 +143,13 @@ static void analyze_rel_coordinator(Relation onerel, bool inh, int attr_cnt,
 extern bool random_collect_stats;
 #endif
 
+#ifdef __TBASE__
+static int acquire_coordinator_sample_rows(Relation onerel, int elevel,
+												HeapTuple *rows, int targrows,
+												double *totalrows, double *totaldeadrows);
+
+#endif
+
 /*
  *    analyze_rel() -- analyze one relation
  */
@@ -175,6 +183,7 @@ analyze_rel(Oid relid, RangeVar *relation, int options,
     
             pfree(childs);
             childs = NULL;
+			CommandCounterIncrement();
         }
 
         relation_close(onerel, NoLock);
@@ -627,7 +636,7 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
      * Acquire the sample rows
      */
     rows = (HeapTuple *) palloc(targrows * sizeof(HeapTuple));
-    if (inh)
+	if (inh || RELATION_IS_INTERVAL(onerel))
         numrows = acquire_inherited_sample_rows(onerel, elevel,
                                                 rows, targrows,
                                                 &totalrows, &totaldeadrows);
@@ -1467,9 +1476,15 @@ acquire_inherited_sample_rows(Relation onerel, int elevel,
      * Find all members of inheritance set.  We only need AccessShareLock on
      * the children.
      */
-    tableOIDs =
-        find_all_inheritors(RelationGetRelid(onerel), AccessShareLock, NULL);
-
+	if (RELATION_IS_INTERVAL(onerel))
+	{
+		tableOIDs = RelationGetAllPartitions(onerel);
+	}
+	else 
+	{
+		tableOIDs =
+			find_all_inheritors(RelationGetRelid(onerel), AccessShareLock, NULL);
+	}
     /*
      * Check that there's at least one descendant, else fail.  This could
      * happen despite analyze_rel's relhassubclass check, if table once had a
@@ -4758,4 +4773,269 @@ GetAnalyzeInfo(int nodeid, char *key)
 
     return NULL;
 }
+
+#define SAMPLE_ATTR_NUM 4
+
+void ExecSample(SampleStmt *stmt, DestReceiver *dest)
+{
+
+	Oid			 relid;
+	Relation	 onerel;
+	TupleDesc 	 tupdesc;
+	TupleDesc	 rowdesc;
+	HeapTuple 	*rows;
+	int 		 targetrows = stmt->rownum;
+	SampleRowsContext *context;
+	TupOutputState *tstate;
+	int 		 index = 0;
+	bool 		 nulls[SAMPLE_ATTR_NUM];
+	Datum 		 values[SAMPLE_ATTR_NUM];
+	
+	if (!IS_PGXC_COORDINATOR && !IS_PGXC_DATANODE)
+	{
+		elog(ERROR, "SAMPLE only support on Coordinator or Datanode");
+	}
+
+	if (stmt->rownum <= 0)
+	{
+		elog(ERROR, "SAMPLE row number must larger than 0");
+	}
+
+	relid = RangeVarGetRelid(stmt->relation, NoLock, false);
+	onerel = try_relation_open(relid, AccessShareLock);
+
+	if (!onerel)
+		elog(ERROR, "could not open relation with OID %u", relid);
+
+	/*
+	 * Check permissions --- this should match vacuum's check!
+	 */
+	if (!(pg_class_ownercheck(RelationGetRelid(onerel), GetUserId()) ||
+		  (pg_database_ownercheck(MyDatabaseId, GetUserId()) && !onerel->rd_rel->relisshared)))
+	{
+		relation_close(onerel, AccessShareLock);
+		elog(ERROR, "Permission denied for ownership");
+		return;
+	}
+
+	/*
+	 * Silently ignore tables that are temp tables of other backends ---
+	 * trying to analyze these is rather pointless, since their contents are
+	 * probably not up-to-date on disk.  (We don't throw a warning here; it
+	 * would just lead to chatter during a database-wide ANALYZE.)
+	 */
+	if (RELATION_IS_OTHER_TEMP(onerel))
+	{
+		relation_close(onerel, AccessShareLock);
+		elog(ERROR, "SAMPLE do not suppport temp table");
+		return;
+	}
+
+	/*
+	 * We can ANALYZE any table except pg_statistic. See update_attstats
+	 */
+	if (RelationGetRelid(onerel) == StatisticRelationId)
+	{
+		relation_close(onerel, AccessShareLock);
+		elog(ERROR, "SAMPLE do not support pg_statistic");
+		return;
+	}
+
+	/* Check that it's a plain table, materialized view */
+	if (onerel->rd_rel->relkind != RELKIND_RELATION &&
+		onerel->rd_rel->relkind != RELKIND_MATVIEW &&
+		onerel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
+	{
+		relation_close(onerel, AccessShareLock);
+		elog(ERROR, "SAMPLE only support Tables or Materialized Views");
+		return;
+
+	}
+
+	rowdesc = BlessTupleDesc(RelationGetDescr(onerel));
+	rows = (HeapTuple *) palloc(targetrows * sizeof(HeapTuple));
+	context = (SampleRowsContext *)palloc0(sizeof(SampleRowsContext));
+	context->rows = rows;
+	vac_strategy = GetAccessStrategy(BAS_VACUUM);
+
+	/* initialize acquire sample rows */
+	if (IS_PGXC_COORDINATOR)
+	{
+		context->samplenum = acquire_coordinator_sample_rows(onerel, DEBUG2,
+ 														   rows, stmt->rownum, 
+ 														   &context->totalnum, 
+ 														   &context->deadnum);
+	}
+	else if (IS_PGXC_DATANODE)
+	{
+		if (onerel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE ||
+			onerel->rd_rel->relhassubclass || RELATION_IS_INTERVAL(onerel))
+		{
+			context->samplenum = acquire_inherited_sample_rows(onerel, DEBUG2, 
+	 														   rows, stmt->rownum, 
+	 														   &context->totalnum, 
+	 														   &context->deadnum);
+	 	}
+		else 
+		{
+			context->samplenum = acquire_sample_rows(onerel, DEBUG2, 
+													 rows, stmt->rownum, 
+													 &context->totalnum, 
+													 &context->deadnum);
+		}
+	}
+	tupdesc = CreateTemplateTupleDesc(SAMPLE_ATTR_NUM, false);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 1, "samplenum",
+					   FLOAT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 2, "totalnum",
+					   FLOAT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 3, "deadnum",
+					   FLOAT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 4, "rows",
+					   onerel->rd_rel->reltype, -1, 0);
+
+	tstate = begin_tup_output_tupdesc(dest, tupdesc);
+	MemSet(nulls, 0, sizeof(nulls));
+	nulls[3] = true;
+	values[0] = Float8GetDatum(context->samplenum);
+	values[1] = Float8GetDatum(context->totalnum);
+	values[2] = Float8GetDatum(context->deadnum);
+
+	do_tup_output(tstate, values, nulls);
+	
+	if (context->samplenum > 0)
+	{
+		for (index = 0; index < context->samplenum; index++)
+		{
+			nulls[0] = true;
+			nulls[1] = true;
+			nulls[2] = true;
+			nulls[3] = false;
+			values[3] = heap_copy_tuple_as_datum(context->rows[index], rowdesc);
+			do_tup_output(tstate, values, nulls);
+		}
+
+	}
+
+	end_tup_output(tstate);
+
+	pfree(rows);
+	pfree(context);
+	
+	relation_close(onerel, AccessShareLock);
+	return;
+
+}
+
+static int 
+acquire_coordinator_sample_rows(Relation onerel, int elevel,
+												HeapTuple *rows, int targrows,
+												double *totalrows, double *totaldeadrows)
+{
+	char		   *nspname;
+	char		   *relname;
+	/* Fields to run query to read statistics from data nodes */
+	StringInfoData	query;
+	EState		   *estate;
+	MemoryContext	oldcontext;
+	RemoteQuery 	*step;
+	RemoteQueryState *node;
+	TupleTableSlot *result;
+	int 			targetnum;
+	Var			   *dummy;
+	double			samplenum = 0;
+	double			totalnum = 0;
+	double			deadnum = 0;
+	int				numrows = 0;
+
+	/* Get the relation identifier */
+	relname = RelationGetRelationName(onerel);
+	nspname = get_namespace_name(RelationGetNamespace(onerel));
+	targetnum = ceil(1.0 * targrows / list_length(onerel->rd_locator_info->rl_nodeList));
+
+	/* Make up query string */
+	initStringInfo(&query);
+	
+	appendStringInfo(&query, "SAMPLE %s.%s(%d)", nspname, relname, targetnum);
+
+	/* Build up RemoteQuery */
+	step = makeNode(RemoteQuery);
+	step->combine_type = COMBINE_TYPE_NONE;
+	step->exec_nodes = makeNode(ExecNodes);
+	step->exec_nodes->nodeList = onerel->rd_locator_info->rl_nodeList;
+	step->sql_statement = query.data;
+	step->force_autocommit = false;
+	step->exec_type = EXEC_ON_DATANODES;
+
+	dummy = makeVar(1, 0, FLOAT8OID, 0, InvalidOid, 0);
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 makeTargetEntry((Expr *) dummy, 0, "samplenum", false));
+	dummy = makeVar(1, 1, FLOAT8OID, 0, InvalidOid, 0);
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 makeTargetEntry((Expr *) dummy, 1, "totalnum", false));
+	dummy = makeVar(1, 2, FLOAT8OID, 0, InvalidOid, 0);
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 makeTargetEntry((Expr *) dummy, 2, "deadnum", false));
+	dummy = makeVar(1, 3, onerel->rd_rel->reltype, 0, InvalidOid, 0);
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 makeTargetEntry((Expr *) dummy, 3, "rows", false));
+
+	/* Execute query on the data nodes */
+	estate = CreateExecutorState();
+	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
+	estate->es_snapshot = GetActiveSnapshot();
+	node = ExecInitRemoteQuery(step, estate, 0);
+	MemoryContextSwitchTo(oldcontext);
+
+	result = ExecRemoteQuery((PlanState *) node);
+	
+	while (result != NULL && !TupIsNull(result))
+	{
+		slot_getallattrs(result);
+		
+		if (result->tts_isnull[0] == false)
+		{
+			samplenum += DatumGetFloat8(result->tts_values[0]);
+		}
+
+		if (result->tts_isnull[1] == false)
+		{
+			totalnum += DatumGetFloat8(result->tts_values[1]);
+		}
+
+		if (result->tts_isnull[2] == false)
+		{
+			deadnum += DatumGetFloat8(result->tts_values[2]);
+		}
+
+		if (result->tts_isnull[3] == false)
+		{
+			if (numrows < targrows)
+			{
+				HeapTupleHeader td = DatumGetHeapTupleHeader(result->tts_values[3]);
+				HeapTupleData tmptup;
+
+				/* Build a temporary HeapTuple control structure */
+				tmptup.t_len = HeapTupleHeaderGetDatumLength(td);
+				ItemPointerSetInvalid(&(tmptup.t_self));
+				tmptup.t_tableOid = InvalidOid;
+				tmptup.t_data = td;
+
+				/* Build a copy and return it */
+				rows[numrows++] = heap_copytuple(&tmptup);
+			}
+		}
+		
+		result = ExecRemoteQuery((PlanState *) node);
+	}
+
+	ExecEndRemoteQuery(node);
+	
+	*totalrows = totalnum;
+	*totaldeadrows = deadnum;
+
+	return samplenum;
+}
+
+
 #endif
