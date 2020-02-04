@@ -4558,6 +4558,20 @@ create_grouping_paths(PlannerInfo *root,
                     bool parallel_safe  = false;
                     Path *agg_path      = NULL;
 
+					if (root->group_pathkeys && olap_optimizer && 
+						!has_cold_hot_table && agg_costs->hasOnlyDistinct)
+					{
+						if (!pathkeys_contained_in(root->group_pathkeys,
+											  path->pathkeys))
+						{
+							path = (Path *) create_sort_path(root,
+											 grouped_rel,
+											 path,
+											 root->group_pathkeys,
+											 -1.0);
+					  	}
+					}
+
                     if (path->pathtype == T_Sort && olap_optimizer && !has_cold_hot_table)
                     {
                         SortPath   *pathnode = (SortPath *)path;
@@ -4609,6 +4623,20 @@ create_grouping_paths(PlannerInfo *root,
                     bool parallel_aware = false;
                     bool parallel_safe    = false;
                     Path *group_path      = NULL;
+
+					if (root->group_pathkeys && olap_optimizer && 
+						!has_cold_hot_table && agg_costs->hasOnlyDistinct)
+					{
+						if (!pathkeys_contained_in(root->group_pathkeys,
+											  path->pathkeys))
+						{
+							path = (Path *) create_sort_path(root,
+											 grouped_rel,
+											 path,
+											 root->group_pathkeys,
+											 -1.0);
+					  	}
+					}
 
                     if (path->pathtype == T_Sort && olap_optimizer && !has_cold_hot_table)
                     {
