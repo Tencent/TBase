@@ -260,14 +260,14 @@ SetHeavyLock(char *lockActions, bool lock)
                     if (lock)
                     {
                         nodelock->flags |= ALL;
-                        nodelock->nHeavyLocks[CMD_NOTHING -1]++;
+						//nodelock->nHeavyLocks[CMD_NOTHING -1]++;
                     }
                     else
                     {
                         if (nodelock->flags & ALL)
                         {
-                            nodelock->nHeavyLocks[CMD_NOTHING -1]--;
-                            if (nodelock->nHeavyLocks[CMD_NOTHING -1] == 0)
+							//nodelock->nHeavyLocks[CMD_NOTHING -1]--;
+							//if (nodelock->nHeavyLocks[CMD_NOTHING -1] == 0)
                             {
                                 nodelock->flags &= ~ALL;
                             }
@@ -281,14 +281,14 @@ SetHeavyLock(char *lockActions, bool lock)
                     if (lock)
                     {
                         nodelock->flags |= SELECT;
-                        nodelock->nHeavyLocks[CMD_SELECT - 1]++;
+						//nodelock->nHeavyLocks[CMD_SELECT - 1]++;
                     }
                     else
                     {
                         if (nodelock->flags & SELECT)
                         {
-                            nodelock->nHeavyLocks[CMD_SELECT - 1]--;
-                            if (nodelock->nHeavyLocks[CMD_SELECT - 1] == 0)
+							//nodelock->nHeavyLocks[CMD_SELECT - 1]--;
+							//if (nodelock->nHeavyLocks[CMD_SELECT - 1] == 0)
                             {
                                 nodelock->flags &= ~SELECT;
                             }
@@ -302,14 +302,14 @@ SetHeavyLock(char *lockActions, bool lock)
                     if (lock)
                     {
                         nodelock->flags |= UPDATE;
-                        nodelock->nHeavyLocks[CMD_UPDATE - 1]++;
+						//nodelock->nHeavyLocks[CMD_UPDATE - 1]++;
                     }
                     else
                     {
                         if (nodelock->flags & UPDATE)
                         {
-                            nodelock->nHeavyLocks[CMD_UPDATE - 1]--;
-                            if (nodelock->nHeavyLocks[CMD_UPDATE - 1] == 0)
+							//nodelock->nHeavyLocks[CMD_UPDATE - 1]--;
+							//if (nodelock->nHeavyLocks[CMD_UPDATE - 1] == 0)
                             {
                                 nodelock->flags &= ~UPDATE;
                             }
@@ -323,14 +323,14 @@ SetHeavyLock(char *lockActions, bool lock)
                     if (lock)
                     {
                         nodelock->flags |= INSERT;
-                        nodelock->nHeavyLocks[CMD_INSERT - 1]++;
+						//nodelock->nHeavyLocks[CMD_INSERT - 1]++;
                     }
                     else
                     {
                         if (nodelock->flags & INSERT)
                         {
-                            nodelock->nHeavyLocks[CMD_INSERT - 1]--;
-                            if (nodelock->nHeavyLocks[CMD_INSERT - 1] == 0)
+							//nodelock->nHeavyLocks[CMD_INSERT - 1]--;
+							//if (nodelock->nHeavyLocks[CMD_INSERT - 1] == 0)
                             {
                                 nodelock->flags &= ~INSERT;
                             }
@@ -344,14 +344,14 @@ SetHeavyLock(char *lockActions, bool lock)
                     if (lock)
                     {
                         nodelock->flags |= DELETE;
-                        nodelock->nHeavyLocks[CMD_DELETE - 1]++;
+						//nodelock->nHeavyLocks[CMD_DELETE - 1]++;
                     }
                     else
                     {
                         if (nodelock->flags & DELETE)
                         {
-                            nodelock->nHeavyLocks[CMD_DELETE - 1]--;
-                            if (nodelock->nHeavyLocks[CMD_DELETE - 1] == 0)
+							//nodelock->nHeavyLocks[CMD_DELETE - 1]--;
+							//if (nodelock->nHeavyLocks[CMD_DELETE - 1] == 0)
                             {
                                 nodelock->flags &= ~DELETE;
                             }
@@ -365,14 +365,14 @@ SetHeavyLock(char *lockActions, bool lock)
                     if (lock)
                     {
                         nodelock->flags |= DDL;
-                        nodelock->nHeavyLocks[CMD_UTILITY - 1]++;
+						//nodelock->nHeavyLocks[CMD_UTILITY - 1]++;
                     }
                     else
                     {
                         if (nodelock->flags & DDL)
                         {
-                            nodelock->nHeavyLocks[CMD_UTILITY - 1]--;
-                            if (nodelock->nHeavyLocks[CMD_UTILITY - 1] == 0)
+							//nodelock->nHeavyLocks[CMD_UTILITY - 1]--;
+							//if (nodelock->nHeavyLocks[CMD_UTILITY - 1] == 0)
                             {
                                 nodelock->flags &= ~DDL;
                             }
@@ -561,7 +561,7 @@ SetLightLock(char *lockActions, char objectType, char *param1, char *param2, boo
 
                     if (idx > 0)
                     {
-                        nodelock->lock[cmd - OFFSET].table_locks[idx]++;
+						//nodelock->lock[cmd - OFFSET].table_locks[idx]++;
                     }
                     else
                     {
@@ -581,13 +581,13 @@ SetLightLock(char *lockActions, char objectType, char *param1, char *param2, boo
                         /* set lock */
                         if (idx > 0)
                         {
-                            if (nodelock->lock[cmd - OFFSET].table_locks[idx] == 0)
+							//if (nodelock->lock[cmd - OFFSET].table_locks[idx] == 0)
                             {
                                 nodelock->lock[cmd - OFFSET].table[idx] = table;
                                 nodelock->lock[cmd - OFFSET].nTables++;
                             }
 
-                            nodelock->lock[cmd - OFFSET].table_locks[idx]++;
+							//nodelock->lock[cmd - OFFSET].table_locks[idx]++;
                         }
                     }
                 }
@@ -602,8 +602,8 @@ SetLightLock(char *lockActions, char objectType, char *param1, char *param2, boo
 
                     if (idx > 0)
                     {
-                        nodelock->lock[cmd - OFFSET].table_locks[idx]--;
-                        if (nodelock->lock[cmd - OFFSET].table_locks[idx] == 0)
+						//nodelock->lock[cmd - OFFSET].table_locks[idx]--;
+						//if (nodelock->lock[cmd - OFFSET].table_locks[idx] == 0)
                         {
                             nodelock->lock[cmd - OFFSET].table[idx] = InvalidOid;
                             nodelock->lock[cmd - OFFSET].nTables--;
@@ -662,16 +662,17 @@ SetLightLock(char *lockActions, char objectType, char *param1, char *param2, boo
                         }
                         if (bms_is_member(shard, shardbitmap))
                         {
-                            nodelock->lock[cmd - OFFSET].nShards[shard]--;
+							//nodelock->lock[cmd - OFFSET].nShards[shard]--;
 
-                            if (nodelock->lock[cmd - OFFSET].nShards[shard] == 0)
+							//if (nodelock->lock[cmd - OFFSET].nShards[shard] == 0)
                             {
+								nodelock->lock[cmd - OFFSET].nShards[shard] = 0;
                                 bms_del_member(shardbitmap, shard);
                             }
                         }
                         else
                         {
-                            elog(NOTICE, "shard %d is not locked before, no need to unlock.", shard);
+							elog(DEBUG1, "shard %d is not locked before, no need to unlock.", shard);
                         }
                     }
                 
@@ -721,7 +722,7 @@ SetEventLock(int event, bool lock)
                     }
                     else
                     {
-                        nodelock->nEventLocks++;
+						//nodelock->nEventLocks++;
 
                         nodelock->eventLocks |= event;
 
@@ -734,7 +735,7 @@ SetEventLock(int event, bool lock)
                 {
                     if (nodelock->eventLocks && (nodelock->eventLocks & event))
                     {
-                        if (--nodelock->nEventLocks == 0)
+						//if (--nodelock->nEventLocks == 0)
                         {
                             nodelock->eventLocks &= ~event;
                         }
