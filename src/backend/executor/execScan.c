@@ -140,6 +140,7 @@ ExecScan(ScanState *node,
     ProjectionInfo *projInfo;
     
 #ifdef __AUDIT_FGA__
+	ShardID 	shardid = InvalidShardID;
     ListCell      *item;
 
     char *cmd_type = "SELECT";
@@ -269,6 +270,7 @@ next_record:
         }
 
 #ifdef __TBASE__
+		shardid = InvalidShardID;
         /* update shard statistic info about select if needed */
         if (g_StatShardInfo && IS_PGXC_DATANODE)
         {
@@ -280,7 +282,7 @@ next_record:
 
                 UpdateShardStatistic(CMD_SELECT, HeapTupleGetShardId(tup), 0, 0);
 
-				LightLockCheck(commandType, InvalidOid, HeapTupleGetShardId(tup));
+				shardid = HeapTupleGetShardId(tup);
             }
         }
 #endif
@@ -330,7 +332,12 @@ next_record:
                 }
             }
 #endif
-            
+#ifdef __TBASE__
+			if (IS_PGXC_DATANODE)
+			{
+				LightLockCheck(commandType, InvalidOid, shardid);
+			}
+#endif
             /*             * Found a satisfactory scan tuple.
              */
             if (projInfo)
