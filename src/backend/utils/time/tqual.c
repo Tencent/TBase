@@ -3818,15 +3818,9 @@ XidInMVCCSnapshotDistri(HeapTupleHeader tuple, TransactionId xid, Snapshot snaps
                 lock_type = BUFFER_LOCK_SHARE;
             }
 
-            if(lock_type != -1)
-            {
-                LockBuffer(buffer, BUFFER_LOCK_UNLOCK);    
-            }
             XactLockTableWait(xid, NULL, NULL, XLTW_None);
             if(lock_type != -1)
             {
-                
-                LockBuffer(buffer, lock_type);
                 /* Avoid deadlock */
                 if(TransactionIdDidAbort(xid))
                 {
