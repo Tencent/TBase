@@ -2912,7 +2912,7 @@ RecordTransactionAbortPrepared(TransactionId xid,
 {
     XLogRecPtr    recptr;
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-    GlobalTimestamp global_time;
+	GlobalTimestamp global_time = InvalidGlobalTimestamp;
 #endif
 
     /*
@@ -2926,8 +2926,13 @@ RecordTransactionAbortPrepared(TransactionId xid,
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
     global_time = GetGlobalTimestampGTM();
     
-    if(!GlobalTimestampIsValid(global_time)){
-        elog(ERROR, "failed to get global timestamp for abort command");
+	if(!GlobalTimestampIsValid(global_time))
+	{
+		/* During the transaction rollback phase, 
+		 * it is not mandatory to obtain a global timestamp from the GTM.
+		 * it is sufficient to simply print a log when falied to get GTS from GTM
+		 */
+		elog(LOG, "failed to get global timestamp for abort command");
     }
     MyProc->commitTs = global_time;
 #endif
