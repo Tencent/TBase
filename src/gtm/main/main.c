@@ -2651,12 +2651,6 @@ GTM_ThreadArchiver(void *argp)
         GTMXLogFileNameWithoutGtmDir(file_name_no_dirname,timeLine,segment_no);
         GTMXLogFileStatusReadyName(file_xlog_status,timeLine,segment_no);
 
-        if(IsXLogFileExist(file_name) == false)
-        {
-            timeLine++;
-            continue;
-        }
-
         if(IsXLogFileExist(file_xlog_status) == false)
         {
             segment_no++;
