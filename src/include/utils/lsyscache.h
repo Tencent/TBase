@@ -185,6 +185,7 @@ extern Oid    getBaseType(Oid typid);
 extern Oid    getBaseTypeAndTypmod(Oid typid, int32 *typmod);
 #ifdef PGXC
 extern char *get_typename(Oid typid);
+extern char * get_typenamespace_typename(Oid typid);
 extern char *get_pgxc_nodename(Oid nodeoid);
 extern Oid    get_pgxc_nodeoid_extend(const char *nodename, const char *clustername);
 #define get_pgxc_nodeoid(nodename) get_pgxc_nodeoid_extend((nodename), (PGXCClusterName))

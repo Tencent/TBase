@@ -276,6 +276,8 @@ typedef struct
 	double samplenum;
 	double totalnum;
 	double deadnum;
+	int64 totalpages;
+	int64 visiblepages;
 	HeapTuple *rows;
 }SampleRowsContext;
 

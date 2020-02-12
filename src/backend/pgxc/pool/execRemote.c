@@ -11777,28 +11777,6 @@ pgxc_append_param_junkval(TupleTableSlot *slot, AttrNumber attno,
     }
 }
 
-/* get the data type's name by oid, for example 
-  * given Oid 23, find the type name is int32
-  */
-static char *
-get_typeName(Oid typid)
-{
-    HeapTuple        tuple;
-    Form_pg_type    typeForm;
-    char           *result;
-
-    tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
-
-    if (!HeapTupleIsValid(tuple))
-            elog(ERROR, "cache lookup failed for type %u", typid);
-
-    typeForm = (Form_pg_type) GETSTRUCT(tuple);
-    result = pstrdup(NameStr(typeForm->typname));
-    ReleaseSysCache(tuple);
-
-    return result;
-}
-
 /* handle escape char '''  in source char sequence */
 static char*
 handleEscape(char *source, bool *special_case)
@@ -11967,7 +11945,7 @@ SetDataRowParams(ModifyTableState *mtstate, RemoteQueryState *node, TupleTableSl
                         att = tdesc->attrs[attindex];
                         getTypeOutputInfo(att->atttypid, &typeOutput, &typIsVarlena);           
                         columnValue = DatumGetCString(OidFunctionCall1(typeOutput, dataSlot->tts_values[attindex]));
-                        typename = get_typeName(att->atttypid);
+	    				typename = get_typename(att->atttypid);
                         columnValue = handleEscape(columnValue, &special_case);
                         if(special_case)
                             appendStringInfo(&select_buf, "%s = E'%s'::%s", att->attname.data, columnValue, typename);
