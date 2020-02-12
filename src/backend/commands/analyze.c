@@ -76,6 +76,7 @@
 #include "funcapi.h"
 #include "nodes/nodes.h"
 #include "utils/ruleutils.h"
+#include "nodes/pg_list.h"
 #endif
 #ifdef _MLS_
 #include "utils/relcrypt.h"
@@ -146,7 +147,8 @@ extern bool random_collect_stats;
 #ifdef __TBASE__
 static int acquire_coordinator_sample_rows(Relation onerel, int elevel,
 												HeapTuple *rows, int targrows,
-												double *totalrows, double *totaldeadrows);
+												double *totalrows, double *totaldeadrows,
+												int64 *totalpages, int64 *visiblepages);
 
 #endif
 
@@ -424,6 +426,9 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
     Oid            save_userid;
     int            save_sec_context;
     int            save_nestlevel;
+	bool		iscoordinator = false;
+	int64		coordpages = 0;
+	int64		coordvisiblepages = 0;
 
     if (inh)
         ereport(elevel,
@@ -586,9 +591,13 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
             }
         }
     }
+	iscoordinator = (IS_PGXC_COORDINATOR && 
+					 onerel->rd_locator_info && 
+					 !RELATION_IS_COORDINATOR_LOCAL(onerel));
 
+#ifndef __TBASE__
 #ifdef XCP
-    if (IS_PGXC_COORDINATOR && onerel->rd_locator_info)
+	if (iscoordinator)
     {
         /*
          * Fetch relation statistics from remote nodes and update
@@ -608,7 +617,7 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
         goto cleanup;
     }
 #endif
-
+#endif
     /*
      * Determine how many rows we need to sample, using the worst case from
      * all analyzable columns.  We use a lower bound of 100 rows to avoid
@@ -636,6 +645,16 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
      * Acquire the sample rows
      */
     rows = (HeapTuple *) palloc(targrows * sizeof(HeapTuple));
+#ifdef __TBASE__
+	if (iscoordinator)
+	{
+		numrows = acquire_coordinator_sample_rows(onerel, elevel,
+												rows, targrows,
+												&totalrows, &totaldeadrows,
+												&coordpages, &coordvisiblepages);
+	}
+	else
+#endif
 	if (inh || RELATION_IS_INTERVAL(onerel))
         numrows = acquire_inherited_sample_rows(onerel, elevel,
                                                 rows, targrows,
@@ -739,7 +758,15 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
     if (!inh)
     {
         BlockNumber relallvisible;
-
+#ifdef __TBASE__
+		if (iscoordinator)
+		{
+			relpages = coordpages;
+			relallvisible = coordvisiblepages;
+		}
+		else 
+		{
+#endif
         visibilitymap_count(onerel, &relallvisible, NULL);
 
 #ifdef __TBASE__
@@ -766,6 +793,7 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
     
             list_free(childs);
         }
+		}
 #endif
 
         vac_update_relstats(onerel,
@@ -4774,7 +4802,7 @@ GetAnalyzeInfo(int nodeid, char *key)
     return NULL;
 }
 
-#define SAMPLE_ATTR_NUM 4
+#define SAMPLE_ATTR_NUM 6
 
 void ExecSample(SampleStmt *stmt, DestReceiver *dest)
 {
@@ -4859,18 +4887,38 @@ void ExecSample(SampleStmt *stmt, DestReceiver *dest)
 	vac_strategy = GetAccessStrategy(BAS_VACUUM);
 
 	/* initialize acquire sample rows */
-	if (IS_PGXC_COORDINATOR)
+	if (IS_PGXC_COORDINATOR && onerel->rd_locator_info && 
+		!RELATION_IS_COORDINATOR_LOCAL(onerel))
 	{
 		context->samplenum = acquire_coordinator_sample_rows(onerel, DEBUG2,
  														   rows, stmt->rownum, 
  														   &context->totalnum, 
- 														   &context->deadnum);
+ 														   &context->deadnum,
+														   &context->totalpages,
+														   &context->visiblepages);
 	}
 	else if (IS_PGXC_DATANODE)
 	{
 		if (onerel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE ||
 			onerel->rd_rel->relhassubclass || RELATION_IS_INTERVAL(onerel))
 		{
+			ListCell *lc;
+			int 	part_pages = 0;
+			int 	part_visible = 0;
+			List 	*childs = RelationGetAllPartitions(onerel);
+			context->totalpages = 0;
+			context->visiblepages = 0;
+
+			foreach(lc, childs)
+			{
+				Oid childoid = lfirst_oid(lc);
+				if(get_rel_stat(childoid,&part_pages,NULL, &part_visible))
+				{
+					context->totalpages += part_pages;
+					context->visiblepages += part_visible;
+				}
+			}
+			list_free(childs);
 			context->samplenum = acquire_inherited_sample_rows(onerel, DEBUG2, 
 	 														   rows, stmt->rownum, 
 	 														   &context->totalnum, 
@@ -4878,12 +4926,17 @@ void ExecSample(SampleStmt *stmt, DestReceiver *dest)
 	 	}
 		else 
 		{
+			BlockNumber visiblepages = 0;
+			context->totalpages = RelationGetNumberOfBlocks(onerel);
+			visibilitymap_count(onerel, &visiblepages, NULL);
+			context->visiblepages = visiblepages;
 			context->samplenum = acquire_sample_rows(onerel, DEBUG2, 
 													 rows, stmt->rownum, 
 													 &context->totalnum, 
 													 &context->deadnum);
 		}
 	}
+
 	tupdesc = CreateTemplateTupleDesc(SAMPLE_ATTR_NUM, false);
 	TupleDescInitEntry(tupdesc, (AttrNumber) 1, "samplenum",
 					   FLOAT8OID, -1, 0);
@@ -4891,15 +4944,21 @@ void ExecSample(SampleStmt *stmt, DestReceiver *dest)
 					   FLOAT8OID, -1, 0);
 	TupleDescInitEntry(tupdesc, (AttrNumber) 3, "deadnum",
 					   FLOAT8OID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 4, "rows",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 4, "totalpages",
+					   INT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 5, "visiblepages",
+					   INT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 6, "rows",
 					   onerel->rd_rel->reltype, -1, 0);
 
 	tstate = begin_tup_output_tupdesc(dest, tupdesc);
 	MemSet(nulls, 0, sizeof(nulls));
-	nulls[3] = true;
+	nulls[5] = true;
 	values[0] = Float8GetDatum(context->samplenum);
 	values[1] = Float8GetDatum(context->totalnum);
 	values[2] = Float8GetDatum(context->deadnum);
+	values[3] = Int64GetDatum(context->totalpages);
+	values[4] = Int64GetDatum(context->visiblepages);
 
 	do_tup_output(tstate, values, nulls);
 	
@@ -4910,8 +4969,10 @@ void ExecSample(SampleStmt *stmt, DestReceiver *dest)
 			nulls[0] = true;
 			nulls[1] = true;
 			nulls[2] = true;
-			nulls[3] = false;
-			values[3] = heap_copy_tuple_as_datum(context->rows[index], rowdesc);
+			nulls[3] = true;
+			nulls[4] = true;
+			nulls[5] = false;
+			values[5] = heap_copy_tuple_as_datum(context->rows[index], rowdesc);
 			do_tup_output(tstate, values, nulls);
 		}
 
@@ -4930,7 +4991,8 @@ void ExecSample(SampleStmt *stmt, DestReceiver *dest)
 static int 
 acquire_coordinator_sample_rows(Relation onerel, int elevel,
 												HeapTuple *rows, int targrows,
-												double *totalrows, double *totaldeadrows)
+												double *totalrows, double *totaldeadrows,
+												int64 *totalpages, int64 *visiblepages)
 {
 	char		   *nspname;
 	char		   *relname;
@@ -4940,29 +5002,58 @@ acquire_coordinator_sample_rows(Relation onerel, int elevel,
 	MemoryContext	oldcontext;
 	RemoteQuery 	*step;
 	RemoteQueryState *node;
+	RelationLocInfo *rellocinfo;
 	TupleTableSlot *result;
+	bool			isreplica = false;
 	int 			targetnum;
 	Var			   *dummy;
 	double			samplenum = 0;
 	double			totalnum = 0;
 	double			deadnum = 0;
 	int				numrows = 0;
+	int64			totalpagesnum = 0;
+	int64			visiblepagesnum = 0;
 
 	/* Get the relation identifier */
 	relname = RelationGetRelationName(onerel);
 	nspname = get_namespace_name(RelationGetNamespace(onerel));
-	targetnum = ceil(1.0 * targrows / list_length(onerel->rd_locator_info->rl_nodeList));
+	rellocinfo = onerel->rd_locator_info;
+	isreplica = IsRelationReplicated(rellocinfo);
+	if (!isreplica) 
+	{
+		targetnum = ceil(1.0 * targrows / list_length(onerel->rd_locator_info->rl_nodeList));
+	}
+	else 
+	{
+		targetnum = targrows;
+	}
 
 	/* Make up query string */
 	initStringInfo(&query);
-	
-	appendStringInfo(&query, "SAMPLE %s.%s(%d)", nspname, relname, targetnum);
+
+	if (onerel->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
+	{
+		appendStringInfo(&query, "SAMPLE %s(%d)", relname, targetnum);
+	}
+	else 
+	{
+		appendStringInfo(&query, "SAMPLE %s.%s(%d)", nspname, relname, targetnum);
+	}
 
 	/* Build up RemoteQuery */
 	step = makeNode(RemoteQuery);
 	step->combine_type = COMBINE_TYPE_NONE;
 	step->exec_nodes = makeNode(ExecNodes);
-	step->exec_nodes->nodeList = onerel->rd_locator_info->rl_nodeList;
+	step->exec_nodes->nodeList = NULL;
+	if (isreplica)
+	{
+		step->exec_nodes->nodeList = lappend_int(step->exec_nodes->nodeList, linitial_int(rellocinfo->rl_nodeList));
+	}
+	else 
+	{
+		step->exec_nodes->nodeList = rellocinfo->rl_nodeList;
+	}
+	
 	step->sql_statement = query.data;
 	step->force_autocommit = false;
 	step->exec_type = EXEC_ON_DATANODES;
@@ -4976,9 +5067,15 @@ acquire_coordinator_sample_rows(Relation onerel, int elevel,
 	dummy = makeVar(1, 2, FLOAT8OID, 0, InvalidOid, 0);
 	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
 										 makeTargetEntry((Expr *) dummy, 2, "deadnum", false));
-	dummy = makeVar(1, 3, onerel->rd_rel->reltype, 0, InvalidOid, 0);
+	dummy = makeVar(1, 3, INT8OID, 0, InvalidOid, 0);
 	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-										 makeTargetEntry((Expr *) dummy, 3, "rows", false));
+										 makeTargetEntry((Expr *) dummy, 3, "totalpages", false));
+	dummy = makeVar(1, 4, INT8OID, 0, InvalidOid, 0);
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 makeTargetEntry((Expr *) dummy, 4, "visiblepages", false));
+	dummy = makeVar(1, 5, onerel->rd_rel->reltype, 0, InvalidOid, 0);
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 makeTargetEntry((Expr *) dummy, 5, "rows", false));
 
 	/* Execute query on the data nodes */
 	estate = CreateExecutorState();
@@ -5010,9 +5107,19 @@ acquire_coordinator_sample_rows(Relation onerel, int elevel,
 
 		if (result->tts_isnull[3] == false)
 		{
+			totalpagesnum += DatumGetInt64(result->tts_values[3]);
+		}
+
+		if (result->tts_isnull[4] == false)
+		{
+			visiblepagesnum += DatumGetInt64(result->tts_values[4]);
+		}
+
+		if (result->tts_isnull[5] == false)
+		{
 			if (numrows < targrows)
 			{
-				HeapTupleHeader td = DatumGetHeapTupleHeader(result->tts_values[3]);
+				HeapTupleHeader td = DatumGetHeapTupleHeader(result->tts_values[5]);
 				HeapTupleData tmptup;
 
 				/* Build a temporary HeapTuple control structure */
@@ -5033,8 +5140,10 @@ acquire_coordinator_sample_rows(Relation onerel, int elevel,
 	
 	*totalrows = totalnum;
 	*totaldeadrows = deadnum;
+	*totalpages = totalpagesnum;
+	*visiblepages = visiblepagesnum;
 
-	return samplenum;
+	return numrows;
 }
 
 
