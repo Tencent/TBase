@@ -771,7 +771,46 @@ RelationIsVisible(Oid relid)
 
     return visible;
 }
+/*
+ * TypIDGetTypename
+ *		Try to resolve an OID.
+ *		Returns typename if type found in search path
+ * 		else, schema.typename.
+ *
+ */
+char *
+TypidGetTypename(Oid typid) 
+{
+	HeapTuple		tuple;
+	Form_pg_type	typeForm;
+	char		   *result;
+	char 			prefix[2*NAMEDATALEN+2];
+	char 			*typnspname;
+	Oid				typnamespace;
 
+	tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
+
+	if (!HeapTupleIsValid(tuple))
+			elog(ERROR, "cache lookup failed for type %u", typid);
+
+	typeForm = (Form_pg_type) GETSTRUCT(tuple);
+	typnamespace = typeForm->typnamespace;
+	if (typnamespace != PG_CATALOG_NAMESPACE &&
+		!list_member_oid(activeSearchPath, typnamespace))
+	{
+		typnspname = get_namespace_name(typeForm->typnamespace);
+		sprintf(prefix, "%s.%s", typnspname, NameStr(typeForm->typname));
+		result = pstrdup(prefix);	
+	}
+	else 
+	{
+		result = pstrdup(NameStr(typeForm->typname));
+	}
+
+	ReleaseSysCache(tuple);
+
+	return result;
+}
 
 /*
  * TypenameGetTypid
