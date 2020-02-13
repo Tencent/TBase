@@ -831,38 +831,9 @@ apply_handle_relation(StringInfo s)
      */
 	if (IS_PGXC_COORDINATOR)
     {
-        Relation     localrel = NULL;
-		RangeVar * 	local_relname = NULL;
 		PGXCNodeAllHandles *connections = NULL;
 
         ensure_transaction();
-
-		local_relname = makeRangeVar(rel->nspname, rel->relname, -1);
-
-		if (am_tbase_subscription_dispatch_worker())
-		{
-			Oid	local_relid = InvalidOid;
-
-			local_relid = RangeVarGetRelid(local_relname, NoLock, true);
-			if (!OidIsValid(local_relid))
-			{
-				elog(LOG, "The subscriber cannot find the table name received from the publisher locally, ignoring the subscription for %s.%s.",
-					rel->nspname, rel->relname);
-
-				pfree(local_relname);
-				logicalrep_relation_free(rel);
-
-				return;
-			}
-		}
-
-        localrel = relation_openrv(makeRangeVar(rel->nspname, rel->relname, -1), NoLock);
-
-        /* Check for supported relkind. */
-        CheckSubscriptionRelkind(localrel->rd_rel->relkind, rel->nspname, rel->relname);
-
-		heap_close(localrel, NoLock);
-		pfree(local_relname);
 
 		/* get all DN handles */
 		connections = get_exec_connections_all_dn(true);
