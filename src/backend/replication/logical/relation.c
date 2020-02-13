@@ -350,7 +350,7 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
 	{
 		if (am_tbase_subscription_dispatch_worker())
 		{
-			// elog(LOG, "no relation map entry for remote relation ID %u, ignoring this subscription", remoteid);
+			//elog(LOG, "no relation map entry for remote relation ID %u, ignoring this subscription", remoteid);
 			return NULL;
 		}
 		else
@@ -383,10 +383,27 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
                                               remoterel->relname, -1),
                                  lockmode, true);
         if (!OidIsValid(relid))
-            ereport(ERROR,
+		{
+			if (am_tbase_subscription_dispatch_worker())
+			{
+				/*Since the received data of the publisher's table does not have this table locally,
+				 * the log will be printed frequently, which will cause log expand.
+				 * So, comment it out first.
+				 * */
+
+				//elog(LOG, "The subscriber cannot find the table name received from the publisher locally, ignoring the subscription for %s.%s.",
+				//			remoterel->nspname, remoterel->relname);
+				return NULL;
+
+			}
+			else
+			{
+			    ereport(ERROR,
                     (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                      errmsg("logical replication target relation \"%s.%s\" does not exist",
                             remoterel->nspname, remoterel->relname)));
+			}
+		}
         entry->localrel = heap_open(relid, NoLock);
 
         /* Check for supported relkind. */
