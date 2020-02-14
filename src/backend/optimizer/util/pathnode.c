@@ -4008,10 +4008,26 @@ create_append_path(RelOptInfo *rel, List *subpaths, Relids required_outer,
                  * Both distribution and subpath->distribution may be NULL at
                  * this point, or they both are not null.
                  */
+#ifdef __TBASE__
+				if (distribution)
+				{
+					if (distribution->restrictNodes && subpath->distribution->restrictNodes)
+					{
+						distribution->restrictNodes = bms_union(
+							distribution->restrictNodes,
+							subpath->distribution->restrictNodes);
+					}
+					else
+					{
+						distribution->restrictNodes = NULL;
+					}
+				}
+#else
                 if (distribution && subpath->distribution->restrictNodes)
                     distribution->restrictNodes = bms_union(
                             distribution->restrictNodes,
                             subpath->distribution->restrictNodes);
+#endif
             }
             else
             {
