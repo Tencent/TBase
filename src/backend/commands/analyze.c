@@ -584,7 +584,7 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
         /*
          * Fetch relation statistics from remote nodes and update
          */
-        vacuum_rel_coordinator(onerel, in_outer_xact);
+		vacuum_rel_coordinator(onerel, in_outer_xact, params);
 
         /*
          * Fetch attribute statistics from remote nodes.
