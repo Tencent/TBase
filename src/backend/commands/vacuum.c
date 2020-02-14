@@ -1528,7 +1528,7 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
      */
     if (IS_PGXC_COORDINATOR && onerel->rd_locator_info)
     {
-        vacuum_rel_coordinator(onerel, true);
+		vacuum_rel_coordinator(onerel, true, params);
     }
     else
 #endif
@@ -1888,7 +1888,7 @@ get_remote_relstat(char *nspname, char *relname, bool replicated,
  * data nodes.
  */
 void
-vacuum_rel_coordinator(Relation onerel, bool is_outer)
+vacuum_rel_coordinator(Relation onerel, bool is_outer, VacuumParams *params)
 {
     char        *nspname;
     char        *relname;
@@ -1900,12 +1900,30 @@ vacuum_rel_coordinator(Relation onerel, bool is_outer)
     bool        hasindex;
     bool         replicated;
     int         rel_nodes;
+#ifdef __TBASE__
+	TransactionId oldestXmin = InvalidTransactionId;
+	TransactionId freezeLimit = InvalidTransactionId;
+	MultiXactId multiXactCutoff = InvalidMultiXactId;
+#endif
 
     /* Get the relation identifier */
     relname = RelationGetRelationName(onerel);
     nspname = get_namespace_name(RelationGetNamespace(onerel));
 
     elog(LOG, "Getting relation statistics for %s.%s", nspname, relname);
+
+#ifdef __TBASE__
+	if (params && onerel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
+	{
+		vacuum_set_xid_limits(onerel,
+							  params->freeze_min_age,
+							  params->freeze_table_age,
+							  params->multixact_freeze_min_age,
+							  params->multixact_freeze_table_age,
+							  &oldestXmin, &freezeLimit, NULL,
+							  &multiXactCutoff, NULL);
+	}
+#endif
 
     replicated = IsLocatorReplicated(RelationGetLocatorType(onerel));
     /*
@@ -1978,6 +1996,13 @@ vacuum_rel_coordinator(Relation onerel, bool is_outer)
         {
             min_frozenxid = InvalidTransactionId;
         }
+
+#ifdef __TBASE__
+		if (TransactionIdIsValid(freezeLimit))
+		{
+	        min_frozenxid = freezeLimit;
+		}
+#endif
 
         /* save changes */
         vac_update_relstats(onerel,

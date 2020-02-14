@@ -304,7 +304,7 @@ extern void vacuum_set_xid_limits(Relation rel,
 extern void vac_update_datfrozenxid(void);
 extern void vacuum_delay_point(void);
 #ifdef XCP
-extern void vacuum_rel_coordinator(Relation onerel, bool is_outer);
+extern void vacuum_rel_coordinator(Relation onerel, bool is_outer, VacuumParams *params);
 TargetEntry *make_relation_tle(Oid reloid, const char *relname, const char *column);
 #endif
 
