@@ -1239,16 +1239,19 @@ HeavyLockCheck(const char* cmdString, CmdType cmd, const char *query_string, voi
     char *lockFuncName = "pg_node_lock";
     char *unlockFuncName = "pg_node_unlock";
     char *statFuncName = "show_node_lock";
+	char *poolReloadFunc = "pgxc_pool_reload";
+	char *terminateFunc = "pg_terminate_backend";
 
 
-    if (((cmdString && strcmp(cmdString, "SELECT") == 0) || cmd == CMD_SELECT))
+	if ((nodelock->flags & SELECT) && ((cmdString && strcmp(cmdString, "SELECT") == 0) || cmd == CMD_SELECT))
     {
         if (query_string)
         {
             char *query = asc_tolower(query_string, strlen(query_string));
             
             if(strstr(query, lockFuncName) != NULL || strstr(query, unlockFuncName) != NULL ||
-                strstr(query, statFuncName) != NULL)
+				strstr(query, statFuncName) != NULL || strstr(query, poolReloadFunc) != NULL ||
+				strstr(query, terminateFunc) != NULL)
             {
                 pfree(query);
                 return;
@@ -1263,17 +1266,17 @@ HeavyLockCheck(const char* cmdString, CmdType cmd, const char *query_string, voi
       * if so, and DDL is permitted, error messages will be shown.
       * current transaction is aborted.
       */
-    if(isDDL(parsetree))
+	if(parsetree && isDDL(parsetree))
     {
-        LWLockAcquire(NodeLockMgrLock, LW_SHARED);
+		//LWLockAcquire(NodeLockMgrLock, LW_SHARED);
         
         if (nodelock->flags & DDL)
         {
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
             elog(ERROR, "%s is not permitted now.", CreateCommandTag((Node *)parsetree));
         }
 
-        LWLockRelease(NodeLockMgrLock);
+		//LWLockRelease(NodeLockMgrLock);
     }
     /*
       * query is DML (update, insert, delete) or select
@@ -1285,51 +1288,51 @@ HeavyLockCheck(const char* cmdString, CmdType cmd, const char *query_string, voi
           */
         if((cmdString && strcmp(cmdString, "SELECT") == 0) || cmd == CMD_SELECT)
         {
-            LWLockAcquire(NodeLockMgrLock, LW_SHARED);
+			//LWLockAcquire(NodeLockMgrLock, LW_SHARED);
         
             if (nodelock->flags & SELECT)
             {
-                LWLockRelease(NodeLockMgrLock);
+				//LWLockRelease(NodeLockMgrLock);
                 elog(ERROR, "SELECT is not permitted now.");
             }
 
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
         }
         else if((cmdString && strcmp(cmdString, "UPDATE") == 0) || cmd == CMD_UPDATE)
         {
-            LWLockAcquire(NodeLockMgrLock, LW_SHARED);
+			//LWLockAcquire(NodeLockMgrLock, LW_SHARED);
         
             if (nodelock->flags & UPDATE)
             {
-                LWLockRelease(NodeLockMgrLock);
+				//LWLockRelease(NodeLockMgrLock);
                 elog(ERROR, "UPDATE is not permitted now.");
             }
 
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
         }
         else if((cmdString && strcmp(cmdString, "DELETE") == 0) || cmd == CMD_DELETE)
         {
-            LWLockAcquire(NodeLockMgrLock, LW_SHARED);
+			//LWLockAcquire(NodeLockMgrLock, LW_SHARED);
         
             if (nodelock->flags & DELETE)
             {
-                LWLockRelease(NodeLockMgrLock);
+				//LWLockRelease(NodeLockMgrLock);
                 elog(ERROR, "DELETE is not permitted now.");
             }
 
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
         }
         else if((cmdString && strcmp(cmdString, "INSERT") == 0) || cmd == CMD_INSERT)
         {
-            LWLockAcquire(NodeLockMgrLock, LW_SHARED);
+			//LWLockAcquire(NodeLockMgrLock, LW_SHARED);
         
             if (nodelock->flags & INSERT)
             {
-                LWLockRelease(NodeLockMgrLock);
+				//LWLockRelease(NodeLockMgrLock);
                 elog(ERROR, "INSERT is not permitted now.");
             }
 
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
         }
     }
 }

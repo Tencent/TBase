@@ -79,6 +79,7 @@ NodeDefinition *sdnDefs;
 
 #ifdef __TBASE__
 char *PGXCNodeHost;
+static char *g_TbasePlane = NULL;
 #endif
 
 /* HashTable key: nodeoid  value: position of coDefs/dnDefs */
@@ -177,6 +178,14 @@ NodeTablesShmemInit(void)
     {
         PGXCNodeHost[0] = '\0';
     }
+
+	g_TbasePlane = (char *)ShmemInitStruct("TBase Plane",
+											NAMEDATALEN,
+								            &found);
+	if (!found)
+	{
+		g_TbasePlane[0] = '\0';
+	}
     
     NodeDefHashTabShmemInit();
 #endif
@@ -246,6 +255,7 @@ NodeTablesShmemSize(void)
     total_size = add_size(co_size, dn_size);
     total_size = add_size(total_size, dn_slave_size);
     total_size = add_size(total_size, NAMEDATALEN);
+	total_size = add_size(total_size, NAMEDATALEN);
     return total_size;
 }
 
@@ -711,6 +721,43 @@ PgxcNodeListAndCount(void)
         qsort(sdnDefs, *shmemNumSlaveDataNodes, sizeof(NodeDefinition), cmp_nodes);
 
 #ifdef __TBASE__
+	/* set plane type */
+	if (g_TbasePlane[0] == '\0')
+	{
+		if (PGXCClusterName && strlen(PGXCClusterName) > 0)
+		{
+			snprintf(g_TbasePlane, NAMEDATALEN, "%s", PGXCClusterName);
+		}
+	}
+	else
+	{
+		bool plane_changed = false;
+
+		if (PGXCClusterName && strcmp(g_TbasePlane, PGXCClusterName))
+		{
+			plane_changed = true;
+		}
+
+		/* reset hashtab */
+		if (plane_changed)
+		{
+			HASH_SEQ_STATUS scan_status;
+			NodeDefLookupEnt  *item;
+
+			hash_seq_init(&scan_status, g_NodeDefHashTab);
+			while ((item = (NodeDefLookupEnt *) hash_seq_search(&scan_status)) != NULL)
+			{
+				if (hash_search(g_NodeDefHashTab, (const void *) &item->tag,
+								HASH_REMOVE, NULL) == NULL)
+				{
+					LWLockRelease(NodeTableLock);
+					elog(ERROR, "node definition hash table corrupted");
+				}
+			}
+
+			snprintf(g_TbasePlane, NAMEDATALEN, "%s", PGXCClusterName);
+		}
+	}
     /* Add to hash table */
     for (loop = 0; loop < *shmemNumCoords; loop++)
     {

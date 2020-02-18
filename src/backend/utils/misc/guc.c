@@ -5316,7 +5316,7 @@ static struct config_string ConfigureNamesString[] =
     },
 
     {
-        {"pgxc_cluster_name", PGC_POSTMASTER, GTM,
+		{"pgxc_cluster_name", PGC_SIGHUP, GTM,
             gettext_noop("The Cluster name."),
             NULL,
             GUC_NO_RESET_ALL | GUC_IS_NAME
