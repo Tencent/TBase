@@ -145,6 +145,9 @@ extern bool random_collect_stats;
 #endif
 
 #ifdef __TBASE__
+static void get_rel_pages_visiblepages(Relation onerel, 
+						   BlockNumber *pages, 
+						   BlockNumber *visiblepages);
 static int acquire_coordinator_sample_rows(Relation onerel, int elevel,
 												HeapTuple *rows, int targrows,
 												double *totalrows, double *totaldeadrows,
@@ -772,26 +775,7 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
 #ifdef __TBASE__
         if(IS_PGXC_DATANODE && RELATION_IS_INTERVAL(onerel))
         {
-            float part_tuples = 0.0;
-            int part_visible = 0;
-            List *childs = NULL;
-            Oid partoid;
-            ListCell *lc;
-    
-            childs = RelationGetAllPartitions(onerel);
-            totalrows = 0;
-            relallvisible = 0;
-            foreach(lc, childs)
-            {
-                partoid = lfirst_oid(lc);
-                if(get_rel_stat(partoid, NULL, &part_tuples, &part_visible))
-                {
-                    totalrows += part_tuples;
-                    relallvisible += part_visible;
-                }
-            }
-    
-            list_free(childs);
+			get_rel_pages_visiblepages(onerel, &relpages, &relallvisible);
         }
 		}
 #endif
@@ -1551,7 +1535,14 @@ acquire_inherited_sample_rows(Relation onerel, int elevel,
         BlockNumber relpages = 0;
 
         /* We already got the needed lock */
-        childrel = heap_open(childOID, NoLock);
+		if (RELATION_IS_INTERVAL(onerel))
+		{
+			childrel = heap_open(childOID, AccessShareLock);
+		}
+		else 
+		{
+			childrel = heap_open(childOID, NoLock);
+		}
 
         /* Ignore if temp table of another backend */
         if (RELATION_IS_OTHER_TEMP(childrel))
@@ -4802,6 +4793,73 @@ GetAnalyzeInfo(int nodeid, char *key)
     return NULL;
 }
 
+static void 
+get_rel_pages_visiblepages(Relation onerel,
+						   BlockNumber *pages, 
+						   BlockNumber *visiblepages)
+{
+	if (onerel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE ||
+		onerel->rd_rel->relhassubclass || RELATION_IS_INTERVAL(onerel))
+	{
+		List * childs;
+		ListCell * lc;
+
+		if (RELATION_IS_INTERVAL(onerel))
+		{
+			childs = RelationGetAllPartitions(onerel);
+		}
+		else 
+		{
+			childs =
+				find_all_inheritors(RelationGetRelid(onerel), NoLock, NULL);
+		}
+
+		*pages = 0;
+		*visiblepages = 0;
+
+		foreach (lc, childs)
+		{
+			Oid			childOID = lfirst_oid(lc);
+			Relation	childrel;
+			BlockNumber visible;
+
+			/* We already got the needed lock */
+			childrel = heap_open(childOID, AccessShareLock);
+
+			/* Ignore if temp table of another backend */
+			if (RELATION_IS_OTHER_TEMP(childrel))
+			{
+				/* ... but release the lock on it */
+				Assert(childrel != onerel);
+				heap_close(childrel, AccessShareLock);
+				continue;
+			}
+
+			/* Check table type (MATVIEW can't happen, but might as well allow) */
+			if (childrel->rd_rel->relkind == RELKIND_RELATION ||
+				childrel->rd_rel->relkind == RELKIND_MATVIEW)
+			{
+				*pages += RelationGetNumberOfBlocks(childrel);
+				visibilitymap_count(childrel, &visible, NULL);
+				*visiblepages += visible;
+				heap_close(childrel, AccessShareLock);
+			}
+			else
+			{
+				Assert(childrel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE);
+				heap_close(childrel, AccessShareLock);
+				continue;
+			}
+		}
+		list_free(childs);
+	}
+	else 
+	{
+		*pages = RelationGetNumberOfBlocks(onerel);
+		visibilitymap_count(onerel, visiblepages, NULL);
+	}
+}
+
 #define SAMPLE_ATTR_NUM 6
 
 void ExecSample(SampleStmt *stmt, DestReceiver *dest)
@@ -4899,26 +4957,17 @@ void ExecSample(SampleStmt *stmt, DestReceiver *dest)
 	}
 	else if (IS_PGXC_DATANODE)
 	{
+		BlockNumber relpages;
+		BlockNumber relallvisible;
+		get_rel_pages_visiblepages(onerel, &relpages,
+								   &relallvisible);
+
+		context->totalpages = relpages;
+		context->visiblepages = relallvisible;
+
 		if (onerel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE ||
 			onerel->rd_rel->relhassubclass || RELATION_IS_INTERVAL(onerel))
 		{
-			ListCell *lc;
-			int 	part_pages = 0;
-			int 	part_visible = 0;
-			List 	*childs = RelationGetAllPartitions(onerel);
-			context->totalpages = 0;
-			context->visiblepages = 0;
-
-			foreach(lc, childs)
-			{
-				Oid childoid = lfirst_oid(lc);
-				if(get_rel_stat(childoid,&part_pages,NULL, &part_visible))
-				{
-					context->totalpages += part_pages;
-					context->visiblepages += part_visible;
-				}
-			}
-			list_free(childs);
 			context->samplenum = acquire_inherited_sample_rows(onerel, DEBUG2, 
 	 														   rows, stmt->rownum, 
 	 														   &context->totalnum, 
@@ -4926,10 +4975,6 @@ void ExecSample(SampleStmt *stmt, DestReceiver *dest)
 	 	}
 		else 
 		{
-			BlockNumber visiblepages = 0;
-			context->totalpages = RelationGetNumberOfBlocks(onerel);
-			visibilitymap_count(onerel, &visiblepages, NULL);
-			context->visiblepages = visiblepages;
 			context->samplenum = acquire_sample_rows(onerel, DEBUG2, 
 													 rows, stmt->rownum, 
 													 &context->totalnum, 

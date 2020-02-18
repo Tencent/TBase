@@ -2009,6 +2009,7 @@ do_autovacuum(void)
     HeapScanDesc relScan;
     Form_pg_database dbForm;
     List       *table_oids = NIL;
+	List	   *interval_parent_oids = NIL;
     List       *orphan_oids = NIL;
     HASHCTL        ctl;
     HTAB       *table_toast_map;
@@ -2178,7 +2179,16 @@ do_autovacuum(void)
 
         /* Relations that need work are added to table_oids */
         if (dovacuum || doanalyze)
-            table_oids = lappend_oid(table_oids, relid);
+		{
+			if (classForm->relpartkind == RELPARTKIND_PARENT)
+			{
+				interval_parent_oids = lappend_oid(interval_parent_oids, relid);
+			}
+			else 
+			{
+				table_oids = lappend_oid(table_oids, relid);
+			}
+		}
 
         /*
          * Remember TOAST associations for the second pass.  Note: we must do
@@ -2208,6 +2218,8 @@ do_autovacuum(void)
             }
         }
     }
+
+	table_oids = list_concat(table_oids, interval_parent_oids);
 
     heap_endscan(relScan);
 
@@ -2840,78 +2852,6 @@ get_pgstat_tabentry_relid(Oid relid, bool isshared, PgStat_StatDBEntry *shared,
 
     return tabentry;
 }
-
-#ifdef __TBASE__
-
-static void 
-clear_pgstat_tabentry(PgStat_StatTabEntry * tabentry)
-{
-	tabentry->numscans = 0;
-	tabentry->tuples_returned = 0;
-	tabentry->tuples_fetched = 0;
-	tabentry->tuples_inserted = 0;
-	tabentry->tuples_updated = 0;
-	tabentry->tuples_deleted = 0;
-	tabentry->tuples_hot_updated = 0;
-	tabentry->n_live_tuples = 0;
-	tabentry->n_dead_tuples = 0;
-	tabentry->changes_since_analyze = 0;
-	tabentry->blocks_fetched = 0;
-	tabentry->blocks_hit = 0;
-}
-
-static void 
-add_pgstat_tabentry(PgStat_StatTabEntry * parent, PgStat_StatTabEntry * child)
-{
-	parent->numscans += child->numscans;
-	parent->tuples_returned += child->tuples_returned;
-	parent->tuples_fetched += child->tuples_fetched;
-	parent->tuples_inserted += child->tuples_inserted;
-	parent->tuples_updated += child->tuples_updated;
-	parent->tuples_deleted += child->tuples_deleted;
-	parent->tuples_hot_updated += child->tuples_hot_updated;
-	parent->n_live_tuples += child->n_live_tuples;
-	parent->n_dead_tuples += child->n_dead_tuples;
-	parent->changes_since_analyze += child->changes_since_analyze;
-	parent->blocks_fetched += child->blocks_fetched;
-	parent->blocks_hit += child->blocks_hit;
-}
-
-static void
-get_pgstat_tabentry_interval_parent(Oid relid, PgStat_StatTabEntry * tabentry,
-									bool isshared,
-									PgStat_StatDBEntry *shared,
-						  			PgStat_StatDBEntry *dbentry)
-{
-	Relation parent;
-	List *childoids;
-	ListCell *child;
-
-	if (tabentry == NULL)
-		return;
-
-	parent = heap_open(relid, AccessShareLock);
-	childoids = RelationGetAllPartitions(parent);
-	clear_pgstat_tabentry(tabentry);
-	foreach (child, childoids)
-	{
-		Oid childoid = lfirst_oid(child);
-		PgStat_StatTabEntry *child_tabentry;
-
-		child_tabentry = get_pgstat_tabentry_relid(childoid, 
-												   isshared,
-												   shared,
-												   dbentry);
-		
-		if (child_tabentry != NULL)
-		{
-			add_pgstat_tabentry(tabentry, child_tabentry);
-		}
-	}
-
-	heap_close(parent, AccessShareLock);
-}
-#endif
 
 /*
  * table_recheck_autovac

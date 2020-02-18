@@ -489,6 +489,9 @@ get_rel_oids(Oid relid, const RangeVar *vacrel)
                 classForm->relkind != RELKIND_MATVIEW &&
                 classForm->relkind != RELKIND_PARTITIONED_TABLE)
                 continue;
+			
+			if (classForm->relpartkind == RELPARTKIND_CHILD)
+				continue;
 
             /* Make a relation list entry for this guy */
             oldcontext = MemoryContextSwitchTo(vac_context);
