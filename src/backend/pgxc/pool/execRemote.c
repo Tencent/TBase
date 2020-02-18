@@ -4335,17 +4335,11 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
             goto prepare_err;
         else
             CloseCombiner(&combiner);
-#if 0
-		/* We can not set ck_resp_rollback to false here. 
-		 * If it is set to false, when the transaction is rolled back, 
-		 * the CN will not send Rollback command to DN in pgxc_node_remote_abort. 
-		 * in that case, the CN will roll back its own local transaction only.
-		 */
 
         /* Before exit clean the flag, to avoid unnecessary checks */
         for (i = 0; i < conn_count; i++)
             connections[i]->ck_resp_rollback = false;
-#endif
+
         clear_handles();
         pfree_pgxc_all_handles(handles);
 
