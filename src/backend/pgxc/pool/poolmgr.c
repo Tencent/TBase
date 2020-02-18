@@ -4311,7 +4311,11 @@ reload_database_pools(PoolAgent *agent)
             if (connstr_chk == NULL || strcmp(connstr_chk, nodePool->connstr))
             {
                 /* Node has been removed or altered */
+#ifdef __TBASE__
+				if (nodePool->size == nodePool->freeSize || connstr_chk == NULL)
+#else
                 if (nodePool->size == nodePool->freeSize)
+#endif
                 {
                     elog(LOG, POOL_MGR_PREFIX"nodePool:%s has been changed, size:%d, freeSize:%d, destory it now", nodePool->connstr, nodePool->size, nodePool->freeSize);                    
                     destroy_node_pool(nodePool);
@@ -8563,12 +8567,36 @@ static void refresh_node_map(void)
     int             numDn;
     int             nodeindex;
     bool            found;
+#ifdef __TBASE__
+	bool           inited = false;
+#endif
 
     if (NULL == g_nodemap)
     {
         /* init node map */
         create_node_map();
+#ifdef __TBASE__
+		inited = true;
+#endif
     }
+#ifdef __TBASE__
+	/* reset hashtab */
+	if (!inited)
+	{
+		HASH_SEQ_STATUS scan_status;
+		PGXCMapNode  *item;
+
+		hash_seq_init(&scan_status, g_nodemap);
+		while ((item = (PGXCMapNode *) hash_seq_search(&scan_status)) != NULL)
+		{
+			if (hash_search(g_nodemap, (const void *) &item->nodeoid,
+							HASH_REMOVE, NULL) == NULL)
+			{
+				elog(ERROR, POOL_MGR_PREFIX"node map hash table corrupted");
+			}
+		}
+	}
+#endif
     PgxcNodeGetOids(&coOids, &dnOids, &numCo, &numDn, false);
 
     for (nodeindex = 0; nodeindex < numCo; nodeindex++)

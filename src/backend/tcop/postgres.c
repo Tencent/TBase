@@ -2212,6 +2212,10 @@ exec_bind_message(StringInfo input_message)
     pgstat_report_activity(STATE_RUNNING, debug_query_string);
 #endif
 
+#ifdef __TBASE__
+	HeavyLockCheck(psrc->commandTag, CMD_UNKNOWN, NULL, NULL);
+#endif
+
     set_ps_display("BIND", false);
 
     if (save_log_statement_stats)
