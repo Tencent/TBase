@@ -63,7 +63,9 @@
 #include "utils/timestamp.h"
 #include "utils/tqual.h"
 #include "access/commit_ts.h"
-
+#ifdef __TBASE__
+#include "utils/ruleutils.h"
+#endif
 
 /*
  * Space/time tradeoff parameters: do these need to be user-tunable?
@@ -170,6 +172,88 @@ static int    vac_cmp_itemptr(const void *left, const void *right);
 static bool heap_page_is_all_visible(Relation rel, Buffer buf,
                          TransactionId *visibility_cutoff_xid, bool *all_frozen);
 
+#ifdef __TBASE__
+static void 
+lazy_vacuum_interval_rel(Relation onerel)
+{
+
+	List *childs;
+	ListCell *lc;
+	double tuples = 0;
+	BlockNumber pages = 0;
+	BlockNumber visiblepages = 0;
+	double live_tuples = 0;
+	double dead_tuples = 0;
+
+	childs = RelationGetAllPartitions(onerel);
+
+	foreach (lc, childs)
+	{
+		Oid			childOID = lfirst_oid(lc);
+		Relation	childrel;
+		PgStat_StatTabEntry *tabentry;
+	
+		/* We already got the needed lock */
+		childrel = heap_open(childOID, AccessShareLock);
+
+		/* Ignore if temp table of another backend */
+		if (RELATION_IS_OTHER_TEMP(childrel))
+		{
+			/* ... but release the lock on it */
+			Assert(childrel != onerel);
+			heap_close(childrel, AccessShareLock);
+			continue;
+		}
+
+		/* Check table type (MATVIEW can't happen, but might as well allow) */
+		if (childrel->rd_rel->relkind == RELKIND_RELATION ||
+			childrel->rd_rel->relkind == RELKIND_MATVIEW)
+		{
+			tuples += childrel->rd_rel->reltuples;
+			pages += childrel->rd_rel->relpages;
+			visiblepages += childrel->rd_rel->relallvisible;
+
+			if ((tabentry = pgstat_fetch_stat_tabentry(childOID)) != NULL)
+			{
+				live_tuples += tabentry->n_live_tuples;
+				dead_tuples += tabentry->n_dead_tuples;
+			}
+
+			heap_close(childrel, AccessShareLock);
+		}
+		else
+		{
+			heap_close(childrel, AccessShareLock);
+			continue;
+		}
+	}
+	list_free(childs);
+
+	
+
+	pgstat_progress_start_command(PROGRESS_COMMAND_VACUUM,
+								  RelationGetRelid(onerel));
+	
+	/* Report that we are now doing final cleanup */
+	pgstat_progress_update_param(PROGRESS_VACUUM_PHASE,
+								 PROGRESS_VACUUM_PHASE_FINAL_CLEANUP);
+
+	vac_update_relstats(onerel,
+						pages,
+						tuples,
+						visiblepages,
+						false,
+						InvalidTransactionId,
+						InvalidMultiXactId,
+						false);
+
+	pgstat_report_vacuum(RelationGetRelid(onerel),
+						 onerel->rd_rel->relisshared,
+						 live_tuples,
+						 dead_tuples);
+	pgstat_progress_end_command();
+}
+#endif
 
 /*
  *    lazy_vacuum_rel() -- perform LAZY VACUUM for one heap relation
@@ -205,6 +289,14 @@ lazy_vacuum_rel(Relation onerel, int options, VacuumParams *params,
     MultiXactId new_min_multi;
 
     Assert(params != NULL);
+
+#ifdef __TBASE__
+	if (RELATION_IS_INTERVAL(onerel))
+	{
+		lazy_vacuum_interval_rel(onerel);
+		return;
+	}
+#endif
 
     /* measure elapsed time iff autovacuum logging requires it */
     if (IsAutoVacuumWorkerProcess() && params->log_min_duration >= 0)
