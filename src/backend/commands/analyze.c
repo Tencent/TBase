@@ -5050,12 +5050,14 @@ acquire_coordinator_sample_rows(Relation onerel, int elevel,
 	RelationLocInfo *rellocinfo;
 	TupleTableSlot *result;
 	bool			isreplica = false;
-	int 			targetnum;
 	Var			   *dummy;
 	double			samplenum = 0;
 	double			totalnum = 0;
 	double			deadnum = 0;
 	int				numrows = 0;
+	double			samplerows = 0;
+	double			rowstoskip = -1;	/* -1 means not set yet */
+	ReservoirStateData rstate;
 	int64			totalpagesnum = 0;
 	int64			visiblepagesnum = 0;
 
@@ -5064,25 +5066,17 @@ acquire_coordinator_sample_rows(Relation onerel, int elevel,
 	nspname = get_namespace_name(RelationGetNamespace(onerel));
 	rellocinfo = onerel->rd_locator_info;
 	isreplica = IsRelationReplicated(rellocinfo);
-	if (!isreplica) 
-	{
-		targetnum = ceil(1.0 * targrows / list_length(onerel->rd_locator_info->rl_nodeList));
-	}
-	else 
-	{
-		targetnum = targrows;
-	}
 
 	/* Make up query string */
 	initStringInfo(&query);
 
 	if (onerel->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
 	{
-		appendStringInfo(&query, "SAMPLE %s(%d)", relname, targetnum);
+		appendStringInfo(&query, "SAMPLE %s(%d)", relname, targrows);
 	}
 	else 
 	{
-		appendStringInfo(&query, "SAMPLE %s.%s(%d)", nspname, relname, targetnum);
+		appendStringInfo(&query, "SAMPLE %s.%s(%d)", nspname, relname, targrows);
 	}
 
 	/* Build up RemoteQuery */
@@ -5128,6 +5122,9 @@ acquire_coordinator_sample_rows(Relation onerel, int elevel,
 	estate->es_snapshot = GetActiveSnapshot();
 	node = ExecInitRemoteQuery(step, estate, 0);
 	MemoryContextSwitchTo(oldcontext);
+
+	/* Prepare for sampling rows */
+	reservoir_init_selection_state(&rstate, targrows);
 
 	result = ExecRemoteQuery((PlanState *) node);
 	
@@ -5176,6 +5173,40 @@ acquire_coordinator_sample_rows(Relation onerel, int elevel,
 				/* Build a copy and return it */
 				rows[numrows++] = heap_copytuple(&tmptup);
 			}
+			else
+			{
+				/*
+					* t in Vitter's paper is the number of records already
+					* processed.  If we need to compute a new S value, we
+					* must use the not-yet-incremented value of samplerows as
+					* t.
+					*/
+				if (rowstoskip < 0)
+					rowstoskip = reservoir_get_next_S(&rstate, samplerows, targrows);
+
+				if (rowstoskip <= 0)
+				{
+					/*
+						* Found a suitable tuple, so save it, replacing one
+						* old tuple at random
+						*/
+					int			k = (int) (targrows * sampler_random_fract(rstate.randstate));
+					HeapTupleHeader td = DatumGetHeapTupleHeader(result->tts_values[5]);
+					HeapTupleData tmptup;
+
+					/* Build a temporary HeapTuple control structure */
+					tmptup.t_len = HeapTupleHeaderGetDatumLength(td);
+					ItemPointerSetInvalid(&(tmptup.t_self));
+					tmptup.t_tableOid = InvalidOid;
+					tmptup.t_data = td;
+					Assert(k >= 0 && k < targrows);
+					heap_freetuple(rows[k]);
+					rows[k] = heap_copytuple(&tmptup);
+				}
+
+				rowstoskip -= 1;
+			}
+			samplerows += 1;
 		}
 		
 		result = ExecRemoteQuery((PlanState *) node);
