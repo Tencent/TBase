@@ -2604,6 +2604,8 @@ void alog(int destination, const char *fmt,...)
 #ifdef AuditLog_007_For_ShardStatistics
 static void * alog_shard_stat_main(void * arg)
 {
+	atexit(FlushShardStatistic);
+	
     while (true)
     {
         long shard_stat_interval = g_ShardInfoFlushInterval * 1000000L;
