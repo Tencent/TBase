@@ -3640,7 +3640,7 @@ static struct config_int ConfigureNamesInt[] =
             NULL
         },
         &g_ShardInfoFlushInterval,
-        300, 300, INT_MAX,
+		300, 3, INT_MAX,
         NULL, NULL, NULL
     },
 
