@@ -1705,6 +1705,17 @@ _equalVacuumStmt(const VacuumStmt *a, const VacuumStmt *b)
     return true;
 }
 
+#ifdef __TBASE__
+static bool
+_equalSampleStmt(const SampleStmt *a, const SampleStmt *b)
+{
+	COMPARE_NODE_FIELD(relation);
+	COMPARE_SCALAR_FIELD(rownum);
+
+	return true;
+}
+#endif
+
 #ifdef _SHARDING_
 static bool
 _equalVacuumShardStmt(const VacuumShardStmt *a, const VacuumShardStmt *b)

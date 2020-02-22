@@ -4124,6 +4124,7 @@ _copyVacuumShardStmt(const VacuumShardStmt *from)
 
     return newnode;
 }
+
 #endif
 
 static ExplainStmt *
@@ -4867,6 +4868,18 @@ _copyPartitionBy(const PartitionBy *from)
 
     return newnode;
 }
+
+static SampleStmt *
+_copySampleStmt(const SampleStmt *from)
+{
+	SampleStmt *newnode = makeNode(SampleStmt);
+
+	COPY_NODE_FIELD(relation);
+	COPY_SCALAR_FIELD(rownum);
+
+	return newnode;
+}
+
 
 static AddDropPartitions *
 _copyAddDropPartitions(const AddDropPartitions *from)

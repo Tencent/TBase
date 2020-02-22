@@ -770,13 +770,13 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
 		else 
 		{
 #endif
-        visibilitymap_count(onerel, &relallvisible, NULL);
+			visibilitymap_count(onerel, &relallvisible, NULL);
 
-#ifdef __TBASE__
-        if(IS_PGXC_DATANODE && RELATION_IS_INTERVAL(onerel))
-        {
-			get_rel_pages_visiblepages(onerel, &relpages, &relallvisible);
-        }
+	#ifdef __TBASE__
+			if(IS_PGXC_DATANODE && RELATION_IS_INTERVAL(onerel))
+			{
+				get_rel_pages_visiblepages(onerel, &relpages, &relallvisible);
+			}
 		}
 #endif
 
@@ -4955,7 +4955,7 @@ void ExecSample(SampleStmt *stmt, DestReceiver *dest)
 														   &context->totalpages,
 														   &context->visiblepages);
 	}
-	else if (IS_PGXC_DATANODE)
+	else
 	{
 		BlockNumber relpages;
 		BlockNumber relallvisible;
