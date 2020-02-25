@@ -7262,7 +7262,7 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
     for (i = 0; i < all_handles->co_conn_count; i++)
     {
         PGXCNodeHandle *handle = all_handles->coord_handles[i];
-        if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+		if (handle->sock != NO_SOCKET)
         {        
             if ((handle->state != DN_CONNECTION_STATE_IDLE) || !node_ready_for_query(handle))
             {
@@ -7314,6 +7314,12 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
 #endif
             }
         }
+#ifdef __TBASE__
+		else
+		{
+			elog(LOG, "PreAbort_Remote cn node %s pid %d, invalid socket %d!", handle->nodename, handle->backend_pid, handle->sock);
+		}
+#endif
     }
 
     /*
@@ -7322,7 +7328,7 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
     for (i = 0; i < all_handles->dn_conn_count; i++)
     {
         PGXCNodeHandle *handle = all_handles->datanode_handles[i];
-        if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+		if (handle->sock != NO_SOCKET)
         {        
             if (handle->state == DN_CONNECTION_STATE_COPY_IN  ||
                 handle->state == DN_CONNECTION_STATE_COPY_OUT || 
@@ -7416,6 +7422,12 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
 
             }
         }
+#ifdef __TBASE__
+		else
+		{
+			elog(LOG, "PreAbort_Remote dn node %s pid %d, invalid socket %d!", handle->nodename, handle->backend_pid, handle->sock);
+		}
+#endif
     }
 
     if (cancel_co_count || cancel_dn_count)
@@ -11020,12 +11032,12 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
             for (i = 0; i < all_handles->co_conn_count; i++)
             {
                 PGXCNodeHandle *handle = all_handles->coord_handles[i];
-                if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+				if (handle->sock != NO_SOCKET)
                 {
                     if (handle->state != DN_CONNECTION_STATE_IDLE || !node_ready_for_query(handle) || pgxc_node_is_data_enqueued(handle))
                     {
                         elog(DEBUG1, "pgxc_abort_connections node:%s not ready for query, status:%d", handle->nodename, handle->state);
-                        if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+						if (handle->sock != NO_SOCKET)
                         {
                             pgxc_node_flush_read(handle);
                             handle->state = DN_CONNECTION_STATE_IDLE;
@@ -11059,7 +11071,7 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
             for (i = 0; i < all_handles->dn_conn_count; i++)
             {
                 PGXCNodeHandle *handle = all_handles->datanode_handles[i];
-                if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+				if (handle->sock != NO_SOCKET)
                 {
                     if (handle->state != DN_CONNECTION_STATE_IDLE || !node_ready_for_query(handle) || pgxc_node_is_data_enqueued(handle))
                     {
@@ -11093,7 +11105,7 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
             for (i = 0; i < all_handles->co_conn_count; i++)
             {
                 PGXCNodeHandle *handle = all_handles->coord_handles[i];
-                if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+				if (handle->sock != NO_SOCKET)
                 {
                     if (handle->state != DN_CONNECTION_STATE_IDLE || !node_ready_for_query(handle) || pgxc_node_is_data_enqueued(handle))
                     {
@@ -11129,7 +11141,7 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
             for (i = 0; i < all_handles->dn_conn_count; i++)
             {
                 PGXCNodeHandle *handle = all_handles->datanode_handles[i];
-                if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+				if (handle->sock != NO_SOCKET)
                 {
                     if (handle->state != DN_CONNECTION_STATE_IDLE || !node_ready_for_query(handle) || pgxc_node_is_data_enqueued(handle))
                     {
