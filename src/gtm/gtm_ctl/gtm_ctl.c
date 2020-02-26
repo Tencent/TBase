@@ -72,6 +72,7 @@ static char *argv0 = NULL;
 #ifdef __TBASE__
 static char *gtm_host = NULL;
 static char *gtm_port = NULL;
+static char *startup_gts = NULL;
 pthread_key_t    threadinfo_key;
 GTM_ThreadID    TopMostThreadID;
 int    tcp_keepalives_idle = 0;
@@ -267,6 +268,7 @@ start_gtm(void)
 {
     char        cmd[MAXPGPATH];
     char        gtm_app_path[MAXPGPATH];
+	char        gtm_startup_gts[MAXPGPATH];
     int            len;
 
     /*
@@ -276,6 +278,7 @@ start_gtm(void)
 
     memset(gtm_app_path, 0, MAXPGPATH);
     memset(cmd, 0, MAXPGPATH);
+	memset(gtm_startup_gts, 0, MAXPGPATH);
 
     /*
      * Build gtm binary path. We should leave one byte at the end for '\0'
@@ -299,12 +302,16 @@ start_gtm(void)
 
     strncat(gtm_app_path, gtm_app, MAXPGPATH - len - 1);
 
+	if (startup_gts != NULL)
+		snprintf(gtm_startup_gts,MAXPGPATH,"-g %s",startup_gts);
+
     if (log_file != NULL)
-        len = snprintf(cmd, MAXPGPATH - 1, "\"%s\" %s%s -l %s &" ,
-                 gtm_app_path, gtmdata_opt, gtm_opts, log_file);
+		len = snprintf(cmd, MAXPGPATH - 1, "\"%s\" %s%s -l %s %s &" ,
+				 gtm_app_path, gtmdata_opt, gtm_opts, log_file, gtm_startup_gts);
     else
-        len = snprintf(cmd, MAXPGPATH - 1, "\"%s\" %s%s < \"%s\" 2>&1 &" ,
-                 gtm_app_path, gtmdata_opt, gtm_opts, DEVNULL);
+		len = snprintf(cmd, MAXPGPATH - 1, "\"%s\" %s%s %s < \"%s\" 2>&1 &" ,
+				 gtm_app_path, gtmdata_opt, gtm_opts, gtm_startup_gts, DEVNULL);
+
 
     if (len >= MAXPGPATH - 1)
     {
@@ -1255,7 +1262,7 @@ main(int argc, char **argv)
     /* process command-line options */
     while (optind < argc)
     {
-        while ((c = getopt(argc, argv, "D:i:l:m:o:p:t:wWZ:H:P:")) != -1)
+		while ((c = getopt(argc, argv, "D:i:l:m:o:p:t:wWZ:H:P:g:")) != -1)
         {
             switch (c)
             {
@@ -1326,7 +1333,10 @@ main(int argc, char **argv)
                     
                 case 'P':
                     gtm_port = xstrdup(optarg);
-                    break;                
+					break;
+				case 'g':
+					startup_gts = xstrdup(optarg);
+					break;
 #endif
                 default:
                     /* getopt_long already issued a suitable error message */
