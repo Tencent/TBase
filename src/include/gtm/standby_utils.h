@@ -17,7 +17,7 @@
 
 #include "gtm/gtm_lock.h"
 
-inline bool Recovery_IsStandby(void);
+extern inline bool Recovery_IsStandby(void);
 void Recovery_StandbySetStandby(bool standby);
 void Recovery_StandbySetConnInfo(const char *addr, int port);
 int Recovery_StandbyGetActivePort(void);
