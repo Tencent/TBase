@@ -12120,8 +12120,8 @@ pruning_walker(Relation rel, Node *expr)
             break;
         case T_RestrictInfo:
             {
-                RestrictInfo *restrict = (RestrictInfo *)expr;
-                result = pruning_walker(rel, (Node *)restrict->clause);
+                RestrictInfo *restricted = (RestrictInfo *)expr;
+                result = pruning_walker(rel, (Node *)restricted->clause);
             }
             break;
         case T_BoolExpr:
