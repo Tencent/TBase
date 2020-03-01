@@ -492,7 +492,7 @@ static List* SyncBufferPostPhase1(List * buf_id_list, WritebackContext *wb_conte
 static List * NormalBufidListMake(int buf_id, int bufstatus);
 static List* SyncBufferParellel(int buf_id, bool skip_recently_used, WritebackContext *wb_context);
 static List* SyncBufferWaitParellelFinsih(WritebackContext *wb_context);
-static List* SyncBufferPostPhase1_2(List * buf_id_list);
+// static List* SyncBufferPostPhase1_2(List * buf_id_list);
 
 #endif
 
@@ -4772,7 +4772,7 @@ static int CheckBufferNeedSync(int buf_id, bool skip_recently_used, int *buf_ret
 static int SyncBufferPrePhase1(int buf_id)
 {
     BufferDesc *bufHdr = GetBufferDescriptor(buf_id);
-    int ret;
+    // int ret;
        
     /*
      * Pin it, share-lock it, write it.  (FlushBuffer will do nothing if the
@@ -4780,15 +4780,10 @@ static int SyncBufferPrePhase1(int buf_id)
      */
     PinBuffer_Locked(bufHdr);
 
-    /*
-     * try to lock the buffer, returning false means other process(start or backend) having lock the buffer in LW_EXCLUSIVE,
-     * so, we skip this buffer, it would be treated in next checkpoint round.
+	/*
+     * lock the buffer before Sync
      */
-    ret = LWLockConditionalAcquire(BufferDescriptorGetContentLock(bufHdr), LW_SHARED);
-    if (false == ret)
-    {
-        return SYNC_BUF_LWLOCK_CONFLICT;
-    }
+	LWLockAcquire(BufferDescriptorGetContentLock(bufHdr), LW_SHARED);
 
     /*
      * Acquire the buffer's io_in_progress lock.  If StartBufferIO returns
@@ -5056,6 +5051,7 @@ static List* SyncBufferPostPhase1(List * buf_id_list, WritebackContext *wb_conte
     return buf_id_list;
 }
 
+#if 0
 static List* SyncBufferPostPhase1_2(List * buf_id_list)
 {
     BufferDesc    *buf;
@@ -5081,6 +5077,7 @@ static List* SyncBufferPostPhase1_2(List * buf_id_list)
 
     return buf_id_list;
 }
+#endif
 
 
 /*
@@ -5156,18 +5153,6 @@ static List* SyncBufferParellel(int buf_id, bool skip_recently_used, WritebackCo
 
             /* release context lock and unpin buffer */
             SyncBufferPostPhase1(buf_id_list, wb_context);
-        }
-        else if (SYNC_BUF_LWLOCK_CONFLICT == ret)
-        {
-            /* 
-             * fail to get buffer content lock
-             */
-            
-            /* make buf id list */
-            buf_id_list = NormalBufidListMake(buf_id, bufstatus);
-            
-            /* there is no context lock, so just unpin buffer */
-            SyncBufferPostPhase1_2(buf_id_list);
         }
         else
         {
