@@ -1887,7 +1887,8 @@ send_some(PGXCNodeHandle *handle, int len)
                     add_error_message(handle, "server closed the connection unexpectedly\n"
                     "\tThis probably means the server terminated abnormally\n"
                               "\tbefore or while processing the request.\n");
-
+					PGXCNodeSetConnectionState(handle,
+							DN_CONNECTION_STATE_ERROR_FATAL);
                     /*
                      * We used to close the socket here, but that's a bad idea
                      * since there might be unread data waiting (typically, a
@@ -5182,6 +5183,7 @@ pgxc_check_socket_health(int sock, int forRead, int forWrite, time_t end_time)
 #ifdef HAVE_POLL
     struct pollfd input_fd;
     int            timeout_ms;
+	int         ret;
 
     if (!forRead && !forWrite)
         return 0;
@@ -5210,7 +5212,17 @@ pgxc_check_socket_health(int sock, int forRead, int forWrite, time_t end_time)
             timeout_ms = 0;
     }
 
-    return poll(&input_fd, 1, timeout_ms);
+	ret = poll(&input_fd, 1, timeout_ms);
+	if (ret > 0)
+	{
+		if (input_fd.revents & POLLERR ||
+			input_fd.revents & POLLNVAL ||
+			input_fd.revents & POLLHUP)
+		{
+			return -1;
+		}
+	}
+	return ret;
 #else                            /* !HAVE_POLL */
 
     fd_set        input_mask;
