@@ -1671,7 +1671,7 @@ WalSndWaitForWal(XLogRecPtr loc)
         }
 
         /* Check for input from the client */
-		ProcessRepliesIfAny(0);
+		ProcessRepliesIfAny(InvalidTransactionId);
 
         /*
          * If we're shutting down, trigger pending WAL to be written out,
@@ -2011,7 +2011,7 @@ ProcessRepliesIfAny(TransactionId xid)
 				ereport(LOG,
 						(errcode(ERRCODE_PROTOCOL_VIOLATION),
 						 errmsg("standby message type \"%c\", the standby is closing down the socket",firstchar)));
-				if (xid != 0)
+				if (TransactionIdIsValid(xid))
 				{
 				    DeleteSpillToDiskSnap(xid);
 				}
@@ -2499,7 +2499,7 @@ WalSndLoop(WalSndSendDataCallback send_data)
         }
 
         /* Check for input from the client */
-		ProcessRepliesIfAny(0);
+		ProcessRepliesIfAny(InvalidTransactionId);
 
         /*
          * If we have received CopyDone from the client, sent CopyDone
