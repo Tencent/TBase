@@ -11115,6 +11115,11 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
                         {
                             need_loop_check = true;
                         }
+						if (proc_exit_inprogress)
+						{
+							handle->state = DN_CONNECTION_STATE_IDLE;
+							handle->last_command = 'Z';
+						}
                     }
                     else
                     {
@@ -11151,6 +11156,11 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
                         {
                             need_loop_check = true;
                         }
+						if (proc_exit_inprogress)
+						{
+							handle->state = DN_CONNECTION_STATE_IDLE;
+							handle->last_command = 'Z';
+						}
                     }
                     else
                     {
