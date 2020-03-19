@@ -136,3 +136,7 @@ Use PGXC\_CTL tool to build a cluster, for example: a cluster with a global tran
 ## License  
 
 The TBase is licensed under the BSD 3-Clause License. Copyright and license information can be found in the file LICENSE.txt
+
+## Hiring
+
+If you are interested in TBase and want to join us. Please send your resume to 454932786@qq.com
