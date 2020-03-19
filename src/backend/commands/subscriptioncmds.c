@@ -1769,6 +1769,16 @@ CreateTbaseSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
                                         &parallel_number,
                                         &copy_data);
 
+	/* check if parallel_number is not greater than max_logical_replication_workers parameter */
+	if (parallel_number > max_logical_replication_workers)
+	{
+		ereport(ERROR,
+                (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+                 errmsg("options parallel_number %d is greater than max_logical_replication_workers %d",
+                     parallel_number, max_logical_replication_workers),
+                 errhint("You might need to increase max_logical_replication_workers or decrease parallel_number.")));
+	}
+
     PushActiveSnapshot(GetLocalTransactionSnapshot());
 
     /* check if already exists a same name */
