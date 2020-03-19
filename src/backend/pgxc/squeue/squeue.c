@@ -1827,6 +1827,12 @@ SharedQueueRead(SharedQueue squeue, int consumerIdx,
                     LWLockRelease(sqsync->sqs_consumer_sync[consumerIdx].cs_lwlock);
                 }
 
+				if (squeue->sender_destroy)
+				{
+					elog(ERROR, "squeue %s Pid %d: Producer failed(destroy) while we were waiting for sending fd - status was %d, err_msg %s",
+						   squeue->sq_key, MyProcPid, cstate->cs_status, squeue->err_msg);
+				}
+
                 pg_usleep(1000L);
             }
 
@@ -1911,6 +1917,13 @@ SharedQueueRead(SharedQueue squeue, int consumerIdx,
                          cstate->cs_node, cstate->cs_pid, cstate->cs_status, squeue->err_msg)));
         }
 #ifdef __TBASE__
+		if (squeue->sender_destroy)
+		{
+			LWLockRelease(sqsync->sqs_consumer_sync[consumerIdx].cs_lwlock);
+			LWLockRelease(sqsync->sqs_producer_lwlock);
+			elog(ERROR, "squeue %s Pid %d: Producer failed while we were reading data from squeue - status was %d, err_msg %s",
+				   squeue->sq_key, MyProcPid, cstate->cs_status, squeue->err_msg);
+		}
         /* got end query request */
         if (end_query_requested)
         {
