@@ -9641,6 +9641,15 @@ PoolPingNodeRecheck(Oid nodeoid)
     NodeDefinition *nodeDef;
     char connstr[MAXPGPATH * 2 + 256];
     bool    healthy;
+    char *username = NULL;
+    char *errstr = NULL;
+
+    username = get_user_name(&errstr);
+    if (errstr != NULL)
+    {
+        elog(WARNING, "Could not get current username errmsg: %s", errstr);
+        return;
+    }
 
     nodeDef = PgxcNodeGetDefinition(nodeoid);
     if (nodeDef == NULL)
@@ -9652,8 +9661,8 @@ PoolPingNodeRecheck(Oid nodeoid)
     }
 
     sprintf(connstr,
-            "host=%s port=%d", NameStr(nodeDef->nodehost),
-            nodeDef->nodeport);
+			"host=%s port=%d user=%s dbname=%s", NameStr(nodeDef->nodehost),
+			nodeDef->nodeport, username, get_database_name(MyDatabaseId));
     status = PGXCNodePing(connstr);
     healthy = (status == 0);
 
