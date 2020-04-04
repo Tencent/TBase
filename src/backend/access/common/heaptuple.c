@@ -2335,4 +2335,50 @@ void slot_deform_tuple_extern(void *slot, int natts)
     return;
 }
 
+void
+heap_tuple_set_shardid(HeapTuple tup, void *tupleslot, AttrNumber diskey, AttrNumber secdiskey,
+				             Oid relid)
+{
+	int   shardId;
+	Datum value;
+	bool  isdisnull;
+	Oid   typeOfDistCol;
+	Datum secvalue;
+	Oid   sectypeOfDistCol;
+	bool  secisnull;
+	TupleTableSlot *slot = (TupleTableSlot *)tupleslot;
+	
+	if(diskey < 1 || diskey > slot->tts_tupleDescriptor->natts)
+	{
+		elog(ERROR, "AttrNum[%d] of distribute key is invalid, ",diskey);
+	}
+
+	if(secdiskey  > slot->tts_tupleDescriptor->natts)
+	{
+		elog(ERROR, "AttrNum[%d] of second distribute key is invalid, ", secdiskey);
+	}		
+
+	/* process sharding maping */		
+	typeOfDistCol = slot->tts_tupleDescriptor->attrs[diskey - 1]->atttypid;
+	value     	  = slot->tts_values[diskey - 1];
+	isdisnull	  = slot->tts_isnull[diskey - 1];
+
+	/* secondary distribute key */
+	if (secdiskey != InvalidAttrNumber)
+	{
+		sectypeOfDistCol = slot->tts_tupleDescriptor->attrs[secdiskey - 1]->atttypid;
+		secvalue     	 = slot->tts_values[secdiskey - 1];
+		secisnull	     = slot->tts_isnull[secdiskey - 1];
+	}
+	else
+	{
+		sectypeOfDistCol = InvalidOid;	
+		secvalue         = 0;
+		secisnull        = true;
+	}
+
+	shardId = EvaluateShardId(typeOfDistCol, isdisnull, value, 
+		                      sectypeOfDistCol, secisnull, secvalue, relid);
+	HeapTupleHeaderSetShardId(tup->t_data, shardId);	
+}
 #endif
