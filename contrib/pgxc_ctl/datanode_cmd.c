@@ -338,10 +338,11 @@ cmd_t *prepare_initDatanodeSlave(char *nodeName)
     /* Obtain base backup of the master */
     appendCmdEl(cmdBuildDir, (cmdBaseBkup = initCmd(aval(VAR_datanodeSlaveServers)[idx])));
     snprintf(newCommand(cmdBaseBkup), MAXLINE, 
-             "pg_basebackup -p %s -h %s -D %s --wal-method=stream",
-             aval(VAR_datanodePorts)[idx], aval(VAR_datanodeMasterServers)[idx],
+			 "pg_basebackup -U %s -p %s -h %s -D %s --wal-method=stream",
+             aval(VAR_pgxcOwner)[0],
+			 aval(VAR_datanodePorts)[idx],
+			 aval(VAR_datanodeMasterServers)[idx],
              aval(VAR_datanodeSlaveDirs)[idx]);
-
     /* Configure recovery.conf of the slave */
     appendCmdEl(cmdBuildDir, (cmdRecovConf = initCmd(aval(VAR_datanodeSlaveServers)[idx])));
     snprintf(newCommand(cmdRecovConf), MAXLINE, 
@@ -1515,8 +1516,9 @@ int add_datanodeSlave(char *name, char *host, int port, int pooler, char *dir,
     doImmediate(aval(VAR_datanodeMasterServers)[idx], NULL, 
                 "pg_ctl start -w -Z datanode -D %s", aval(VAR_datanodeMasterDirs)[idx]);
     /* pg_basebackup */
-    doImmediate(host, NULL, "pg_basebackup -p %s -h %s -D %s --wal-method=stream %s %s",
-                aval(VAR_datanodePorts)[idx],
+	doImmediate(host, NULL, "pg_basebackup -U %s -p %s -h %s -D %s --wal-method=stream %s %s",
+	            aval(VAR_pgxcOwner)[0],
+	            aval(VAR_datanodePorts)[idx],
                 aval(VAR_datanodeMasterServers)[idx], dir,
                 wal ? "--waldir" : "",
                 wal ? walDir : "");
