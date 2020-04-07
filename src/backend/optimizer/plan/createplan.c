@@ -4783,7 +4783,11 @@ create_nestloop_plan(PlannerInfo *root,
      * rescan RemoteSubplan and do not support it.
      * So if inner_plan is a RemoteSubplan, materialize it.
      */
+#ifdef __TBASE__
+	if (!IsA(inner_plan, Material) && contain_remote_subplan_walker((Node*)inner_plan, NULL, true))
+#else
     if (IsA(inner_plan, RemoteSubplan))
+#endif
     {
         Plan       *matplan = (Plan *) make_material(inner_plan);
 
