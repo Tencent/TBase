@@ -126,17 +126,18 @@ select p from
           (box(point(0.8,0.8), point(1.0,1.0)))) as v(bb)
 cross join lateral
   (select p from gist_tbl where p <@ bb order by p <-> bb[0] limit 2) ss;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Nested Loop
    ->  Values Scan on "*VALUES*"
-   ->  Limit
-         ->  Remote Subquery Scan on all (datanode_1)
-               ->  Limit
-                     ->  Index Only Scan using gist_tbl_point_index on gist_tbl
-                           Index Cond: (p <@ "*VALUES*".column1)
-                           Order By: (p <-> ("*VALUES*".column1)[0])
-(8 rows)
+   ->  Materialize
+         ->  Limit
+               ->  Remote Subquery Scan on all (datanode_1)
+                     ->  Limit
+                           ->  Index Only Scan using gist_tbl_point_index on gist_tbl
+                                 Index Cond: (p <@ "*VALUES*".column1)
+                                 Order By: (p <-> ("*VALUES*".column1)[0])
+(9 rows)
 
 select p from
   (values (box(point(0,0), point(0.5,0.5))),

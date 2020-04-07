@@ -12429,6 +12429,11 @@ void SetCurrentHandlesReadonly(void)
 void
 SubTranscation_PreCommit_Remote(void)
 {
+	MemoryContext old;
+	MemoryContext temp = AllocSetContextCreate(TopMemoryContext,
+												  "SubTransaction remote commit context",
+												  ALLOCSET_DEFAULT_SIZES);
+	old = MemoryContextSwitchTo(temp);
     /* Only local coord can send down commit_subtxn when exec plpgsql */
     if (InPlpgsqlFunc() && IS_PGXC_LOCAL_COORDINATOR)
     {
@@ -12438,7 +12443,8 @@ SubTranscation_PreCommit_Remote(void)
     {
         pgxc_node_remote_commit(TXN_TYPE_CommitTxn, false);
     }
-    
+	MemoryContextSwitchTo(old);
+	MemoryContextDelete(temp);
 }
 
 /*
