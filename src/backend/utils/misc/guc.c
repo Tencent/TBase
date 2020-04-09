@@ -2343,6 +2343,15 @@ static struct config_bool ConfigureNamesBool[] =
         false,
         NULL, NULL, NULL
     },
+	{
+		{"allow_force_drop_on_datanode", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("allow forced drop of inconsistent metadata on datanode"),
+			NULL
+		},
+		&g_allow_force_drop_on_datanode,
+		false,
+		NULL, NULL, NULL
+	},
     {
         {"trace_extent", PGC_SUSET, DEVELOPER_OPTIONS,
             gettext_noop("Emits information about extent changing."),

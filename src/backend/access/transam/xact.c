@@ -156,6 +156,7 @@ int            MyXactFlags;
 
 #ifdef _SHARDING_
 bool        g_allow_dml_on_datanode = false;
+bool		g_allow_force_drop_on_datanode = false;
 #endif
 
 #ifdef __TBASE__
