@@ -96,6 +96,7 @@
 #ifdef __TBASE__
 #include "catalog/pg_partition_interval.h"
 #include "catalog/pgxc_node.h"
+#include "utils/guc.h"
 #endif
 #ifdef _MLS_
 #include "access/tupdesc_details.h"
@@ -676,9 +677,12 @@ RelationBuildTupleDesc(Relation relation)
     systable_endscan(pg_attribute_scan);
     heap_close(pg_attribute_desc, AccessShareLock);
 
-    if (need != 0)
-        elog(ERROR, "catalog is missing %d attribute(s) for relid %u",
-             need, RelationGetRelid(relation));
+	if (g_allow_force_drop_on_datanode == false)
+	{
+		if (need != 0)
+			elog(ERROR, "catalog is missing %d attribute(s) for relid %u",
+				 need, RelationGetRelid(relation));
+	}
 
     /*
      * The attcacheoff values we read from pg_attribute should all be -1
@@ -699,8 +703,16 @@ RelationBuildTupleDesc(Relation relation)
      * attribute: it must be zero.  This eliminates the need for special cases
      * for attnum=1 that used to exist in fastgetattr() and index_getattr().
      */
-    if (relation->rd_rel->relnatts > 0)
-        relation->rd_att->attrs[0]->attcacheoff = 0;
+	if (g_allow_force_drop_on_datanode == false)
+	{
+		if (relation->rd_rel->relnatts > 0)
+			relation->rd_att->attrs[0]->attcacheoff = 0;
+	}
+	else
+	{
+		if (relation->rd_att->natts > 0)
+			relation->rd_att->attrs[0]->attcacheoff = 0;
+	}
 
     /*
      * Set up constraint/default info
