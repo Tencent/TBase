@@ -301,7 +301,7 @@ extern int    tcp_keepalives_interval;
 extern int    tcp_keepalives_count;
 #ifdef _SHARDING_
 extern bool g_allow_dml_on_datanode;
-extern bool g_allow_force_drop_on_datanode;
+extern bool g_allow_force_ddl;
 extern bool trace_extent;
 #endif
 #ifdef XCP
