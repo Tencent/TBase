@@ -121,6 +121,7 @@
 #include "utils/relcryptmap.h"
 
 #include "utils/datamask.h"
+#include "utils/guc.h"
 
 #include "utils/mls_extension.h"
 #include "pgxc/pgxcnode.h"
@@ -1367,6 +1368,11 @@ Oid mls_get_parent_oid_by_relid(Oid relid)
             {
                 tbl_oid = IndexGetRelation(relid, false);
                 tbl_tp  = SearchSysCache1(RELOID, ObjectIdGetDatum(tbl_oid));
+                if (g_allow_force_ddl && !tbl_tp)
+                {
+                    ReleaseSysCache(tp);
+                    return InvalidOid;
+                }
                 reltup  = (Form_pg_class)GETSTRUCT(tbl_tp);
             }
             
