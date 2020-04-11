@@ -2344,11 +2344,11 @@ static struct config_bool ConfigureNamesBool[] =
         NULL, NULL, NULL
     },
 	{
-		{"allow_force_drop_on_datanode", PGC_USERSET, CUSTOM_OPTIONS,
-			gettext_noop("allow forced drop of inconsistent metadata on datanode"),
+		{"allow_force_ddl", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("allow forced ddl of inconsistent metadata"),
 			NULL
 		},
-		&g_allow_force_drop_on_datanode,
+		&g_allow_force_ddl,
 		false,
 		NULL, NULL, NULL
 	},

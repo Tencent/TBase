@@ -498,6 +498,10 @@ RelationParseRelOptions(Relation relation, HeapTuple tuple)
      * we might not have any other for pg_class yet (consider executing this
      * code for pg_class itself)
      */
+	if (g_allow_force_ddl && !relation->rd_amroutine)
+	{
+	    return;
+	}
     options = extractRelOptions(tuple,
                                 GetPgClassDescriptor(),
                                 relation->rd_rel->relkind == RELKIND_INDEX ?
@@ -677,12 +681,9 @@ RelationBuildTupleDesc(Relation relation)
     systable_endscan(pg_attribute_scan);
     heap_close(pg_attribute_desc, AccessShareLock);
 
-	if (g_allow_force_drop_on_datanode == false)
-	{
-		if (need != 0)
-			elog(ERROR, "catalog is missing %d attribute(s) for relid %u",
-				 need, RelationGetRelid(relation));
-	}
+	if (need != 0 && false == g_allow_force_ddl)
+	    elog(ERROR, "catalog is missing %d attribute(s) for relid %u",
+	        need, RelationGetRelid(relation));
 
     /*
      * The attcacheoff values we read from pg_attribute should all be -1
@@ -703,7 +704,7 @@ RelationBuildTupleDesc(Relation relation)
      * attribute: it must be zero.  This eliminates the need for special cases
      * for attnum=1 that used to exist in fastgetattr() and index_getattr().
      */
-	if (g_allow_force_drop_on_datanode == false)
+	if (false == g_allow_force_ddl)
 	{
 		if (relation->rd_rel->relnatts > 0)
 			relation->rd_att->attrs[0]->attcacheoff = 0;
@@ -1776,9 +1777,15 @@ RelationInitIndexAccessInfo(Relation relation)
      */
     tuple = SearchSysCache1(INDEXRELID,
                             ObjectIdGetDatum(RelationGetRelid(relation)));
-    if (!HeapTupleIsValid(tuple))
-        elog(ERROR, "cache lookup failed for index %u",
-             RelationGetRelid(relation));
+	if (!HeapTupleIsValid(tuple) && false == g_allow_force_ddl)
+	{
+	    elog(ERROR, "cache lookup failed for index %u",
+	 	    RelationGetRelid(relation));
+	}
+	else if (!HeapTupleIsValid(tuple) && g_allow_force_ddl)
+	{
+	    return;
+	}
     oldcontext = MemoryContextSwitchTo(CacheMemoryContext);
     relation->rd_indextuple = heap_copytuple(tuple);
     relation->rd_index = (Form_pg_index) GETSTRUCT(relation->rd_indextuple);
