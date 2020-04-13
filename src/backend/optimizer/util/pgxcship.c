@@ -1325,7 +1325,7 @@ pgxc_shippability_walker(Node *node, Shippability_context *sc_context)
              * Datanodes needed for evaluating this query
              */
             sc_context->sc_exec_nodes = pgxc_FQS_find_datanodes(query);
-            #if 0
+            #if 1
             sc_context->sc_exec_nodes = pgxc_merge_exec_nodes(exec_nodes, sc_context->sc_exec_nodes);            
             #endif
         }
@@ -2096,6 +2096,32 @@ pgxc_find_dist_equi_nodes(Relids varnos_1,
             {
                 continue;
             }
+        }
+
+        {
+            Var* tmp_var = var;
+            bool origin_var_found = false;
+
+            while(true)
+            {
+                RangeTblEntry* rte = rt_fetch(tmp_var->varno, rtable);
+                if (rte->rtekind == RTE_RELATION)
+                {
+                    origin_var_found = true;
+                    break;
+                }
+
+                if (rte->rtekind != RTE_JOIN || rte->jointype != JOIN_INNER) 
+                    break;
+
+                Assert(list_length(rte->joinaliasvars) > var->varattno - 1);
+                    
+                tmp_var = (Var*)list_nth(rte->joinaliasvars, var->varattno -1);
+                Assert(IsA(tmp_var, Var));
+            }
+
+            if (origin_var_found)
+                var = tmp_var;
         }
 
         /* if the vars do not correspond to the required varnos, continue. */
