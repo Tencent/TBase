@@ -904,7 +904,7 @@ main(int argc, char *argv[])
         exit(1);
     }
 
-    if(synchronous_standby_names != NULL && enable_sync_commit == false)
+	if( (synchronous_standby_names != NULL && strlen(synchronous_standby_names) > 0) && enable_sync_commit == false)
     {
         write_stderr("synchronous_standby_names is not allow to set in async commit mode");
         write_stderr("Try \"%s --help\" for more information.\n",
