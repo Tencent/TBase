@@ -184,6 +184,9 @@ lazy_vacuum_interval_rel(Relation onerel)
 	BlockNumber visiblepages = 0;
 	double live_tuples = 0;
 	double dead_tuples = 0;
+	int nindexes;
+	Relation *Irel;
+	bool hasindex;
 
 	childs = RelationGetAllPartitions(onerel);
 
@@ -229,6 +232,11 @@ lazy_vacuum_interval_rel(Relation onerel)
 	}
 	list_free(childs);
 
+	vac_open_indexes(onerel, ShareUpdateExclusiveLock, &nindexes, &Irel);
+	hasindex = (nindexes > 0);
+
+	vac_close_indexes(nindexes, Irel, ShareUpdateExclusiveLock);
+
 	
 
 	pgstat_progress_start_command(PROGRESS_COMMAND_VACUUM,
@@ -242,7 +250,7 @@ lazy_vacuum_interval_rel(Relation onerel)
 						pages,
 						tuples,
 						visiblepages,
-						false,
+						hasindex,
 						InvalidTransactionId,
 						InvalidMultiXactId,
 						false);
