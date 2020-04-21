@@ -209,6 +209,11 @@ ExecInitNode(Plan *node, EState *estate, int eflags)
         case T_SeqScan:
             result = (PlanState *) ExecInitSeqScan((SeqScan *) node,
                                                    estate, eflags);
+			if (!result)
+			{
+				return NULL;
+			}
+
             break;
 
         case T_SampleScan:

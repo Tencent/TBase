@@ -153,3 +153,42 @@ drop index t_month_3_c3_c2;
 
 drop table t_month_3;
 
+--add partition & drop partiton--
+create table t_drop(f1 int not null,f2 timestamp not null,f3 varchar(10),primary key(f1)) partition by range (f2) begin (timestamp without time zone '2019-01-01 0:0:0') step (interval '1 month') partitions (2) distribute by shard(f1) to group default_group;
+
+ALTER TABLE t_drop ADD PARTITIONS 2; 
+
+insert into t_drop select generate_series(1,10), timestamp without time zone '2019-01-31 23:23:59', 'aaa';
+insert into t_drop select generate_series(11,30), timestamp without time zone '2019-02-01 10:23:59', 'aaa';
+insert into t_drop select generate_series(31,50), timestamp without time zone '2019-03-31 23:23:59', 'aaa';
+insert into t_drop select generate_series(51,100), timestamp without time zone '2019-04-01 00:00:00', 'aaa';
+
+drop table t_drop_part_0;
+drop table t_drop_part_1;
+drop table t_drop_part_3;
+
+create index t_drop_f3 on t_drop(f3);
+create index t_drop_f2 on t_drop(f2);
+
+insert into t_drop select generate_series(101,150), timestamp without time zone '2019-03-01 00:00:00', 'bbb';
+
+select count(1) from t_drop where f2 >= timestamp without time zone '2019-02-01 00:00:00';
+
+select count(1) from t_drop where f3 = 'aaa';
+
+select * from t_drop where f3 = 'aaa' order by f1 limit 5;
+
+ALTER TABLE t_drop ADD PARTITIONS 1; 
+
+insert into t_drop select generate_series(201,250), timestamp without time zone '2019-05-01 00:00:00', 'ccc';
+
+select * from t_drop where f3 = 'ccc' order by f1 limit 5;
+
+drop index t_drop_f2;
+drop index t_drop_f3;
+
+select count(1) from t_drop where f2 >= timestamp without time zone '2019-02-01 00:00:00';
+
+select count(1) from t_drop where f3 = 'ccc';
+
+drop table t_drop;

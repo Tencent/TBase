@@ -174,9 +174,14 @@ ExecInitAppend(Append *node, EState *estate, int eflags)
     {
         Plan       *initNode = (Plan *) lfirst(lc);
 
-        appendplanstates[i] = ExecInitNode(initNode, estate, eflags);
-        i++;
+		PlanState *ret = ExecInitNode(initNode, estate, eflags);
+		if (ret)
+		{
+			appendplanstates[i] = ret;
+			i++;
+		}
     }
+	appendstate->as_nplans = i;
 
     /*
      * initialize output tuple type
