@@ -8889,6 +8889,8 @@ create_remotequery_for_rel(PlannerInfo *root, ModifyTable *mt, RangeTblEntry *re
     RelationLocInfo    *rel_loc_info;
     Plan            *sourceDataPlan;
     RangeTblEntry    *dummy_rte;
+	char            *child_relname;
+	Oid             child_reloid;
 
     relname = get_rel_name(res_rel->relid);
 
@@ -8896,6 +8898,20 @@ create_remotequery_for_rel(PlannerInfo *root, ModifyTable *mt, RangeTblEntry *re
     rel_loc_info = GetRelationLocInfo(res_rel->relid);
     if (rel_loc_info == NULL)
         return;
+
+	if (partindex >= 0)
+	{
+		child_relname = GetPartitionName(res_rel->relid, partindex, false);
+		child_reloid = get_relname_relid(child_relname, RelationGetNamespace(relation));
+		if (InvalidOid == child_reloid)
+		{
+			if(child_relname)
+			{
+			    pfree(child_relname);
+			}
+			return;
+		}
+	}
 
     fstep = makeNode(RemoteQuery);
     fstep->scan.scanrelid = resultRelationIndex;
@@ -8922,8 +8938,8 @@ create_remotequery_for_rel(PlannerInfo *root, ModifyTable *mt, RangeTblEntry *re
 
         child_rte = copyObject(res_rel);
         child_rte->intervalparent = false;
-        child_rte->relname = GetPartitionName(res_rel->relid, partindex, false);
-        child_rte->relid = get_relname_relid(child_rte->relname, RelationGetNamespace(relation));
+		child_rte->relname = child_relname;
+		child_rte->relid = child_reloid;
 
         root->parse->rtable = lappend(root->parse->rtable, child_rte);
 

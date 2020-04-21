@@ -11964,6 +11964,8 @@ RelationGetPartitionByValue(Relation rel, Const *value)
     AttrNumber partkey = InvalidAttrNumber;
     Form_pg_attribute attr = NULL;
     Bitmapset * bms = NULL;
+	char *partname = NULL;
+	Oid partoid = InvalidOid;
 
     partkey = RelationGetPartitionColumnIndex(rel);
     attr = rel->rd_att->attrs[partkey-1];
@@ -11975,7 +11977,10 @@ RelationGetPartitionByValue(Relation rel, Const *value)
 
     partidx = RelationGetPartitionIdxByValue(rel,value->constvalue);
 
-    if(partidx >= 0)
+	partname = GetPartitionName(RelationGetRelid(rel), partidx, false);
+	partoid = get_relname_relid(partname, RelationGetNamespace(rel));
+
+	if(partidx >= 0 && partoid)
         bms = bms_make_singleton(partidx);
     else
         bms = NULL;
@@ -11998,11 +12003,17 @@ RelationGetAllPartitions(Relation rel)
     {
         partname = GetPartitionName(RelationGetRelid(rel), partidx, false);
         partoid = get_relname_relid(partname, RelationGetNamespace(rel));
-        result = lappend_oid(result, partoid);
 
         if(partname)
             pfree(partname);
         partname = NULL;
+
+		if (InvalidOid == partoid)
+		{
+			continue;
+		}
+
+		result = lappend_oid(result, partoid);
     }
 
     return result;
@@ -12017,27 +12028,30 @@ RelationGetChildIndex(Relation rel, Oid childoid)
     int partidx = 0;
     int result = -1;
 
-    nparts = RelationGetNParts(rel);
-
-    for(partidx = 0; partidx < nparts; partidx++)
+	if (childoid)
     {
-        partname = GetPartitionName(RelationGetRelid(rel), partidx, false);
-        partoid = get_relname_relid(partname, RelationGetNamespace(rel));
+		nparts = RelationGetNParts(rel);
 
-        if (partoid == childoid)
+		for(partidx = 0; partidx < nparts; partidx++)
         {
-            result = partidx;
+			partname = GetPartitionName(RelationGetRelid(rel), partidx, false);
+			partoid = get_relname_relid(partname, RelationGetNamespace(rel));
+
+			if (partoid == childoid)
+			{
+				result = partidx;
+
+				if(partname)
+					pfree(partname);
+				partname = NULL;
+
+				break;
+			}
 
             if(partname)
                 pfree(partname);
             partname = NULL;
-        
-            break;
         }
-
-        if(partname)
-            pfree(partname);
-        partname = NULL;
     }
 
     return result;
@@ -12322,6 +12336,9 @@ pruning_opexpr(Relation rel, OpExpr *expr)
         return NULL;
     else if(partidx >= 0)
     {
+		char *partname = NULL;
+		Oid partoid = InvalidOid;
+
         switch(qualtype)
         {
             case QULIFICATION_TYPE_LS:                
@@ -12329,12 +12346,24 @@ pruning_opexpr(Relation rel, OpExpr *expr)
                 {
                     int i;
                     for(i = 0; i <= partidx; i++)
-                        result = bms_add_member(result, i);
+					{
+						partname = GetPartitionName(RelationGetRelid(rel), i, false);
+						partoid = get_relname_relid(partname, RelationGetNamespace(rel));
+						if(partoid)
+						{
+							result = bms_add_member(result, i);
+						}
+					}
                 }
                 break;
             case QULIFICATION_TYPE_EQUAL:
                 {
-                    result = bms_make_singleton(partidx);
+					partname = GetPartitionName(RelationGetRelid(rel), partidx, false);
+					partoid = get_relname_relid(partname, RelationGetNamespace(rel));
+					if(partoid)
+					{
+					    result = bms_make_singleton(partidx);
+					}
                 }
                 break;
             case QULIFICATION_TYPE_GE:
@@ -12342,7 +12371,14 @@ pruning_opexpr(Relation rel, OpExpr *expr)
                 {
                     int i;
                     for(i = partidx; i < npart; i++)
-                        result = bms_add_member(result, i);
+					{
+						partname = GetPartitionName(RelationGetRelid(rel), i, false);
+						partoid = get_relname_relid(partname, RelationGetNamespace(rel));
+						if(partoid)
+						{
+						    result = bms_add_member(result, i);
+						}
+					}
                 }
                 break;
             default:
@@ -12362,8 +12398,18 @@ get_full_pruning_result(Relation rel)
     int nparts = RelationGetNParts(rel);
     Assert(nparts > 0);
 
+	char *partname = NULL;
+	Oid partoid = InvalidOid;
+
     for(i=0; i<nparts; i++)
-        result = bms_add_member(result,i);
+	{
+		partname = GetPartitionName(RelationGetRelid(rel), i, false);
+		partoid = get_relname_relid(partname, RelationGetNamespace(rel));
+		if (partoid)
+		{
+			result = bms_add_member(result,i);
+		}
+	}
 
     return result;
 }

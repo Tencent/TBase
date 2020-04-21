@@ -2461,7 +2461,10 @@ CopyTo(CopyState cstate)
                 {
                     partoid = RelationGetPartition(cstate->rel, i, false);
                     if(!OidIsValid(partoid))
-                        elog(ERROR, "internal error: relation has not this partition[%d]", i);
+					{
+						//elog(ERROR, "internal error: relation has not this partition[%d]", i);
+						continue;
+					}
                     cstate->partrels[cstate->nparts] = heap_open(partoid, AccessShareLock);
                     
                     /* increase partition number */
@@ -3657,31 +3660,63 @@ readnextline:
                             bufferedTuplesSize > 65535)
                         {
                             int i=0;
+							char *partname = NULL;
+							Oid partoid = InvalidOid;
+							int part_rel_index = 0;
+
                             for(i=0; i < npart; i++)
                             {
-                                if(part_nBufferedTuples[i] == 0)
-                                    continue;
-                                partRel = resultRelInfo->part_relinfo[i];
-                                tempparent = cstate->rel;
-                                tempRelInfo =  estate->es_result_relation_info;
-                                estate->es_result_relation_info = partRel;
-                                cstate->rel = partRel->ri_RelationDesc;
+								if(part_nBufferedTuples[i] > 0)
+								{
+                                    /* the child table have data to be inserted */
+									partname = GetPartitionName(RelationGetRelid(cstate->rel), i, false);
+									partoid = get_relname_relid(partname, RelationGetNamespace(cstate->rel));
+									if(partoid)
+									{
+										/* Find the corresponding partition child table info that has not been dropped */
+										for(part_rel_index = 0; part_rel_index < resultRelInfo->partarraysize; part_rel_index++)
+										{
+											if(i == resultRelInfo->part_relinfo[part_rel_index]->part_index)
+											{
+												/* insert data into corresponding partition child table */
+												partRel = resultRelInfo->part_relinfo[part_rel_index];
+												tempparent = cstate->rel;
+												tempRelInfo =  estate->es_result_relation_info;
+												estate->es_result_relation_info = partRel;
+												cstate->rel = partRel->ri_RelationDesc;
 
 
-                                CopyFromInsertBatch(cstate, estate, mycid, hi_options,
-                                                            partRel, myslot, part_bistates[i],
-                                                            part_nBufferedTuples[i], part_bufferedTuples[i],
-                                                            firstBufferedLineNo);
+				                                CopyFromInsertBatch(cstate, estate, mycid, hi_options,
+				        													partRel, myslot, part_bistates[i],
+				        													part_nBufferedTuples[i], part_bufferedTuples[i],
+				        													firstBufferedLineNo);
 
-                                estate->es_result_relation_info = tempRelInfo;
-                                cstate->rel = tempparent;
-                                
-                                part_nBufferedTuples[i] = 0;
-                                part_bufferedTuplesSize[i] = 0;
+												estate->es_result_relation_info = tempRelInfo;
+												cstate->rel = tempparent;
+
+												part_nBufferedTuples[i] = 0;
+												part_bufferedTuplesSize[i] = 0;
+												break;
+											}
+										}
+									}
+									else
+									{
+										/* The data of the dropped child table is classified into the default partition */
+		                                CopyFromInsertBatch(cstate, estate, mycid, hi_options,
+														resultRelInfo, myslot, bistate,
+														part_nBufferedTuples[i], part_bufferedTuples[i],
+														firstBufferedLineNo);
+
+		                                part_nBufferedTuples[i] = 0;
+		                                part_bufferedTuplesSize[i] = 0;
+									}
+								}
                             }
 
                             if(nBufferedTuples > 0)
                             {
+								/* The data of > npart table is classified into the default partition */
                                 CopyFromInsertBatch(cstate, estate, mycid, hi_options,
                                                 resultRelInfo, myslot, bistate,
                                                 nBufferedTuples, bufferedTuples,
@@ -3787,28 +3822,57 @@ readnextline:
     if(IS_PGXC_DATANODE && npart > 0)
     {
         int partcur = 0;
+		char *partname = NULL;
+		Oid partoid = InvalidOid;
+		int part_rel_index = 0;
 
         for(partcur = 0; partcur < npart; partcur++)
         {
             if(part_nBufferedTuples[partcur] > 0)
             {
-                partRel = resultRelInfo->part_relinfo[partcur];
-                tempparent = cstate->rel;
-                tempRelInfo =  estate->es_result_relation_info;
-                estate->es_result_relation_info = partRel;
-                cstate->rel = partRel->ri_RelationDesc;
+				/* the child table have data to be inserted */
+				partname = GetPartitionName(RelationGetRelid(cstate->rel), partcur, false);
+				partoid = get_relname_relid(partname, RelationGetNamespace(cstate->rel));
+				if(partoid)
+				{
+					/* Find the corresponding partition child table info that has not been dropped */
+					for(part_rel_index = 0; part_rel_index < resultRelInfo->partarraysize; part_rel_index++)
+					{
+						if(partcur == resultRelInfo->part_relinfo[part_rel_index]->part_index)
+						{
+							/* insert data into corresponding partition child table */
+							partRel = resultRelInfo->part_relinfo[part_rel_index];
+							tempparent = cstate->rel;
+							tempRelInfo =  estate->es_result_relation_info;
+							estate->es_result_relation_info = partRel;
+							cstate->rel = partRel->ri_RelationDesc;
 
 
-                CopyFromInsertBatch(cstate, estate, mycid, hi_options,
-                            partRel, myslot, part_bistates[partcur],
-                            part_nBufferedTuples[partcur], part_bufferedTuples[partcur],
-                            firstBufferedLineNo);
+			                CopyFromInsertBatch(cstate, estate, mycid, hi_options,
+										partRel, myslot, part_bistates[partcur],
+										part_nBufferedTuples[partcur], part_bufferedTuples[partcur],
+										firstBufferedLineNo);
 
 
-                estate->es_result_relation_info = tempRelInfo;
-                cstate->rel = tempparent;
-                part_nBufferedTuples[partcur] = 0;
-                part_bufferedTuplesSize[partcur] = 0;
+							estate->es_result_relation_info = tempRelInfo;
+							cstate->rel = tempparent;
+							part_nBufferedTuples[partcur] = 0;
+							part_bufferedTuplesSize[partcur] = 0;
+							break;
+						}
+					}
+				}
+				else
+				{
+					/* The data of the dropped child table is classified into the default partition */
+			        CopyFromInsertBatch(cstate, estate, mycid, hi_options,
+										resultRelInfo, myslot, bistate,
+										part_nBufferedTuples[partcur], part_bufferedTuples[partcur],
+										firstBufferedLineNo);
+
+			        part_nBufferedTuples[partcur] = 0;
+			        part_bufferedTuplesSize[partcur] = 0;
+				}
             }
         }
     }
@@ -3816,13 +3880,14 @@ readnextline:
 
     if (nBufferedTuples > 0)
     {
-
+		/* The data of > npart table is classified into the default partition */
         CopyFromInsertBatch(cstate, estate, mycid, hi_options,
                             resultRelInfo, myslot, bistate,
                             nBufferedTuples, bufferedTuples,
                             firstBufferedLineNo);
 
-        nBufferedTuples = 0;        
+        nBufferedTuples = 0;
+        bufferedTuplesSize = 0;
     }
 
 #ifdef XCP

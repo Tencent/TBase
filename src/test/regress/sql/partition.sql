@@ -320,3 +320,61 @@ select count(1) from t_year_1;
 truncate table t_year_1 partition for(timestamp without time zone '2020-01-01 00:00:00');
 
 drop table t_year_1;
+
+--add partition & drop partiton--
+create table t_drop(f1 int not null,f2 timestamp not null,f3 varchar(10),primary key(f1)) partition by range (f2) begin (timestamp without time zone '2019-01-01 0:0:0') step (interval '1 month') partitions (2) distribute by shard(f1) to group default_group;
+ALTER TABLE t_drop ADD PARTITIONS 2; 
+insert into t_drop select generate_series(1,10), timestamp without time zone '2019-01-31 23:23:59', 'aaa';
+insert into t_drop select generate_series(11,30), timestamp without time zone '2019-02-01 10:23:59', 'aaa';
+insert into t_drop select generate_series(31,50), timestamp without time zone '2019-03-31 23:23:59', 'aaa';
+insert into t_drop select generate_series(51,100), timestamp without time zone '2019-04-01 00:00:00', 'aaa';
+select count(1) from t_drop;
+drop table t_drop_part_0;
+drop table t_drop_part_1;
+drop table t_drop_part_3;
+select count(1) from t_drop partition for(timestamp without time zone '2019-01-01 00:00:00');
+select count(1) from t_drop  where f2 = timestamp without time zone '2019-01-01 00:00:00';
+select count(1) from t_drop;
+select * from t_drop order by f1 limit 3;
+ALTER TABLE t_drop ADD PARTITIONS 3; 
+insert into t_drop select generate_series(101,110), timestamp without time zone '2019-05-01 00:00:00', 'aaa';
+select count(1) from t_drop;
+select * from t_drop where f2 = timestamp without time zone '2019-05-01 00:00:00' order by f1 desc limit 3;
+
+--DDL--
+alter table t_drop add f4 int;
+insert into t_drop select generate_series(111,120), timestamp without time zone '2019-05-01 00:00:00', 'bbb', 100;
+select count(1) from t_drop where f4 = 100; 
+alter table t_drop drop f4;
+alter table t_drop rename f3 to f3s;
+select count(1) from t_drop where f3s = 'bbb';
+alter table t_drop alter f3s type char(30);
+VACUUM t_drop;
+
+	
+--DML--
+update t_drop set f3s='cccccccccccc' where f3s = 'bbb';
+update t_drop set f3s='ddd' where f2='2019-05-01';
+delete from t_drop where f2 = timestamp without time zone '2019-02-01 00:00:00';
+delete from t_drop where f2 >= timestamp without time zone '2019-05-01 00:00:00' and f2< timestamp without time zone '2019-06-01 00:00:00';
+insert into t_drop values(130,'2019-02-01','a');
+insert into t_drop values(130,'2019-03-01','multi-value'),(140,'2019-05-01','multi-value'),(150,'2019-06-01','multi-value');
+insert into t_drop select generate_series(200, 2226),'2019-02-01','a';
+insert into t_drop select generate_series(200, 2226),'2019-06-01','ffffff';
+copy t_drop from stdin;
+3000	'2019-07-01'	'hhhhhhh'
+3001	'2019-07-01'	'hhhhhhh'
+3002	'2019-07-01'	'hhhhhhh'
+3003	'2019-07-01'	'hhhhhhh'
+4000	'2019-08-01'	'lllllllll'
+4001	'2019-08-01'	'lllllllll'
+4002	'2019-08-01'	'lllllllll'
+4003	'2019-08-01'	'lllllllll'
+\.
+copy (select * from t_drop where f2 = timestamp without time zone '2019-07-01 00:00:00') to stdout;
+
+--truncate--
+truncate table t_drop partition for(timestamp without time zone '2019-01-01 00:00:00');
+truncate table t_drop partition for(timestamp without time zone '2019-12-01 00:00:00');
+truncate table t_drop partition for(timestamp without time zone '2019-07-01 00:00:00');
+drop table t_drop;
