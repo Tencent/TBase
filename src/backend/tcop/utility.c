@@ -3706,6 +3706,12 @@ ProcessUtilitySlow(ParseState *pstate,
 
                                 partOid = get_relname_relid(partidxstmt->relation->relname, relnamespace);
 
+								if (InvalidOid == partOid)
+								{
+									MemoryContextReset(temp);
+									continue;
+								}
+
                                 addr = DefineIndex(partOid,    /* OID of heap relation */
                                                    partidxstmt,
                                                    InvalidOid, /* no predefined OID */
@@ -4012,6 +4018,7 @@ ProcessUtilitySlow(ParseState *pstate,
                         int child_idx = 0;
                         int nParts = 0;
                         CreateTrigStmt *child_stmt = NULL;
+						Oid child_reloid = InvalidOid;
 
                         nParts = RelationGetNParts(rel);
 
@@ -4020,6 +4027,12 @@ ProcessUtilitySlow(ParseState *pstate,
                         for (child_idx = 0; child_idx < nParts; child_idx++)
                         {
                             child_stmt->relation->relname = GetPartitionName(RelationGetRelid(rel), child_idx, false);
+
+							child_reloid = get_relname_relid(child_stmt->relation->relname, RelationGetNamespace(rel));
+							if (InvalidOid == child_reloid)
+							{
+								continue;
+							}
 
                             child_address = CreateTrigger((CreateTrigStmt *) child_stmt,
                                                           queryString, InvalidOid, InvalidOid,

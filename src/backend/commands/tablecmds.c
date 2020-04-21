@@ -1358,7 +1358,7 @@ RemoveRelations(DropStmt *drop)
 
             if (report_error)
             {
-                elog(ERROR, "Drop child interval partition or its index is not permitted");
+				//elog(ERROR, "Drop child interval partition or its index is not permitted");
             }
         }
 #endif
@@ -3727,11 +3727,13 @@ RenameRelation(RenameStmt *stmt)
 
                     pfree(partname);
                 }
+				/*
                 else
                 {
                     elog(ERROR, "RenameRelation: could not get %d child's oid of interval partition %s",
                                  i, RelationGetRelationName(rel));
                 }
+				*/
             }
         }
 
@@ -6252,10 +6254,13 @@ ATSimpleRecursion(List **wqueue, Relation rel,
                     char *childname = (char *)palloc0(NAMEDATALEN);
                     int partidx = RelationGetChildIndex(rel, childrelid);
 
-                    snprintf(childname, NAMEDATALEN,
-                                 "%s_part_%d", rep->name, partidx);
+					if (partidx >= 0)
+					{
+						snprintf(childname, NAMEDATALEN,
+									 "%s_part_%d", rep->name, partidx);
 
-                    rep->name = childname;
+						rep->name = childname;
+					}
                 }
     
                 ATPrepCmd(wqueue, childrel, childcmd, false, true, lockmode);
@@ -8283,6 +8288,11 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
                 partidxstmt->idxname = GetPartitionName(indexOid, i, true);
 
                 partOid = get_relname_relid(partidxstmt->relation->relname, RelationGetNamespace(rel));
+
+				if (InvalidOid == partOid)
+				{
+					continue;
+				}
 
                 addr = DefineIndex(partOid,    /* OID of heap relation */
                                    partidxstmt,

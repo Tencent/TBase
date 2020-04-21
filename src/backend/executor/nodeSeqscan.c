@@ -39,7 +39,7 @@
 #endif
 
 
-static void InitScanRelation(SeqScanState *node, EState *estate, int eflags);
+static bool InitScanRelation(SeqScanState *node, EState *estate, int eflags);
 static TupleTableSlot *SeqNext(SeqScanState *node);
 
 /* ----------------------------------------------------------------
@@ -159,7 +159,7 @@ ExecSeqScan(PlanState *pstate)
  *        Set up to access the scan relation.
  * ----------------------------------------------------------------
  */
-static void
+static bool
 InitScanRelation(SeqScanState *node, EState *estate, int eflags)
 {
     Relation    currentRelation;
@@ -186,6 +186,12 @@ InitScanRelation(SeqScanState *node, EState *estate, int eflags)
 #ifdef __TBASE__
     }
 #endif
+
+	if (!currentRelation)
+	{
+		return false;
+	}
+
 #ifdef _MLS_
     mls_check_datamask_need_passby((ScanState*)node, currentRelation->rd_id);
 #endif 
@@ -194,17 +200,20 @@ InitScanRelation(SeqScanState *node, EState *estate, int eflags)
 
     /* and report the scan tuple slot's rowtype */
     ExecAssignScanType(&node->ss, RelationGetDescr(currentRelation));
+
+	return true;
 }
 
 
 /* ----------------------------------------------------------------
  *        ExecInitSeqScan
- * ----------------------------------------------------------------
+ * ---------------------------------------------------------------
  */
 SeqScanState *
 ExecInitSeqScan(SeqScan *node, EState *estate, int eflags)
 {
     SeqScanState *scanstate;
+	bool init_ret = true;
 
 #ifdef __AUDIT_FGA__
     ListCell      *item;
@@ -268,7 +277,12 @@ ExecInitSeqScan(SeqScan *node, EState *estate, int eflags)
     /*
      * initialize scan relation
      */
-    InitScanRelation(scanstate, estate, eflags);
+	init_ret = InitScanRelation(scanstate, estate, eflags);
+	if (!init_ret)
+	{
+		//TODO release scanstate
+		return NULL;
+	}
 
     /*
      * Initialize result tuple type and projection info.

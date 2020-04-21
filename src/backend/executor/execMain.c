@@ -1572,9 +1572,9 @@ InitResultRelInfo(ResultRelInfo *resultRelInfo,
         {
             resultpartinfo = (ResultRelInfo*)makeNode(ResultRelInfo);
             partoid = RelationGetPartition(resultRelationDesc, partidx, false);
-            
+
             partrel = heap_open(partoid,RowExclusiveLock);
-            
+
             resultpartinfo->ispartparent = false;
             resultpartinfo->operation = resultRelInfo->operation;
             resultpartinfo->part_index = partidx;
