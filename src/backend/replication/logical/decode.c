@@ -380,7 +380,7 @@ DecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				 * NB: this goes effect under async replication,thus sync replicaton   
 				 * is not protected which need to be consider later.
 				 */
-				if(MyWalSnd->sync_standby_priority == 0)
+				if(MyWalSnd && MyWalSnd->sync_standby_priority == 0)
 					SyncRepWaitForLSN(buf->endptr, true);
 #endif
 
