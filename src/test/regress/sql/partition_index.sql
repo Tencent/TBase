@@ -192,3 +192,28 @@ select count(1) from t_drop where f2 >= timestamp without time zone '2019-02-01 
 select count(1) from t_drop where f3 = 'ccc';
 
 drop table t_drop;
+
+--int add partition & drop partiton--
+create table int_drop(f1 bigint,f2 timestamp default now(), f3 integer) partition by range (f3) begin (1) step (50) partitions (2) distribute by shard(f1) to group default_group;
+ALTER TABLE int_drop ADD PARTITIONS 2; 
+insert into int_drop select generate_series(1,10), null, 10;
+insert into int_drop select generate_series(51,70), null, 80;
+insert into int_drop select generate_series(101,120), null, 130;
+insert into int_drop select generate_series(151,200), null, 190;
+drop table int_drop_part_0;
+drop table int_drop_part_1;
+drop table int_drop_part_3;
+create index int_drop_f3 on int_drop(f3);
+create index int_drop_f2 on int_drop(f2);
+insert into int_drop select generate_series(121,150), timestamp without time zone '2019-03-01 00:00:00', 145;
+select count(1) from int_drop where f2 >= timestamp without time zone '2019-02-01 00:00:00';
+select count(1) from int_drop where f3 = 145;
+select * from int_drop where f3 = 145 order by f1 limit 5;
+ALTER TABLE int_drop ADD PARTITIONS 1; 
+insert into int_drop select generate_series(201,250), timestamp without time zone '2019-05-01 00:00:00', 234;
+select * from int_drop where f3 = 234 order by f1 limit 6;
+drop index int_drop_f2;
+drop index int_drop_f3;
+select count(1) from int_drop where f2 >= timestamp without time zone '2019-02-01 00:00:00';
+select count(1) from int_drop where f3 = 234;
+drop table int_drop;
