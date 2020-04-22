@@ -321,7 +321,7 @@ truncate table t_year_1 partition for(timestamp without time zone '2020-01-01 00
 
 drop table t_year_1;
 
---add partition & drop partiton--
+--date partition: add partition & drop partiton--
 create table t_drop(f1 int not null,f2 timestamp not null,f3 varchar(10),primary key(f1)) partition by range (f2) begin (timestamp without time zone '2019-01-01 0:0:0') step (interval '1 month') partitions (2) distribute by shard(f1) to group default_group;
 ALTER TABLE t_drop ADD PARTITIONS 2; 
 insert into t_drop select generate_series(1,10), timestamp without time zone '2019-01-31 23:23:59', 'aaa';
@@ -378,3 +378,63 @@ truncate table t_drop partition for(timestamp without time zone '2019-01-01 00:0
 truncate table t_drop partition for(timestamp without time zone '2019-12-01 00:00:00');
 truncate table t_drop partition for(timestamp without time zone '2019-07-01 00:00:00');
 drop table t_drop;
+
+--int partition: add partition & drop partiton--
+create table int_drop(f1 bigint,f2 timestamp default now(), f3 integer) partition by range (f3) begin (1) step (50) partitions (2) distribute by shard(f1) to group default_group;
+ALTER TABLE int_drop ADD PARTITIONS 2; 
+insert into int_drop select generate_series(1,10), null, 10;
+insert into int_drop select generate_series(51,70), null, 80;
+insert into int_drop select generate_series(101,120), null, 130;
+insert into int_drop select generate_series(151,200), null, 190;
+select count(1) from int_drop;
+drop table int_drop_part_0;
+drop table int_drop_part_2;
+drop table int_drop_part_3;
+select count(1) from int_drop partition for(20);
+select count(1) from int_drop  where f3 = 20;
+select count(1) from int_drop;
+select * from int_drop order by f1 limit 5;
+ALTER TABLE int_drop ADD PARTITIONS 5; 
+insert into int_drop select generate_series(201,210), null, 245;
+select count(1) from int_drop;
+select * from int_drop where f3 = 245 order by f1 desc limit 5;
+
+--DDL--
+alter table int_drop add f4 int, add f5 varchar(20);
+insert into int_drop select generate_series(211,220), null, 249, 100, 'aaa';
+select count(1) from int_drop where f4 = 100; 
+alter table int_drop drop f4;
+alter table int_drop rename f5 to f5s;
+select count(1) from int_drop where f5s = 'aaa';
+alter table int_drop alter f5s type varchar(30);
+VACUUM int_drop;
+
+	
+--DML--
+update int_drop set f5s='cccccccccccc' where f5s = 'aaa';
+update int_drop set f5s='ddddddddddd' where f3=249;
+delete from int_drop where f3 = 10;
+delete from int_drop where f3 >= 1 and f3< 201;
+insert into int_drop values(140,'2019-03-01',140,'aaa');
+insert into int_drop values(90,'2019-02-01',90,'single-value-insert');
+insert into int_drop values(240,'2019-05-01',240,'multi-value-insert'),(280,'2019-06-01',280,'multi-value-insert'),(330,'2019-07-01',330,'multi-value-insert');
+insert into int_drop select generate_series(500, 2526),'2019-03-01',145,'a';
+insert into int_drop select generate_series(500, 2526),'2019-07-01',345,'ffffff';
+copy int_drop from stdin;
+3000	'2019-08-01'	355	'hhhhhhh'
+3001	'2019-08-02'	365	'hhhhhhh'
+3002	'2019-08-03'	375	'hhhhhhh'
+3003	'2019-08-04'	385	'hhhhhhh'
+4000	'2019-09-11'	405	'lllllllll'
+4001	'2019-09-12'	415	'lllllllll'
+4002	'2019-09-13'	425	'lllllllll'
+4003	'2019-09-14'	435	'lllllllll'
+4004	'2019-09-15'	445	'lllllllll'
+\.
+copy (select * from int_drop where f3 > 400 order by f1) to stdout;
+
+--truncate--
+truncate table int_drop partition for(5);
+truncate table int_drop partition for(1000);
+truncate table int_drop partition for(370);
+drop table int_drop;

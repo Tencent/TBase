@@ -770,7 +770,7 @@ select count(1) from t_year_1;
 truncate table t_year_1 partition for(timestamp without time zone '2020-01-01 00:00:00');
 ERROR:  the value for locating a partition is out of range
 drop table t_year_1;
---add partition & drop partiton--
+--date partition: add partition & drop partiton--
 create table t_drop(f1 int not null,f2 timestamp not null,f3 varchar(10),primary key(f1)) partition by range (f2) begin (timestamp without time zone '2019-01-01 0:0:0') step (interval '1 month') partitions (2) distribute by shard(f1) to group default_group;
 NOTICE:  Replica identity is needed for shard table, please add to this table through "alter table" command.
 ALTER TABLE t_drop ADD PARTITIONS 2; 
@@ -871,3 +871,110 @@ truncate table t_drop partition for(timestamp without time zone '2019-12-01 00:0
 ERROR:  the value for locating a partition is out of range
 truncate table t_drop partition for(timestamp without time zone '2019-07-01 00:00:00');
 drop table t_drop;
+--int partition: add partition & drop partiton--
+create table int_drop(f1 bigint,f2 timestamp default now(), f3 integer) partition by range (f3) begin (1) step (50) partitions (2) distribute by shard(f1) to group default_group;
+NOTICE:  Replica identity is needed for shard table, please add to this table through "alter table" command.
+ALTER TABLE int_drop ADD PARTITIONS 2; 
+insert into int_drop select generate_series(1,10), null, 10;
+insert into int_drop select generate_series(51,70), null, 80;
+insert into int_drop select generate_series(101,120), null, 130;
+insert into int_drop select generate_series(151,200), null, 190;
+select count(1) from int_drop;
+ count 
+-------
+   100
+(1 row)
+
+drop table int_drop_part_0;
+drop table int_drop_part_2;
+drop table int_drop_part_3;
+select count(1) from int_drop partition for(20);
+ERROR:  relation "int_drop_part_0" does not exist
+LINE 1: select count(1) from int_drop partition for(20);
+                             ^
+select count(1) from int_drop  where f3 = 20;
+ count 
+-------
+     0
+(1 row)
+
+select count(1) from int_drop;
+ count 
+-------
+    20
+(1 row)
+
+select * from int_drop order by f1 limit 5;
+ f1 | f2 | f3 
+----+----+----
+ 51 |    | 80
+ 52 |    | 80
+ 53 |    | 80
+ 54 |    | 80
+ 55 |    | 80
+(5 rows)
+
+ALTER TABLE int_drop ADD PARTITIONS 5; 
+insert into int_drop select generate_series(201,210), null, 245;
+select count(1) from int_drop;
+ count 
+-------
+    30
+(1 row)
+
+select * from int_drop where f3 = 245 order by f1 desc limit 5;
+ f1  | f2 | f3  
+-----+----+-----
+ 210 |    | 245
+ 209 |    | 245
+ 208 |    | 245
+ 207 |    | 245
+ 206 |    | 245
+(5 rows)
+
+--DDL--
+alter table int_drop add f4 int, add f5 varchar(20);
+insert into int_drop select generate_series(211,220), null, 249, 100, 'aaa';
+select count(1) from int_drop where f4 = 100; 
+ count 
+-------
+    10
+(1 row)
+
+alter table int_drop drop f4;
+alter table int_drop rename f5 to f5s;
+select count(1) from int_drop where f5s = 'aaa';
+ count 
+-------
+    10
+(1 row)
+
+alter table int_drop alter f5s type varchar(30);
+VACUUM int_drop;
+	
+--DML--
+update int_drop set f5s='cccccccccccc' where f5s = 'aaa';
+update int_drop set f5s='ddddddddddd' where f3=249;
+delete from int_drop where f3 = 10;
+delete from int_drop where f3 >= 1 and f3< 201;
+insert into int_drop values(140,'2019-03-01',140,'aaa');
+ERROR:  value to inserted execeed range of partitioned table
+insert into int_drop values(90,'2019-02-01',90,'single-value-insert');
+insert into int_drop values(240,'2019-05-01',240,'multi-value-insert'),(280,'2019-06-01',280,'multi-value-insert'),(330,'2019-07-01',330,'multi-value-insert');
+insert into int_drop select generate_series(500, 2526),'2019-03-01',145,'a';
+ERROR:  inserted value is not in range of partitioned table, please check the value of paritition key
+insert into int_drop select generate_series(500, 2526),'2019-07-01',345,'ffffff';
+copy int_drop from stdin;
+copy (select * from int_drop where f3 > 400 order by f1) to stdout;
+4000	Wed Sep 11 00:00:00 2019	405	'lllllllll'
+4001	Thu Sep 12 00:00:00 2019	415	'lllllllll'
+4002	Fri Sep 13 00:00:00 2019	425	'lllllllll'
+4003	Sat Sep 14 00:00:00 2019	435	'lllllllll'
+4004	Sun Sep 15 00:00:00 2019	445	'lllllllll'
+--truncate--
+truncate table int_drop partition for(5);
+ERROR:  relation "int_drop_part_0" does not exist
+truncate table int_drop partition for(1000);
+ERROR:  the value for locating a partition is out of range
+truncate table int_drop partition for(370);
+drop table int_drop;
