@@ -433,7 +433,13 @@ GetMaxSyncStandbyCompletePtr()
     heap_destroy(&h);
 
     if(enalbe_gtm_xlog_debug)
-        elog(LOG,"GetMaxSyncStandbyCompletePtr result %X/%X",(uint32)((*temp_key)>>32),(uint32)(*temp_key));
+    {
+		if(temp_key)
+	        	elog(LOG,"GetMaxSyncStandbyCompletePtr result %X/%X",(uint32)((*temp_key)>>32),(uint32)(*temp_key));
+		else
+	        	elog(LOG,"GetMaxSyncStandbyCompletePtr result 0");
+			
+    }
 
     return temp_key ? *temp_key : InvalidXLogRecPtr;
 }
