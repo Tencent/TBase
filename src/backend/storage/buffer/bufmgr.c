@@ -490,9 +490,9 @@ static List* SyncBufferDoing(int buf_id, int status);
 static void SyncBufferPostPhase2(List * buf_id_list);
 static List* SyncBufferPostPhase1(List * buf_id_list, WritebackContext *wb_context);
 static List * NormalBufidListMake(int buf_id, int bufstatus);
-static List* SyncBufferParellel(int buf_id, bool skip_recently_used, WritebackContext *wb_context);
+static List* SyncBufferParellel(int buf_id, bool skip_recently_used, WritebackContext *wb_context, int * sync_result);
 static List* SyncBufferWaitParellelFinsih(WritebackContext *wb_context);
-// static List* SyncBufferPostPhase1_2(List * buf_id_list);
+static List* SyncBufferPostPhase1_2(List * buf_id_list);
 
 #endif
 
@@ -1862,13 +1862,13 @@ BufferSync(int flags)
     int            num_processed;
     int            num_written;
     CkptTsStatus *per_ts_stat = NULL;
-    Oid            last_tsid;
-    binaryheap *ts_heap;
-    int            i;
+	Oid			last_tsid = InvalidOid;
+	binaryheap *ts_heap = NULL;
+	int			i = 0;
     int            mask = BM_DIRTY;
 #ifdef _MLS_
-    List       *buf_id_list;
-    ListCell   *l;
+    List       *buf_id_list = NIL;
+    ListCell   *l = NULL;
 #endif
     WritebackContext wb_context;
 
@@ -2072,21 +2072,37 @@ BufferSync(int flags)
          */
         if (pg_atomic_read_u32(&bufHdr->state) & BM_CHECKPOINT_NEEDED)
         {
-            buf_id_list = SyncBufferParellel(buf_id, false, &wb_context);
+			int sync_result = SYNC_BUF_BUTT;
 
-            foreach(l, buf_id_list)
-            {
-                SyncBufIdInfo * info = (SyncBufIdInfo *) lfirst(l);
-                if (info->status & BUF_WRITTEN)
-                {
-                    TRACE_POSTGRESQL_BUFFER_SYNC_WRITTEN(buf_id);
-                    BgWriterStats.m_buf_written_checkpoints++;
-                    num_written++;
-                }
-            }
-            
-            num_processed += list_length(buf_id_list);
-            list_free_deep(buf_id_list);
+			do
+			{
+				buf_id_list = NIL;
+				sync_result = SYNC_BUF_BUTT;
+	            buf_id_list = SyncBufferParellel(buf_id, false, &wb_context, &sync_result);
+
+	            foreach(l, buf_id_list)
+	            {
+	                SyncBufIdInfo * info = (SyncBufIdInfo *) lfirst(l);
+	                if (info->status & BUF_WRITTEN)
+	                {
+	                    TRACE_POSTGRESQL_BUFFER_SYNC_WRITTEN(buf_id);
+	    				BgWriterStats.m_buf_written_checkpoints++;
+	    				num_written++;
+	                }
+	            }
+
+	            num_processed += list_length(buf_id_list);
+
+	            if (buf_id_list != NIL)
+	            {
+		            list_free_deep(buf_id_list);
+		        }
+
+		        if (SYNC_BUF_LWLOCK_CONFLICT == sync_result)
+		        {
+					pg_usleep(100000L);
+				}
+			} while (SYNC_BUF_LWLOCK_CONFLICT == sync_result);
         }
 #endif
 
@@ -4772,7 +4788,7 @@ static int CheckBufferNeedSync(int buf_id, bool skip_recently_used, int *buf_ret
 static int SyncBufferPrePhase1(int buf_id)
 {
     BufferDesc *bufHdr = GetBufferDescriptor(buf_id);
-    // int ret;
+    int ret;
        
     /*
      * Pin it, share-lock it, write it.  (FlushBuffer will do nothing if the
@@ -4780,10 +4796,15 @@ static int SyncBufferPrePhase1(int buf_id)
      */
     PinBuffer_Locked(bufHdr);
 
-	/*
-     * lock the buffer before Sync
+    /*
+     * try to lock the buffer, returning false means other process(start or backend) having lock the buffer in LW_EXCLUSIVE,
+     * so, we skip this buffer, it would be treated in next checkpoint round.
      */
-	LWLockAcquire(BufferDescriptorGetContentLock(bufHdr), LW_SHARED);
+	ret = LWLockConditionalAcquire(BufferDescriptorGetContentLock(bufHdr), LW_SHARED);
+    if (false == ret)
+    {
+        return SYNC_BUF_LWLOCK_CONFLICT;
+    }
 
     /*
      * Acquire the buffer's io_in_progress lock.  If StartBufferIO returns
@@ -5051,7 +5072,6 @@ static List* SyncBufferPostPhase1(List * buf_id_list, WritebackContext *wb_conte
     return buf_id_list;
 }
 
-#if 0
 static List* SyncBufferPostPhase1_2(List * buf_id_list)
 {
     BufferDesc    *buf;
@@ -5077,7 +5097,6 @@ static List* SyncBufferPostPhase1_2(List * buf_id_list)
 
     return buf_id_list;
 }
-#endif
 
 
 /*
@@ -5105,9 +5124,9 @@ static List * NormalBufidListMake(int buf_id, int bufstatus)
  * so parellel is a good choice.
  * and it should handle normal page in origal procedure.
  */
-static List* SyncBufferParellel(int buf_id, bool skip_recently_used, WritebackContext *wb_context)
+static List* SyncBufferParellel(int buf_id, bool skip_recently_used, WritebackContext *wb_context, int * sync_result)
 {
-    List * buf_id_list;
+    List * buf_id_list = NIL;
     int    ret;
     int    bufstatus = 0;
     ErrorContextCallback errcallback;
@@ -5154,6 +5173,26 @@ static List* SyncBufferParellel(int buf_id, bool skip_recently_used, WritebackCo
             /* release context lock and unpin buffer */
             SyncBufferPostPhase1(buf_id_list, wb_context);
         }
+        else if (SYNC_BUF_LWLOCK_CONFLICT == ret)
+        {
+            /* 
+             * fail to get buffer content lock
+             */
+
+            /* make buf id list */
+            buf_id_list = NormalBufidListMake(buf_id, bufstatus);
+
+            /* there is no context lock, so just unpin buffer */
+            SyncBufferPostPhase1_2(buf_id_list);
+			list_free_deep(buf_id_list);
+
+			/* get crypted buf_id list and reset those slots status*/
+			buf_id_list = NULL;
+			buf_id_list = mls_get_crypted_buflist(buf_id_list);
+		
+			SyncBufferPostPhase2(buf_id_list);
+			SyncBufferPostPhase1(buf_id_list, wb_context);
+        }
         else
         {
             Assert(0);
@@ -5164,6 +5203,11 @@ static List* SyncBufferParellel(int buf_id, bool skip_recently_used, WritebackCo
         /* make buf id list */
         buf_id_list = NormalBufidListMake(buf_id, bufstatus);
     }
+
+	if (sync_result != NULL)
+	{
+		*sync_result = ret;
+	}
 
     return buf_id_list;
 }
