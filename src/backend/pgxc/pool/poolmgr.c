@@ -520,7 +520,7 @@ static void  *pooler_async_utility_thread(void *arg);
 static void  *pooler_async_connection_management_thread(void *arg);
 static void  *pooler_sync_remote_operator_thread(void *arg);
 
-static void   pooler_async_build_connection(DatabasePool *pool, int32 pool_version, int32 nodeidx, Oid node, 
+static bool   pooler_async_build_connection(DatabasePool *pool, int32 pool_version, int32 nodeidx, Oid node, 
                                             int32 size, char *connStr, bool bCoord);
 static BitmapMgr *BmpMgrCreate(uint32 objnum);
 static int        BmpMgrAlloc(BitmapMgr *mgr);
@@ -4742,8 +4742,10 @@ grow_pool(DatabasePool *dbPool, int32 nodeidx, Oid node, bool bCoord)
                 
                 if (size)
                 {
-                    pooler_async_build_connection(dbPool, nodePool->m_version, nodeidx, node, size, nodePool->connstr, bCoord);
-                    nodePool->asyncInProgress = true;
+    				if (pooler_async_build_connection(dbPool, nodePool->m_version, nodeidx, node, size, nodePool->connstr, bCoord))
+					{
+    					nodePool->asyncInProgress = true;
+					}
                 }
             }
         }
@@ -6668,12 +6670,21 @@ static void pooler_async_ping_node(Oid node)
 
 
 /* async batch connection build  */
-static void pooler_async_build_connection(DatabasePool *pool, int32 pool_version, int32 nodeidx, Oid node, int32 size, char *connStr, bool bCoord)
+static bool pooler_async_build_connection(DatabasePool *pool, int32 pool_version, int32 nodeidx, Oid node, int32 size, char *connStr, bool bCoord)
 {
+	int32 threadid; 
 	uint64 pipeput_loops = 0;
     PGXCPoolConnectReq *connReq = NULL;
-
     MemoryContext     oldcontext;    
+
+	/* if no free pipe line avaliable, do nothing */
+	threadid = pooler_async_task_pick_thread(&g_PoolConnControl, nodeidx);
+	if (-1 == threadid)
+	{
+		elog(LOG, POOL_MGR_PREFIX"no pipeline avaliable, pooler_async_build_connection node:%u nodeidx:%d", node, nodeidx);	
+		return false;
+	}
+	
     oldcontext = MemoryContextSwitchTo(PoolerMemoryContext);
     connReq  = (PGXCPoolConnectReq*)palloc0(sizeof(PGXCPoolConnectReq) + (size - 1) * sizeof(PGXCNodePoolSlot));
     connReq->cmd       = COMMAND_CONNECTION_BUILD;
@@ -6686,7 +6697,7 @@ static void pooler_async_build_connection(DatabasePool *pool, int32 pool_version
     connReq->validSize = 0;
     connReq->m_version = pool_version;
 
-    while (-1 == PipePut(g_PoolConnControl.request[nodeidx % MAX_SYNC_NETWORK_THREAD], (void*)connReq))
+	while (-1 == PipePut(g_PoolConnControl.request[threadid], (void*)connReq))
     {
 		pipeput_loops++;		
     }
@@ -6697,12 +6708,14 @@ static void pooler_async_build_connection(DatabasePool *pool, int32 pool_version
 	}
     
     /* signal thread to start build job */
-    ThreadSemaUp(&g_PoolConnControl.sem[nodeidx % MAX_SYNC_NETWORK_THREAD]);
+	ThreadSemaUp(&g_PoolConnControl.sem[threadid]);
     if (PoolConnectDebugPrint)
     {
         elog(LOG, POOL_MGR_PREFIX"async build connection db:%s user:%s node:%u size:%d", pool->database, pool->user_name, node, size);
     }
     MemoryContextSwitchTo(oldcontext);
+
+	return true;
 }
 
 /* aync acquire connection */
@@ -9694,6 +9707,12 @@ PoolAsyncPingNodes()
     int                numCo;
     int                numDn;
     int                i;
+
+	/* pipe is full, no need to continue */
+	if (IS_ASYNC_PIPE_FULL())
+	{
+		return;
+	}	
 
     coOids = (Oid*)palloc(sizeof(Oid) * TBASE_MAX_COORDINATOR_NUMBER);
     if (coOids == NULL)
