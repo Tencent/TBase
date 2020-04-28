@@ -1291,8 +1291,9 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
             oldmctx = MemoryContextSwitchTo(vac_context);
             new_childs = list_copy(childs);
             MemoryContextSwitchTo(oldmctx);
-            
-            pfree(childs);
+
+			if (childs)
+				pfree(childs);
             childs = NULL;
             onerelid = onerel->rd_lockInfo.lockRelId;
             LockRelationIdForSession(&onerelid, RowExclusiveLock);
