@@ -185,8 +185,8 @@ analyze_rel(Oid relid, RangeVar *relation, int options,
                 analyze_rel(child, relation, options, params, va_cols, in_outer_xact,
                             bstrategy);
             }
-    
-            pfree(childs);
+			if (childs)
+				pfree(childs);
             childs = NULL;
 			CommandCounterIncrement();
         }
