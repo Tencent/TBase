@@ -556,7 +556,9 @@ static int  refresh_database_pools(PoolAgent *agent);
 static void pooler_async_ping_node(Oid node);
 static bool match_databasepool(DatabasePool *databasePool, const char* user_name, const char* database);
 static int handle_close_pooled_connections(PoolAgent * agent, StringInfo s);
-
+#ifdef __TBASE__
+static void ConnectPoolManager(void);
+#endif
 
 
 #define IncreaseSlotRefCount(slot,filename,linenumber)\
@@ -1141,8 +1143,6 @@ PoolManagerConnect(PoolHandle *handle,
 void
 PoolManagerReconnect(void)
 {
-    PoolHandle *handle;
-
     HOLD_POOLER_RELOAD();
 
     if (poolHandle)
@@ -1150,11 +1150,7 @@ PoolManagerReconnect(void)
         PoolManagerDisconnect();
     }
     
-    handle = GetPoolManagerHandle();
-    PoolManagerConnect(handle,
-                       get_database_name(MyDatabaseId),
-                       GetUserNameFromId(GetUserId(), false),
-                       session_options());
+	ConnectPoolManager();
 
     RESUME_POOLER_RELOAD();
 }
@@ -1171,7 +1167,6 @@ PoolManagerSetCommand(PGXCNodeHandle **connections, int32 count, PoolCommandType
     char msgtype = 's';
     char *p   = NULL;
     char *sep = NULL;
-    PoolHandle *handle = NULL;
     
     if (PoolConnectDebugPrint)
     {
@@ -1265,9 +1260,7 @@ PoolManagerSetCommand(PGXCNodeHandle **connections, int32 count, PoolCommandType
 
     if (NULL == poolHandle)
     {
-        handle = GetPoolManagerHandle();
-        PoolManagerConnect(handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
 
     if (poolHandle)
@@ -1442,15 +1435,12 @@ PoolManagerLock(bool is_lock)
     char msgtype = 'o';
     int n32;
     int msglen = 8;
-    PoolHandle *handle;
 
     HOLD_POOLER_RELOAD();
 
     if (poolHandle == NULL)
     {
-        handle = GetPoolManagerHandle();
-        PoolManagerConnect(handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
 
     /* Message type */
@@ -1690,7 +1680,6 @@ PoolManagerGetConnections(List *datanodelist, List *coordlist, int **pids)
     int           *fds;
     int            totlen = list_length(datanodelist) + list_length(coordlist);
     int            nodes[totlen + 2];
-    PoolHandle *handle;
     int         pool_recvpids_num;
     int         pool_recvfds_ret;
 
@@ -1700,9 +1689,7 @@ PoolManagerGetConnections(List *datanodelist, List *coordlist, int **pids)
     
     if (poolHandle == NULL)
     {
-        handle = GetPoolManagerHandle();
-        PoolManagerConnect(handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
     
     /*
@@ -1802,13 +1789,10 @@ PoolManagerAbortTransactions(char *dbname, char *username, int **proc_pids)
     char        msgtype = 'a';
     int        dblen = dbname ? strlen(dbname) + 1 : 0;
     int        userlen = username ? strlen(username) + 1 : 0;
-    PoolHandle *handle;
     
     if (poolHandle == NULL)
     {
-        handle = GetPoolManagerHandle();
-        PoolManagerConnect(handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
 
     /* Message type */
@@ -1857,15 +1841,12 @@ PoolManagerCleanConnection(List *datanodelist, List *coordlist, char *dbname, ch
     char            msgtype = 'f';
     int            userlen = username ? strlen(username) + 1 : 0;
     int            dblen = dbname ? strlen(dbname) + 1 : 0;
-    PoolHandle *handle;
 
     HOLD_POOLER_RELOAD();
 
     if (poolHandle == NULL)
     {
-        handle = GetPoolManagerHandle();
-        PoolManagerConnect(handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
 
     nodes[0] = htonl(list_length(datanodelist));
@@ -1935,7 +1916,6 @@ bool
 PoolManagerCheckConnectionInfo(void)
 {
     int res;
-    PoolHandle *pool_handle;
 
     /*
      * New connection may be established to clean connections to
@@ -1943,15 +1923,7 @@ PoolManagerCheckConnectionInfo(void)
      */
     if (poolHandle == NULL)
     {
-        pool_handle = GetPoolManagerHandle();
-        if (pool_handle == NULL)
-        {
-            ereport(ERROR,
-                (errcode(ERRCODE_IO_ERROR),
-                 errmsg("Can not connect to pool manager")));
-        }
-        PoolManagerConnect(pool_handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
     
     PgxcNodeListAndCount();
@@ -10654,15 +10626,12 @@ PoolManagerClosePooledConnections(const char *dbname, const char *username)
     int     res = 0;
     int        dblen = dbname ? strlen(dbname) + 1 : 0;
     int        userlen = username ? strlen(username) + 1 : 0;
-    PoolHandle *handle = NULL;
 
     HOLD_POOLER_RELOAD();
     
     if (poolHandle == NULL)
     {
-        handle = GetPoolManagerHandle();
-        PoolManagerConnect(handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
 
     /* Message type */
@@ -10766,3 +10735,25 @@ static bool match_databasepool(DatabasePool *databasePool, const char* user_name
 
     return true;
 }
+#ifdef __TBASE__
+static void
+ConnectPoolManager(void)
+{
+	bool need_abort = false;
+	PoolHandle *handle = NULL;
+	
+	handle = GetPoolManagerHandle();
+	if (!IsTransactionOrTransactionBlock())
+	{
+		StartTransactionCommand();
+		need_abort = true;
+	}
+	PoolManagerConnect(handle, get_database_name(MyDatabaseId),
+					   GetClusterUserName(), session_options());
+	if (need_abort)
+	{
+		AbortCurrentTransaction();
+	}
+
+}
+#endif
