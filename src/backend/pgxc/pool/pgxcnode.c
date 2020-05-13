@@ -651,6 +651,7 @@ pgxc_node_init(PGXCNodeHandle *handle, int sock, bool global_session, int pid)
     handle->plpgsql_need_begin_sub_txn = false;
     handle->plpgsql_need_begin_txn = false;
     handle->sendGxidVersion = 0;
+	handle->sock_fatal_occurred = false;
 #endif
     /*
      * We got a new connection, set on the remote node the session parameters
