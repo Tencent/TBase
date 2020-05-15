@@ -790,7 +790,7 @@ pgxc_node_receive(const int conn_count,
 #endif
         }
 #ifdef __TBASE__
-        elog(LOG, "no message in buffer");
+		elog(DEBUG1, "no message in buffer");
         return DNStatus_ERR;
 #else
         return ERROR_OCCURED;

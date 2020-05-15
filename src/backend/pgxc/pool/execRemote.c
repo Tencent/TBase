@@ -1012,7 +1012,7 @@ validate_combiner(ResponseCombiner *combiner)
             || combiner->request_type == REQUEST_TYPE_QUERY)
             && combiner->command_complete_count != combiner->node_count)
     {
-        elog(LOG, "validate_combiner request_type is %d, command_complete_count:%d not equal node_count:%d", combiner->request_type, combiner->command_complete_count, combiner->node_count);
+		elog(DEBUG1, "validate_combiner request_type is %d, command_complete_count:%d not equal node_count:%d", combiner->request_type, combiner->command_complete_count, combiner->node_count);
         return false;
     }
 
@@ -9038,7 +9038,7 @@ pgxc_connections_cleanup(ResponseCombiner *combiner)
             {
                 case DNStatus_ERR:                    
                     {
-                        elog(LOG, "Failed to read response from data node:%s pid:%d when ending query for ERROR, node status:%d", conn->nodename, conn->backend_pid, conn->state);
+						elog(DEBUG1, "Failed to read response from data node:%s pid:%d when ending query for ERROR, node status:%d", conn->nodename, conn->backend_pid, conn->state);
                         break;
                     }
                     
@@ -9072,7 +9072,7 @@ pgxc_connections_cleanup(ResponseCombiner *combiner)
                     {
                         case DNStatus_ERR:                    
                             {
-                                elog(LOG, "Failed to read response from data node:%u when ending query for ERROR, state:%d", conn->nodeoid, conn->state);
+								elog(DEBUG1, "Failed to read response from data node:%u when ending query for ERROR, state:%d", conn->nodeoid, conn->state);
                                 break;
                             }
                             
@@ -10941,9 +10941,11 @@ ExecDisconnectRemoteSubplan(RemoteSubplanState *node)
                     ereport(ERROR,
                             (errcode(ERRCODE_INTERNAL_ERROR),
                              errmsg("Failed to disconnect from node %d.", conn->nodeoid)));
-                
-                elog(LOG, "send disconnect to node %d with cursor %s, remote_pid %d, nconsumers %d.", conn->nodeoid, cursor,
-                           conn->backend_pid, list_length(plan->distributionRestrict));
+				if (g_DataPumpDebug)
+				{
+					elog(LOG, "send disconnect to node %d with cursor %s, remote_pid %d, nconsumers %d.", conn->nodeoid, cursor,
+						       conn->backend_pid, list_length(plan->distributionRestrict));
+				}
             }
         }
 
