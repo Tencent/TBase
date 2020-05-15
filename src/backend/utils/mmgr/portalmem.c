@@ -664,7 +664,7 @@ PortalDrop(Portal portal, bool isTopCommit)
          * when dn recv rollback_subtxn, the resource already release by AbortSubTransaction,
          * and the memory delete by CleanupSubTransaction (delete parent memory context op will delete child)
          */
-        if (IS_PGXC_DATANODE && (strcmp(portal->commandTag, "ROLLBACK SUBTXN") == 0))
+		if (strcmp(portal->commandTag, "ROLLBACK SUBTXN") == 0)
         {
             elog(LOG, "skip delete portal resowner");
         }
