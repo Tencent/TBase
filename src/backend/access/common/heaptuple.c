@@ -1370,7 +1370,8 @@ slot_deform_datarow(TupleTableSlot *slot)
     if (col_count != natts)
         ereport(ERROR,
                 (errcode(ERRCODE_DATA_CORRUPTED),
-                 errmsg("Tuple does not match the descriptor")));
+				 errmsg("Tuple does not match the descriptor, tuple cols %d, descriptor cols %d", 
+				 col_count, natts)));
 
     if (slot->tts_attinmeta == NULL)
     {
