@@ -6692,7 +6692,7 @@ make_remotesubplan(PlannerInfo *root,
 
                 parallel_workers = Min(parallel_workers, max_parallel_workers_per_gather);
                 
-                gather_plan = make_gather(gather_left->targetlist,
+				gather_plan = make_gather(copyObject(gather_left->targetlist),
                                           NIL,
                                           parallel_workers,
                                           false,
@@ -6770,6 +6770,30 @@ make_remotesubplan(PlannerInfo *root,
                 {
                     /* Ok to modify subplan's target list */
                     lefttree->targetlist = lappend(lefttree->targetlist, newtle);
+#ifdef __TBASE__
+					if (IsA(lefttree, Gather)&& g_UseDataPump && olap_optimizer &&
+						(distributionType == LOCATOR_TYPE_HASH || distributionType == LOCATOR_TYPE_SHARD))
+					{
+						Plan *leftchild = lefttree->lefttree;
+
+						newtle = makeTargetEntry(expr,
+										 list_length(leftchild->targetlist) + 1,
+									     NULL,
+										 true);
+					
+						if (is_projection_capable_plan(leftchild))
+						{
+							leftchild->targetlist = lappend(leftchild->targetlist, newtle);
+						}
+						else
+						{
+							List *newtlist = list_copy(leftchild->targetlist);
+							newtlist = lappend(newtlist, newtle);
+							leftchild = (Plan *) make_result(newtlist, NULL, leftchild);
+							lefttree->lefttree = leftchild;
+						}
+					}
+#endif
                 }
                 else
                 {
