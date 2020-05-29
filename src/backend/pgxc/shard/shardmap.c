@@ -611,7 +611,16 @@ static void SyncShardMapList_CN(bool force)
     g_GroupShardingMgr->needLock = true;
 
     LWLockAcquire(ShardMapLock, LW_EXCLUSIVE);    
+
+	/* in case of race conditions */
+	if (!force && g_UpdateShardingGroupInfo.nGroups == 0 && g_GroupShardingMgr->inited)
+	{
+		LWLockRelease(ShardMapLock);
+		g_GroupShardingMgr->needLock = false;
+		return;
+	}
     
+	g_GroupShardingMgr->inited = false;
     SyncShardMapList_Node_CN();
     g_GroupShardingMgr->inited = true;
         
@@ -644,7 +653,16 @@ static void SyncShardMapList_DN(bool force)
     /* tell others use lock to access shard map */
     g_GroupShardingMgr_DN->needLock = true;
 
-    LWLockAcquire(ShardMapLock, LW_EXCLUSIVE);    
+	LWLockAcquire(ShardMapLock, LW_EXCLUSIVE);
+
+	/* in case of race conditions */
+	if (!force && g_UpdateShardingGroupInfo.nGroups == 0 && g_GroupShardingMgr_DN->inited)
+	{
+		LWLockRelease(ShardMapLock);
+		g_GroupShardingMgr_DN->needLock = false;
+		return;
+	}
+	g_GroupShardingMgr_DN->inited = false;
     
     g_GroupShardingMgr_DN->inited = SyncShardMapList_Node_DN();
         
@@ -1891,12 +1909,14 @@ void ForceRefreshShardMap(Oid groupoid)
     {    
         if (IS_PGXC_COORDINATOR)
         {
+			g_GroupShardingMgr->inited = false;
             SyncShardMapList_Node_CN();
             g_GroupShardingMgr->inited = true;
 
         }
         else if (IS_PGXC_DATANODE)
         {    
+			g_GroupShardingMgr_DN->inited = false;
             g_GroupShardingMgr_DN->inited = SyncShardMapList_Node_DN();
         }
     }
