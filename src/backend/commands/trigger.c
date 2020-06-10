@@ -4862,7 +4862,12 @@ AfterTriggerEndXact(bool isCommit)
 #ifdef __TBASE__
     /* On similar lines, discard the rowstore memory. */
     if (IS_PGXC_COORDINATOR && afterTriggers.xc_rs_cxt)
+	{
         MemoryContextDelete(afterTriggers.xc_rs_cxt);
+		afterTriggers.xc_rs_cxt = NULL;
+	}
+	afterTriggers.xc_rowstores = NULL;
+	afterTriggers.xc_max_rowstores = 0;
 #endif
 
 }
