@@ -3106,7 +3106,7 @@ ProcessUtilitySlow(ParseState *pstate,
                                             elog(ERROR, "Cannot support distribute type: RoundRobin");
                                             break;
                                         default:
-                                            elog(ERROR,"Unkown distribute type.");
+											elog(ERROR,"Unknown distribute type.");
                                             break;
                                     }
                                 }
