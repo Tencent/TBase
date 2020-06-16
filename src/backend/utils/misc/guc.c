@@ -8153,7 +8153,7 @@ set_config_option(const char *name, const char *value,
     bool        send_to_nodes = false;
 
     /* Determine now, because source may be changed below in the function */
-    if (source == PGC_S_SESSION && (IS_PGXC_DATANODE || !IsConnFromCoord()))
+    if ((source == PGC_S_SESSION || source == PGC_S_CLIENT) && (IS_PGXC_DATANODE || !IsConnFromCoord()))
         send_to_nodes = true;
 #endif
 
