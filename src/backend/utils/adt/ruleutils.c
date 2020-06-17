@@ -12401,10 +12401,10 @@ get_full_pruning_result(Relation rel)
     Bitmapset *result = NULL;
     int i = 0;
     int nparts = RelationGetNParts(rel);
-    Assert(nparts > 0);
-
 	char *partname = NULL;
 	Oid partoid = InvalidOid;
+
+	Assert(nparts > 0);
 
     for(i=0; i<nparts; i++)
 	{
