@@ -56,6 +56,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/tqual.h"
+#include "utils/lsyscache.h"
 #ifdef __TBASE__
 #include "optimizer/pgxcship.h"
 #include "pgxc/execRemote.h"
