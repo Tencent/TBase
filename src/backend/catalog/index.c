@@ -1409,7 +1409,7 @@ index_drop(Oid indexId, bool concurrent)
      * using it.)
      */
     heapId = IndexGetRelation(indexId, false);
-	if (g_allow_force_ddl && !RelationIsValid(heapId))
+	if (g_allow_force_ddl && !OidIsValid(heapId))
 	{
 	    return;
 	}
