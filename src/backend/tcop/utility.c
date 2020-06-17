@@ -1072,11 +1072,14 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 
         case T_AlterPublicationStmt:
 #ifdef __STORAGE_SCALABLE__
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                     errmsg("Postgres-XL does not support ALTER PUBLICATION"),
-                     errdetail("The feature is not currently supported")));
-            break;
+			if (((AlterPublicationStmt *) parsetree)->tableAction != DEFELEM_ADD &&
+ 				((AlterPublicationStmt *) parsetree)->tableAction != DEFELEM_DROP)
+ 			{
+ 				ereport(ERROR,
+ 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+ 						 errmsg("Postgres-XL only support ALTER PUBLICATION ... ADD/DROP TABLE "),
+ 						 errdetail("The feature is not currently supported")));
+			}
 #endif
             break;
 
