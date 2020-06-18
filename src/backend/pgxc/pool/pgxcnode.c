@@ -1484,9 +1484,9 @@ release_handles(bool force)
         }
     }
 
-    //destroy = true;
     /* And finally release all the connections on pooler */
-    PoolManagerReleaseConnections(destroy);
+	PoolManagerReleaseConnections(destroy || force);
+	DropAllDatanodeStatements();
 
     datanode_count = 0;
     coord_count = 0;
@@ -2440,8 +2440,10 @@ pgxc_node_send_query_extended(PGXCNodeHandle *handle, const char *query,
 {// #lizard forgives
     /* NULL query indicates already prepared statement */
     if (query)
+    {
         if (pgxc_node_send_parse(handle, statement, query, num_params, param_types))
             return EOF;
+    }
     if (pgxc_node_send_bind(handle, portal, statement, paramlen, params))
         return EOF;
     if (send_describe)

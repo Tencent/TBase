@@ -135,6 +135,7 @@ extern DatanodeStatement *FetchDatanodeStatement(const char *stmt_name, bool thr
 extern bool ActivateDatanodeStatementOnNode(const char *stmt_name, int noid);
 extern bool HaveActiveDatanodeStatements(void);
 extern void DropDatanodeStatement(const char *stmt_name);
+extern void DropAllDatanodeStatements(void);
 extern int SetRemoteStatementName(Plan *plan, const char *stmt_name, int num_params,
                         Oid *param_types, int n);
 #endif
