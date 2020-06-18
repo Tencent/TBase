@@ -128,8 +128,6 @@ struct config_enum_entry
 /*
  * Signatures for per-variable check/assign/show hook functions
  */
-/* No hook in GTM */
-#if 0
 typedef bool (*GtmOptBoolCheckHook) (bool *newval, void **extra, GtmOptSource source);
 typedef bool (*GtmOptIntCheckHook) (int *newval, void **extra, GtmOptSource source);
 typedef bool (*GtmOptRealCheckHook) (double *newval, void **extra, GtmOptSource source);
@@ -142,6 +140,7 @@ typedef void (*GtmOptRealAssignHook) (double newval, void *extra);
 typedef void (*GtmOptStringAssignHook) (const char *newval, void *extra);
 typedef void (*GtmOptEnumAssignHook) (int newval, void *extra);
 
+#if 0
 typedef const char *(*GtmOptShowHook) (void);
 #endif
 
@@ -239,6 +238,7 @@ extern bool trace_syncscan;
 extern bool optimize_bounded_sort;
 #endif
 
+extern volatile sig_atomic_t ConfigReloadPending;
 
 /*
  * Log_min_messages ENUM strings

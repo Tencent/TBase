@@ -48,7 +48,8 @@ typedef enum
     PROMOTE_COMMAND,
     RESTART_COMMAND,
     STATUS_COMMAND,
-    RECONNECT_COMMAND
+	RECONNECT_COMMAND,
+	RELOAD_COMMAND
 } CtlCommand;
 
 #define DEFAULT_WAIT    60
@@ -711,6 +712,36 @@ do_promote(void)
     }
 }
 
+static void
+do_reload(void)
+{
+	pgpid_t		pid;
+
+	pid = get_pgpid();
+
+	if (pid == 0)				/* no pid file */
+	{
+		write_stderr(_("%s: PID file \"%s\" does not exist\n"), progname, pid_file);
+		write_stderr(_("Is server running?\n"));
+		exit(1);
+	}
+	else if (pid < 0)			/* standalone backend, not gtm */
+	{
+		pid = -pid;
+		write_stderr(_("%s: cannot promote server; "
+					   "single-user server is running (PID: %ld)\n"),
+					 progname, pid);
+		exit(1);
+	}
+
+	if (kill((pid_t) pid, SIGHUP) != 0)
+	{
+		write_stderr(_("%s: could not send reload signal (PID: %ld): %s\n"), progname, pid,
+					 strerror(errno));
+		exit(1);
+	}
+}
+
 /*
  * At least we expect the following argument
  *
@@ -1109,6 +1140,7 @@ do_help(void)
          "                 [-o \"OPTIONS\"]\n"), progname);
     printf(_("  %s status  -Z STARTUP_MODE [-H host] [-P port] [-w] [-t SECS] [-D DATADIR]\n"), progname);
     printf(_("  %s reconnect -Z STARTUP_MODE [-D DATADIR] -o \"OPTIONS\"]\n"), progname);
+	printf(_("  %s reload [-D DATADIR]\"]\n"), progname);
 
     printf(_("\nCommon options:\n"));
     printf(_("  -D DATADIR             location of the database storage area\n"));
@@ -1325,6 +1357,8 @@ main(int argc, char **argv)
                 ctl_command = STATUS_COMMAND;
             else if (strcmp(argv[optind], "reconnect") == 0)
                 ctl_command = RECONNECT_COMMAND;
+			else if (strcmp(argv[optind], "reload") == 0)
+				ctl_command = RELOAD_COMMAND;
             else
             {
                 write_stderr(_("%s: unrecognized operation mode \"%s\"\n"),
@@ -1418,6 +1452,7 @@ main(int argc, char **argv)
             case START_COMMAND:
             case PROMOTE_COMMAND:
             case STATUS_COMMAND:
+			case RELOAD_COMMAND:
                 do_wait = false;
                 break;
             case STOP_COMMAND:
@@ -1475,6 +1510,9 @@ main(int argc, char **argv)
         case RECONNECT_COMMAND:
             do_reconnect();
             break;
+		case RELOAD_COMMAND:
+			do_reload();
+			break;
         default:
             break;
     }

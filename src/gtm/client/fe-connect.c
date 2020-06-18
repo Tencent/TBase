@@ -508,7 +508,6 @@ keep_going:                        /* We will come back to here until there is
                 while (conn->addr_cur != NULL)
                 {
                     struct addrinfo *addr_cur = conn->addr_cur;
-					int ret  = 0;
 
                     /* Remember current address for possible error msg */
                     memcpy(&conn->raddr.addr, addr_cur->ai_addr,
