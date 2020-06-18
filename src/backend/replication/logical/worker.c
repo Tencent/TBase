@@ -149,6 +149,11 @@ static bool
 should_apply_changes_for_rel(LogicalRepRelMapEntry *rel)
 {// #lizard forgives
 #ifdef __SUBSCRIPTION__
+	if (NULL == rel)
+	{
+		return false;
+	}
+
     if (IS_PGXC_COORDINATOR)
     {
         if (rel->localrel != NULL)
@@ -759,10 +764,9 @@ apply_handle_origin(StringInfo s)
 static void
 apply_handle_relation(StringInfo s)
 {// #lizard forgives
-    LogicalRepRelation *rel;
+	LogicalRepRelation *rel = NULL;
 
     rel = logicalrep_read_rel(s);
-    logicalrep_relmap_update(rel);
 
 #ifdef __SUBSCRIPTION__
     /*
@@ -773,10 +777,30 @@ apply_handle_relation(StringInfo s)
     {
         Relation     localrel = NULL;
         TupleDesc    desc = NULL;
-        int   natts = 0, nliveatts = 0;
+		int			natts = 0, nliveatts = 0;
         int            i = 0;
+		RangeVar * 	local_relname = NULL;
 
         ensure_transaction();
+
+		local_relname = makeRangeVar(rel->nspname, rel->relname, -1);
+
+		if (am_tbase_subscription_dispatch_worker())
+		{
+			Oid	local_relid = InvalidOid;
+
+			local_relid = RangeVarGetRelid(local_relname, NoLock, true);
+			if (!OidIsValid(local_relid))
+			{
+				elog(LOG, "The subscriber cannot find the table name received from the publisher locally, ignoring the subscription for %s.%s.",
+					rel->nspname, rel->relname);
+
+				pfree(local_relname);
+				logicalrep_relation_free(rel);
+
+				return;
+			}
+		}
 
         localrel = relation_openrv(makeRangeVar(rel->nspname, rel->relname, -1), NoLock);
         desc = RelationGetDescr(localrel);
@@ -836,8 +860,11 @@ apply_handle_relation(StringInfo s)
         }
 
         heap_close(localrel, NoLock);
+		pfree(local_relname);
     } while (0);
 #endif
+
+	logicalrep_relmap_update(rel);
 }
 
 /*

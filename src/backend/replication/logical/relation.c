@@ -335,8 +335,8 @@ logicalrep_rel_att_by_name(LogicalRepRelation *remoterel, const char *attname)
 LogicalRepRelMapEntry *
 logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
 {// #lizard forgives
-    LogicalRepRelMapEntry *entry;
-    bool        found;
+	LogicalRepRelMapEntry *entry = NULL;
+	bool		found = false;
 
     if (LogicalRepRelMap == NULL)
         logicalrep_relmap_init();
@@ -345,9 +345,25 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
     entry = hash_search(LogicalRepRelMap, (void *) &remoteid,
                         HASH_FIND, &found);
 
+#ifdef __SUBSCRIPTION__
+	if (!found)
+	{
+		if (am_tbase_subscription_dispatch_worker())
+		{
+			// elog(LOG, "no relation map entry for remote relation ID %u, ignoring this subscription", remoteid);
+			return NULL;
+		}
+		else
+		{
+			elog(ERROR, "no relation map entry for remote relation ID %u",
+			 	remoteid);
+		}
+	}
+#else
     if (!found)
         elog(ERROR, "no relation map entry for remote relation ID %u",
              remoteid);
+#endif
 
     /* Need to update the local cache? */
     if (!OidIsValid(entry->localreloid))
@@ -483,6 +499,11 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
 void
 logicalrep_rel_close(LogicalRepRelMapEntry *rel, LOCKMODE lockmode)
 {
+#ifdef __SUBSCRIPTION__
+	if (NULL == rel)
+		return;
+#endif
+
     heap_close(rel->localrel, lockmode);
     rel->localrel = NULL;
 }
