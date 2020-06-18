@@ -91,7 +91,6 @@ extern void PoolPingNodes(void);
 #endif
 
 #ifdef __TBASE__
-static void contains_remotesubplan(Path *path, int *number, bool *redistribute);
 static int get_num_connections(int numnodes, int nRemotePlans);
 #endif
 
@@ -2565,7 +2564,7 @@ pull_up:
 
 #ifdef __TBASE__
 /* count remotesubplans in path */
-static void
+void
 contains_remotesubplan(Path *path, int *number, bool *redistribute)
 {// #lizard forgives
     if (!number)    
@@ -2601,6 +2600,13 @@ contains_remotesubplan(Path *path, int *number, bool *redistribute)
                 contains_remotesubplan(pathnode->subpath, number, redistribute);
             }
             break;
+		case T_GatherMerge:
+			{
+				GatherMergePath *pathnode = (GatherMergePath *)path;
+				
+				contains_remotesubplan(pathnode->subpath, number, redistribute);
+			}
+			break;
         case T_Agg:
             {
                 if (IsA(path, AggPath))
