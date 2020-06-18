@@ -344,6 +344,10 @@ extern int DataNodeCopyInBinaryForAll(char *msg_buf, int len, int conn_count,
                                       PGXCNodeHandle** connections);
 extern bool DataNodeCopyEnd(PGXCNodeHandle *handle, bool is_error);
 
+#ifdef __TBASE__
+extern PGXCNodeAllHandles *get_exec_connections_all_dn(bool is_global_session);
+#endif
+
 extern RemoteQueryState *ExecInitRemoteQuery(RemoteQuery *node, EState *estate, int eflags);
 extern TupleTableSlot* ExecRemoteQuery(PlanState *pstate);
 extern void ExecReScanRemoteQuery(RemoteQueryState *node);

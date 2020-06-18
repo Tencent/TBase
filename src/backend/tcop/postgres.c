@@ -120,6 +120,7 @@
 
 #ifdef __SUBSCRIPTION__
 #include "replication/logicalrelation.h"
+#include "replication/worker_internal.h"
 #endif
 
 extern int    optind;
