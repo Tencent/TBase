@@ -201,7 +201,14 @@ next_record:
                         goto next_record;
                     }
                 }
+
                 MlsExecCheck(node, slot);
+
+				if(node && datamask_scan_key_contain_mask(node))
+				{
+					ExecClearTuple(slot);
+                    return NULL;
+				}
             }
 
 #ifdef __TBASE__
