@@ -449,7 +449,7 @@ int64 vacuum_shard_internal(Relation rel, Bitmapset *to_vacuum, Snapshot vacuum_
             if(to_delete)
             {
                 tuples++;
-                if(tuples > 200)
+				if(tuples > 2000)
                 {
                     tuples = 0;
                     pg_usleep(sleep_interval * 1000);

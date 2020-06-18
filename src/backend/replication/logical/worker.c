@@ -175,7 +175,26 @@ should_apply_changes_for_rel(LogicalRepRelMapEntry *rel)
 #endif
 
     if (am_tablesync_worker())
+#ifdef __STORAGE_SCALABLE__
+	{
+		Oid localreloid = rel->localreloid;
+		if (!OidIsValid(localreloid))
+		{
+			if (rel->localrel)
+			{
+				localreloid = RelationGetRelid(rel->localrel);
+			}
+
+			if (!OidIsValid(localreloid))
+			{
+				elog(ERROR, "should_apply_changes_for_rel: invalid localreloid %u", localreloid);
+			}
+		}
+		return MyLogicalRepWorker->relid == localreloid;
+	}
+#else
         return MyLogicalRepWorker->relid == rel->localreloid;
+#endif
     else
         return (rel->state == SUBREL_STATE_READY ||
                 (rel->state == SUBREL_STATE_SYNCDONE &&

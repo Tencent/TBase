@@ -2077,7 +2077,10 @@ CopyShardGroups_DN(Bitmapset * dest)
         return NULL;
     }
 
+	LWLockAcquire(ShardMapLock, LW_SHARED);	
     memcpy(dest, g_DatanodeShardgroupBitmap, SHARD_TABLE_BITMAP_SIZE);
+	LWLockRelease(ShardMapLock);
+	
     return dest;
 }
 
@@ -3705,7 +3708,8 @@ tbase_shard_statistic(PG_FUNCTION_ARGS)
         {
             InitShardStatistic(&rec[i]);
         }
-    
+
+		LWLockAcquire(ShardMapLock, LW_SHARED);	
         for (i = 0; i < npools; i++)
         {
             for (j = 0; j < nelems; j++)
@@ -3722,6 +3726,7 @@ tbase_shard_statistic(PG_FUNCTION_ARGS)
                 }
             }
         }
+		LWLockRelease(ShardMapLock);
 
         status->rec = rec;
         MemoryContextSwitchTo(oldcontext);

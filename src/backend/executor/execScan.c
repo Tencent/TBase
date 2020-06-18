@@ -33,6 +33,7 @@
 #include "pgxc/shardmap.h"
 #include "access/htup_details.h"
 #include "utils/guc.h"
+#include "storage/nodelock.h"
 #endif
 
 static bool tlist_matches_tupdesc(PlanState *ps, List *tlist, Index varno, TupleDesc tupdesc);
@@ -214,6 +215,8 @@ next_record:
                     HeapTuple tup = slot->tts_tuple;
 
                     UpdateShardStatistic(CMD_SELECT, HeapTupleGetShardId(tup), 0, 0);
+
+					LightLockCheck(commandType, InvalidOid, HeapTupleGetShardId(tup));
                 }
             }
 #endif
@@ -269,6 +272,8 @@ next_record:
                 HeapTuple tup = slot->tts_tuple;
 
                 UpdateShardStatistic(CMD_SELECT, HeapTupleGetShardId(tup), 0, 0);
+
+				LightLockCheck(commandType, InvalidOid, HeapTupleGetShardId(tup));
             }
         }
 #endif
