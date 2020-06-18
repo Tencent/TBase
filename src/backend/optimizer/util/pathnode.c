@@ -2283,7 +2283,7 @@ not_allowed_join:
                     (pathnode->jointype != JOIN_RIGHT && pathnode->jointype != JOIN_FULL) &&
                     outerd->distributionType != LOCATOR_TYPE_REPLICATED && !redistribute_inner &&
                     get_num_connections(outer_nodes, nRemotePlans_inner + 1) < MaxConnections * REPLICATION_FACTOR &&
-                    !dml && nRemotePlans_inner < replication_level)
+					!dml && nRemotePlans_inner < replication_level && !pathnode->inner_unique)
                 {
                     replicate_inner = true;
 
@@ -2295,7 +2295,7 @@ not_allowed_join:
                      pathnode->jointype != JOIN_SEMI && pathnode->jointype != JOIN_ANTI) &&
                      innerd->distributionType != LOCATOR_TYPE_REPLICATED && !redistribute_outer &&
                      get_num_connections(inner_nodes, nRemotePlans_outer + 1) < MaxConnections * REPLICATION_FACTOR &&
-                     !replicate_inner && !dml && nRemotePlans_outer < replication_level)
+					 !replicate_inner && !dml && nRemotePlans_outer < replication_level && !pathnode->inner_unique)
                 {
                     replicate_outer = true;
 
@@ -2320,7 +2320,7 @@ not_allowed_join:
                      pathnode->jointype != JOIN_SEMI && pathnode->jointype != JOIN_ANTI) &&
                      innerd->distributionType != LOCATOR_TYPE_REPLICATED && !redistribute_outer &&
                      get_num_connections(inner_nodes, nRemotePlans_outer + 1) < MaxConnections * REPLICATION_FACTOR &&
-                     !dml && nRemotePlans_outer < replication_level)
+					 !dml && nRemotePlans_outer < replication_level && !pathnode->inner_unique)
                 {
                     replicate_outer = true;
 
@@ -2349,7 +2349,7 @@ not_allowed_join:
                     (pathnode->jointype != JOIN_RIGHT && pathnode->jointype != JOIN_FULL) &&
                     outerd->distributionType != LOCATOR_TYPE_REPLICATED && !redistribute_inner &&
                     get_num_connections(outer_nodes, nRemotePlans_inner + 1) < MaxConnections * REPLICATION_FACTOR &&
-                    !dml && nRemotePlans_inner < replication_level)
+					!dml && nRemotePlans_inner < replication_level && !pathnode->inner_unique)
                 {
                     replicate_inner = true;
 

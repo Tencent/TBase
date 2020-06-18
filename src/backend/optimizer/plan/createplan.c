@@ -105,6 +105,7 @@ int remote_subplan_depth = 0;
 List *groupOids = NULL;
 bool mergejoin = false;
 bool enable_group_across_query = false;
+bool enable_distributed_unique_plan = false;
 #endif
 #ifdef __COLD_HOT__
 bool has_distribute_remote_plan = false;
@@ -1636,7 +1637,20 @@ create_unique_plan(PlannerInfo *root, UniquePath *best_path, int flags)
     AttrNumber *groupColIdx;
     int            groupColPos;
     ListCell   *l;
+#ifdef __TBASE__
+	TargetEntry *distributed_expr = NULL;
+	Path	    *subpath = best_path->subpath;
+	Node	    *sub_disExpr = NULL;
+	bool        match_distributed_column = false;
 
+	if (enable_distributed_unique_plan)
+	{
+		if (subpath && subpath->distribution && subpath->distribution->distributionExpr)
+		{
+			sub_disExpr = subpath->distribution->distributionExpr;
+		}
+	}
+#endif
     /* Unique doesn't project, so tlist requirements pass through */
     subplan = create_plan_recurse(root, best_path->subpath, flags);
 
@@ -1729,6 +1743,15 @@ create_unique_plan(PlannerInfo *root, UniquePath *best_path, int flags)
         if (!tle)                /* shouldn't happen */
             elog(ERROR, "failed to find unique expression in subplan tlist");
         groupColIdx[groupColPos++] = tle->resno;
+#ifdef __TBASE__
+		if (enable_distributed_unique_plan)
+		{
+			if (equal(tle->expr, sub_disExpr))
+			{
+				match_distributed_column = true;
+			}
+		}
+#endif
     }
 
     if (best_path->umethod == UNIQUE_PATH_HASH)
@@ -1752,8 +1775,77 @@ create_unique_plan(PlannerInfo *root, UniquePath *best_path, int flags)
                 elog(ERROR, "could not find compatible hash operator for operator %u",
                      in_oper);
             groupOperators[groupColPos++] = eq_oper;
+#ifdef __TBASE__
+			if (enable_distributed_unique_plan)
+			{
+				if (!distributed_expr)
+				{
+					int groupColIndex = groupColPos - 1;
+					distributed_expr = get_tle_by_resno(subplan->targetlist,
+										   groupColIdx[groupColIndex]);
+				}
+			}
+#endif
         }
+#ifdef __TBASE__
+		if (enable_distributed_unique_plan)
+		{
+			if (!match_distributed_column)
+			{
+				bool is_distributable = false;
+				Oid  hashType = InvalidOid;
+				if (distributed_expr)
+				{
+					hashType = exprType((Node *)distributed_expr->expr);
+					is_distributable = IsTypeHashDistributable(hashType);
+				}
+				if (!is_distributable)
+				{
+					elog(LOG, "create_unique_plan using hash: redistribution is impossible because of"
+						" undistributable hash type %u", hashType);
+				}
+				if (subpath && subpath->distribution && 
+					subpath->distribution->distributionExpr && is_distributable)
+				{
+					Plan *remote_subplan = NULL;
+					Distribution *distribution = NULL;
+					/* remove duplicated tuples on each node */
+					Plan *first_agg = (Plan *) make_agg(subplan->targetlist,
+														 NIL,
+														 AGG_HASHED,
+														 AGGSPLIT_SIMPLE,
+														 numGroupCols,
+														 groupColIdx,
+														 groupOperators,
+														 NIL,
+														 NIL,
+														 best_path->path.rows,
+														 subplan);
+					/* redistributed group by results between nodes */
+					distribution = copyObject(subpath->distribution);
+					distribution->distributionExpr = (Node *)distributed_expr->expr;
+					remote_subplan = (Plan *)make_remotesubplan(root, first_agg, distribution, subpath->distribution, NULL);
 
+					/* remove duplicated tuples on each node again */
+					plan = (Plan *) make_agg(build_path_tlist(root, &best_path->path),
+														 NIL,
+														 AGG_HASHED,
+														 AGGSPLIT_SIMPLE,
+														 numGroupCols,
+														 groupColIdx,
+														 groupOperators,
+														 NIL,
+														 NIL,
+														 best_path->path.rows,
+														 remote_subplan);
+					/* Copy cost data from Path to Plan */
+					copy_generic_path_info(plan, &best_path->path);
+
+					return plan;
+				}
+			}
+		}
+#endif
         /*
          * Since the Agg node is going to project anyway, we can give it the
          * minimum output tlist, without any stuff we might have added to the
@@ -1806,7 +1898,16 @@ create_unique_plan(PlannerInfo *root, UniquePath *best_path, int flags)
             tle = get_tle_by_resno(subplan->targetlist,
                                    groupColIdx[groupColPos]);
             Assert(tle != NULL);
-
+#ifdef __TBASE__
+            /* get distributed column for remote_subplan */
+            if (enable_distributed_unique_plan)
+            {
+                if (!distributed_expr)
+                {
+                    distributed_expr = tle;
+                }
+            }
+#endif
             sortcl = makeNode(SortGroupClause);
             if(tle)
             {
@@ -1820,6 +1921,33 @@ create_unique_plan(PlannerInfo *root, UniquePath *best_path, int flags)
             sortList = lappend(sortList, sortcl);
             groupColPos++;
         }
+#ifdef __TBASE__
+		if (enable_distributed_unique_plan)
+		{
+			if (!match_distributed_column)
+			{
+				bool is_distributable = false;
+				Oid  hashType = InvalidOid;
+				if (distributed_expr)
+				{
+					hashType = exprType((Node *)distributed_expr->expr);
+					is_distributable = IsTypeHashDistributable(hashType);
+				}
+				if (!is_distributable)
+				{
+					elog(LOG, "create_unique_plan using sort: redistribution is impossible because of"
+						" undistributable hash type %u", hashType);
+				}
+				if (subpath && subpath->distribution && 
+					subpath->distribution->distributionExpr && is_distributable)
+				{
+					Distribution *distribution = copyObject(subpath->distribution);
+					distribution->distributionExpr = (Node *)distributed_expr->expr;
+					subplan = (Plan *)make_remotesubplan(root, subplan, distribution, subpath->distribution, NULL);
+				}
+			}
+		}
+#endif
         sort = make_sort_from_sortclauses(sortList, subplan);
         label_sort_with_costsize(root, sort, -1.0);
         plan = (Plan *) make_unique_from_sortclauses((Plan *) sort, sortList);
