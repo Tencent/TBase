@@ -652,6 +652,7 @@ SocketBackend(StringInfo inBuf)
 #ifdef PGXC /* PGXC_DATANODE */
 #ifdef __TBASE__
         case 'N':
+		case 'U':				/* coord info: coord_pid and top_xid */
 #endif
         case 'M':                /* Command ID */
         case 'g':                /* GXID */
@@ -5650,6 +5651,19 @@ PostgresMain(int argc, char *argv[],
                     }
                 }
                 break;
+			case 'U':			/* coord info: coord_pid and coord_vxid */
+				{
+					int coord_pid = 0;
+					TransactionId coord_vxid = InvalidTransactionId;
+
+					coord_pid = (int) pq_getmsgint(&input_message, 4);
+					coord_vxid = (TransactionId) pq_getmsgint(&input_message, 4);
+
+					pgxc_set_coordinator_proc_pid(coord_pid);
+					pgxc_set_coordinator_proc_vxid(coord_vxid);
+					elog(DEBUG5, "Received coord_pid: %d, coord_vxid: %u", coord_pid, coord_vxid);
+				}
+				break;
 #endif
                 /*
                  * 'X' means that the frontend is closing down the socket. EOF
