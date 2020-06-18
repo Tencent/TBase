@@ -353,6 +353,7 @@ extern ParamPathInfo *get_appendrel_parampathinfo(RelOptInfo *appendrel,
 #ifdef __TBASE__
 extern Path *create_redistribute_grouping_path(PlannerInfo *root, 
                                                 Query *parse, Path *path);
+extern void contains_remotesubplan(Path *path, int *number, bool *redistribute);
 
 extern int replication_level;
 
