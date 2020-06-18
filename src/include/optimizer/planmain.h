@@ -98,6 +98,7 @@ extern int    force_parallel_mode;
 extern int remote_subplan_depth;
 extern List *groupOids;
 extern bool enable_group_across_query;
+extern bool enable_distributed_unique_plan;
 extern bool has_distribute_remote_plan;
 extern bool has_cold_hot_table;
 
