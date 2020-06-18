@@ -5221,7 +5221,7 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
 {// #lizard forgives
 #ifdef __TBASE__
 #define ROLLBACK_PREPARED_CMD_LEN 256
-    bool             force_release_handle = false;
+	//bool                  force_release_handle = false;
 #endif
     int                ret    = -1;
     int                result = 0;
@@ -5607,7 +5607,7 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
 
     stat_transaction(conn_count);
     
-#ifdef __TBASE__
+#if 0
     force_release_handle = validate_handles();
     if (force_release_handle)
     {
@@ -5622,7 +5622,7 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
         {
             /* Clean up remote sessions */
             pgxc_node_remote_cleanup_all();
-            release_handles(false);
+			release_handles(true);
         }
     }
     else

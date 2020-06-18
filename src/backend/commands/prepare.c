@@ -615,7 +615,6 @@ StorePreparedStatement(const char *stmt_name,
 
     /* Now it's safe to move the CachedPlanSource to permanent memory */
     SaveCachedPlan(plansource);
-
 #ifdef XCP    
     if (use_resowner)
     {
@@ -1082,13 +1081,38 @@ ActivateDatanodeStatementOnNode(const char *stmt_name, int noid)
 
     /* see if statement already active on the node */
     for (i = 0; i < entry->number_of_nodes; i++)
+	{
         if (entry->dns_node_indices[i] == noid)
+		{
             return true;
+		}
+	}
 
     /* statement is not active on the specified node append item to the list */
     entry->dns_node_indices[entry->number_of_nodes++] = noid;
     return false;
 }
+#ifdef __TBASE__
+void
+DropAllDatanodeStatements(void)
+{
+	HASH_SEQ_STATUS seq;
+	DatanodeStatement *entry;
+
+	/* nothing cached */
+	if (!datanode_queries)
+	{
+		return;
+	}
+	
+	/* walk over cache */
+	hash_seq_init(&seq, datanode_queries);
+	while ((entry = hash_seq_search(&seq)) != NULL)
+	{
+		entry->number_of_nodes = 0;
+	}
+}
+#endif
 #endif
 #ifdef __TBASE__
 /* prepare remoteDML statement on coordinator */
