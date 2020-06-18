@@ -648,6 +648,15 @@ static void apply_exec_on_nodes(StringInfo s, char *nspname, char *relname, Exec
 static bool 
 check_if_ican_apply(int32 tuple_hash)
 {// #lizard forgives
+    if (am_tablesync_worker())
+    {
+        /* All data needs to be apply if I'am table worker */
+
+        Assert(MySubscription->parallel_index == 0);
+        if (!(MySubscription->parallel_index == 0)) abort();
+        return true;
+    }
+
     if (MySubscription->is_all_actived)
     {
         if (tuple_hash != 0)
@@ -1805,7 +1814,14 @@ send_feedback(XLogRecPtr recvpos, bool force, bool requestReply)
     pq_sendint64(reply_message, now);    /* sendTime */
     pq_sendbyte(reply_message, requestReply);    /* replyRequested */
 #ifdef __SUBSCRIPTION__
-    pq_sendbyte(reply_message, MySubscription->is_all_actived ? 1 : 0);    /* is_all_actived */
+    if(am_tablesync_worker())
+    {
+        pq_sendbyte(reply_message, 0);  /* All data needs to be subscirbed if I'am table worker */
+    }
+    else
+    {
+        pq_sendbyte(reply_message, MySubscription->is_all_actived ? 1 : 0); /* is_all_actived */
+    }
 #endif
 
     elog(DEBUG2, "sending feedback (force %d) to recv %X/%X, write %X/%X, flush %X/%X",
