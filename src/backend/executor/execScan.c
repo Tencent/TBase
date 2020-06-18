@@ -23,6 +23,7 @@
 #include "utils/memutils.h"
 #ifdef _MLS_
 #include "utils/mls.h"
+#include "utils/datamask.h"
 #endif
 
 #ifdef __AUDIT_FGA__

@@ -6273,6 +6273,9 @@ copyObjectImpl(const void *from)
             retval = _copyCheckOverLapStmt(from);
             break;
 #endif
+	    case T_SampleStmt:
+	        retval = _copySampleStmt(from);
+	        break;
         default:
             elog(ERROR, "unrecognized node type: %d", (int) nodeTag(from));
             retval = 0;            /* keep compiler quiet */
