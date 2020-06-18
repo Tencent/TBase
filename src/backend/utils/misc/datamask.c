@@ -127,6 +127,7 @@
 #define DATAMASK_TEST_INT32_STUB    PG_INT32_MAX
 #define DATAMASK_TEST_INT64_STUB    PG_INT64_MAX
 
+
 /*
  * value of option in pg_data_mask_map, indentify kinds of data mask.
  */
@@ -145,49 +146,34 @@ static Datum datamask_exchange_one_col_value(Oid relid, Form_pg_attribute attr, 
 static bool datamask_attr_mask_is_valid(Datamask   *datamask, int attnum);
 static char * transfer_str_prefix(text * text_str, int mask_bit_count);
 static char * transfer_str_postfix(text * text_str, int mask_bit_count);
-static int calculate_character_cnt(char * input_str, int input_str_len);
-
-static int calculate_character_cnt(char * input_str, int input_str_len)
-{
-    int loop;
-    int character_cnt = 0;
-    
-    for(loop = 0; loop < input_str_len; )
-    {
-        if (IS_HIGHBIT_SET(input_str[loop]) && PG_SQL_ASCII == GetDatabaseEncoding())
-        {
-            loop          += 3;
-            character_cnt += 1;
-        }
-        else
-        {
-            loop          += 1;
-            character_cnt += 1;
-        }
-    }    
-
-    return character_cnt;
-}
-
 
 /*
  * relative to input_str, to alloc a new memory, and exchange serveral chars from end to begin
  * and returns up to max('mask_bit_count', strlen(input_str) characters
  * if input_str is null, a string of 'X' with 'mask_bit_count' length would be returned
  */
- 
 static char * transfer_str_postfix(text * text_str, int mask_bit_count)
 {// #lizard forgives
     char *  str;
     char *  input_str = NULL;
-    int     bit_count;
-    int     loop;
-    int     input_str_len     = 0;
-    int     character_cnt     = 0;
-    int     begin_to_mask_idx = 0;
-    int     dst_loop;
-    int     input_loop;
-    int     character_idx;
+    int     input_str_len = 0;
+    int     character_len = 0;
+    int     character_idx = 0;
+    int     dst_loop   = 0;
+    int     input_loop = 0;
+    int     char_len   = 0;
+    static char    mask_len  = 0;
+    static char   *mask_char = NULL;
+
+    if(mask_char == NULL)
+    {
+        /* perform conversion */
+        mask_char = (char *) pg_do_encoding_conversion((unsigned char *)"X",
+                             1,
+                             PG_SQL_ASCII,
+                             GetDatabaseEncoding());
+        mask_len = strlen(mask_char);
+    }
     
     /* string mask must be valid */
     Assert(mask_bit_count);
@@ -196,79 +182,45 @@ static char * transfer_str_postfix(text * text_str, int mask_bit_count)
     {
         input_str     = VARDATA_ANY(text_str);
         input_str_len = VARSIZE_ANY_EXHDR(text_str);
+		character_len = pg_mbstrlen_with_len(input_str,input_str_len);
     }
 
-    if (input_str)
-    {
-        character_cnt = calculate_character_cnt(input_str, input_str_len);
-        begin_to_mask_idx = 0;
-        if (character_cnt > mask_bit_count)
-        {
-            begin_to_mask_idx = character_cnt - mask_bit_count;
-        }
-    }
+	if(character_len > mask_bit_count)
+	{
+		/* assume mini encoding byte to be 1,to avoid repalloc or calculation */
+	    str = palloc0(input_str_len + (mask_len - 1) * mask_bit_count + 1);
 
-    if ((character_cnt > mask_bit_count) && (0 != input_str_len))
-    {
-        input_str     = VARDATA_ANY(text_str);
-        
-        str = palloc0(input_str_len + 1);
+	    while(input_loop < input_str_len)
+	    {
+	    	char_len = pg_mblen(input_str + input_loop);
+			
+			if(character_len - character_idx <= mask_bit_count)
+			{
+				memcpy(str + dst_loop,mask_char,(uint)mask_len);
+				dst_loop += mask_len;
+			}
+			else
+			{
+				memcpy(str + dst_loop,input_str + input_loop,(uint)char_len);
+				dst_loop += char_len;
+			}
 
-        for (dst_loop = 0, input_loop = 0, character_idx = 0; 
-            input_loop < input_str_len && character_idx < begin_to_mask_idx && character_idx < character_cnt;)
-        {
-            if (IS_HIGHBIT_SET(input_str[input_loop]) && PG_SQL_ASCII == GetDatabaseEncoding())
-            {
-                for(loop = 0; loop < 3; loop++)
-                {
-                    str[dst_loop] = input_str[input_loop];
-                    input_loop    += 1;
-                    dst_loop      += 1;
-                }
-                character_idx += 1;
-            }
-            else
-            {
-                str[dst_loop] = input_str[input_loop];
-                input_loop    += 1;
-                dst_loop      += 1;
-                character_idx += 1;
-            }
-        }
+			input_loop += char_len;
+			character_idx++;
+	    }
+	}
+	else
+	{
+		str = palloc0(mask_len * mask_bit_count + 1);
+		
+		for(character_idx = 0; character_idx < mask_bit_count;character_idx++)
+		{
+			memcpy(str + dst_loop,mask_char,(uint)mask_len);
+			dst_loop += mask_len;
+		}
+	}
 
-        for (bit_count = 0;
-            input_loop < input_str_len && begin_to_mask_idx < character_cnt && bit_count < mask_bit_count;
-            input_loop++, dst_loop++, begin_to_mask_idx++)
-        {
-            str[dst_loop] = 'X';
-        }
-
-        str[dst_loop] = '\0';
-
-#if 0        
-        input_str_len = strlen(input_str);
-
-        str = palloc(input_str_len + 1);
-        strncpy(str, input_str, input_str_len);
-        str[input_str_len] = '\0';
-
-        for (loop = input_str_len - 1, bit_count = 0; 
-            loop >=0 && bit_count < mask_bit_count;
-            loop--,bit_count++)
-        {
-            str[loop] = 'X';
-        }
-#endif
-    }
-    else
-    {
-        str = palloc(mask_bit_count + 1);
-        for(loop = 0; loop < mask_bit_count; loop++)
-        {
-            str[loop] = 'X';
-        }
-        str[mask_bit_count] = '\0';
-    }
+    str[dst_loop] = '\0';
 
     return str;
 }
@@ -278,15 +230,28 @@ static char * transfer_str_postfix(text * text_str, int mask_bit_count)
  */
 static char * transfer_str_prefix(text * text_str, int mask_bit_count)
 {// #lizard forgives
-    char *  input_str = NULL;
     char *  str;
+    char *  input_str = NULL;
     int     input_str_len = 0;
-    int     bit_count;
-    int     loop;
-    int     character_cnt = 0;
-    int     dst_loop;
-    int     input_loop;
-    int     character_idx;
+    int     character_idx = 0;
+    int     character_len = 0;
+    int     dst_loop   = 0;
+    int     input_loop = 0;
+    int     char_len   = 0;
+    static char    mask_len  = 0;
+    static char   *mask_char = NULL;
+
+    if(mask_char == NULL)
+    {
+        /* perform conversion */
+        mask_char = (char *) pg_do_encoding_conversion((unsigned char *)"X",
+                             1,
+                             PG_SQL_ASCII,
+                             GetDatabaseEncoding());
+        mask_len = strlen(mask_char);
+
+        Assert(mask_char);
+    }
 
     /* string mask must be valid */
     Assert(mask_bit_count);
@@ -295,64 +260,47 @@ static char * transfer_str_prefix(text * text_str, int mask_bit_count)
     {
         input_str     = VARDATA_ANY(text_str);
         input_str_len = VARSIZE_ANY_EXHDR(text_str);
-        character_cnt = calculate_character_cnt(input_str, input_str_len);
-    }
-    
-    if (character_cnt > mask_bit_count && 0 != input_str_len)
-    {
-        input_str     = VARDATA_ANY(text_str);
-        
-        str = palloc0(input_str_len + 1);
-
-        for (dst_loop = 0, input_loop = 0, bit_count = 0, character_idx = 0; 
-            input_loop < input_str_len && bit_count < mask_bit_count && character_idx < character_cnt;)
-        {
-            if (IS_HIGHBIT_SET(input_str[input_loop]) && PG_SQL_ASCII == GetDatabaseEncoding())
-            {
-                str[dst_loop] = 'X';
-                input_loop    += 3;
-                dst_loop      += 1;
-                character_idx += 1;
-                bit_count     += 1;
-            }
-            else
-            {
-                str[dst_loop] = 'X';
-                input_loop    += 1;
-                dst_loop      += 1;
-                character_idx += 1;
-                bit_count     += 1;
-            }
-        }
-
-        for(;input_loop < input_str_len; input_loop++, dst_loop++)
-        {
-            str[dst_loop] = input_str[input_loop];
-        }
-
-        str[dst_loop] = '\0';
-#if 0        
-        strncpy(str, input_str, input_str_len);
-        str[input_str_len] = '\0';
-
-        for (loop = 0, bit_count = 0; 
-            loop < input_str_len && bit_count < mask_bit_count;
-            loop++, bit_count++)
-        {
-            str[loop] = 'X';
-        }
-#endif            
-    }
-    else
-    {
-        str = palloc0(mask_bit_count + 1);
-        for(loop = 0; loop < mask_bit_count; loop++)
-        {
-            str[loop] = 'X';
-        }
-        str[mask_bit_count] = '\0';
+		character_len = pg_mbstrlen_with_len(input_str,input_str_len);
     }
 
+
+	if(character_len > mask_bit_count)
+	{
+	    str = palloc0(input_str_len + (mask_len - 1) * mask_bit_count + 1);
+
+	    while(input_loop < input_str_len)
+	    {
+	    	char_len = pg_mblen(input_str + input_loop);
+			
+			if(character_idx < mask_bit_count)
+			{
+				memcpy(str + dst_loop,mask_char,(uint)mask_len);
+				dst_loop += mask_len;
+			}
+			else
+			{
+				memcpy(str + dst_loop,input_str + input_loop,(uint)char_len);
+				dst_loop += char_len;
+			}
+
+			input_loop += char_len;
+			character_idx++;
+	    }	    
+	}
+	else
+	{
+		str = palloc0(mask_len * mask_bit_count + 1);
+		
+		for(character_idx = 0; character_idx < mask_bit_count;character_idx++)
+		{
+			memcpy(str + dst_loop,mask_char,(uint)mask_len);
+			dst_loop += mask_len;
+		}
+	}
+
+	
+	str[dst_loop] = '\0';
+ 
     return str;
 }
 
