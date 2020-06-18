@@ -574,6 +574,9 @@ ExecInitIndexOnlyScan(IndexOnlyScan *node, EState *estate, int eflags)
      * suitable data anyway.)
      */
     tupDesc = ExecTypeFromTL(node->indextlist, false);
+#ifdef _MLS_
+	tupDesc->tdatamask = currentRelation->rd_att->tdatamask;
+#endif
     ExecAssignScanType(&indexstate->ss, tupDesc);
 
     /*

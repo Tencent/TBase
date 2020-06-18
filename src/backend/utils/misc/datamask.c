@@ -655,6 +655,51 @@ static Datum datamask_exchange_one_col_value(Oid relid,
     return value;
 }
 
+bool datamask_scan_key_contain_mask(ScanState *node)
+{
+	int i = 0;
+    Datamask   *datamask  = NULL;
+	ScanKey		ScanKeys;
+	int			NumScanKeys;
+
+	if(!IsA(node, IndexScanState) && !IsA(node, IndexOnlyScanState))
+		return false;
+
+	if(node == NULL)
+		return false;
+
+    if (node->ss_currentRelation && 
+		node->ss_currentRelation->rd_att)
+    {
+        datamask = node->ss_currentRelation->rd_att->tdatamask;
+    }
+	else 
+	{
+		return false;
+	}
+
+	if(IsA(node, IndexScanState))
+	{
+		IndexScanState *state  = (IndexScanState *)node;
+		ScanKeys = state->iss_ScanKeys;
+		NumScanKeys = state->iss_NumScanKeys;
+	} 
+	if (IsA(node, IndexOnlyScanState))
+	{
+		IndexOnlyScanState *state  = (IndexOnlyScanState *)node;
+		ScanKeys = state->ioss_ScanKeys;
+		NumScanKeys = state->ioss_NumScanKeys;
+	}
+
+	for(i = 0; i < NumScanKeys ;i++)
+	{
+		if(datamask_attr_mask_is_valid(datamask, ScanKeys[i].sk_attno - 1))
+			return true;
+	}
+	
+	return false;
+}
+
 /* 
  *  one col needs data masking when the corresponding mask_array is valid
  */
