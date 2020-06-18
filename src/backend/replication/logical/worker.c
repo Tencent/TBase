@@ -558,34 +558,39 @@ apply_get_exec_nodes(LogicalRepRelMapEntry * rel,
 }
 
 /*
- * send apply message to datanode and wait response
+ * send apply message to datanodes and wait response
  */
-static void apply_exec_on_nodes(StringInfo s, char *nspname, char *relname, ExecNodes * exec_nodes)
+static void
+apply_exec_on_dn_nodes(StringInfo s, char *nspname, char *relname, PGXCNodeAllHandles *all_handles)
 {// #lizard forgives
-    PGXCNodeAllHandles * all_handles = NULL;
-    int i = 0, result = 0;
+    int i = 0;
+    int result = 0;
     bool ignore_pk_conflict = false;
 
     ResponseCombiner combiner;
     MemSet(&combiner, 0, sizeof(ResponseCombiner));
 
-    if (exec_nodes == NULL)
+    if (all_handles == NULL)
+    {
         return;
+    }
 
     /* send apply message to DN and wait response */
-    all_handles = get_handles(exec_nodes->nodeList, NIL, false, true);
     ignore_pk_conflict = MySubscription->ignore_pk_conflict;
 
     for (i = 0; i < all_handles->dn_conn_count; i++)
     {
         Assert(all_handles->datanode_handles[i]->sock != PGINVALID_SOCKET);
-        if (!(all_handles->datanode_handles[i]->sock != PGINVALID_SOCKET)) abort();
+        if (all_handles->datanode_handles[i]->sock == PGINVALID_SOCKET)
+        {
+            abort();
+        }
         
         if (pgxc_node_send_apply(all_handles->datanode_handles[i], s->data, s->len, ignore_pk_conflict))
         {
             ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("apply_exec_on_nodes sending apply fails")));
+                errmsg("apply_exec_on_dn_nodes sending apply fails")));
         }
     }
 
@@ -603,7 +608,7 @@ static void apply_exec_on_nodes(StringInfo s, char *nspname, char *relname, Exec
         {
             ereport(ERROR,
                     (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("Failed to APPLY the tuple on one or more datanodes")));
+					 errmsg("Failed to APPLY the insert or update or delete or relation message on datanodes")));
         }
         result = EOF;
     }
@@ -615,33 +620,52 @@ static void apply_exec_on_nodes(StringInfo s, char *nspname, char *relname, Exec
     {
         if (combiner.errorDetail && combiner.errorHint)
         {
-            elog(LOG, "logical apply found that %s, %s, %s", 
+			elog(LOG, "logical apply found that %s, %s, %s",
                         combiner.errorMessage,
                         combiner.errorDetail,
                         combiner.errorHint);
         }
         else if (combiner.errorDetail)
         {
-            elog(LOG, "logical apply found that %s, %s", 
+            elog(LOG, "logical apply found that %s, %s",
                         combiner.errorMessage,
                         combiner.errorDetail);
         }
         else
         {
-            elog(LOG, "logical apply found that %s", 
+            elog(LOG, "logical apply found that %s",
                         combiner.errorMessage);
         }
-    } 
+    }
     else if (!validate_combiner(&combiner))
     {
         ereport(ERROR,
-	                (errcode(ERRCODE_INTERNAL_ERROR),
-                        errmsg("apply_exec_on_nodes validate_combiner responese of APPLY failed: %s, on table %s.%s in database %s",
-                        combiner.errorMessage, nspname, relname, get_database_name(MyDatabaseId))));
-        
-    }    
+	              (errcode(ERRCODE_INTERNAL_ERROR),
+                  errmsg("apply_exec_on_dn_nodes validate_combiner responese of APPLY failed: %s, on table %s.%s in database %s",
+                  combiner.errorMessage, nspname, relname, get_database_name(MyDatabaseId))));
+
+	}
 
     CloseCombiner(&combiner);
+}
+
+/*
+ * get handles from exec_nodes , then send apply message to datanode
+ */
+static void
+apply_exec_on_nodes(StringInfo s, char *nspname, char *relname, ExecNodes * exec_nodes)
+{
+	PGXCNodeAllHandles * all_handles = NULL;
+
+	if (exec_nodes == NULL)
+		return;
+
+	/* send apply message to DN and wait response */
+	all_handles = get_handles(exec_nodes->nodeList, NIL, false, true);
+
+	/* send insert/update/delete to DN and wait exec finish */
+	apply_exec_on_dn_nodes(s, nspname, relname, all_handles);
+
     pfree_pgxc_all_handles(all_handles);
 }
 
@@ -801,16 +825,15 @@ apply_handle_relation(StringInfo s)
 
 #ifdef __SUBSCRIPTION__
     /*
-     * Perform a check on the table structure of the local table and the remote table.
-     * Only the table structure is identical, the logical replication can be performed.
+	 * Perform a check on the local table existence and type based on the remote table.
+	 * Only the table is exists and supported relkind,
+	 * the logical replication can be performed to send handle_relation to all DN.
      */
-    do
+	if (IS_PGXC_COORDINATOR)
     {
         Relation     localrel = NULL;
-        TupleDesc    desc = NULL;
-		int			natts = 0, nliveatts = 0;
-        int            i = 0;
 		RangeVar * 	local_relname = NULL;
+		PGXCNodeAllHandles *connections = NULL;
 
         ensure_transaction();
 
@@ -834,65 +857,22 @@ apply_handle_relation(StringInfo s)
 		}
 
         localrel = relation_openrv(makeRangeVar(rel->nspname, rel->relname, -1), NoLock);
-        desc = RelationGetDescr(localrel);
-        natts = desc->natts;
 
         /* Check for supported relkind. */
         CheckSubscriptionRelkind(localrel->rd_rel->relkind, rel->nspname, rel->relname);
 
-        for (i = 0; i < desc->natts; i++)
-        {
-            if (desc->attrs[i]->attisdropped)
-            {
-                continue;
-            }
-            nliveatts++;
-        }
-
-        if (nliveatts != rel->natts)
-        {
-            heap_close(localrel, NoLock);
-            ereport(ERROR,
-                (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                 errmsg("The number of attributes between the remote table \"%s.%s\" and the local table \"%s.%s\" is different",
-                         rel->nspname, rel->relname, rel->nspname, rel->relname)));
-            return;
-        }
-
-        nliveatts = -1;
-        for (i = 0; i < natts; i++)
-        {
-            Form_pg_attribute att = desc->attrs[i];
-
-            if (att->attisdropped)
-                continue;
-            
-            nliveatts++;
-            
-            if (pg_strcasecmp(rel->attnames[nliveatts], NameStr(att->attname)) != 0)
-            {
-                heap_close(localrel, NoLock);
-                ereport(ERROR,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                     errmsg("The %d th attribute name between the remote table \"%s.%s\" and the local table \"%s.%s\" is different",
-                             nliveatts, rel->nspname, rel->relname, rel->nspname, rel->relname)));
-                return;
-            }
-
-            if (rel->atttyps[nliveatts] != att->atttypid)
-            {
-                heap_close(localrel, NoLock);
-                ereport(ERROR,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                     errmsg("The %d th attribute type between the remote table \"%s.%s\" and the local table \"%s.%s\" is different",
-                             nliveatts, rel->nspname, rel->relname, rel->nspname, rel->relname)));
-                return;
-            }
-        }
-
-        heap_close(localrel, NoLock);
+		heap_close(localrel, NoLock);
 		pfree(local_relname);
-    } while (0);
+
+		/* get all DN handles */
+		connections = get_exec_connections_all_dn(true);
+
+		/* send handle_relation to all DN and wait exec finish */
+		apply_exec_on_dn_nodes(s, rel->nspname, rel->relname, connections);
+
+		pfree_pgxc_all_handles(connections);
+	}
+
 #endif
 
 	logicalrep_relmap_update(rel);
@@ -946,19 +926,35 @@ apply_handle_insert(StringInfo s)
 	char *npname = NULL;
 	char *tbname = NULL;
 
-    ensure_transaction();
+#ifdef __SUBSCRIPTION__
+	if (MySubscription != NULL)
+	{
+	    ensure_transaction();
+    }
+#endif
 
 	relid = logicalrep_read_insert(s, &npname, &tbname, NULL, &newtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
-    if (!should_apply_changes_for_rel(rel))
+	if (NULL == rel)
     {
-        /*
-         * The relation can't become interesting in the middle of the
-         * transaction so it's safe to unlock it.
-         */
-        logicalrep_rel_close(rel, RowExclusiveLock);
         return;
     }
+
+	if (MyLogicalRepWorker != NULL)
+	{
+	    if (!should_apply_changes_for_rel(rel))
+	    {
+		    /*
+		     * The relation can't become interesting in the middle of the
+		     * transaction so it's safe to unlock it.
+		     */
+		    logicalrep_rel_close(rel, RowExclusiveLock);
+		    return;
+	    }
+	}
+
+	/* Check for supported relkind. */
+	CheckSubscriptionRelkind(rel->localrel->rd_rel->relkind, npname, tbname);
 
 #ifdef __SUBSCRIPTION__
     if (IS_PGXC_COORDINATOR &&
@@ -987,18 +983,19 @@ apply_handle_insert(StringInfo s)
     remoteslot = ExecInitExtraTupleSlot(estate);
     ExecSetSlotDescriptor(remoteslot, RelationGetDescr(rel->localrel));
 
-    /* Process and store remote tuple in the slot */
-    oldctx = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
-    slot_store_cstrings(remoteslot, rel, newtup.values);
-    slot_fill_defaults(rel, estate, remoteslot);
-    MemoryContextSwitchTo(oldctx);
-
 #ifdef __STORAGE_SCALABLE__
     /* use local snapshot instead of global snapshot */
     PushActiveSnapshot(GetLocalTransactionSnapshot());
 #else
     PushActiveSnapshot(GetTransactionSnapshot());
 #endif
+
+	/* Process and store remote tuple in the slot */
+	oldctx = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
+	slot_store_cstrings(remoteslot, rel, newtup.values);
+	slot_fill_defaults(rel, estate, remoteslot);
+	MemoryContextSwitchTo(oldctx);
+
     ExecOpenIndices(estate->es_result_relation_info, false);
 
     /* Do the insert. */
@@ -1019,9 +1016,12 @@ apply_handle_insert(StringInfo s)
     CommandCounterIncrement();
 
 #ifdef __STORAGE_SCALABLE__
-    rel->ntups_insert++;
+	if (MySubscription != NULL)
+	{
+		rel->ntups_insert++;
 
-    GetSubTableEntry(MySubscription->oid, rel->localreloid, &rel->ent, CMD_INSERT);
+		GetSubTableEntry(MySubscription->oid, rel->localreloid, &rel->ent, CMD_INSERT);
+	}
 #endif
 }
 
@@ -1081,21 +1081,37 @@ apply_handle_update(StringInfo s)
 	char *npname = NULL;
 	char *tbname = NULL;
 
-    ensure_transaction();
+#ifdef __SUBSCRIPTION__
+	if (MySubscription != NULL)
+	{
+	    ensure_transaction();
+    }
+#endif
 
 	relid = logicalrep_read_update(s, &npname, &tbname, NULL,
                                    &has_oldtup, &oldtup,
                                    &newtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
-    if (!should_apply_changes_for_rel(rel))
+	if (NULL == rel)
     {
-        /*
-         * The relation can't become interesting in the middle of the
-         * transaction so it's safe to unlock it.
-         */
-        logicalrep_rel_close(rel, RowExclusiveLock);
         return;
     }
+
+	if (MyLogicalRepWorker != NULL)
+	{
+	    if (!should_apply_changes_for_rel(rel))
+	    {
+		    /*
+		     * The relation can't become interesting in the middle of the
+		     * transaction so it's safe to unlock it.
+		     */
+		    logicalrep_rel_close(rel, RowExclusiveLock);
+		    return;
+	    }
+	}
+
+	/* Check for supported relkind. */
+	CheckSubscriptionRelkind(rel->localrel->rd_rel->relkind, npname, tbname);
 
     /* Check if we can do the update. */
     check_relation_updatable(rel);
@@ -1213,10 +1229,13 @@ apply_handle_update(StringInfo s)
 #ifdef __STORAGE_SCALABLE__
     if (found)
     {
-        rel->ntups_insert++;
-        rel->ntups_delete++;
+		if (MySubscription != NULL)
+		{
+		    rel->ntups_insert++;
+		    rel->ntups_delete++;
 
-        GetSubTableEntry(MySubscription->oid, rel->localreloid, &rel->ent, CMD_UPDATE);
+		    GetSubTableEntry(MySubscription->oid, rel->localreloid, &rel->ent, CMD_UPDATE);
+		}
     }
 #endif
 }
@@ -1242,19 +1261,35 @@ apply_handle_delete(StringInfo s)
 	char *npname = NULL;
 	char *tbname = NULL;
 
-    ensure_transaction();
+#ifdef __SUBSCRIPTION__
+	if (MySubscription != NULL)
+	{
+	    ensure_transaction();
+    }
+#endif
 
 	relid = logicalrep_read_delete(s, &npname, &tbname, NULL, &oldtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
-    if (!should_apply_changes_for_rel(rel))
+	if (NULL == rel)
     {
-        /*
-         * The relation can't become interesting in the middle of the
-         * transaction so it's safe to unlock it.
-         */
-        logicalrep_rel_close(rel, RowExclusiveLock);
         return;
     }
+
+	if (MyLogicalRepWorker != NULL)
+	{
+	    if (!should_apply_changes_for_rel(rel))
+	    {
+		    /*
+		     * The relation can't become interesting in the middle of the
+		     * transaction so it's safe to unlock it.
+		     */
+		    logicalrep_rel_close(rel, RowExclusiveLock);
+		    return;
+	    }
+	}
+
+	/* Check for supported relkind. */
+	CheckSubscriptionRelkind(rel->localrel->rd_rel->relkind, npname, tbname);
 
     /* Check if we can do the delete. */
     check_relation_updatable(rel);
@@ -1353,16 +1388,19 @@ apply_handle_delete(StringInfo s)
 #ifdef __STORAGE_SCALABLE__
     if (found)
     {
-        rel->ntups_delete++;
+		if (MySubscription != NULL)
+		{
+		    rel->ntups_delete++;
 
-        GetSubTableEntry(MySubscription->oid, rel->localreloid, &rel->ent, CMD_DELETE);
+		    GetSubTableEntry(MySubscription->oid, rel->localreloid, &rel->ent, CMD_DELETE);
+		}
     }
 #endif
 }
 
 
 /*
- * Logical replication protocol message dispatcher.
+ * Logical replication protocol message dispatcher for CN.
  */
 static void
 apply_dispatch(StringInfo s)
@@ -1412,6 +1450,41 @@ apply_dispatch(StringInfo s)
     }
 }
 
+#ifdef __SUBSCRIPTION__
+/*
+ * Logical apply protocol message dispatcher for DN.
+ */
+void logical_apply_dispatch(StringInfo s)
+{
+	char action = pq_getmsgbyte(s);
+
+	TbaseSubscriptionApplyWorkerSet();
+
+	switch (action)
+	{
+			/* INSERT */
+		case 'I':
+			apply_handle_insert(s);
+			break;
+			/* UPDATE */
+		case 'U':
+			apply_handle_update(s);
+			break;
+			/* DELETE */
+		case 'D':
+			apply_handle_delete(s);
+			break;
+			/* RELATION */
+		case 'R':
+			apply_handle_relation(s);
+			break;
+		default:
+			ereport(ERROR,
+					(errcode(ERRCODE_PROTOCOL_VIOLATION),
+					 errmsg("invalid logical apply message type %c", action)));
+	}
+}
+#endif
 /*
  * Figure out which write/flush positions to report to the walsender process.
  *

@@ -1161,13 +1161,15 @@ DoCopy(ParseState *pstate, const CopyStmt *stmt,
         if (am_walsender && !AmTbaseSubscriptionWalSender())
         {
             Assert(MyReplicationSlot);
-
-            if (OidIsValid(MyReplicationSlot->subid) && OidIsValid(MyReplicationSlot->relid))
+            if (MyReplicationSlot)
             {
-                if (MyReplicationSlot->relid == RelationGetRelid(rel))
+                if (OidIsValid(MyReplicationSlot->subid) && OidIsValid(MyReplicationSlot->relid))
                 {
-                    UpdatePubStatistics(MyReplicationSlot->subname.data, *processed, 0, 0, 0, 0, false);
-                    UpdatePubTableStatistics(MyReplicationSlot->subid, MyReplicationSlot->relid, *processed, 0, 0, 0, 0, false);
+                    if (MyReplicationSlot->relid == RelationGetRelid(rel))
+                    {
+                        UpdatePubStatistics(MyReplicationSlot->subname.data, *processed, 0, 0, 0, 0, false);
+                        UpdatePubTableStatistics(MyReplicationSlot->subid, MyReplicationSlot->relid, *processed, 0, 0, 0, 0, false);
+                    }
                 }
             }
         }

@@ -125,8 +125,6 @@ extern void logicl_apply_set_ignor_pk_conflict(bool ignore);
 extern void logicl_aply_rset_ignor_pk_conflict(void);
 extern bool logical_apply_ignore_pk_conflict(void);
 
-extern void logical_apply_dispatch(StringInfo s);
-
 extern void TbaseSubscriptionApplyWorkerReset(void);
 extern void TbaseSubscriptionApplyWorkerSet(void);
 extern bool AmTbaseSubscriptionApplyWorker(void);
