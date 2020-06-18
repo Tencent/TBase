@@ -2750,6 +2750,77 @@ StartupReorderBuffer(void)
     FreeDir(logical_dir);
 }
 
+/*
+ * Delete slot related all data spilled to disk after we've crashed. It will be
+ * recreated when the respective slots are reused.
+ */
+void
+DeleteSpillToDiskSnap(TransactionId xid)
+{
+	DIR		   *logical_dir;
+	struct dirent *logical_de;
+
+	DIR		   *spill_dir;
+	struct dirent *spill_de;
+
+	logical_dir = AllocateDir("pg_replslot");
+	while ((logical_de = ReadDir(logical_dir, "pg_replslot")) != NULL)
+	{
+		struct stat statbuf;
+		char		path[MAXPGPATH * 2 + 12];
+		char        spilled_file[NAMEDATALEN]="";
+
+		if (strcmp(logical_de->d_name, ".") == 0 ||
+			strcmp(logical_de->d_name, "..") == 0)
+			continue;
+
+		/* if it cannot be a slot, skip the directory */
+		if (!ReplicationSlotValidateName(logical_de->d_name, DEBUG2))
+			continue;
+
+		/* if it cannot be myself slot, skip the directory */
+		if (strncmp(logical_de->d_name, NameStr(MyReplicationSlot->data.name), NAMEDATALEN-1) != 0)
+		{
+		    continue;
+		}
+
+		/*
+		 * ok, has to be a surviving logical slot, iterate and delete
+		 * everything starting with xid-*
+		 */
+		sprintf(path, "pg_replslot/%s", logical_de->d_name);
+
+		/* we're only creating directories here, skip if it's not our's */
+		if (lstat(path, &statbuf) == 0 && !S_ISDIR(statbuf.st_mode))
+			continue;
+
+		spill_dir = AllocateDir(path);
+		while ((spill_de = ReadDir(spill_dir, path)) != NULL)
+		{
+			if (strcmp(spill_de->d_name, ".") == 0 ||
+				strcmp(spill_de->d_name, "..") == 0)
+				continue;
+
+			sprintf(spilled_file, "xid-%u-lsn-", xid);
+
+			/* only look at names that can be ours */
+			if (strncmp(spill_de->d_name, spilled_file, strlen(spilled_file)) == 0)
+			{
+				sprintf(path, "pg_replslot/%s/%s", logical_de->d_name,
+						spill_de->d_name);
+
+				if (unlink(path) != 0)
+					ereport(PANIC,
+							(errcode_for_file_access(),
+							 errmsg("could not remove file \"%s\": %m",
+									path)));
+			}
+		}
+		FreeDir(spill_dir);
+	}
+	FreeDir(logical_dir);
+}
+
 /* ---------------------------------------
  * toast reassembly support
  * ---------------------------------------
