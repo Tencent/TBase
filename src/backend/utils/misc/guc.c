@@ -2192,6 +2192,16 @@ static struct config_bool ConfigureNamesBool[] =
         NULL, NULL, NULL
     },
 
+	{
+		{"enable_distributed_unique_plan", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("enable distributed unique plan."),
+			NULL
+		},
+		&enable_distributed_unique_plan,
+		true,
+		NULL, NULL, NULL
+	},
+
     {
         {"enable_null_string", PGC_USERSET, CUSTOM_OPTIONS,
             gettext_noop("enable nulls in string."),
