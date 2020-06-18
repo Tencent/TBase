@@ -660,6 +660,26 @@ transformCreateStmt(CreateStmt *stmt, const char *queryString)
 #endif
 
 #ifdef __TBASE__
+	/* distributed column must be set not null */
+	if (stmt->distributeby && stmt->distributeby->disttype == DISTTYPE_SHARD)
+	{
+		char *dis_colname = strVal(linitial(stmt->distributeby->colname));
+		foreach(elements, stmt->tableElts)
+		{
+			Node	   *element = lfirst(elements);
+
+		    if (IsA(element, ColumnDef))
+			{
+				ColumnDef *def = (ColumnDef *)element;
+				if (strcmp(def->colname, dis_colname) == 0)
+				{
+					def->is_not_null = true;
+					break;
+				}
+			}
+		}
+	}
+	
     /*
       * If interval partition is created, process PartitionBy clause here.
       * get begin value(where to start partition), interval, number of

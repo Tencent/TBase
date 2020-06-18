@@ -137,7 +137,7 @@ static char *event_message[] = {"storage extension source",
 
 #define MAX_HEAVY_LOCK 5
 
-#define NUM_LIGHT_LOCK 3                    
+#define NUM_LIGHT_LOCK 4                    
 #define OFFSET CMD_UPDATE
 
 #define LOCK_TABLE 'T'
@@ -163,7 +163,8 @@ typedef struct NodeLockData
 
 static char *LockMessages[NUM_LIGHT_LOCK] =    {"UPDATE",
                                                 "INSERT",
-                                                "DELETE"};
+                                                "DELETE",
+                                                "SELECT"};
 
 
 /* hash search type */
@@ -520,11 +521,14 @@ SetLightLock(char *lockActions, char objectType, char *param1, char *param2, boo
         {
             case 'A':
             case 'a':
-            case 'S':
-            case 's':
             case 'C':
             case 'c':
                 break;
+			case 'S':
+			case 's':
+				setlock = true;
+				cmd = CMD_SELECT + 4;
+				break;
             case 'U':
             case 'u':
                 setlock = true;
@@ -1179,9 +1183,20 @@ isDDL(void *parsetree)
 void
 LightLockCheck(CmdType cmd, Oid table, int shard)
 {
-    DMLLockContent *lock = &nodelock->lock[cmd - OFFSET];
+	DMLLockContent *lock = NULL;
 
-    LWLockAcquire(NodeLockMgrLock, LW_SHARED);
+	if (cmd < CMD_SELECT || cmd > CMD_DELETE)
+	{
+		return;
+	}
+	
+	if (cmd == CMD_SELECT)
+	{
+		cmd = CMD_SELECT + 4;
+	}
+	lock = &nodelock->lock[cmd - OFFSET];
+
+	//LWLockAcquire(NodeLockMgrLock, LW_SHARED);
 
     if (lock->nTables > 0 && OidIsValid(table))
     {
@@ -1191,7 +1206,7 @@ LightLockCheck(CmdType cmd, Oid table, int shard)
 
         if (idx > 0)
         {
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
 
             elog(ERROR, "%s on table %s is not permitted.", LockMessages[cmd - OFFSET], get_rel_name(table));
         }
@@ -1203,13 +1218,13 @@ LightLockCheck(CmdType cmd, Oid table, int shard)
         
         if (bms_is_member(shard, shardbitmap))
         {
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
 
             elog(ERROR, "%s on shard %d is not permitted.", LockMessages[cmd - OFFSET], shard);
         }
     }
     
-    LWLockRelease(NodeLockMgrLock);
+	//LWLockRelease(NodeLockMgrLock);
 }
 
 
@@ -1613,10 +1628,15 @@ void nodeLockRecovery(void)
                 (errcode_for_file_access(),
                 errmsg("could not open control file \"%s\"", controlFile)));
         }
-        if((ret = read(fd, buf, NODELOCKSIZE)) == NODELOCKSIZE)
+		ret = read(fd, buf, NODELOCKSIZE);
+        if(ret == NODELOCKSIZE)
         {
             memcpy(nodelock, buf, NODELOCKSIZE);
         }
+		else if (ret == NODELOCKSIZE - sizeof(DMLLockContent))
+		{
+			memcpy(nodelock, buf, NODELOCKSIZE - sizeof(DMLLockContent));
+		}
         else
         {
             close(fd);
