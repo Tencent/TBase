@@ -1315,7 +1315,6 @@ InitializeOneGTMOption(struct config_generic * gconf)
     gconf->extra = NULL;
     gconf->sourcefile = NULL;
     gconf->sourceline = 0;
-    gconf->context = GTMC_DEFAULT;
 
     switch (gconf->vartype)
     {
@@ -2181,6 +2180,9 @@ set_config_option(const char *name, const char *value,
                     if (!makeDefault)
                         push_old_value(&conf->gen);
 
+					if (conf->assign_hook)
+						(*conf->assign_hook) (newval, newextra);
+
                     *conf->variable = newval;
                     set_extra_field(&conf->gen, &conf->gen.extra,
                                     newextra);
@@ -2296,6 +2298,9 @@ set_config_option(const char *name, const char *value,
                     if (!makeDefault)
                         push_old_value(&conf->gen);
 
+					if (conf->assign_hook)
+						(*conf->assign_hook) (newval, newextra);
+
                     *conf->variable = newval;
                     set_extra_field(&conf->gen, &conf->gen.extra,
                                     newextra);
@@ -2408,6 +2413,9 @@ set_config_option(const char *name, const char *value,
                     if (!makeDefault)
                         push_old_value(&conf->gen);
 
+					if (conf->assign_hook)
+						(*conf->assign_hook) (newval, newextra);
+
                     *conf->variable = newval;
                     set_extra_field(&conf->gen, &conf->gen.extra,
                                     newextra);
@@ -2509,6 +2517,9 @@ set_config_option(const char *name, const char *value,
                     /* Save old value to support transaction abort */
                     if (!makeDefault)
                         push_old_value(&conf->gen);
+
+					if (conf->assign_hook)
+						(*conf->assign_hook) (newval, newextra);
 
                     set_string_field(conf, conf->variable, newval);
                     set_extra_field(&conf->gen, &conf->gen.extra,
@@ -2620,6 +2631,9 @@ set_config_option(const char *name, const char *value,
                     /* Save old value to support transaction abort */
                     if (!makeDefault)
                         push_old_value(&conf->gen);
+
+					if (conf->assign_hook)
+						(*conf->assign_hook) (newval, newextra);
 
                     *conf->variable = newval;
                     set_extra_field(&conf->gen, &conf->gen.extra,

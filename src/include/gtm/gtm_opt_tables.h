@@ -120,6 +120,8 @@ struct config_bool
     /* constant fields, must be set correctly in initial value: */
     bool       *variable;
     bool        boot_val;
+	GtmOptBoolCheckHook check_hook;
+	GtmOptBoolAssignHook assign_hook;
     /* variable fields, initialized at runtime: */
     bool        reset_val;
     void       *reset_extra;
@@ -133,6 +135,8 @@ struct config_int
     int            boot_val;
     int            min;
     int            max;
+	GtmOptIntCheckHook check_hook;
+	GtmOptIntAssignHook assign_hook;
     /* variable fields, initialized at runtime: */
     int            reset_val;
     void       *reset_extra;
@@ -146,6 +150,8 @@ struct config_real
     double        boot_val;
     double        min;
     double        max;
+	GtmOptRealCheckHook check_hook;
+	GtmOptRealAssignHook assign_hook;
     /* variable fields, initialized at runtime: */
     double        reset_val;
     void       *reset_extra;
@@ -157,6 +163,8 @@ struct config_string
     /* constant fields, must be set correctly in initial value: */
     char      **variable;
     const char *boot_val;
+	GtmOptStringCheckHook check_hook;
+	GtmOptStringAssignHook assign_hook;
     /* variable fields, initialized at runtime: */
     char       *reset_val;
     void       *reset_extra;
@@ -169,6 +177,8 @@ struct config_enum
     int           *variable;
     int            boot_val;
     const struct config_enum_entry *options;
+	GtmOptEnumCheckHook check_hook;
+	GtmOptEnumAssignHook assign_hook;
     /* variable fields, initialized at runtime: */
     int            reset_val;
     void       *reset_extra;
