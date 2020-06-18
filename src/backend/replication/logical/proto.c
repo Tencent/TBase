@@ -521,8 +521,9 @@ logicalrep_write_rel(StringInfo out, Relation rel)
 LogicalRepRelation *
 logicalrep_read_rel(StringInfo in)
 {
-    LogicalRepRelation *rel = palloc(sizeof(LogicalRepRelation));
+	LogicalRepRelation *rel = NULL;
 
+	rel = palloc0(sizeof(LogicalRepRelation));
     rel->remoteid = pq_getmsgint(in, 4);
 
     /* Read relation name from stream */
@@ -537,6 +538,63 @@ logicalrep_read_rel(StringInfo in)
 
     return rel;
 }
+
+#ifdef __SUBSCRIPTION__
+void logicalrep_relation_free(LogicalRepRelation * rel)
+{
+	if (rel != NULL)
+	{
+		if (rel->attnames != NULL)
+		{
+			if (rel->natts > 0)
+			{
+				int	i = 0;
+				int	natts = 0;
+
+				natts = rel->natts;
+				for (i = 0; i < natts; i++)
+				{
+					if (rel->attnames[i] != NULL)
+					{
+						pfree(rel->attnames[i]);
+						rel->attnames[i] = NULL;
+					}
+				}
+			}
+
+			pfree(rel->attnames);
+			rel->attnames = NULL;
+		}
+
+		if (rel->atttyps != NULL)
+		{
+			pfree(rel->atttyps);
+			rel->atttyps = NULL;
+		}
+
+		if (rel->attkeys != NULL)
+		{
+			bms_free(rel->attkeys);
+			rel->attkeys = NULL;
+		}
+
+		if (rel->relname != NULL)
+		{
+			pfree(rel->relname);
+			rel->relname = NULL;
+		}
+
+		if (rel->nspname != NULL)
+		{
+			pfree(rel->nspname);
+			rel->nspname = NULL;
+		}
+
+		pfree(rel);
+		rel = NULL;
+	}
+}
+#endif
 
 /*
  * Write type info to the output stream.
@@ -779,20 +837,20 @@ logicalrep_write_attrs(StringInfo out, Relation rel)
 static void
 logicalrep_read_attrs(StringInfo in, LogicalRepRelation *rel)
 {
-    int            i;
-    int            natts;
-    char      **attnames;
-    Oid           *atttyps;
+	int			i = 0;
+	int			natts = 0;
+	char	  **attnames = NULL;
+	Oid		   *atttyps = NULL;
     Bitmapset  *attkeys = NULL;
 
     natts = pq_getmsgint(in, 2);
-    attnames = palloc(natts * sizeof(char *));
-    atttyps = palloc(natts * sizeof(Oid));
+	attnames = palloc0(natts * sizeof(char *));
+	atttyps = palloc0(natts * sizeof(Oid));
 
     /* read the attributes */
     for (i = 0; i < natts; i++)
     {
-        uint8        flags;
+		uint8		flags = 0;
 
         /* Check for replica identity column */
         flags = pq_getmsgbyte(in);

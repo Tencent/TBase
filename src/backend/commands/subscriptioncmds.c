@@ -698,7 +698,13 @@ AlterSubscription_refresh(Subscription *sub, bool copy_data)
             Oid            relid = InvalidOid;
             Relation    relation = NULL;
 
-            relid = RangeVarGetRelid(rv, AccessShareLock, false);
+			relid = RangeVarGetRelid(rv, AccessShareLock, true);
+			if (!OidIsValid(relid))
+			{
+				elog(LOG, "no local relation for remote relation %s", RangeVarGetName(rv));
+				continue;
+			}
+
             relation = heap_open(relid, NoLock);
 
             /* only support shard table */
