@@ -4767,6 +4767,7 @@ static void
 destroy_slot_ex(int32 nodeidx, Oid node, PGXCNodePoolSlot *slot, char *file, int32 line)
 {// #lizard forgives
     int32                  threadid = 0;
+    uint64              pipeput_loops = 0;
     PGXCPoolConnectReq *connReq;
     MemoryContext        oldcontext;
 
@@ -4836,8 +4837,13 @@ destroy_slot_ex(int32 nodeidx, Oid node, PGXCNodePoolSlot *slot, char *file, int
 
     while (-1 == PipePut(g_PoolConnControl.request[threadid % MAX_SYNC_NETWORK_THREAD], (void*)connReq))
     {
-        elog(LOG, POOL_MGR_PREFIX"destroy_slot_ex fail to async close connection node:%u ",node);        
+		pipeput_loops++;
     }
+
+	if (pipeput_loops > 0)
+	{
+		elog(LOG, POOL_MGR_PREFIX"destroy_slot_ex fail to async close connection node:%u for loops %lu", node, pipeput_loops);
+	}
     
     /* signal thread to start build job */
     ThreadSemaUp(&g_PoolConnControl.sem[threadid % MAX_SYNC_NETWORK_THREAD]);
@@ -4858,7 +4864,8 @@ destroy_slot_ex(int32 nodeidx, Oid node, PGXCNodePoolSlot *slot, char *file, int
 static void
 close_slot(int32 nodeidx, Oid node, PGXCNodePoolSlot *slot)
 {// #lizard forgives
-    int32 threadid; 
+    int32 threadid;
+    uint64 pipeput_loops = 0;
     PGXCPoolConnectReq *connReq;
     if (!slot)
     {
@@ -4897,8 +4904,13 @@ close_slot(int32 nodeidx, Oid node, PGXCNodePoolSlot *slot)
     connReq->slot[0].conn          = slot->conn;
     while (-1 == PipePut(g_PoolConnControl.request[threadid % MAX_SYNC_NETWORK_THREAD], (void*)connReq))
     {
-        elog(LOG, POOL_MGR_PREFIX"fail to async close connection node:%u ",node);        
+		pipeput_loops++;	
     }
+
+	if (pipeput_loops > 0)
+	{
+		elog(LOG, POOL_MGR_PREFIX"fail to async close connection node:%u for loops %lu", node, pipeput_loops);
+	}
     
     /* signal thread to start build job */
     ThreadSemaUp(&g_PoolConnControl.sem[threadid % MAX_SYNC_NETWORK_THREAD]);
@@ -6525,6 +6537,7 @@ static void pooler_sync_connections_to_nodepool(void)
 /* async warm a conection */
 static void pooler_async_warm_connection(DatabasePool *pool, PGXCNodePoolSlot *slot, PGXCNodePool *nodePool, Oid node)
 {
+	uint64 pipeput_loops = 0;
     PGXCAsyncWarmInfo *asyncInfo = NULL;
     MemoryContext     oldcontext;
     
@@ -6536,8 +6549,13 @@ static void pooler_async_warm_connection(DatabasePool *pool, PGXCNodePoolSlot *s
     asyncInfo->node           = node;
     while (-1 == PipePut(g_AsynUtilityPipeSender, (void*)asyncInfo))
     {
-        elog(LOG, POOL_MGR_PREFIX"fail to async warm connection db:%s user:%s node:%u", pool->database, pool->user_name, node);
+		pipeput_loops++;
     }
+
+	if (pipeput_loops > 0)
+	{
+        elog(LOG, POOL_MGR_PREFIX"fail to async warm connection db:%s user:%s node:%u for loops %lu", pool->database, pool->user_name, node, pipeput_loops);
+	}
 
     /* increase warming count */
     nodePool->nwarming++;
@@ -6552,6 +6570,7 @@ static void pooler_async_warm_connection(DatabasePool *pool, PGXCNodePoolSlot *s
 /* async query the memrory usage of a conection */
 static void pooler_async_query_connection(DatabasePool *pool, PGXCNodePoolSlot *slot, int32 nodeidx, Oid node)
 {
+	uint64 pipeput_loops = 0;
     PGXCAsyncWarmInfo *asyncInfo = NULL;
     
     MemoryContext     oldcontext;    
@@ -6565,8 +6584,13 @@ static void pooler_async_query_connection(DatabasePool *pool, PGXCNodePoolSlot *
     asyncInfo->node           = node;
     while (-1 == PipePut(g_AsynUtilityPipeSender, (void*)asyncInfo))
     {
-        elog(LOG, POOL_MGR_PREFIX"fail to async query connection db:%s user:%s node:%u", pool->database, pool->user_name, node);
+		pipeput_loops++;
     }
+
+	if (pipeput_loops > 0)
+	{
+	    elog(LOG, POOL_MGR_PREFIX"fail to async query connection db:%s user:%s node:%u for loops %lu", pool->database, pool->user_name, node, pipeput_loops);
+	}
 
     ThreadSemaUp(&g_AsnyUtilitysem);
     if (PoolConnectDebugPrint)
@@ -6579,6 +6603,7 @@ static void pooler_async_query_connection(DatabasePool *pool, PGXCNodePoolSlot *
 /* async ping a node */
 static void pooler_async_ping_node(Oid node)
 {
+	uint64 pipeput_loops = 0;
     PGXCAsyncWarmInfo *asyncInfo = NULL;
     MemoryContext     oldcontext;
     NodeDefinition       *nodeDef   = NULL;
@@ -6621,8 +6646,13 @@ static void pooler_async_ping_node(Oid node)
     
     while (-1 == PipePut(g_AsynUtilityPipeSender, (void*)asyncInfo))
     {
-        elog(DEBUG1, POOL_MGR_PREFIX"fail to async ping node:%u", node);
+		pipeput_loops++;
     }
+
+	if (pipeput_loops > 0)
+	{
+		elog(LOG, POOL_MGR_PREFIX"fail to async ping node:%u for loops %lu", node, pipeput_loops);
+	}
     
     ThreadSemaUp(&g_AsnyUtilitysem);
     if (PoolConnectDebugPrint)
@@ -6640,6 +6670,7 @@ static void pooler_async_ping_node(Oid node)
 /* async batch connection build  */
 static void pooler_async_build_connection(DatabasePool *pool, int32 pool_version, int32 nodeidx, Oid node, int32 size, char *connStr, bool bCoord)
 {
+	uint64 pipeput_loops = 0;
     PGXCPoolConnectReq *connReq = NULL;
 
     MemoryContext     oldcontext;    
@@ -6657,8 +6688,13 @@ static void pooler_async_build_connection(DatabasePool *pool, int32 pool_version
 
     while (-1 == PipePut(g_PoolConnControl.request[nodeidx % MAX_SYNC_NETWORK_THREAD], (void*)connReq))
     {
-        elog(LOG, POOL_MGR_PREFIX"fail to async build connection db:%s user:%s node:%u size:%d", pool->database, pool->user_name, node, size);        
+		pipeput_loops++;		
     }
+
+	if (pipeput_loops > 0)
+	{
+	    elog(LOG, POOL_MGR_PREFIX"fail to async build connection db:%s user:%s node:%u size:%d for loops %lu", pool->database, pool->user_name, node, size, pipeput_loops);
+	}
     
     /* signal thread to start build job */
     ThreadSemaUp(&g_PoolConnControl.sem[nodeidx % MAX_SYNC_NETWORK_THREAD]);
@@ -6674,6 +6710,7 @@ static bool dispatch_async_network_operation(PGXCPoolAsyncReq *req)
 {
     int32 threadid = 0;
     Oid   node     = 0;
+	uint64 pipeput_loops = 0;
 
     /* choose a thread to handle the msg */
     threadid = pooler_async_task_pick_thread(&g_PoolSyncNetworkControl, req->nodeindex);
@@ -6700,8 +6737,13 @@ static bool dispatch_async_network_operation(PGXCPoolAsyncReq *req)
     /* dispatch the msg to the handling thread */
     while (-1 == PipePut(g_PoolSyncNetworkControl.request[threadid % MAX_SYNC_NETWORK_THREAD], (void*)req))
     {
-        elog(LOG, POOL_MGR_PREFIX"fail to async network operation pid:%d bCoord:%d nodeindex:%d current_status:%d final_status:%d thread:%d req_seq:%d", req->agent->pid, req->bCoord, req->nodeindex, req->current_status, req->final_status, threadid, req->req_seq);        
+		pipeput_loops++;		
     }
+
+	if (pipeput_loops > 0)
+	{
+        elog(LOG, POOL_MGR_PREFIX"fail to async network operation pid:%d bCoord:%d nodeindex:%d current_status:%d final_status:%d thread:%d req_seq:%d for loops %lu", req->agent->pid, req->bCoord, req->nodeindex, req->current_status, req->final_status, threadid, req->req_seq, pipeput_loops);
+	}
 
     /* increase agent ref count */
     agent_increase_ref_count(req->agent);
