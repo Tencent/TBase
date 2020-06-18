@@ -558,7 +558,7 @@ apply_get_exec_nodes(LogicalRepRelMapEntry * rel,
 /*
  * send apply message to datanode and wait response
  */
-static void apply_exec_on_nodes(StringInfo s, ExecNodes * exec_nodes)
+static void apply_exec_on_nodes(StringInfo s, char **nspname, char **relname, ExecNodes * exec_nodes)
 {// #lizard forgives
     PGXCNodeAllHandles * all_handles = NULL;
     int i = 0, result = 0;
@@ -632,6 +632,8 @@ static void apply_exec_on_nodes(StringInfo s, ExecNodes * exec_nodes)
     } 
     else if (!validate_combiner(&combiner))
     {
+		elog(LOG, "logical apply found that %s, on table %s.%s in database %s",
+				combiner.errorMessage, *nspname, *relname, get_database_name(MyDatabaseId));
         ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
                  errmsg("apply_exec_on_nodes validate_combiner responese of APPLY failed")));
@@ -931,10 +933,12 @@ apply_handle_insert(StringInfo s)
     EState       *estate;
     TupleTableSlot *remoteslot;
     MemoryContext oldctx;
+	char *npname[1] = {NULL};
+	char *tbname[1] = {NULL};
 
     ensure_transaction();
 
-    relid = logicalrep_read_insert(s, NULL, NULL, NULL, &newtup);
+	relid = logicalrep_read_insert(s, npname, tbname, NULL, &newtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
     if (!should_apply_changes_for_rel(rel))
     {
@@ -958,7 +962,7 @@ apply_handle_insert(StringInfo s)
 
             /* send insert to DN and wait exec finish */
             exec_nodes = apply_get_exec_nodes(rel, &newtup, RELATION_ACCESS_INSERT);
-            apply_exec_on_nodes(s, exec_nodes);
+			apply_exec_on_nodes(s, npname, tbname, exec_nodes);
             FreeExecNodes(&exec_nodes);
         }
 
@@ -1064,10 +1068,12 @@ apply_handle_update(StringInfo s)
     TupleTableSlot *remoteslot;
     bool        found;
     MemoryContext oldctx;
+	char *npname[1] = {NULL};
+	char *tbname[1] = {NULL};
 
     ensure_transaction();
 
-    relid = logicalrep_read_update(s, NULL, NULL, NULL, 
+	relid = logicalrep_read_update(s, npname, tbname, NULL,
                                    &has_oldtup, &oldtup,
                                    &newtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
@@ -1097,7 +1103,7 @@ apply_handle_update(StringInfo s)
             /* send update to DN and wait exec finish */
             exec_nodes = apply_get_exec_nodes(rel, has_oldtup ? &oldtup : &newtup,
                                                 RELATION_ACCESS_UPDATE);
-            apply_exec_on_nodes(s, exec_nodes);
+			apply_exec_on_nodes(s, npname, tbname, exec_nodes);
             FreeExecNodes(&exec_nodes);    
         }
 
@@ -1223,10 +1229,12 @@ apply_handle_delete(StringInfo s)
     TupleTableSlot *localslot;
     bool        found;
     MemoryContext oldctx;
+	char *npname[1] = {NULL};
+	char *tbname[1] = {NULL};
 
     ensure_transaction();
 
-    relid = logicalrep_read_delete(s, NULL, NULL, NULL, &oldtup);
+	relid = logicalrep_read_delete(s, npname, tbname, NULL, &oldtup);
     rel = logicalrep_rel_open(relid, RowExclusiveLock);
     if (!should_apply_changes_for_rel(rel))
     {
@@ -1253,7 +1261,7 @@ apply_handle_delete(StringInfo s)
 
             /* send delete to DN and wait exec finish */
             exec_nodes = apply_get_exec_nodes(rel, &oldtup, RELATION_ACCESS_UPDATE);
-            apply_exec_on_nodes(s, exec_nodes);
+			apply_exec_on_nodes(s, npname, tbname, exec_nodes);
             FreeExecNodes(&exec_nodes);
         }
 
