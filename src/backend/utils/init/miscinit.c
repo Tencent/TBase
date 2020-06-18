@@ -19,6 +19,7 @@
 #include <signal.h>
 #include <time.h>
 #include <sys/file.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <fcntl.h>
@@ -222,6 +223,10 @@ InitPostmasterChild(void)
 #ifdef HAVE_SETSID
     if (setsid() < 0)
         elog(FATAL, "setsid() failed: %m");
+#endif
+
+#ifdef __TBASE__
+	prctl(PR_SET_PDEATHSIG, SIGKILL);
 #endif
 }
 
