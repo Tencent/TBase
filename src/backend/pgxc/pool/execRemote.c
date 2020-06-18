@@ -6084,6 +6084,18 @@ DataNodeCopyEnd(PGXCNodeHandle *handle, bool is_error)
     return false;
 }
 
+#ifdef __TBASE__
+/*
+ * Get Node connections of all Datanodes
+ */
+PGXCNodeAllHandles *
+get_exec_connections_all_dn(bool is_global_session)
+{
+	PGXCNodeAllHandles *pgxc_handles_connections = get_exec_connections(NULL, NULL, EXEC_ON_DATANODES, is_global_session);
+	return pgxc_handles_connections;
+}
+
+#endif
 
 /*
  * Get Node connections depending on the connection type:

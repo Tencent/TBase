@@ -484,11 +484,18 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
     else
         entry->localrel = heap_open(entry->localreloid, lockmode);
 
-    if (entry->state != SUBREL_STATE_READY)
-        entry->state = GetSubscriptionRelState(MySubscription->oid,
-                                               entry->localreloid,
-                                               &entry->statelsn,
-                                               true);
+#ifdef __SUBSCRIPTION__
+	if (MySubscription != NULL)
+	{
+#endif
+	    if (entry->state != SUBREL_STATE_READY)
+			entry->state = GetSubscriptionRelState(MySubscription->oid,
+					            entry->localreloid,
+								&entry->statelsn,
+								true);
+#ifdef __SUBSCRIPTION__
+	}
+#endif
 
     return entry;
 }
@@ -722,7 +729,7 @@ bool logical_apply_ignore_pk_conflict(void)
 {
     return g_logical_apply_ignore_pk_conflict;
 }
-
+#if 0
 /*
  * Executor state preparation for evaluation of constraint expressions,
  * indexes and triggers.
@@ -730,7 +737,7 @@ bool logical_apply_ignore_pk_conflict(void)
  * This is based on similar code in copy.c
  */
 static EState *
-logical_apply_create_estate_for_rel(Relation rel)
+logical_apply_create_estate_for_rel_dn_exec(Relation rel)
 {
     EState       *estate = NULL;
     ResultRelInfo *resultRelInfo = NULL;
@@ -769,7 +776,7 @@ logical_apply_create_estate_for_rel(Relation rel)
  * than on the upstream.
  */
 static void
-logical_apply_slot_fill_defaults(Relation rel,
+logical_apply_slot_fill_defaults_dn_exec(Relation rel,
                                     EState *estate,
                                        TupleTableSlot *slot,
                                        char **values)
@@ -827,7 +834,7 @@ logical_apply_slot_fill_defaults(Relation rel,
  * use better.
  */
 static void
-logical_apply_slot_store_cstrings(TupleTableSlot *slot,
+logical_apply_slot_store_cstrings_dn_exec(TupleTableSlot *slot,
                                         Relation rel,
                                         char **values)
 {
@@ -892,7 +899,7 @@ logical_apply_slot_store_cstrings(TupleTableSlot *slot,
  * of the types.
  */
 static void
-logical_apply_slot_modify_cstrings(TupleTableSlot *slot,
+logical_apply_slot_modify_cstrings_dn_exec(TupleTableSlot *slot,
                                         Relation rel,
                                          char **values,
                                          bool *replaces)
@@ -946,7 +953,7 @@ logical_apply_slot_modify_cstrings(TupleTableSlot *slot,
  * logical apply insert message from CN
  */
 static void
-logical_apply_insert(StringInfo s)
+logical_apply_insert_dn_exec(StringInfo s)
 {
     Relation rel = NULL;
     LogicalRepTupleData newtup;
@@ -1008,7 +1015,7 @@ logical_apply_insert(StringInfo s)
  * logical apply update message from CN
  */
 static void 
-logical_apply_update(StringInfo s)
+logical_apply_update_dn_exec_dn_exec(StringInfo s)
 {
     Relation     rel = NULL;
     Oid            idxoid = InvalidOid;
@@ -1129,7 +1136,7 @@ logical_apply_update(StringInfo s)
  * logical apply delete message from CN
  */
 static void
-logical_apply_delete(StringInfo s)
+logical_apply_delete_dn_exec(StringInfo s)
 {
     Relation             rel = NULL;
     LogicalRepTupleData oldtup;
@@ -1223,33 +1230,24 @@ logical_apply_delete(StringInfo s)
 
     CommandCounterIncrement();
 }
+
 /*
- * Logical apply protocol message dispatcher.
+ * logical apply Handle RELATION message from CN.
+ *
+ * Note we don't do validation against local schema here. The validation
+ * against local schema is postponed until first change for given relation
+ * comes as we only care about it when applying changes for it anyway and we
+ * do less locking this way.
  */
-void logical_apply_dispatch(StringInfo s)
+static void
+logical_apply_relation_dn_exec(StringInfo s)
 {
-    char action = pq_getmsgbyte(s);
+	LogicalRepRelation *rel;
 
-    TbaseSubscriptionApplyWorkerSet();
-
-    switch (action)
-    {
-            /* INSERT */
-        case 'I':
-            logical_apply_insert(s);
-            break;
-            /* UPDATE */
-        case 'U':
-            logical_apply_update(s);
-            break;
-            /* DELETE */
-        case 'D':
-            logical_apply_delete(s);
-            break;
-        default:
-            ereport(ERROR,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                     errmsg("invalid logical apply message type %c", action)));
-    }
+	rel = logicalrep_read_rel(s);
+	logicalrep_relmap_update(rel);
 }
+
+#endif
+
 #endif
