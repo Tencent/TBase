@@ -138,9 +138,11 @@ static Datum std_fetch_func(VacAttrStatsP stats, int rownum, bool *isNull);
 static Datum ind_fetch_func(VacAttrStatsP stats, int rownum, bool *isNull);
 
 #ifdef XCP
+#ifndef __TBASE__
 static void analyze_rel_coordinator(Relation onerel, bool inh, int attr_cnt,
                         VacAttrStats **vacattrstats, int nindexes,
                         Relation *indexes, AnlIndexData *indexdata);
+#endif
 extern bool random_collect_stats;
 #endif
 
@@ -814,11 +816,13 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
         }
     }
 
+#ifndef __TBASE__
 #ifdef XCP
     /*
      * Coordinator skips getting local stats of distributed table up to here
      */
 cleanup:
+#endif
 #endif
     /*
      * Report ANALYZE to the stats collector, too.  However, if doing
@@ -1848,6 +1852,7 @@ update_attstats(Oid relid, bool inh, int natts, VacAttrStats **vacattrstats)
     heap_close(sd, RowExclusiveLock);
 }
 
+#ifndef __TBASE__
 /*
  *    update_ext_stats() -- update extended statistics
  */
@@ -1916,6 +1921,7 @@ update_ext_stats(Name nspname, Name name,
     heap_freetuple(stup);
     heap_close(sd, RowExclusiveLock);
 }
+#endif
 
 /*
  * Standard fetch function for use by compute_stats subroutines.
@@ -3169,6 +3175,7 @@ compare_mcvs(const void *a, const void *b)
 
 
 #ifdef XCP
+#ifndef __TBASE__
 /*
  * coord_accu_distinct_stat
  *        Accumulate the distinct statistics for the attribute.
@@ -4379,6 +4386,7 @@ analyze_rel_coordinator(Relation onerel, bool inh, int attr_cnt,
     /* extended statistics (pg_statistic) for the relation */
     coord_collect_extended_stats(onerel, attr_cnt);
 }
+#endif
 #endif
 #ifdef __TBASE__
 Size
