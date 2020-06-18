@@ -575,7 +575,11 @@ try_partial_mergejoin_path(PlannerInfo *root,
                            JoinPathExtraData *extra)
 {
     JoinCostWorkspace workspace;
-
+#ifdef __TBASE__
+	bool redistribute_inner = false;
+	int  nRemotePlans_inner = 0;
+	Path *mj_path = NULL;
+#endif
     /*
      * See comments in try_partial_hashjoin_path().
      */
@@ -611,6 +615,27 @@ try_partial_mergejoin_path(PlannerInfo *root,
         return;
 
     /* Might be good enough to be worth trying, so let's try it. */
+#ifdef __TBASE__
+	mj_path = (Path *)
+					 create_mergejoin_path(root,
+										   joinrel,
+										   jointype,
+										   &workspace,
+										   extra,
+										   outer_path,
+										   inner_path,
+										   extra->restrictlist,
+										   pathkeys,
+										   NULL,
+										   mergeclauses,
+										   outersortkeys,
+										   innersortkeys);
+	contains_remotesubplan(((JoinPath *)mj_path)->innerjoinpath, &nRemotePlans_inner, &redistribute_inner);
+	if (!redistribute_inner && nRemotePlans_inner == 0)
+	{
+		add_partial_path(joinrel, mj_path);
+	}
+#else
     add_partial_path(joinrel, (Path *)
                      create_mergejoin_path(root,
                                            joinrel,
@@ -625,6 +650,7 @@ try_partial_mergejoin_path(PlannerInfo *root,
                                            mergeclauses,
                                            outersortkeys,
                                            innersortkeys));
+#endif
 }
 
 /*

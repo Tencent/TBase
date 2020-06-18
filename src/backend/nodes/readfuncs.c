@@ -1259,7 +1259,7 @@ _readNullIfExpr(void)
     else
 #endif
     READ_OID_FIELD(opfuncid);
-
+#if 0
     /*
      * The opfuncid is stored in the textual format primarily for debugging
      * and documentation reasons.  We want to always read it as zero to force
@@ -1273,7 +1273,7 @@ _readNullIfExpr(void)
     if (!portable_input)
 #endif
     local_node->opfuncid = InvalidOid;
-
+#endif
 #ifdef XCP
     if (portable_input)
         READ_TYPID_FIELD(opresulttype);
