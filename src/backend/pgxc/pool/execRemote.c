@@ -997,7 +997,7 @@ validate_combiner(ResponseCombiner *combiner)
     /* There was error message while combining */
     if (combiner->errorMessage)
     {
-        elog(LOG, "validate_combiner there is errorMessage in combiner");
+		elog(LOG, "validate_combiner there is errorMessage in combiner, errorMessage: %s", combiner->errorMessage);
         return false;
     }
     /* Check if state is defined */
@@ -3090,6 +3090,7 @@ handle_response(PGXCNodeHandle *conn, ResponseCombiner *combiner)
                     DN_CONNECTION_STATE_ERROR_FATAL);
             closesocket(conn->sock);
             conn->sock = NO_SOCKET;
+			conn->sock_fatal_occurred = true;
 
             ereport(ERROR,
                     (errcode(ERRCODE_INTERNAL_ERROR),
@@ -3481,6 +3482,16 @@ pgxc_node_begin(int conn_count, PGXCNodeHandle **connections,
         {
             need_send_begin = true;
         }
+
+		/* 
+		 * Send the Coordinator info down to the PGXC node at the beginning of transaction,
+		 * In this way, Datanode can print this Coordinator info into logfile, 
+		 * and those infos can be found in Datanode logifile if needed during debugging
+		 */
+		if (need_send_begin && IS_PGXC_COORDINATOR)
+		{
+			pgxc_node_send_coord_info(connections[i], MyProcPid, MyProc->lxid);
+		}
 #endif        
 
         elog(DEBUG5, "[PLPGSQL] pgxc_node_begin need_tran_block %d, connections[%d]->transaction_status %c need_send_begin:%d",
@@ -3611,6 +3622,16 @@ pgxc_node_remote_cleanup_all(void)
             continue;
         }
 
+#ifdef __TBASE__
+		/* 
+		 * At the end of the transaction, 
+		 * clean up the CN info sent to the DN in pgxc_node_begin
+		 */
+		if (IS_PGXC_COORDINATOR)
+		{
+			pgxc_node_send_coord_info(handle, 0, 0);
+		}
+#endif
         /*
          * We must go ahead and release connections anyway, so do not throw
          * an error if we have a problem here.
@@ -3637,6 +3658,16 @@ pgxc_node_remote_cleanup_all(void)
             continue;
         }
 
+#ifdef __TBASE__
+		/* 
+		 * At the end of the transaction, 
+		 * clean up the CN info sent to the DN in pgxc_node_begin
+		 */
+		if (IS_PGXC_COORDINATOR)
+		{
+			pgxc_node_send_coord_info(handle, 0, 0);
+		}
+#endif
         /*
          * We must go ahead and release connections anyway, so do not throw
          * an error if we have a problem here.
@@ -7621,9 +7652,12 @@ PostPrepare_Remote(char *prepareGID, bool implicit)
 bool
 IsTwoPhaseCommitRequired(bool localWrite)
 {// #lizard forgives
-    PGXCNodeAllHandles *handles;
+	PGXCNodeAllHandles *handles = NULL;
     bool                found = localWrite;
-    int                 i;
+    int                 i = 0;
+#ifdef __TBASE__
+    int                                     sock_fatal_count = 0;
+#endif
 
     /* Never run 2PC on Datanode-to-Datanode connection */
     if (IS_PGXC_DATANODE)
@@ -7644,10 +7678,44 @@ IsTwoPhaseCommitRequired(bool localWrite)
     if (!TransactionIdIsValid(GetTopTransactionIdIfAny()))
         return false;
 
+#ifdef __TBASE__
+	handles = get_sock_fatal_handles();
+	sock_fatal_count = handles->dn_conn_count + handles->co_conn_count;
+
+	for (i = 0; i < handles->dn_conn_count; i++)
+	{
+		PGXCNodeHandle *conn = handles->datanode_handles[i];
+
+		elog(LOG, "IsTwoPhaseCommitRequired, fatal_conn->nodename=%s, fatal_conn->sock=%d, "
+			"fatal_conn->read_only=%d, fatal_conn->transaction_status=%c, fatal_conn->error=%s", 
+			conn->nodename, conn->sock, conn->read_only, conn->transaction_status, conn->error);
+	}
+
+	for (i = 0; i < handles->co_conn_count; i++)
+	{
+		PGXCNodeHandle *conn = handles->coord_handles[i];
+
+		elog(LOG, "IsTwoPhaseCommitRequired, fatal_conn->nodename=%s, fatal_conn->sock=%d, "
+			"fatal_conn->read_only=%d, fatal_conn->transaction_status=%c, fatal_conn->error=%s", 
+			conn->nodename, conn->sock, conn->read_only, conn->transaction_status, conn->error);
+	}
+	pfree_pgxc_all_handles(handles);
+
+	if (sock_fatal_count != 0)
+	{
+		elog(ERROR, "IsTwoPhaseCommitRequired, Found %d sock fatal handles exist", sock_fatal_count);
+	}
+#endif
+
     handles = get_current_handles();
     for (i = 0; i < handles->dn_conn_count; i++)
     {
         PGXCNodeHandle *conn = handles->datanode_handles[i];
+
+#ifdef __TBASE__
+		elog(DEBUG5, "IsTwoPhaseCommitRequired, conn->nodename=%s, conn->sock=%d, conn->read_only=%d, conn->transaction_status=%c", 
+			conn->nodename, conn->sock, conn->read_only, conn->transaction_status);
+#endif
         if (conn->sock != NO_SOCKET && !conn->read_only &&
                 conn->transaction_status == 'T')
         {
@@ -7665,6 +7733,11 @@ IsTwoPhaseCommitRequired(bool localWrite)
     for (i = 0; i < handles->co_conn_count; i++)
     {
         PGXCNodeHandle *conn = handles->coord_handles[i];
+
+#ifdef __TBASE__
+		elog(DEBUG5, "IsTwoPhaseCommitRequired, conn->nodename=%s, conn->sock=%d, conn->read_only=%d, conn->transaction_status=%c", 
+			conn->nodename, conn->sock, conn->read_only, conn->transaction_status);
+#endif
         if (conn->sock != NO_SOCKET && !conn->read_only &&
                 conn->transaction_status == 'T')
         {
@@ -7680,6 +7753,11 @@ IsTwoPhaseCommitRequired(bool localWrite)
         }
     }
     pfree_pgxc_all_handles(handles);
+
+#ifdef __TBASE__
+	elog(DEBUG5, "IsTwoPhaseCommitRequired return false");
+#endif
+
     return false;
 }
 

@@ -2562,18 +2562,26 @@ log_line_prefix(StringInfo buf, ErrorData *edata)
                 {
                     char        strfbuf[128];
 
-                    snprintf(strfbuf, sizeof(strfbuf) - 1, "%lx.%x",
-                             (long) (MyStartTime), MyProcPid);
+					snprintf(strfbuf, sizeof(strfbuf) - 1, "%lx.%x,coord(%d,%u)",
+							 (long) (MyStartTime), MyProcPid, 
+							 pgxc_get_coordinator_proc_pid(),
+							 pgxc_get_coordinator_proc_vxid());
                     appendStringInfo(buf, "%*s", padding, strfbuf);
                 }
                 else
-                    appendStringInfo(buf, "%lx.%x", (long) (MyStartTime), MyProcPid);
+					appendStringInfo(buf, "%lx.%x,coord(%d,%u)", 
+									(long) (MyStartTime), MyProcPid, 
+									pgxc_get_coordinator_proc_pid(),
+									pgxc_get_coordinator_proc_vxid());
                 break;
             case 'p':
                 if (padding != 0)
                     appendStringInfo(buf, "%*d", padding, MyProcPid);
                 else
-                    appendStringInfo(buf, "%d", MyProcPid);
+					appendStringInfo(buf, "%d,coord(%d,%u)",
+									MyProcPid, 
+									pgxc_get_coordinator_proc_pid(),
+									pgxc_get_coordinator_proc_vxid());
                 break;
             case 'l':
                 if (padding != 0)
@@ -2871,7 +2879,10 @@ write_csvlog(ErrorData *edata)
 
     /* Process id  */
     if (MyProcPid != 0)
-        appendStringInfo(&buf, "%d", MyProcPid);
+		appendStringInfo(&buf, "%d,coord(%d,%u)",
+						MyProcPid,
+						pgxc_get_coordinator_proc_pid(),
+						pgxc_get_coordinator_proc_vxid());
     appendStringInfoChar(&buf, ',');
 
     /* Remote host and port */
@@ -2889,7 +2900,10 @@ write_csvlog(ErrorData *edata)
     appendStringInfoChar(&buf, ',');
 
     /* session id */
-    appendStringInfo(&buf, "%lx.%x", (long) MyStartTime, MyProcPid);
+	appendStringInfo(&buf, "%lx.%x,coord(%d,%u)", 
+					(long) MyStartTime, MyProcPid,
+					pgxc_get_coordinator_proc_pid(),
+					pgxc_get_coordinator_proc_vxid());
     appendStringInfoChar(&buf, ',');
 
     /* Line number */
