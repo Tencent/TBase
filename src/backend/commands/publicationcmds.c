@@ -542,9 +542,9 @@ OpenTableList(List *tables)
     foreach(lc, tables)
     {
         RangeVar   *rv = lfirst(lc);
-        Relation    rel;
+		Relation	rel  = NULL;
         bool        recurse = rv->inh;
-        Oid            myrelid;
+		Oid			myrelid = InvalidOid;
 
         CHECK_FOR_INTERRUPTS();
 
@@ -558,6 +558,7 @@ OpenTableList(List *tables)
             if (!RelationIsSharded(rel))
             {
                 heap_close(rel, ShareUpdateExclusiveLock);
+				rel = NULL;
                 elog(ERROR, "Table must be shard table while specified shard"
                             "in publication.");
             }
@@ -574,6 +575,7 @@ OpenTableList(List *tables)
         if (list_member_oid(relids, myrelid))
         {
             heap_close(rel, ShareUpdateExclusiveLock);
+			rel = NULL;
             continue;
         }
 
@@ -603,6 +605,8 @@ OpenTableList(List *tables)
             if (RELATION_IS_INTERVAL(rel))
             {
                 children = RelationGetAllPartitions(rel);
+				heap_close(rel, ShareUpdateExclusiveLock);
+				rel = NULL;
             }
             else
             {
@@ -625,7 +629,11 @@ OpenTableList(List *tables)
                  */
                 if (list_member_oid(relids, childrelid))
                 {
-                    heap_close(rel, ShareUpdateExclusiveLock);
+					if (rel != NULL)
+					{
+						heap_close(rel, ShareUpdateExclusiveLock);
+						rel = NULL;
+					}
                     continue;
                 }
 
