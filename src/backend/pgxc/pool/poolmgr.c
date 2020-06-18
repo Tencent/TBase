@@ -50,6 +50,7 @@
 #include "utils/resowner.h"
 #include "lib/stringinfo.h"
 #include "libpq/pqformat.h"
+#include "common/username.h"
 #include "pgxc/locator.h"
 #include "pgxc/pgxc.h"
 #include "pgxc/nodemgr.h"
@@ -9626,7 +9627,7 @@ PoolPingNodeRecheck(Oid nodeoid)
     NodeDefinition *nodeDef;
     char connstr[MAXPGPATH * 2 + 256];
     bool    healthy;
-    char *username = NULL;
+    const char *username = NULL;
     char *errstr = NULL;
 
     username = get_user_name(&errstr);

@@ -3961,6 +3961,9 @@ equal(const void *a, const void *b)
             retval = _equalCheckOverLapStmt(a, b);
             break;
 #endif
+        case T_SampleStmt:
+            retval =_equalSampleStmt(a, b);
+            break;
         default:
             elog(ERROR, "unrecognized node type: %d",
                  (int) nodeTag(a));
