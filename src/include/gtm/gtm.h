@@ -148,6 +148,7 @@ GTM_RemoveConnection(GTM_ConnectionInfo *conn);
 extern   bool    enable_gtm_sequence_debug;
 extern     bool     enable_gtm_debug;
 extern   bool   enable_sync_commit;
+extern   int    warnning_time_cost;
 #endif
 /*
  * pthread keys to get thread specific information

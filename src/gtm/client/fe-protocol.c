@@ -139,6 +139,7 @@ pqParseInput(GTM_Conn *conn)
                               "unexpected response from server; first received character was \"%c\"\n",
                               id);
             conn->inCursor += msgLength;
+			result->gr_status = GTM_RESULT_ERROR;
             break;
     }                    /* switch on protocol character */
     /* Successfully consumed this message */
@@ -155,6 +156,8 @@ pqParseInput(GTM_Conn *conn)
                           id);
         /* trust the specified message length as what to skip */
         conn->inStart += 5 + msgLength;
+
+		result->gr_status = GTM_RESULT_ERROR;
     }
 
     return result;
@@ -245,7 +248,7 @@ fail:
 }
 
 /*
- * GTMPQgetResult
+ * gtmpQgetResult
  *      Get the next GTM_Result produced.  Returns NULL if no
  *      query work remains or an error has occurred (e.g. out of
  *      memory).
@@ -432,6 +435,7 @@ break;
         {
             int len = 0;
             int count = 0;
+
 
             if (gtmpqGetnchar((char *) &result->gr_resdata.grd_gts.node_status,
                               sizeof(int), conn))

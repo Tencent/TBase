@@ -124,6 +124,7 @@ bool        enable_gtm_sequence_debug = false;
 bool        enalbe_gtm_xlog_debug = false;
 bool        enable_gtm_debug   = false;
 bool        enable_sync_commit = false;
+int         warnning_time_cost = 0;
 
 
 GTM_TimerEntry *g_timer_entry;
@@ -3426,6 +3427,7 @@ ProcessCommand(Port *myport, StringInfo input_message)
 #ifdef __TBASE__
     GTM_ThreadInfo *my_threadinfo = NULL;
     long long  start_time;
+    long long  end_time;
     my_threadinfo = GetMyThreadInfo;
 #ifndef __XLOG__
     GTM_ConnectionInfo *conn;
@@ -3654,8 +3656,10 @@ ProcessCommand(Port *myport, StringInfo input_message)
 
     BeforeReplyToClientXLogTrigger();
 
-    if(enable_gtm_debug)
-        elog(LOG, "cost mtype = %s (%d) %lld ms.", gtm_util_message_name(mtype), (int)mtype,getSystemTime() - start_time);
+    end_time = getSystemTime();
+
+    if(enable_gtm_debug || end_time - start_time > warnning_time_cost)
+	    elog(LOG, "cost mtype = %s (%d) %lld ms.", gtm_util_message_name(mtype), (int)mtype,end_time - start_time);
 
 #ifdef __TBASE__
     if (my_threadinfo->handle_standby)
