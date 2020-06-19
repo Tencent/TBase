@@ -1166,6 +1166,23 @@ typedef struct BitmapOrState
     int            nplans;            /* number of input plans */
 } BitmapOrState;
 
+/* ----------------
+ *	 DataMaskState information
+ * ----------------
+ */
+typedef struct datamask_att_scan {
+	bool     enable;
+	int32    option;        /* see DATAMASK_KIND_VALUE, DATAMASK_KIND_STR_PREFIX, DATAMASK_KIND_STR_POSTFIX */
+	char     *defaultval;    /* keep default val */
+	int64    datamask;
+	FmgrInfo flinfo;
+} DataMaskAttScan;
+
+typedef struct datamask_state
+{
+	DataMaskAttScan *maskinfo;
+} DataMaskState ;
+
 /* ----------------------------------------------------------------
  *                 Scan State Information
  * ----------------------------------------------------------------
@@ -1191,6 +1208,7 @@ typedef struct ScanState
     Relation    ss_currentRelation;
     HeapScanDesc ss_currentScanDesc;
     TupleTableSlot *ss_ScanTupleSlot;
+    DataMaskState   *ss_currentMaskDesc;
 #ifdef __COLD_HOT__
     bool        inited;
 #endif

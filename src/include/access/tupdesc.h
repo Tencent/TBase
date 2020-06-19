@@ -61,6 +61,7 @@ typedef struct datamask
     bool   *mask_array;     /* to record datamask info separately */ 
 }Datamask;
 
+
 typedef struct transp_crypt
 {
     int16   algo_id;        /* this algo_id is caculated by FUNC API, default is TRANSP_CRYPT_INVALID_ALGORITHM_ID */   
