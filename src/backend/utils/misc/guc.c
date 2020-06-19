@@ -8152,8 +8152,13 @@ set_config_option(const char *name, const char *value,
 #ifdef XCP
     bool        send_to_nodes = false;
 
-    /* Determine now, because source may be changed below in the function */
-    if ((source == PGC_S_SESSION || source == PGC_S_CLIENT) && (IS_PGXC_DATANODE || !IsConnFromCoord()))
+	/*
+	 * Determine now, because source may be changed below in the function.
+	 * remotetype and parentnode are only used in internal connections.
+	 */
+    if ((source == PGC_S_SESSION || source == PGC_S_CLIENT)
+        && (IS_PGXC_DATANODE || !IsConnFromCoord())
+        && (strcmp(name,"remotetype") != 0 && strcmp(name,"parentnode") != 0))
         send_to_nodes = true;
 #endif
 
@@ -8978,7 +8983,7 @@ set_config_option(const char *name, const char *value,
          * Save new parameter value with the node manager.
          * XXX here we may check: if value equals to configuration default
          * just reset parameter instead. Minus one table entry, shorter SET
-         * command sent downn... Sounds like optimization.
+		 * command sent down... Sounds like optimization.
          */
 
         if (action == GUC_ACTION_LOCAL)
