@@ -1754,7 +1754,8 @@ typedef enum ObjectType
     OBJECT_TSTEMPLATE,
     OBJECT_TYPE,
     OBJECT_USER_MAPPING,
-    OBJECT_VIEW
+	OBJECT_VIEW,
+	OBJECT_REPLICATION_SLOT
 } ObjectType;
 
 /* ----------------------

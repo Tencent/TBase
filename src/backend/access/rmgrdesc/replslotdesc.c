@@ -128,6 +128,18 @@ void replication_slot_desc(StringInfo buf, XLogReaderState *record)
                             NameStr(xlrec->slotname));
             break;
         }
+        case XLOG_REPLORIGIN_SLOT_RENAME:
+        {
+            xl_replication_slot_rename *xlrec;
+
+            xlrec = (xl_replication_slot_rename *) rec;
+
+            appendStringInfo(buf, "info in xlrec, id:%d, old_name:%s, new_name:%s",
+                             xlrec->slotid,
+                             NameStr(xlrec->old_slotname),
+                             NameStr(xlrec->new_slotname));
+            break;
+        }
         default:
             break;
     }
@@ -144,6 +156,8 @@ const char * replication_slot_identify(uint8 info)
             return "REPLORIGIN_SLOT_CREATE";
         case XLOG_REPLORIGIN_SLOT_DROP:
             return "REPLORIGIN_SLOT_DROP";
+        case XLOG_REPLORIGIN_SLOT_RENAME:
+            return "REPLORIGIN_SLOT_RENAME";
         default:
             break;
     }

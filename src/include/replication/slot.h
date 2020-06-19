@@ -198,6 +198,7 @@ extern void ReplicationSlotCreate(const char *name, bool db_specific,
                       ReplicationSlotPersistency p);
 extern void ReplicationSlotPersist(void);
 extern void ReplicationSlotDrop(const char *name, bool nowait);
+extern void ReplicationSlotModify(const char *old_name, const char *new_name, bool nowait);
 
 extern void ReplicationSlotAcquire(const char *name, bool nowait);
 extern void ReplicationSlotRelease(void);
@@ -223,6 +224,7 @@ extern void CheckSlotRequirements(void);
 extern void replica_slot_wal_record_lsn_replic(void);
 extern void replica_slot_wal_record_creat_slot(void);
 extern void replication_slot_wal_record_drop(void);
+extern void replication_slot_wal_record_rename_slot(const char * new_name);
 #endif
 
 #endif                            /* SLOT_H */

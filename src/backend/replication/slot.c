@@ -113,6 +113,9 @@ int            max_replication_slots = 0;    /* the maximum number of replicatio
 static void ReplicationSlotDropAcquired(void);
 static void ReplicationSlotDropPtr(ReplicationSlot *slot);
 
+static void ReplicationSlotModifyAcquired(const char *new_name);
+static void ReplicationSlotRenamePtr(ReplicationSlot *slot, const char * new_name);
+
 /* internal persistency functions */
 static void RestoreSlotFromDisk(const char *name);
 static void CreateSlotOnDisk(ReplicationSlot *slot);
@@ -122,6 +125,7 @@ static void SaveSlotToPath(ReplicationSlot *slot, const char *path, int elevel);
 extern bool g_replication_slot_debug;
 static void replication_slot_redo_create(xl_replication_slot_create * xlrec);
 static void replication_slot_redo_drop(xl_replication_slot_drop * xlrec);
+static void replication_slot_redo_rename(xl_replication_slot_rename * xlrec);
 static void replication_slot_redo_lsn_update(xl_replication_slot_lsn_replica * xlrec);
 #endif
 
@@ -697,6 +701,122 @@ ReplicationSlotDropPtr(ReplicationSlot *slot)
      * a slot while we're still cleaning up the detritus of the old one.
      */
     LWLockRelease(ReplicationSlotAllocationLock);
+}
+
+/*
+ * Permanently rename replication slot to new_name identified by the passed in old_name.
+ */
+void
+ReplicationSlotModify(const char *old_name, const char *new_name, bool nowait)
+{
+    Assert(MyReplicationSlot == NULL);
+
+    ReplicationSlotAcquire(old_name, nowait);
+
+    ReplicationSlotModifyAcquired(new_name);
+
+    return;
+}
+
+/*
+ * Permanently rename the currently acquired replication slot.
+ */
+static void
+ReplicationSlotModifyAcquired(const char *new_name)
+{
+    ReplicationSlot *slot = MyReplicationSlot;
+
+    Assert(MyReplicationSlot != NULL);
+
+#ifdef _PUB_SUB_RELIABLE_
+    replication_slot_wal_record_rename_slot(new_name);
+#endif
+
+    ReplicationSlotRenamePtr(slot, new_name);
+
+    return;
+}
+
+/*
+ * Permanently rename the replication slot which will be released by the point
+ * this function returns.
+ */
+static void
+ReplicationSlotRenamePtr(ReplicationSlot *slot, const char * new_name)
+{
+    int	    i;
+    char    old_path[MAXPGPATH];
+    char    new_path[MAXPGPATH];
+
+    /* If the slot is null, we're out of luck. */
+    Assert(slot == NULL);
+    if (slot == NULL)
+        elog(ERROR, "cannot perform rename slot name without an acquired slot");
+
+    ReplicationSlotValidateName(new_name, ERROR);
+
+    /* Generate pathnames. */
+    sprintf(old_path, "pg_replslot/%s", NameStr(slot->data.name));
+    sprintf(new_path, "pg_replslot/%s", new_name);
+
+    /*
+     * If some other backend ran this code concurrently with us, we'd likely
+     * both rename the same slot, and that would be bad.  We'd also be at
+     * risk of missing a name collision.  Also, we don't want to try to rename
+     * a new slot while somebody's busy cleaning up an old one, because we
+     * might both be monkeying with the same directory.
+     */
+    LWLockAcquire(ReplicationSlotAllocationLock, LW_EXCLUSIVE);
+
+    /*
+     * Check for name collision, and identify an allocatable slot.  We need to
+     * hold ReplicationSlotControlLock in shared mode for this, so that nobody
+     * else can change the in_use flags while we're looking at them.
+     */
+    LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+    for (i = 0; i < max_replication_slots; i++)
+    {
+        ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[i];
+
+        if (s->in_use && strcmp(new_name, NameStr(s->data.name)) == 0)
+            ereport(ERROR,
+                    (errcode(ERRCODE_DUPLICATE_OBJECT),
+                            errmsg("replication slot \"%s\" already exists", new_name)));
+    }
+    LWLockRelease(ReplicationSlotControlLock);
+
+    /* first initialize persistent data */
+    StrNCpy(NameStr(slot->data.name), new_name, NAMEDATALEN);
+
+    /* Rename the directory into place. */
+    if (rename(old_path, new_path) != 0)
+        ereport(ERROR,
+                (errcode_for_file_access(),
+                        errmsg("Fail to rename file \"%s\" to \"%s\": %m",
+                               old_path, new_path)));
+
+    /*
+     * If we'd now fail - really unlikely - we wouldn't know whether this slot
+     * would persist after an OS crash or not - so, force a restart. The
+     * restart would try to fsync this again till it works.
+     */
+    START_CRIT_SECTION();
+    fsync_fname(new_path, true);
+    fsync_fname("pg_replslot", true);
+    END_CRIT_SECTION();
+
+    CreateSlotOnDisk(slot);
+
+    /* Let everybody know we've modified this slot */
+    ConditionVariableBroadcast(&slot->active_cv);
+
+    /*
+     * Now that the slot has been renamed, it's safe to
+     * let somebody else try to allocate or rename a slot.
+     */
+    LWLockRelease(ReplicationSlotAllocationLock);
+
+    return;
 }
 
 /*
@@ -1572,6 +1692,14 @@ RestoreSlotFromDisk(const char *name)
     
     slot = &ReplicationSlotCtl->replication_slots[cp.slotdata.slotid];
 
+    elog(LOG, "slot info in restoring, info in file, slotid:%d, slot_name: %s; "
+              "info in slot slotid:%d, active_pid:%d, slot_name: %s, in_use: %d",
+         cp.slotdata.slotid,
+         NameStr(cp.slotdata.name),
+         slot->data.slotid,
+         slot->active_pid,
+         NameStr(slot->data.name),
+         slot->in_use);
     if (slot->in_use)
     {
         elog(PANIC, "slot info conflict in restoring, info in file, slotid:%d; info in slot slotid:%d, active_pid:%d",
@@ -1725,6 +1853,33 @@ void replication_slot_wal_record_drop(void)
     return;
 }
 
+void replication_slot_wal_record_rename_slot(const char * new_name)
+{
+    xl_replication_slot_rename xlrec;
+
+    if (RS_PERSISTENT != MyReplicationSlot->data.persistency)
+    {
+        /* skip TEMPORARY slot */
+        return;
+    }
+
+    xlrec.slotid = MyReplicationSlot->data.slotid;
+    StrNCpy(NameStr(xlrec.old_slotname), NameStr(MyReplicationSlot->data.name), NAMEDATALEN);
+    StrNCpy(NameStr(xlrec.new_slotname), new_name, NAMEDATALEN);
+
+    elog(LOG, "replication_slot_wal_record_rename_slot info in xlrec, slotid:%d, old_slot_name:%s, new_slot_name:%s",
+         xlrec.slotid,
+         NameStr(xlrec.old_slotname),
+         NameStr(xlrec.new_slotname));
+
+    /* assemble and insert */
+    XLogBeginInsert();
+    XLogRegisterData((char *) (&xlrec), sizeof(xlrec));
+    XLogInsert(RM_RELICATION_SLOT_ID, XLOG_REPLORIGIN_SLOT_RENAME);
+
+    return;
+}
+
 void replication_slot_redo(XLogReaderState *record)
 {
     uint8        info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
@@ -1747,6 +1902,12 @@ void replication_slot_redo(XLogReaderState *record)
         {
             replication_slot_redo_drop((xl_replication_slot_drop*)XLogRecGetData(record));
             
+            break;
+        }
+        case XLOG_REPLORIGIN_SLOT_RENAME:
+        {
+            replication_slot_redo_rename((xl_replication_slot_rename*)XLogRecGetData(record));
+
             break;
         }
         default:
@@ -2034,6 +2195,68 @@ static void replication_slot_redo_drop(xl_replication_slot_drop * xlrec)
     ReplicationSlotDropPtr(slot);
 
     slot->data.slotid       = REPLICATION_SLOT_INVALID_ID;
+
+    return;
+}
+
+static void replication_slot_redo_rename(xl_replication_slot_rename * xlrec)
+{
+    ReplicationSlot *slot;
+
+    if (xlrec->slotid <= REPLICATION_SLOT_INVALID_ID ||xlrec->slotid >= max_replication_slots)
+    {
+        elog(PANIC, "replication_slot_redo_rename: get invalid slotid %d", xlrec->slotid);
+    }
+
+    slot = &ReplicationSlotCtl->replication_slots[xlrec->slotid];
+
+    /*
+     * if slot is not ours, skip
+     */
+    if (slot->data.slotid != xlrec->slotid)
+    {
+        elog(LOG, "replication_slot_redo_rename: slot(id:%d) in wal, in_use:%d, slotid in data:%d",
+             xlrec->slotid, slot->in_use, slot->data.slotid);
+        return;
+    }
+
+    if (0 != slot->data.slotid && strncmp(NameStr(slot->data.name), "", NAMEDATALEN) !=0 )
+    {
+        elog(LOG, "replication_slot_redo_rename info in slot, slotid:%d, name:%s, database:%u, persistency:%d, xmin:%u, catalog_xmin:%u, "
+                  "restart_lsn:%X/%X, confirmed_flush:%X/%X, plugin:%s, in_use:%d, effective_xmin:%u, just_dirtied:%d, dirty:%d, pgoutput:%d, subid:%u, relid:%u ",
+             slot->data.slotid,
+             NameStr(slot->data.name),
+             slot->data.database,
+             slot->data.persistency, slot->data.xmin, slot->data.catalog_xmin,
+             (uint32) (slot->data.restart_lsn >> 32), (uint32) slot->data.restart_lsn,
+             (uint32) (slot->data.confirmed_flush >> 32), (uint32) slot->data.confirmed_flush,
+             NameStr(slot->data.plugin),
+             slot->in_use,
+             slot->effective_xmin, slot->just_dirtied, slot->dirty, slot->pgoutput, slot->subid, slot->relid);
+    }
+    else
+    {
+        elog(LOG, "replication_slot_redo_rename info in slot, slotid:%d, database:%u, persistency:%d, xmin:%u, catalog_xmin:%u, "
+                  "restart_lsn:%X/%X, confirmed_flush:%X/%X, in_use:%d, effective_xmin:%u, just_dirtied:%d, dirty:%d, pgoutput:%d, subid:%u, relid:%u ",
+             slot->data.slotid,
+             slot->data.database,
+             slot->data.persistency, slot->data.xmin, slot->data.catalog_xmin,
+             (uint32) (slot->data.restart_lsn >> 32), (uint32) slot->data.restart_lsn,
+             (uint32) (slot->data.confirmed_flush >> 32), (uint32) slot->data.confirmed_flush,
+             slot->in_use,
+             slot->effective_xmin, slot->just_dirtied, slot->dirty, slot->pgoutput, slot->subid, slot->relid);
+    }
+    elog(LOG, "replication_slot_redo_rename info in xlrec, slotid:%d, old_name:%s, new_name:%s ",
+            xlrec->slotid,  NameStr(xlrec->old_slotname), NameStr(xlrec->new_slotname));
+
+    if (strncmp(NameStr(slot->data.name), NameStr(xlrec->old_slotname), NAMEDATALEN) != 0)
+        elog(LOG, "replication_slot_redo_rename old_name in xlog:%s is inconsistency with slot.name:%s", NameStr(xlrec->old_slotname), NameStr(slot->data.name));
+
+    if (strncmp(NameStr(slot->data.name), NameStr(xlrec->new_slotname), NAMEDATALEN) ==0)
+        return;
+
+    /* rename slot */
+    ReplicationSlotRenamePtr(slot, NameStr(xlrec->new_slotname));
 
     return;
 }
