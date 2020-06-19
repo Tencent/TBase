@@ -140,6 +140,8 @@ InitScanRelation(SampleScanState *node, EState *estate, int eflags)
     /* we won't set up the HeapScanDesc till later */
     node->ss.ss_currentScanDesc = NULL;
 
+	node->ss.ss_currentMaskDesc = NULL;
+
     /* and report the scan tuple slot's rowtype */
     ExecAssignScanType(&node->ss, RelationGetDescr(currentRelation));
 }

@@ -1332,7 +1332,7 @@ slot_deform_tuple(TupleTableSlot *slot, int natts)
  * slot_deform_datarow
  *         Extract data from the DataRow message into Datum/isnull arrays.
  *
- * We always extract all atributes, as specified in tts_tupleDescriptor,
+ * We always extract all attributes, as specified in tts_tupleDescriptor,
  * because there is no easy way to find random attribute in the DataRow.
  *
  * XXX There's an opportunity for optimization - we might extract only the
