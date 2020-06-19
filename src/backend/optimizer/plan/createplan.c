@@ -7085,7 +7085,7 @@ make_remotesubplan(PlannerInfo *root,
       * without gather motion to speed up the data transfering.
       */
     if ((distributionType == LOCATOR_TYPE_HASH || distributionType == LOCATOR_TYPE_SHARD) 
-        && IsA(lefttree, Gather) && g_UseDataPump && olap_optimizer)
+		&& IsA(lefttree, Gather) && g_UseDataPump && olap_optimizer && list_length(node->distributionRestrict) > 1)
     {
         Gather *gather_plan = (Gather *)lefttree;
         
@@ -9534,6 +9534,24 @@ build_physical_tlist_with_sysattr(List *relation_tlist, List *physical_tlist)
 
     return list_concat(result, physical_tlist);
 }
+static void
+bitmap_subplan_set_shared(Plan *plan, bool shared)
+{
+       if (!plan)
+       {
+               return;
+       }
+       if (IsA(plan, BitmapAnd))
+               bitmap_subplan_set_shared(
+                                 linitial(((BitmapAnd *) plan)->bitmapplans), shared);
+       else if (IsA(plan, BitmapOr))
+               ((BitmapOr *) plan)->isshared = shared;
+       else if (IsA(plan, BitmapIndexScan))
+               ((BitmapIndexScan *) plan)->isshared = shared;
+       else
+               elog(ERROR, "unrecognized node type: %d", nodeTag(plan));
+}
+
 static bool
 set_plan_parallel(Plan *plan)
 {// #lizard forgives
@@ -9547,13 +9565,19 @@ set_plan_parallel(Plan *plan)
         case T_SeqScan:
         case T_IndexScan:
         case T_IndexOnlyScan:
-        case T_BitmapHeapScan:
         case T_RemoteSubplan:
             {
                 plan->parallel_aware = true;
                 result = true;
             }
             break;
+		case T_BitmapHeapScan:
+			{
+				bitmap_subplan_set_shared(plan->lefttree, true);
+				plan->parallel_aware = true;
+				result = true;
+				break;
+			}
         case T_NestLoop:
             {
                 if (set_plan_parallel(plan->lefttree))
@@ -9717,6 +9741,12 @@ set_plan_nonparallel(Plan *plan)
 
         return;
     }
+	else if (IsA(plan, BitmapHeapScan))
+	{
+		bitmap_subplan_set_shared(plan->lefttree, false);
+		plan->parallel_aware = false;
+		return;
+	}
 
     set_plan_nonparallel(subplan->lefttree);
     set_plan_nonparallel(subplan->righttree);
