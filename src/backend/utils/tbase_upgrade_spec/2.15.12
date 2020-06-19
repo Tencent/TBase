@@ -20,6 +20,6 @@ GTM_XLOG=true
 # These commands will be executed by oss when upgraded to this version
 # %d will be replaced by datadir , %b will be replaced with bindir, %v will be replaced with node version
 [Upgrade Script]
-Before_Stop="export PATH=/usr/sbin/:$PATH && chmod +x %b/share/postgresql/tbase_upgrade_spec/2.15.11_before_stop.sh && bash -c '%b/share/postgresql/tbase_upgrade_spec/2.15.11_before_stop.sh %d %b %v &> /tmp/before_stop'"
+Before_Stop="export PATH=/usr/sbin/:$PATH && chmod +x %b/share/postgresql/tbase_upgrade_spec/2.15.12_before_stop.sh && bash -c '%b/share/postgresql/tbase_upgrade_spec/2.15.12_before_stop.sh %d %b %v &> /tmp/before_stop'"
 During_Stop="echo %d %b %v &> /tmp/during_stop"
-After_Start="export PATH=/usr/sbin/:$PATH && chmod +x %b/share/postgresql/tbase_upgrade_spec/2.15.11_before_stop.sh && bash -c '%b/share/postgresql/tbase_upgrade_spec/2.15.11_after_start.sh %d %b %v &> /tmp/after_start'"
+After_Start="export PATH=/usr/sbin/:$PATH && chmod +x %b/share/postgresql/tbase_upgrade_spec/2.15.12_before_stop.sh && bash -c '%b/share/postgresql/tbase_upgrade_spec/2.15.12_after_start.sh %d %b %v &> /tmp/after_start'"
