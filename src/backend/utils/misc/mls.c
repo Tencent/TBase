@@ -1092,8 +1092,6 @@ void mls_check_datamask_need_passby(ScanState * scanstate, Oid relid)
     }
 
     scanstate->ps.skip_data_mask_check = DATA_MASK_SKIP_ALL_TRUE;
-    
-    return;
 }
 #endif
 
@@ -1376,7 +1374,7 @@ Oid mls_get_parent_oid_by_relid(Oid relid)
                 reltup  = (Form_pg_class)GETSTRUCT(tbl_tp);
             }
             
-            /* parition internal */
+            /* partition internal */
             if (RELPARTKIND_CHILD == reltup->relpartkind)
             {
                 /* if child, return parent */
@@ -1438,7 +1436,7 @@ bool mls_support_data_type(Oid typid)
 
 
 /*
- * all relative row level control feature enterance, such as datamask, cls, tranparent crypt.
+ * all relative row level control feature entrance, such as datamask, cls, transparent crypt.
  */
 void MlsExecCheck(ScanState *node, TupleTableSlot *slot)
 {// #lizard forgives
@@ -1472,15 +1470,20 @@ void MlsExecCheck(ScanState *node, TupleTableSlot *slot)
                     {
                         if (node->ss_currentRelation->rd_att->tdatamask)
                         {
+                            if(node->ss_currentMaskDesc == NULL)
+                            {
+                                parent_oid = mls_get_parent_oid(node->ss_currentRelation);
+                                node->ss_currentMaskDesc = init_datamask_desc(parent_oid,
+                                                                              slot->tts_tupleDescriptor->attrs,
+                                                                              node->ss_currentRelation->rd_att->tdatamask);
+                            }
+
                             /* 
                              * skip_data_mask_check is assigned in execinitnode, 
                              * so concurrent changing to datamask has not effect on current select 
                              */
                             if (DATA_MASK_SKIP_ALL_TRUE != node->ps.skip_data_mask_check)
-                            {
-                                parent_oid = mls_get_parent_oid(node->ss_currentRelation);
-                                datamask_exchange_all_cols_value((Node*)node, slot, parent_oid);
-                            }
+                                datamask_exchange_all_cols_value((Node *) node, slot);
                         }
                     }
                 }
