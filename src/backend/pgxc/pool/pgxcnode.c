@@ -160,6 +160,7 @@ static int    get_char(PGXCNodeHandle * conn, char *out);
 #ifdef __TBASE__
 static ParamEntry * paramlist_get_paramentry(List *param_list, const char *name);
 static ParamEntry * paramentry_copy(ParamEntry * src_entry);
+static void PGXCNodeHandleError(PGXCNodeHandle *handle, char *msg_body, int len);
 #endif
 
 /*
@@ -4634,9 +4635,9 @@ pgxc_node_set_query(PGXCNodeHandle *handle, const char *set_query)
 
         if (msgtype == 'E')    /* ErrorResponse */
         {
-            int32 offset = strnlen(handle->error, MAX_ERROR_MSG_LENGTH);
-            snprintf(handle->error + offset, MAX_ERROR_MSG_LENGTH - offset, "%s", msg);
+		    PGXCNodeHandleError(handle, msg, msglen);
             PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_ERROR_FATAL);
+            elog(ERROR,"pgxc_node_set_query: %s",handle->error);
             break;
         }
 
@@ -4859,6 +4860,73 @@ PGXCNodeSetConnectionState(PGXCNodeHandle *handle, DNConnectionState new_state)
             "new state %d", handle->nodename, handle->state, new_state);
     handle->state = new_state;
 }
+
+#ifdef __TBASE__
+/*
+ * Handle ErrorResponse ('E') message from a Datanode connection for PGXCNodeHandle
+ */
+static void
+PGXCNodeHandleError(PGXCNodeHandle *handle, char *msg_body, int len)
+{
+    char *message = NULL;
+    char *detail = NULL;
+    char *hint = NULL;
+    int   offset = 0;
+    char  *message_combine = NULL;
+
+    /*
+     * Scan until point to terminating \0
+     */
+    while (offset + 1 < len)
+    {
+        /* pointer to the field message */
+        char *str = msg_body + offset + 1;
+
+        switch (msg_body[offset])
+        {
+            case 'M':	/* message */
+                message = str;
+                break;
+            case 'D':	/* details */
+                detail = str;
+                break;
+
+            case 'H':	/* hint */
+                hint = str;
+                break;
+
+                /* Fields not yet in use */
+            case 'C':	/* code */
+            case 'S':	/* severity */
+            case 'R':	/* routine */
+            case 'P':	/* position string */
+            case 'p':	/* position int */
+            case 'q':	/* int query */
+            case 'W':	/* where */
+            case 'F':	/* file */
+            case 'L':	/* line */
+            default:
+                break;
+        }
+
+        /* code, message and \0 */
+        offset += strlen(str) + 2;
+    }
+
+    message_combine = palloc(MAX_ERROR_MSG_LENGTH);
+
+    snprintf(message_combine, MAX_ERROR_MSG_LENGTH,
+             "nodename:%s,backend_pid:%d,message:%s,detail:%s,hint:%s ",
+             handle->nodename,
+             handle->backend_pid,
+             message ? message : "",
+             detail  ? detail  : "",
+             hint ? hint: "");
+    add_error_message(handle,message_combine);
+
+    pfree(message_combine);
+}
+#endif
 
 /*
  * Do a "Diff" of backend NODE metadata and the one present in catalog
