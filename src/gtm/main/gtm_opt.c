@@ -345,6 +345,17 @@ struct config_int ConfigureNamesInt[] =
 		3, 0, 100, NULL, NULL,
         0, NULL
     },
+	{
+		{
+			GTM_OPTNAME_MAX_WAL_SENDER, GTMC_STARTUP,
+			gettext_noop("print time cost in ms when cost is larger then it."),
+			NULL,
+			0
+		},
+		&warnning_time_cost,
+		500, 0, INT_MAX,
+		0, NULL
+	},
 #endif
     {
             {

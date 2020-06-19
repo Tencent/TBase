@@ -164,6 +164,7 @@ typedef struct XLogSyncStandby
     GTM_MutexLock check_mutex;
     int           head_xlog_hints;
     XLogRecPtr    head_ptr;   /* temp of the head of wait_queue , not always correct */
+	XLogRecPtr    synced_lsn;
 
     GTM_MutexLock wait_queue_mutex;
     heap wait_queue;
