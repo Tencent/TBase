@@ -293,6 +293,19 @@ check_xact_readonly(Node *parsetree)
                         }
                     }
                 }
+                if (nodeTag(parsetree) == T_RenameStmt)
+                {
+                    RenameStmt   *stmt = (RenameStmt *) parsetree;
+
+                    /* alter replication_slot rename is allowed on datanode */
+                    if (stmt->renameType == OBJECT_REPLICATION_SLOT)
+                    {
+                        if (XactReadOnly && !IsInParallelMode() && IS_PGXC_DATANODE)
+                        {
+                            break;
+                        }
+                    }
+                }
             }
 #endif
         case T_DropdbStmt:
@@ -4670,6 +4683,9 @@ AlterObjectTypeCommandTag(ObjectType objtype)
         case OBJECT_STATISTIC_EXT:
             tag = "ALTER STATISTICS";
             break;
+	    case OBJECT_REPLICATION_SLOT:
+	        tag = "ALTER SLOT";
+	        break;
         default:
             tag = "???";
             break;

@@ -106,6 +106,13 @@ typedef struct xl_replication_slot_drop
     NameData        slotname;
 } xl_replication_slot_drop;
 
+typedef struct xl_replication_slot_rename
+{
+    int             slotid;
+    NameData        old_slotname;
+    NameData        new_slotname;
+} xl_replication_slot_rename;
+
 typedef struct xl_replication_slot_lsn_replica
 {
     int             slotid;
@@ -118,6 +125,7 @@ typedef struct xl_replication_slot_lsn_replica
 #define XLOG_REPLORIGIN_SLOT_CREATE         0x10
 #define XLOG_REPLORIGIN_SLOT_LSN_REPLICA    0x20
 #define XLOG_REPLORIGIN_SLOT_DROP           0x40
+#define XLOG_REPLORIGIN_SLOT_RENAME         0x60
 
 extern void replication_slot_redo(XLogReaderState *record);
 extern void replication_slot_desc(StringInfo buf, XLogReaderState *record);
