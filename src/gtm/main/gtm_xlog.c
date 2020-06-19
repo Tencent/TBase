@@ -75,6 +75,7 @@
  */
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/timeb.h>
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
@@ -215,6 +216,14 @@ static void clear_syncconfig(void);
 static void load_syncconfig(void);
 static void load_xlogsync(void);
 static void init_sync_structures(void);
+
+static long long
+getSystemTime()
+{
+    struct timeb t;
+    ftime(&t);
+    return 1000 * t.time + t.millitm;
+}
 
 char *
 GetFormatedCommandLine(char *ans,int size,const char *cmd,char *file_name,char *relative_path)
@@ -442,8 +451,6 @@ NotifyWaitingQueue(void)
     int       ret = 0;
 
     
-    if(enalbe_gtm_xlog_debug)
-        elog(LOG,"count XLogSync->sync_standbys %d",gtm_list_length(XLogSync->sync_standbys));
 
     /* get max sync xlog position */
     check_ptr = GetMaxSyncStandbyCompletePtr();
@@ -455,6 +462,7 @@ NotifyWaitingQueue(void)
     }
 
     GTM_MutexLockAcquire(&XLogSync->wait_queue_mutex);
+	XLogSync->synced_lsn = XLogSync->synced_lsn > check_ptr ? XLogSync->synced_lsn : check_ptr;
 
     while(ret = heap_min(&XLogSync->wait_queue,(void **)&key,(void **)&waiter),ret)
     {
@@ -547,8 +555,10 @@ WaitSyncComplete(XLogRecPtr ptr)
 
     GTM_MutexLockAcquire(&XLogSync->wait_queue_mutex);
 	/* avoid reload changes which will cause hug up*/
-	if(!enable_sync_commit)
+    if(XLogSync->synced_lsn >= ptr)
 	{
+	    if(enalbe_gtm_xlog_debug)
+		    elog(LOG,"WaitSyncComplete %X/%X early finished",(uint32)(ptr>>32),(uint32)ptr);
 		GTM_MutexLockRelease(&XLogSync->wait_queue_mutex);
         return ;
 	}
@@ -1230,6 +1240,8 @@ BeforeReplyToClientXLogTrigger(void)
 {
     GTM_ThreadInfo *thr = GetMyThreadInfo;
     XLogRecPtr  endPos;
+    long long start_time;
+    long long end_time;
 
     ReleaseXLogRecordWriteLocks();
 
@@ -1245,6 +1257,8 @@ BeforeReplyToClientXLogTrigger(void)
         return ;
     }
 
+    start_time = getSystemTime();
+
     /* release thread lock ,so that we don't block GTM_StoreLock in xlog flush waiting. */
     if(thr->handle_standby)
         GTM_RWLockRelease(&thr->thr_lock);
@@ -1256,6 +1270,11 @@ BeforeReplyToClientXLogTrigger(void)
 
     if(thr->handle_standby)
         GTM_RWLockAcquire(&thr->thr_lock, GTM_LOCKMODE_WRITE);
+
+    end_time = getSystemTime();
+
+    if(end_time - start_time > warnning_time_cost)
+        elog(LOG, "BeforeReplyToClientXLogTrigger lsn %X/%X cost %lld ms", (uint32)(endPos >> 32), (uint32)endPos, end_time - start_time);
 }
 
 /* Read xlog file to buff */
@@ -3357,10 +3376,13 @@ static void
 XLogWrite(XLogRecPtr req)
 {// #lizard forgives
     uint64  nleft;
+    uint64  total_write;
     uint64  start_pos;
     int     written;
     uint64  end_pos;
     XLogRecPtr flush_pos;
+    long long  start_time;
+    long long  end_time;
 
     end_pos = XLogRecPtrToFileOffset(req);
 
@@ -3387,6 +3409,8 @@ XLogWrite(XLogRecPtr req)
         nleft  = end_pos - start_pos;
     }
 
+    total_write = nleft;
+
     Assert(nleft <= GTM_XLOG_SEG_SIZE);
 
     if(nleft == 0)
@@ -3401,6 +3425,8 @@ XLogWrite(XLogRecPtr req)
              (uint32_t)(req >> 32),
              (uint32_t)req,nleft);
     }
+
+    start_time = getSystemTime();
 
     do
     {
@@ -3432,6 +3458,10 @@ XLogWrite(XLogRecPtr req)
     XLogCtl->last_write_idx = end_pos;
 
     fsync(XLogCtl->xlog_fd);
+    
+    end_time = getSystemTime();
+    if(end_time - start_time > warnning_time_cost)
+        elog(LOG, "XLogWrite size %ld lsn %X/%X cost %lld ms", total_write, (uint32)(req >> 32), (uint32)req, end_time - start_time);
 
     SpinLockAcquire(&XLogCtl->walwirte_info_lck);
     Assert(XLogCtl->LogwrtResult.Write  <= req);
