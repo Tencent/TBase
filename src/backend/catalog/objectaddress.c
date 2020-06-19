@@ -773,6 +773,10 @@ static const struct object_type_map
     {
         "statistics object", OBJECT_STATISTIC_EXT
     },
+    /* OCLASS_SUBSCRIPTION */
+    {
+	    "slot", OBJECT_REPLICATION_SLOT
+    },
 #ifdef __AUDIT__
     /* OCLASS_AUDIT_STMT */
     {
@@ -1074,6 +1078,7 @@ get_object_address(ObjectType objtype, Node *object,
                                                              missing_ok);
                 address.objectSubId = 0;
                 break;
+            case OBJECT_REPLICATION_SLOT:
             default:
                 elog(ERROR, "unrecognized objtype: %d", (int) objtype);
                 /* placate compiler, in case it thinks elog might return */
@@ -2217,6 +2222,7 @@ pg_get_object_address(PG_FUNCTION_ARGS)
         case OBJECT_SCHEMA:
         case OBJECT_SUBSCRIPTION:
         case OBJECT_TABLESPACE:
+        case OBJECT_REPLICATION_SLOT:
             if (list_length(name) != 1)
                 ereport(ERROR,
                         (errcode(ERRCODE_INVALID_PARAMETER_VALUE),

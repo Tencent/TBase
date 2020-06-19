@@ -1155,6 +1155,9 @@ EventTriggerSupportsObjectType(ObjectType obtype)
         case OBJECT_EVENT_TRIGGER:
             /* no support for event triggers on event triggers */
             return false;
+	    case OBJECT_REPLICATION_SLOT:
+	        /* no support for event triggers on replication slot */
+	        return false;
         case OBJECT_ACCESS_METHOD:
         case OBJECT_AGGREGATE:
         case OBJECT_AMOP:

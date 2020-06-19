@@ -22,6 +22,7 @@
 #include "replication/logicalfuncs.h"
 #include "utils/builtins.h"
 #include "utils/pg_lsn.h"
+#include "commands/slotfuncs.h"
 
 static void
 check_permissions(void)
@@ -311,4 +312,93 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
     tuplestore_donestoring(tupstore);
 
     return (Datum) 0;
+}
+
+/*
+ * Execute ALTER SLOT RENAME
+ */
+ObjectAddress
+RenameSlot(const char *oldname, const char *newname)
+{
+    ObjectAddress address;
+
+    if (strncmp(oldname, newname, NAMEDATALEN) == 0)
+        elog(ERROR, "newname is same to oldname");
+
+    check_permissions();
+    CheckSlotRequirements();
+
+    /* nowait = true, meaning if slot is active, throw an error. */
+    ReplicationSlotModify(oldname, newname, true);
+
+    elog(LOG, "print Slot info:  MyReplicationSlot->data.slotid:%d, MyReplicationSlot->data.name:%s, "
+              "MyReplicationSlot->data.database;%d, MyReplicationSlot->in_use:%d, MyReplicationSlot->subname:%s, "
+              "MyReplicationSlot->subid:%d, MyReplicationSlot->relid:%d",
+              MyReplicationSlot->data.slotid, NameStr(MyReplicationSlot->data.name),
+              MyReplicationSlot->data.database, MyReplicationSlot->in_use, NameStr(MyReplicationSlot->subname),
+              MyReplicationSlot->subid, MyReplicationSlot->relid);
+
+    ObjectAddressSet(address, MyReplicationSlot->data.slotid, MyReplicationSlot->data.database);
+    ReplicationSlotRelease();
+    return address;
+}
+
+/*
+ * get_replication_slot_slotd - given a subscription name, look up the slot OID
+ *
+ * If missing_ok is false, throw an error if name not found.  If true, just
+ * return InvalidOid.
+ */
+Oid
+get_replication_slot_slotid(const char *slotname, bool missing_ok)
+{
+    Oid			oid;
+    int i = 0;
+
+    for (i = 0; i < max_replication_slots; i++)
+    {
+        ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[i];
+
+        if (s->in_use && strncmp(slotname, NameStr(s->data.name), NAMEDATALEN) == 0)
+        {
+            oid = s->data.slotid;
+            break;
+        }
+    }
+
+    if (!OidIsValid(oid) && !missing_ok)
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("replication_slot \"%s\" does not exist", slotname)));
+    return oid;
+}
+
+/*
+ * get_replication_slot_dbid - given a subscription name, look up the database OID
+ *
+ * If missing_ok is false, throw an error if name not found.  If true, just
+ * return InvalidOid.
+ */
+Oid
+get_replication_slot_dbid(const char *slotname, bool missing_ok)
+{
+    Oid			oid;
+    int i = 0;
+
+    for (i = 0; i < max_replication_slots; i++)
+    {
+        ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[i];
+
+        if (s->in_use && strncmp(slotname, NameStr(s->data.name), NAMEDATALEN) == 0)
+        {
+            oid = s->data.database;
+            break;
+        }
+    }
+
+    if (!OidIsValid(oid) && !missing_ok)
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("replication_slot \"%s\" does not exist", slotname)));
+    return oid;
 }

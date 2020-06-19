@@ -91,9 +91,11 @@ parse_tbase_subscription_options(List *options,
                                  char **temp_hot_date,
                                  char **temp_cold_date,
                                  int *parallel_number,
-                                 bool *copy_data);
+								 bool *copy_data,
+								 char **slot_name,
+								 bool *slot_name_given);
 static bool check_tbase_subscription_ifexists(Relation tbase_sub_rel, char * check_subname);
-static List * tbase_subscription_parallelization(Node * stmt, int parallel_number);
+static List * tbase_subscription_parallelization(Node * stmt, int parallel_number, bool slot_name_given);
 #endif
 
 /*
@@ -1495,10 +1497,13 @@ parse_tbase_subscription_options(List *options,
                                  char **temp_hot_date,
                                  char **temp_cold_date,
                                  int *parallel_number,
-                                 bool *copy_data)
+								 bool *copy_data,
+								 char **slot_name,
+								 bool *slot_name_given)
 {// #lizard forgives
     ListCell *lc = NULL;
     bool copy_data_given = false;
+    *slot_name_given = false;
 
     /* This operation can only be performed on Coordinator */
     if (!IS_PGXC_COORDINATOR || !IsConnFromApp())
@@ -1560,9 +1565,17 @@ parse_tbase_subscription_options(List *options,
         }
         else if (strcmp(defel->defname, "slot_name") == 0)
         {
-            ereport(ERROR,
-                    (errcode(ERRCODE_SYNTAX_ERROR),
-                     errmsg("User-defined \"slot_name\" is not allowed in TBASE SUBSCRIPTION.")));
+		    if (*slot_name_given)
+		        ereport(ERROR,
+		                (errcode(ERRCODE_SYNTAX_ERROR),
+		                        errmsg("conflicting or redundant options")));
+
+		    *slot_name_given = true;
+		    *slot_name       = defGetString(defel);
+
+		    /* Setting slot_name = NONE is treated as no slot name. */
+		    if (strcmp(*slot_name, "none") == 0)
+		        *slot_name = NULL;
         }
         else if (strcmp(defel->defname, "copy_data") == 0)
         {
@@ -1637,7 +1650,7 @@ static bool check_tbase_subscription_ifexists(Relation tbase_sub_rel, char * che
 /*
  * transform tbase subscription into parallel sub-subscriptions list
  */
-static List * tbase_subscription_parallelization(Node * stmt, int parallel_number)
+static List * tbase_subscription_parallelization(Node * stmt, int parallel_number, bool slot_name_given)
 {// #lizard forgives
     int i = 0;
     List * lstmt = NIL;
@@ -1660,10 +1673,32 @@ static List * tbase_subscription_parallelization(Node * stmt, int parallel_numbe
             {
                 CreateSubscriptionStmt * stmt_create = (CreateSubscriptionStmt *) stmt_parallel;
                 char * new_subname = palloc0(NAMEDATALEN);
+				char * new_slot_name = palloc0(NAMEDATALEN);
 
                 /* rename subname a parallel one */
                 snprintf(new_subname, NAMEDATALEN - 1, "%s_%d_%d", stmt_create->subname, parallel_number, i);
                 stmt_create->subname = new_subname;
+
+				/* construct slotname for a parallel one */
+				if (slot_name_given)
+				{
+				    ListCell * 	lc = NULL;
+
+				    foreach(lc, stmt_create->options)
+				    {
+				        DefElem * defel = (DefElem *) lfirst(lc);
+				        if (strcmp(defel->defname, "slot_name") == 0)
+				        {
+				            char * slot_name_pre = defGetString(defel);
+				            if (strcmp(slot_name_pre, "none") == 0)
+				                snprintf(new_slot_name, NAMEDATALEN - 1, "%s", slot_name_pre);
+				            else
+				                snprintf(new_slot_name, NAMEDATALEN - 1, "%s_%d_%d", slot_name_pre, parallel_number, i);
+
+				            defel->arg = (Node *)makeString(new_slot_name);
+				        }
+				    }
+				}
 
                 /*
                  * Only the first sub-subscription of all parallel sub-subscriptions is allowed
@@ -1711,10 +1746,31 @@ static List * tbase_subscription_parallelization(Node * stmt, int parallel_numbe
             {
                 AlterSubscriptionStmt * stmt_alter = (AlterSubscriptionStmt *) stmt_parallel;
                 char * new_subname = palloc0(NAMEDATALEN);
+				char * new_slot_name = palloc0(NAMEDATALEN);
 
                 /* rename subname a parallel one */
                 snprintf(new_subname, NAMEDATALEN - 1, "%s_%d_%d", stmt_alter->subname, parallel_number, i);
                 stmt_alter->subname = new_subname;
+
+				/*construct a new parallel slot_name */
+				if (slot_name_given)
+				{
+				    ListCell * 	lc = NULL;
+
+				    foreach(lc, stmt_alter->options)
+				    {
+				        DefElem * defel = (DefElem *) lfirst(lc);
+				        if (strcmp(defel->defname, "slot_name") == 0)
+				        {
+				            char * slot_name_pre = defGetString(defel);
+				            if (strcmp(slot_name_pre, "none") == 0)
+				                snprintf(new_slot_name, NAMEDATALEN - 1, "%s", slot_name_pre);
+				            else
+				                snprintf(new_slot_name, NAMEDATALEN - 1, "%s_%d_%d", slot_name_pre, parallel_number, i);
+				            defel->arg = (Node *)makeString(new_slot_name);
+				        }
+				    }
+				}
                 break;
             }
             case T_DropSubscriptionStmt:
@@ -1749,6 +1805,8 @@ CreateTbaseSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
     char *temp_cold_date = NULL;
     int parallel_number = 1;
     bool copy_data = false;
+	char *slot_name = NULL;
+	bool slot_name_given = false;
 
     Relation tbase_sub_rel = NULL;
     Oid    tbase_sub_parent_oid = InvalidOid;
@@ -1767,7 +1825,9 @@ CreateTbaseSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
                                         &temp_hot_date,
                                         &temp_cold_date,
                                         &parallel_number,
-                                        &copy_data);
+										&copy_data,
+										&slot_name,
+										&slot_name_given);
 
 	/* check if parallel_number is not greater than max_logical_replication_workers parameter */
 	if (parallel_number > max_logical_replication_workers)
@@ -1856,7 +1916,7 @@ CreateTbaseSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
     } while (0);
 
     /* transform to CreateSubscriptionStmt list, and rename each item */
-    stmt_create_list = tbase_subscription_parallelization((Node *)stmt, parallel_number);
+	stmt_create_list = tbase_subscription_parallelization((Node *)stmt, parallel_number, slot_name_given);
 
     /* call CreateSubscription for each item */
     do
@@ -1945,6 +2005,8 @@ void AlterTbaseSubscription(AlterSubscriptionStmt *stmt)
 {// #lizard forgives
     int parallel_number = 0;
     bool is_all_actived = false;
+    bool slot_name_given = false;
+    char * slot_name = NULL;
 
     check_tbase_subscription_extension();
 
@@ -2001,13 +2063,19 @@ void AlterTbaseSubscription(AlterSubscriptionStmt *stmt)
         elog(ERROR, "TBase Subscription '%s' is not allowed to refresh until all its sub-subscriptions have been activated", stmt->subname);
         return;
     }
+	/* check if slot_name is given*/
+	if (stmt->kind == ALTER_SUBSCRIPTION_OPTIONS)
+	{
+	    parse_tbase_subscription_options(stmt->options, false, NULL, NULL, NULL,
+	            NULL, NULL, NULL, &slot_name, &slot_name_given);
+	}
 
     do
     {
         List    * stmt_list;
         ListCell* lc;
 
-        stmt_list = tbase_subscription_parallelization((Node *)stmt, parallel_number);
+		stmt_list = tbase_subscription_parallelization((Node *)stmt, parallel_number, slot_name_given);
 
         foreach(lc, stmt_list)
         {
@@ -2147,7 +2215,7 @@ DropTbaseSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
         ListCell * lc = NULL;
         int32 i_assert = 0;
 
-        stmt_drop_list = tbase_subscription_parallelization((Node *)stmt, parallel_number);
+		stmt_drop_list = tbase_subscription_parallelization((Node *)stmt, parallel_number, false);
 
         foreach(lc, stmt_drop_list)
         {
