@@ -484,12 +484,11 @@ AuditLoggerMain(int argc, char *argv[])
 static void
 audit_logger_MainLoop(void)
 {
-    int ret = 0;
     /*
      * Create log directory if not present; ignore errors
      */
     audit_assign_log_dir();
-    ret = mkdir(audit_log_directory, S_IRWXU);
+    mkdir(audit_log_directory, S_IRWXU);
 
     /*
      * Remember active logfile's name.    We recompute this from the reference
@@ -672,7 +671,6 @@ audit_sigIntHandler(SIGNAL_ARGS)
 
 static void audit_process_sighup(void)
 {
-    int ret=0;
     /*
      * Process any requests or signals received recently.
      */
@@ -697,7 +695,7 @@ static void audit_process_sighup(void)
             /*
              * Also, create new directory if not present; ignore errors
              */
-            ret = mkdir(audit_log_directory, S_IRWXU);
+            mkdir(audit_log_directory, S_IRWXU);
         }
 
         if (strcmp(AuditLog_filename, audit_curr_log_file_name) != 0)

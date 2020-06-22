@@ -4192,11 +4192,11 @@ static TocEntry *
 get_next_work_item(ArchiveHandle *AH, TocEntry *ready_list,
                    ParallelState *pstate)
 {
-    bool        pref_non_data = false;    /* or get from AH->ropt */
-    TocEntry   *data_te = NULL;
+//    bool        pref_non_data = false;    /* or get from AH->ropt */
+//    TocEntry   *data_te = NULL;
     TocEntry   *te;
-    int            i,
-                k;
+    int i;
+//    int k;
 
     /*
      * Bogus heuristics for pref_non_data
@@ -4253,7 +4253,7 @@ get_next_work_item(ArchiveHandle *AH, TocEntry *ready_list,
                 data_te = te;
             continue;
         }
-*、
+*/
         /* passed all tests, so this item can run */
         return te;
     }

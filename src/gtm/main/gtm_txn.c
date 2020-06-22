@@ -62,7 +62,6 @@ static GTM_TransactionHandle GTM_GlobalSessionIDToHandle(
 GlobalTransactionId ControlXid;  /* last one written to control file */
 GTM_Transactions GTMTransactions;
 #ifdef __TBASE__
-static void GTM_TxnInvalidateSeqStorageHandle(GTM_TransactionInfo *gtm_txninfo);
 #endif
 void
 GTM_InitTxnManager(void)
@@ -294,54 +293,6 @@ GTM_HandleToTransactionInfo(GTM_TransactionHandle handle)
     }
 
     return gtm_txninfo;
-}
-
-
-/*
- * Remove the given transaction info structures from the global array. If the
- * calling thread does not have enough cached structures, we in fact keep the
- * structure in the global array and also add it to the list of cached
- * structures for this thread. This ensures that the next transaction starting
- * in this thread can quickly get a free slot in the array of transactions and
- * also avoid repeated malloc/free of the structures.
- *
- * Also compute the latestCompletedXid.
- */
-static void
-GTM_RemoveTransInfoMulti(GTM_TransactionInfo *gtm_txninfo[], int txn_count)
-{
-    int ii;
-
-    /*
-     * Remove the transaction structure from the global list of open
-     * transactions
-     */
-    GTM_RWLockAcquire(&GTMTransactions.gt_TransArrayLock, GTM_LOCKMODE_WRITE);
-
-    for (ii = 0; ii < txn_count; ii++)
-    {
-        if (gtm_txninfo[ii] == NULL)
-            continue;
-
-        GTMTransactions.gt_open_transactions = gtm_list_delete(GTMTransactions.gt_open_transactions, gtm_txninfo[ii]);
-
-        if (GlobalTransactionIdIsNormal(gtm_txninfo[ii]->gti_gxid) &&
-            GlobalTransactionIdFollowsOrEquals(gtm_txninfo[ii]->gti_gxid,
-                                               GTMTransactions.gt_latestCompletedXid))
-            GTMTransactions.gt_latestCompletedXid = gtm_txninfo[ii]->gti_gxid;
-
-        elog(DEBUG1, "GTM_RemoveTransInfoMulti: removing transaction id %u, %u, handle (%d)",
-                gtm_txninfo[ii]->gti_gxid, gtm_txninfo[ii]->gti_client_id,
-                gtm_txninfo[ii]->gti_handle);
-
-        /*
-         * Now mark the transaction as aborted and mark the structure as not-in-use
-         */
-        clean_GTM_TransactionInfo(gtm_txninfo[ii]);
-    }
-
-    GTM_RWLockRelease(&GTMTransactions.gt_TransArrayLock);
-    return;
 }
 
 /*
@@ -1006,10 +957,6 @@ GTM_RollbackTransactionGXID(GlobalTransactionId gxid)
 int
 GTM_RollbackTransactionMulti(GTM_TransactionHandle txn[], int txn_count, int status[])
 {
-    int32 ret = -1;
-    GTM_TransactionInfo *gtm_txninfo[txn_count];
-    int ii;
-
     return txn_count;
 }
 
@@ -1044,12 +991,6 @@ GTM_CommitTransactionMulti(GTM_TransactionHandle txn[], int txn_count,
         int waited_xid_count, GlobalTransactionId *waited_xids,
         int status[])
 {
-    GTM_TransactionInfo *gtm_txninfo[txn_count];
-    GTM_TransactionInfo *remove_txninfo[txn_count];
-    int remove_count = 0;
-    int ii;
-    int32 ret = -1;
-
     return txn_count;
 }
 
@@ -3792,40 +3733,6 @@ int GTM_GetAllTransactions(GTM_TransactionInfo txninfo[], uint32 txncnt);
 uint32 GTM_GetAllPrepared(GlobalTransactionId gxids[], uint32 gxidcnt);
 
 #ifdef __TBASE__
-/*
- * Invalidate SEQ storage of the TXN.
- */
-void GTM_TxnInvalidateSeqStorageHandle(GTM_TransactionInfo *gtm_txninfo)
-{
-    gtm_ListCell *lc;
-    
-    if (enable_gtm_sequence_debug)
-    {
-        if (gtm_txninfo->gti_gid)
-        {
-            elog(LOG, "GTM_TxnInvalidateSeqStorageHandle for txn:%s", gtm_txninfo->gti_gid);
-        }
-    }
-    
-    gtm_foreach(lc, gtm_txninfo->gti_created_seqs)
-    {
-        GTM_SeqInvalidateHandle(gtm_lfirst(lc));
-    }
-
-    
-    gtm_foreach(lc, gtm_txninfo->gti_dropped_seqs)
-    {
-        GTM_SeqInvalidateHandle(gtm_lfirst(lc));
-    }
-
-    /*
-     * Restore altered sequences to their original state
-     */
-    gtm_foreach(lc, gtm_txninfo->gti_altered_seqs)
-    {
-        GTM_SeqInvalidateAlteredSeq(gtm_lfirst(lc));
-    }
-}
 
 void
 ProcessFinishGIDTransactionCommand(Port *myport, StringInfo message)

@@ -587,17 +587,17 @@ create_scan_plan(PlannerInfo *root, Path *best_path, int flags)
 #ifdef __TBASE__
     bool    isindexscan = false;                /* result is sorted? */
     bool    need_merge_append = false;            /* need MergeAppend */
-    bool    need_pullup_filter = false;         /* need pull up filter */
+//    bool    need_pullup_filter = false;         /* need pull up filter */
     bool    isbackward = false;                 /* indexscan is backward ?*/
     AttrNumber partkey;
-    List        *outtlist = NULL;
-    List        *qual = NULL;
+//    List        *outtlist = NULL;
+//    List        *qual = NULL;
 
     Relation relation = NULL;
     RangeTblEntry *rte;
 
-    bool    does_use_physical_tlist = false;
-    bool    need_projection = false;
+//    bool    does_use_physical_tlist = false;
+//    bool    need_projection = false;
 #endif
 
     /*
@@ -666,7 +666,7 @@ create_scan_plan(PlannerInfo *root, Path *best_path, int flags)
         {
             tlist = build_physical_tlist(root, rel);
 #ifdef __TBASE__
-            does_use_physical_tlist = true;
+//            does_use_physical_tlist = true;
 #endif
             if (tlist == NIL)
             {
@@ -751,7 +751,7 @@ create_scan_plan(PlannerInfo *root, Path *best_path, int flags)
             {
                 need_merge_append = true;
             }
-            need_pullup_filter = false;
+//            need_pullup_filter = false;
 /*
             if(need_pullup_filter)
             {

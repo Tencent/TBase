@@ -348,7 +348,7 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
 #ifdef __SUBSCRIPTION__
 	if (!found)
 	{
-		if (am_tbase_subscription_dispatch_worker())
+		if (am_tbase_subscript_dispatch_worker())
 		{
 			//elog(LOG, "no relation map entry for remote relation ID %u, ignoring this subscription", remoteid);
 			return NULL;
@@ -384,7 +384,7 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
                                  lockmode, true);
         if (!OidIsValid(relid))
 		{
-			if (am_tbase_subscription_dispatch_worker())
+			if (am_tbase_subscript_dispatch_worker())
 			{
 				/*Since the received data of the publisher's table does not have this table locally,
 				 * the log will be printed frequently, which will cause log expand.
