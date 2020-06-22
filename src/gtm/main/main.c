@@ -548,12 +548,11 @@ static int CheckTscFeatures(char *cmd)
 {
     FILE *file = popen(cmd, "r");
     int count;
-    int ret = 0;
     
     if (file == NULL)
         return false;
 
-    ret = fscanf(file, "%d", &count);
+    fscanf(file, "%d", &count);
     pclose(file);
     
     return count;
@@ -978,7 +977,6 @@ main(int argc, char *argv[])
 
     if(access(RECOVERY_CONF_NAME,F_OK) == 0)
     {
-        int ret = 0;
         recovery_pitr_mode = true;
 
         ValidXLogRecoveryCondition();
@@ -988,7 +986,7 @@ main(int argc, char *argv[])
         ControlData->state = DB_SHUTDOWNED;
         ControlDataSync(false);
 
-        ret = rename(RECOVERY_CONF_NAME,RECOVERY_CONF_NAME_DONE);
+        rename(RECOVERY_CONF_NAME,RECOVERY_CONF_NAME_DONE);
         exit(1);
     }
     else
