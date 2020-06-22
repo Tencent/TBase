@@ -9641,7 +9641,7 @@ get_agg_expr(Aggref *aggref, deparse_context *context,
     Oid            argtypes[FUNC_MAX_ARGS];
     int            nargs;
 #ifdef PGXC
-    bool        added_finalfn = false;
+//    bool        added_finalfn = false;
 #endif /* PGXC */
 
     bool        use_variadic;

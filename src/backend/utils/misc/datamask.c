@@ -789,7 +789,7 @@ DataMaskState *init_datamask_desc(Oid relid, Form_pg_attribute *attrs, Datamask 
             continue;
         }
 
-        if(datamask_check_user_and_column_in_white_list(relid, GetUserId(), attrs[attno]->attnum))
+        if(dmask_chk_usr_and_col_in_whit_list(relid, GetUserId(), attrs[attno]->attnum))
         {
             att_info->enable = false;
             continue;
