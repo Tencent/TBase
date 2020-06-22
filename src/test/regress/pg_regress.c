@@ -1586,6 +1586,7 @@ initialize_environment(void)
         /*
          * Clear out any non-C locale settings
          */
+		unsetenv("LC_ALL");
         unsetenv("LC_COLLATE");
         unsetenv("LC_CTYPE");
         unsetenv("LC_MONETARY");
@@ -1625,6 +1626,7 @@ initialize_environment(void)
             unsetenv("PGCLIENTENCODING");
     
 #else
+        unsetenv("LC_ALL");
         putenv("LC_COLLATE=en_US.utf8");
         putenv("LC_CTYPE=en_US.utf8");
         putenv("LC_MONETARY=en_US.utf8");
