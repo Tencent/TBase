@@ -1351,6 +1351,7 @@ int add_datanodeSlave(char *name, char *host, int port, int pooler, char *dir,
     int kk;
     bool wal;
     int size;
+    char *__p__ = NULL;
 
     if (walDir && (strcasecmp(walDir, "none") != 0))
         wal = true;
@@ -1443,7 +1444,7 @@ int add_datanodeSlave(char *name, char *host, int port, int pooler, char *dir,
                 sval(VAR_pgxcOwner), aval(VAR_datanodePgHbaEntries)[kk]);
     }
 
-    char *__p__ = getIpAddress(host);
+    __p__ = getIpAddress(host);
     fprintf(f,
             "host replication %s %s/32 trust\n"
             "# End of addition ===============================\n",
