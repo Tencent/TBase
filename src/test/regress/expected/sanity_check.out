@@ -122,6 +122,7 @@ pg_collation|t
 pg_constraint|t
 pg_conversion|t
 pg_data_mask_map|t
+pg_data_mask_user|t
 pg_database|t
 pg_db_role_setting|t
 pg_default_acl|t
@@ -150,6 +151,7 @@ pg_policy|t
 pg_proc|t
 pg_publication|t
 pg_publication_rel|t
+pg_publication_shard|t
 pg_range|t
 pg_replication_origin|t
 pg_rewrite|t
@@ -162,10 +164,14 @@ pg_statistic|t
 pg_statistic_ext|t
 pg_subscription|t
 pg_subscription_rel|t
+pg_subscription_shard|t
+pg_subscription_table|t
 pg_tablespace|t
 pg_transform|t
 pg_transparent_crypt_policy_algorithm|t
 pg_transparent_crypt_policy_map|t
+pg_transparent_crypt_policy_schema|t
+pg_transparent_crypt_policy_tablespace|t
 pg_trigger|t
 pg_ts_config|t
 pg_ts_config_map|t
@@ -228,12 +234,7 @@ WHERE relhasoids
     AND NOT EXISTS (SELECT 1 FROM pg_index i WHERE indrelid = c.oid
                     AND indkey[0] = -2 AND indnatts = 1
                     AND indisunique AND indimmediate);
-        relname        |  nspname   
------------------------+------------
- pg_audit_stmt_conf    | pg_catalog
- pg_audit_user_conf    | pg_catalog
- pg_audit_obj_conf     | pg_catalog
- pg_audit_obj_def_opts | pg_catalog
- pg_audit_fga_conf     | pg_catalog
-(5 rows)
+ relname | nspname 
+---------+---------
+(0 rows)
 
