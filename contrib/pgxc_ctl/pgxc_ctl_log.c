@@ -300,11 +300,12 @@ void lockLogFile(void)
     }
     if (lockStack == 0)
     {
+    	int file_no;
         lock1.l_type = F_WRLCK;
         lock1.l_start = 0;
         lock1.l_len = 0;
         lock1.l_whence = SEEK_SET;
-        int file_no=fileno(logFile);
+        file_no=fileno(logFile);
         if(file_no != -1)
             fcntl(file_no, F_SETLKW, &lock1);
     }
@@ -326,11 +327,12 @@ void unlockLogFile(void)
     }
     if (lockStack == 0)
     {
+    	int file_no;
         lock1.l_type = F_UNLCK;
         lock1.l_start = 0;
         lock1.l_len = 0;
         lock1.l_whence = SEEK_SET;
-        int file_no=fileno(logFile);
+        file_no=fileno(logFile);
         if(file_no != -1)
             fcntl(file_no, F_SETLKW, &lock1);
     }

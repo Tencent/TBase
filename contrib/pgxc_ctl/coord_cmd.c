@@ -1652,6 +1652,7 @@ int add_coordinatorSlave(char *name, char *host, int port, int pooler_port, char
     char pooler_s[MAXTOKEN+1];
     int kk;
     int size;
+    char *__p__ = NULL;
 
     /* Check if the name is valid coordinator */
     if ((idx = coordIdx(name)) < 0)
@@ -1736,7 +1737,7 @@ int add_coordinatorSlave(char *name, char *host, int port, int pooler_port, char
                 sval(VAR_pgxcOwner), aval(VAR_coordPgHbaEntries)[kk]);
     }
 
-    char *__p__=getIpAddress(host);
+    __p__=getIpAddress(host);
     fprintf(f,
             "host replication %s %s/32 trust\n"
             "# End of addition ===============================\n",

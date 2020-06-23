@@ -5,12 +5,6 @@
 # this limits the number of connections needed to run the tests.
 # ----------
 
-#run audit fga
-test: audit_fga
-
-#run mls
-test: mls_check
-
 # run oracle compatibility and audit
 test: oracle audit
 

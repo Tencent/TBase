@@ -426,7 +426,6 @@ int main(int argc, char *argv[])
     char *configuration = NULL;
     char *infile = NULL;
     char *outfile = NULL;
-    char *verbose = NULL;
     int version_opt = 0;
     char *logdir = NULL;
     char *logfile = NULL;
@@ -471,7 +470,6 @@ int main(int argc, char *argv[])
         switch(c)
         {
             case 1:
-                verbose = "n";
                 break;
             case 2:
                 if (home)
@@ -489,7 +487,6 @@ int main(int argc, char *argv[])
                 outfile = strdup(optarg);
                 break;
             case 'v':
-                verbose = "y";
                 break;
             case 'V':
                 version_opt = 1;
