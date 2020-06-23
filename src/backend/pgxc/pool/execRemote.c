@@ -11500,9 +11500,11 @@ get_success_nodes(int node_count, PGXCNodeHandle **handles, char node_type, Stri
         {
             if (failednodes->len == 0)
                 appendStringInfo(failednodes, "Error message received from nodes:");
+#ifndef _PG_REGRESS_
             appendStringInfo(failednodes, " %s#%d",
                 (node_type == PGXC_NODE_COORDINATOR ? "coordinator" : "datanode"),
                 nodenum + 1);
+#endif
         }
     }
     return success_nodes;

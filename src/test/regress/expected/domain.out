@@ -49,7 +49,7 @@ INSERT INTO basictest values ('88', 'haha', 'short', '123.1212');    -- Truncate
 -- Test copy
 COPY basictest (testvarchar) FROM stdin; -- fail
 ERROR:  value too long for type character varying(5)
-CONTEXT:  COPY basictest, line 1, column testvarchar: "notsoshorttext"
+CONTEXT:  COPY basictest, line 1, column testvarchar: "notsoshorttext", nodetype:1(1:cn,0:dn)
 COPY basictest (testvarchar) FROM stdin;
 select * from basictest order by 1, 2, 3, 4;
  testint4 | testtext | testvarchar | testnumeric 
@@ -144,7 +144,7 @@ select array_dims(testint4arr), array_dims(testchar4arr) from domarrtest order b
 COPY domarrtest FROM stdin;
 COPY domarrtest FROM stdin;	-- fail
 ERROR:  value too long for type character varying(4)
-CONTEXT:  COPY domarrtest, line 1, column testchar4arr: "{qwerty,w,e}"
+CONTEXT:  COPY domarrtest, line 1, column testchar4arr: "{qwerty,w,e}", nodetype:1(1:cn,0:dn)
 select * from domarrtest order by 1, 2;
   testint4arr  |    testchar4arr     
 ---------------+---------------------
@@ -210,7 +210,7 @@ ERROR:  duplicate key value violates unique constraint "dcomptable_d1_key"
 DETAIL:  Key (d1)=((public.comptype){"(1,2)"}) already exists.
 insert into dcomptable (d1[1]) values(row(9,10));
 insert into dcomptable (d1[1].r) values(11);
-select * from dcomptable;
+select * from dcomptable order by 1;
          d1         
 --------------------
  {"(1,2)"}
@@ -220,18 +220,18 @@ select * from dcomptable;
  {"(11,)"}
 (5 rows)
 
-select d1[2], d1[1].r, d1[1].i from dcomptable;
+select d1[2], d1[1].r, d1[1].i from dcomptable order by 1,2,3;
    d1   | r  | i  
 --------+----+----
-        |  1 |  2
  (5,6)  |  3 |  4
  (9,10) |  7 |  8
+        |  1 |  2
         |  9 | 10
         | 11 |   
 (5 rows)
 
 update dcomptable set d1[2] = row(d1[2].i, d1[2].r);
-select * from dcomptable;
+select * from dcomptable order by 1;
          d1         
 --------------------
  {"(1,2)","(,)"}
@@ -242,14 +242,14 @@ select * from dcomptable;
 (5 rows)
 
 update dcomptable set d1[1].r = d1[1].r + 1 where d1[1].i > 0;
-select * from dcomptable;
+select * from dcomptable order by 1;
          d1         
 --------------------
- {"(11,)","(,)"}
  {"(2,2)","(,)"}
  {"(4,4)","(6,5)"}
  {"(8,8)","(10,9)"}
  {"(10,10)","(,)"}
+ {"(11,)","(,)"}
 (5 rows)
 
 alter domain dcomptypea add constraint c1 check (value[1].r <= value[1].i);
@@ -268,28 +268,28 @@ update dcomptable set d1[1].r = d1[1].r + 1 where d1[1].i > 0;  -- fail
 ERROR:  value for domain dcomptypea violates check constraint "c1"
 update dcomptable set d1[1].r = d1[1].r - 1, d1[1].i = d1[1].i + 1
   where d1[1].i > 0;
-select * from dcomptable;
+select * from dcomptable order by 1;
          d1         
 --------------------
- {"(11,)","(,)"}
- {"(99,)"}
+ {"(0,3)"}
  {"(1,3)","(,)"}
  {"(3,5)","(6,5)"}
  {"(7,9)","(10,9)"}
  {"(9,11)","(,)"}
- {"(0,3)"}
+ {"(11,)","(,)"}
  {"(98,101)"}
+ {"(99,)"}
 (8 rows)
 
 explain (verbose, costs off)
   update dcomptable set d1[1].r = d1[1].r - 1, d1[1].i = d1[1].i + 1
     where d1[1].i > 0;
-                                                      QUERY PLAN                                                      
-----------------------------------------------------------------------------------------------------------------------
+                                                          QUERY PLAN                                                           
+-------------------------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on any (datanode_1,datanode_2)
    ->  Update on public.dcomptable
          ->  Seq Scan on public.dcomptable
-               Output: (d1[1].r := (d1[1].r - '1'::double precision))[1].i := (d1[1].i + '1'::double precision), ctid
+               Output: (d1[1].r := (d1[1].r - '1'::double precision))[1].i := (d1[1].i + '1'::double precision), ctid, shardid
                Filter: (dcomptable.d1[1].i > '0'::double precision)
 (5 rows)
 
@@ -346,7 +346,7 @@ ERROR:  null value in column "col3" violates not-null constraint
 DETAIL:  Failing row contains (a, b, null, d, d).
 COPY nulltest FROM stdin; --fail
 ERROR:  domain dcheck does not allow null values
-CONTEXT:  COPY nulltest, line 1, column col5: null input
+CONTEXT:  COPY nulltest, line 1, column col5: null input, nodetype:1(1:cn,0:dn)
 -- Last row is bad
 COPY nulltest FROM stdin;
 ERROR:  new row for relation "nulltest" violates check constraint "nulltest_col5_check"

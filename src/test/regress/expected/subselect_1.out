@@ -935,13 +935,13 @@ select (select q from
           union all
           select 4,5,6.0 where f1 <= 0
          ) q )
-from int4_tbl;
+from int4_tbl order by 1;
      q     
 -----------
- (4,5,6.0)
+ (1,2,3)
  (1,2,3)
  (4,5,6.0)
- (1,2,3)
+ (4,5,6.0)
  (4,5,6.0)
 (5 rows)
 

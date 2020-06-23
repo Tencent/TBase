@@ -996,12 +996,12 @@ create rule r1 as on update to rules_src do also
 update rules_src set f2 = f2 + 1;
 update rules_src set f2 = f2 * 10;
 select * from rules_src;
-select * from rules_log;
+select * from rules_log order by 1,2,3;
 create rule r2 as on update to rules_src do also
   values(old.*, 'old'), (new.*, 'new');
 update rules_src set f2 = f2 / 10;
 select * from rules_src;
-select * from rules_log;
+select * from rules_log order by 1,2,3;
 create rule r3 as on delete to rules_src do notify rules_src_deletion;
 \d+ rules_src
 

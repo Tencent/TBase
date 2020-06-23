@@ -1671,8 +1671,8 @@ DELETE FROM t1 WHERE f_leak(b) RETURNING oid, *, t1;
  oid | a |   b    |     t1     
 -----+---+--------+------------
  202 | 2 | bcdbcd | (2,bcdbcd)
- 204 | 4 | defdef | (4,defdef)
  302 | 2 | yyyyyy | (2,yyyyyy)
+ 204 | 4 | defdef | (4,defdef)
 (3 rows)
 
 --
@@ -2302,11 +2302,11 @@ UPDATE x1 SET b = b || '_updt' WHERE f_leak(b) RETURNING *;
  a |       b       |         c         
 ---+---------------+-------------------
  2 | bcd_updt_updt | regress_rls_bob
- 6 | fgh_updt_updt | regress_rls_bob
- 8 | fgh_updt_updt | regress_rls_carol
  3 | cde_updt      | regress_rls_carol
  7 | fgh_updt      | regress_rls_carol
  4 | def_updt_updt | regress_rls_carol
+ 6 | fgh_updt_updt | regress_rls_bob
+ 8 | fgh_updt_updt | regress_rls_carol
 (6 rows)
 
 DELETE FROM x1 WHERE f_leak(b) RETURNING *;

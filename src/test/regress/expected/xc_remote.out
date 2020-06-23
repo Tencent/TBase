@@ -62,18 +62,21 @@ SELECT a, b FROM rel_rep WHERE a <= currval('seqtest') - 15 ORDER BY 1,2;
  1 |  1
  1 | 12
 (2 rows)
+
 SELECT a, b FROM rel_hash WHERE a <= currval('seqtest') - 15 ORDER BY 1,2;
  a | b  
 ---+----
  1 |  1
  1 | 17
 (2 rows)
+
 SELECT a, b FROM rel_rr WHERE a <= currval('seqtest') - 15 ORDER BY 1,2;
  a | b  
 ---+----
  1 |  1
  1 | 22
 (2 rows)
+
 -- Non Coordinator quals
 SELECT a, b FROM rel_rep WHERE a <= func_immutable(5) ORDER BY 1,2;
  a | b  
@@ -318,7 +321,6 @@ DROP SEQUENCE seqtest5;
 -- Coordinator quals
 CREATE SEQUENCE seqtest7 START 1;
 DELETE FROM rel_rep WHERE a < nextval('seqtest7') + 1;
-ERROR:  Write to replicated table returned different results from the Datanodes
 DELETE FROM rel_rr WHERE a < nextval('seqtest7') - 3;
 DELETE FROM rel_hash WHERE a < nextval('seqtest7') - 3;
 -- Plain cases
@@ -372,22 +374,24 @@ $$begin return 3;end $$ language plpgsql;
 \set stmt 'update xcrem_employee E set salary = salary + salary + 0.3 * bonus WHERE SALARY > ( SELECT AVG(SALARY) FROM xcrem_employee WHERE SUBSTRING(E.WORKDEPT,1,1) = SUBSTRING(WORKDEPT, 1,1) )'
 :stmt;
 :EXP :stmt;
-                                                                                                          QUERY PLAN                                                                                                          
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                                                      QUERY PLAN                                                                                                                                                                                       
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all
    ->  Update on public.xcrem_employee e
          ->  Seq Scan on public.xcrem_employee e
-               Output: e.empno, e.firstname, e.midinit, e.lastname, e.workdept, e.phoneno, e.hiredate, e.job, e.edlevel, e.sex, e.birthdate, ((e.salary + e.salary) + (0.3 * e.bonus)), e.bonus, e.comm, e.xc_node_id, e.ctid
+               Output: e.empno, e.firstname, e.midinit, e.lastname, e.workdept, e.phoneno, e.hiredate, e.job, e.edlevel, e.sex, e.birthdate, ((e.salary + e.salary) + (0.3 * e.bonus)), e.bonus, e.comm, e.xc_node_id, e.ctid, e.shardid
                Filter: (e.salary > (SubPlan 1))
                SubPlan 1
-                 ->  Aggregate
+                 ->  Finalize Aggregate
                        Output: avg(xcrem_employee.salary)
                        ->  Remote Subquery Scan on all
-                             Output: xcrem_employee.salary
-                             ->  Seq Scan on public.xcrem_employee
-                                   Output: xcrem_employee.salary
-                                   Filter: ("substring"((e.workdept)::text, 1, 1) = "substring"((xcrem_employee.workdept)::text, 1, 1))
-(13 rows)
+                             Output: PARTIAL avg(xcrem_employee.salary)
+                             ->  Partial Aggregate
+                                   Output: PARTIAL avg(xcrem_employee.salary)
+                                   ->  Seq Scan on public.xcrem_employee
+                                         Output: xcrem_employee.empno, xcrem_employee.firstname, xcrem_employee.midinit, xcrem_employee.lastname, xcrem_employee.workdept, xcrem_employee.phoneno, xcrem_employee.hiredate, xcrem_employee.job, xcrem_employee.edlevel, xcrem_employee.sex, xcrem_employee.birthdate, xcrem_employee.salary, xcrem_employee.bonus, xcrem_employee.comm
+                                         Filter: ("substring"((e.workdept)::text, 1, 1) = "substring"((xcrem_employee.workdept)::text, 1, 1))
+(15 rows)
 
 :SEL;
  empno  | edlevel | lastname  |  salary   |  bonus  
@@ -413,22 +417,24 @@ $$begin return 3;end $$ language plpgsql;
 \set stmt 'update xcrem_employee E set bonus = bonus + salary* 0.3 WHERE EDLEVEL > ( SELECT AVG(EDLEVEL) FROM xcrem_employee WHERE WORKDEPT = E.WORKDEPT )'
 :stmt;
 :EXP :stmt;
-                                                                                                    QUERY PLAN                                                                                                    
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                                                      QUERY PLAN                                                                                                                                                                                       
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all
    ->  Update on public.xcrem_employee e
          ->  Seq Scan on public.xcrem_employee e
-               Output: e.empno, e.firstname, e.midinit, e.lastname, e.workdept, e.phoneno, e.hiredate, e.job, e.edlevel, e.sex, e.birthdate, e.salary, (e.bonus + (e.salary * 0.3)), e.comm, e.xc_node_id, e.ctid
+               Output: e.empno, e.firstname, e.midinit, e.lastname, e.workdept, e.phoneno, e.hiredate, e.job, e.edlevel, e.sex, e.birthdate, e.salary, (e.bonus + (e.salary * 0.3)), e.comm, e.xc_node_id, e.ctid, e.shardid
                Filter: ((e.edlevel)::numeric > (SubPlan 1))
                SubPlan 1
-                 ->  Aggregate
+                 ->  Finalize Aggregate
                        Output: avg(xcrem_employee.edlevel)
                        ->  Remote Subquery Scan on all
-                             Output: xcrem_employee.edlevel
-                             ->  Seq Scan on public.xcrem_employee
-                                   Output: xcrem_employee.edlevel
-                                   Filter: (xcrem_employee.workdept = e.workdept)
-(13 rows)
+                             Output: PARTIAL avg(xcrem_employee.edlevel)
+                             ->  Partial Aggregate
+                                   Output: PARTIAL avg(xcrem_employee.edlevel)
+                                   ->  Seq Scan on public.xcrem_employee
+                                         Output: xcrem_employee.empno, xcrem_employee.firstname, xcrem_employee.midinit, xcrem_employee.lastname, xcrem_employee.workdept, xcrem_employee.phoneno, xcrem_employee.hiredate, xcrem_employee.job, xcrem_employee.edlevel, xcrem_employee.sex, xcrem_employee.birthdate, xcrem_employee.salary, xcrem_employee.bonus, xcrem_employee.comm
+                                         Filter: (xcrem_employee.workdept = e.workdept)
+(15 rows)
 
 :SEL;
  empno  | edlevel | lastname  |  salary   |  bonus   
@@ -454,12 +460,12 @@ $$begin return 3;end $$ language plpgsql;
 \set stmt 'update xcrem_employee E set lastname = lastname || ''suf'' WHERE EDLEVEL > volatile_func(2)'
 :stmt;
 :EXP :stmt;
-                                                                                      QUERY PLAN                                                                                      
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                          QUERY PLAN                                                                                           
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all
    ->  Update on public.xcrem_employee e
          ->  Seq Scan on public.xcrem_employee e
-               Output: empno, firstname, midinit, ((lastname)::text || 'suf'::text), workdept, phoneno, hiredate, job, edlevel, sex, birthdate, salary, bonus, comm, xc_node_id, ctid
+               Output: empno, firstname, midinit, ((lastname)::text || 'suf'::text), workdept, phoneno, hiredate, job, edlevel, sex, birthdate, salary, bonus, comm, xc_node_id, ctid, shardid
                Filter: (e.edlevel > volatile_func(2))
 (5 rows)
 
@@ -487,12 +493,12 @@ $$begin return 3;end $$ language plpgsql;
 \set stmt 'update xcrem_employee E set lastname = lastname || ''suf'', edlevel = edlevel+1  WHERE EDLEVEL > volatile_func(2)'
 :stmt;
 :EXP :stmt;
-                                                                                         QUERY PLAN                                                                                         
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                             QUERY PLAN                                                                                              
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all
    ->  Update on public.xcrem_employee e
          ->  Seq Scan on public.xcrem_employee e
-               Output: empno, firstname, midinit, ((lastname)::text || 'suf'::text), workdept, phoneno, hiredate, job, (edlevel + 1), sex, birthdate, salary, bonus, comm, xc_node_id, ctid
+               Output: empno, firstname, midinit, ((lastname)::text || 'suf'::text), workdept, phoneno, hiredate, job, (edlevel + 1), sex, birthdate, salary, bonus, comm, xc_node_id, ctid, shardid
                Filter: (e.edlevel > volatile_func(2))
 (5 rows)
 
@@ -524,12 +530,12 @@ insert into xcrem_employee select * from xcrem_temptable;
 \set stmt 'DELETE FROM xcrem_employee E WHERE EDLEVEL > volatile_func(2)'
 :stmt;
 :EXP :stmt;
-                      QUERY PLAN                      
-------------------------------------------------------
+                       QUERY PLAN                       
+--------------------------------------------------------
  Remote Subquery Scan on all
    ->  Delete on public.xcrem_employee e
          ->  Seq Scan on public.xcrem_employee e
-               Output: xc_node_id, ctid, empno
+               Output: xc_node_id, ctid, shardid, empno
                Filter: (e.edlevel > volatile_func(2))
 (5 rows)
 
@@ -543,22 +549,24 @@ insert into xcrem_employee select * from xcrem_temptable;
 \set stmt 'DELETE FROM xcrem_employee E WHERE EDLEVEL > ( SELECT AVG(EDLEVEL) FROM xcrem_employee WHERE WORKDEPT = E.WORKDEPT )'
 :stmt;
 :EXP :stmt;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
+                                                                                                                                                                                      QUERY PLAN                                                                                                                                                                                       
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all
    ->  Delete on public.xcrem_employee e
          ->  Seq Scan on public.xcrem_employee e
-               Output: e.xc_node_id, e.ctid, e.empno
+               Output: e.xc_node_id, e.ctid, e.shardid, e.empno
                Filter: ((e.edlevel)::numeric > (SubPlan 1))
                SubPlan 1
-                 ->  Aggregate
+                 ->  Finalize Aggregate
                        Output: avg(xcrem_employee.edlevel)
                        ->  Remote Subquery Scan on all
-                             Output: xcrem_employee.edlevel
-                             ->  Seq Scan on public.xcrem_employee
-                                   Output: xcrem_employee.edlevel
-                                   Filter: (xcrem_employee.workdept = e.workdept)
-(13 rows)
+                             Output: PARTIAL avg(xcrem_employee.edlevel)
+                             ->  Partial Aggregate
+                                   Output: PARTIAL avg(xcrem_employee.edlevel)
+                                   ->  Seq Scan on public.xcrem_employee
+                                         Output: xcrem_employee.empno, xcrem_employee.firstname, xcrem_employee.midinit, xcrem_employee.lastname, xcrem_employee.workdept, xcrem_employee.phoneno, xcrem_employee.hiredate, xcrem_employee.job, xcrem_employee.edlevel, xcrem_employee.sex, xcrem_employee.birthdate, xcrem_employee.salary, xcrem_employee.bonus, xcrem_employee.comm
+                                         Filter: (xcrem_employee.workdept = e.workdept)
+(15 rows)
 
 :SEL;
  empno  | edlevel | lastname  |  salary  | bonus  
@@ -581,22 +589,24 @@ insert into xcrem_employee select * from xcrem_temptable;
 \set stmt 'DELETE FROM xcrem_employee E WHERE SALARY > ( SELECT AVG(SALARY) FROM xcrem_employee WHERE SUBSTRING(E.WORKDEPT,1,1) = SUBSTRING(WORKDEPT, 1,1) )'
 :stmt;
 :EXP :stmt;
-                                                               QUERY PLAN                                                               
-----------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                                                      QUERY PLAN                                                                                                                                                                                       
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all
    ->  Delete on public.xcrem_employee e
          ->  Seq Scan on public.xcrem_employee e
-               Output: e.xc_node_id, e.ctid, e.empno
+               Output: e.xc_node_id, e.ctid, e.shardid, e.empno
                Filter: (e.salary > (SubPlan 1))
                SubPlan 1
-                 ->  Aggregate
+                 ->  Finalize Aggregate
                        Output: avg(xcrem_employee.salary)
                        ->  Remote Subquery Scan on all
-                             Output: xcrem_employee.salary
-                             ->  Seq Scan on public.xcrem_employee
-                                   Output: xcrem_employee.salary
-                                   Filter: ("substring"((e.workdept)::text, 1, 1) = "substring"((xcrem_employee.workdept)::text, 1, 1))
-(13 rows)
+                             Output: PARTIAL avg(xcrem_employee.salary)
+                             ->  Partial Aggregate
+                                   Output: PARTIAL avg(xcrem_employee.salary)
+                                   ->  Seq Scan on public.xcrem_employee
+                                         Output: xcrem_employee.empno, xcrem_employee.firstname, xcrem_employee.midinit, xcrem_employee.lastname, xcrem_employee.workdept, xcrem_employee.phoneno, xcrem_employee.hiredate, xcrem_employee.job, xcrem_employee.edlevel, xcrem_employee.sex, xcrem_employee.birthdate, xcrem_employee.salary, xcrem_employee.bonus, xcrem_employee.comm
+                                         Filter: ("substring"((e.workdept)::text, 1, 1) = "substring"((xcrem_employee.workdept)::text, 1, 1))
+(15 rows)
 
 :SEL;
  empno  | edlevel | lastname  |  salary  | bonus  

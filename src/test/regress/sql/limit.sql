@@ -33,13 +33,13 @@ SELECT ''::text AS five, unique1, unique2, stringu1
 
 -- Test null limit and offset.  The planner would discard a simple null
 -- constant, so to ensure executor is exercised, do this:
-select * from int8_tbl limit (case when random() < 0.5 then null::bigint end);
-select * from int8_tbl offset (case when random() < 0.5 then null::bigint end);
+select * from int8_tbl order by 1,2 limit (case when random() < 0.5 then null::bigint end);
+select * from int8_tbl order by 1,2 offset (case when random() < 0.5 then null::bigint end);
 
 -- Test assorted cases involving backwards fetch from a LIMIT plan node
 begin;
 
-declare c1 scroll cursor for select * from int8_tbl limit 10;
+declare c1 scroll cursor for select * from int8_tbl order by 1,2 limit 10;
 fetch all in c1;
 fetch 1 in c1;
 fetch backward 1 in c1;
@@ -47,7 +47,7 @@ fetch backward all in c1;
 fetch backward 1 in c1;
 fetch all in c1;
 
-declare c2 scroll cursor for select * from int8_tbl limit 3;
+declare c2 scroll cursor for select * from int8_tbl order by 1,2 limit 3;
 fetch all in c2;
 fetch 1 in c2;
 fetch backward 1 in c2;
@@ -55,7 +55,7 @@ fetch backward all in c2;
 fetch backward 1 in c2;
 fetch all in c2;
 
-declare c3 scroll cursor for select * from int8_tbl offset 3;
+declare c3 scroll cursor for select * from int8_tbl order by 1,2 offset 3;
 fetch all in c3;
 fetch 1 in c3;
 fetch backward 1 in c3;
@@ -63,7 +63,7 @@ fetch backward all in c3;
 fetch backward 1 in c3;
 fetch all in c3;
 
-declare c4 scroll cursor for select * from int8_tbl offset 10;
+declare c4 scroll cursor for select * from int8_tbl order by 1,2 offset 10;
 fetch all in c4;
 fetch 1 in c4;
 fetch backward 1 in c4;

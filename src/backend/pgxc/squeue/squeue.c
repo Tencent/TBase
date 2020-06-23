@@ -1908,6 +1908,7 @@ SharedQueueRead(SharedQueue squeue, int consumerIdx,
              * the queue so we should hold it for now. We should prevent queue
              * unbound in between.
              */
+#ifdef __PG_REGRESS__
             ereport(ERROR,
                     (errcode(ERRCODE_PRODUCER_ERROR),
                      errmsg("Failed to read from SQueue %s, "
@@ -1915,6 +1916,13 @@ SharedQueueRead(SharedQueue squeue, int consumerIdx,
                          "CONSUMER_ERROR set, err_msg %s",
                          squeue->sq_key,
                          cstate->cs_node, cstate->cs_pid, cstate->cs_status, squeue->err_msg)));
+#else
+			ereport(ERROR,
+					(errcode(ERRCODE_PRODUCER_ERROR),
+					 errmsg("Failed to read from SQueue, "
+						 "CONSUMER_ERROR set, err_msg %s",
+						 squeue->err_msg)));
+#endif
         }
 #ifdef __TBASE__
 		if (squeue->sender_destroy)

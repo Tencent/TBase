@@ -495,7 +495,7 @@ select (select q from
           union all
           select 4,5,6.0 where f1 <= 0
          ) q )
-from int4_tbl;
+from int4_tbl order by 1;
 
 --
 -- Check that volatile quals aren't pushed down past a DISTINCT:

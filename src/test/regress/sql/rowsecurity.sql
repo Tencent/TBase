@@ -1048,7 +1048,7 @@ ALTER TABLE t1 ENABLE ROW LEVEL SECURITY;
 
 -- Prepare as regress_rls_bob
 SET ROLE regress_rls_bob;
-PREPARE role_inval AS SELECT * FROM t1 order by 1;
+PREPARE role_inval AS SELECT * FROM t1;
 -- Check plan
 EXPLAIN (COSTS OFF) EXECUTE role_inval;
 
