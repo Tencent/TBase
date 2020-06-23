@@ -223,24 +223,24 @@ ALTER TABLE T ALTER COLUMN c_bpchar    DROP DEFAULT,
               ALTER COLUMN c_timestamp DROP DEFAULT,
               ALTER COLUMN c_array     DROP DEFAULT;
 INSERT INTO T VALUES (15), (16);
-SELECT * FROM T;
+SELECT * FROM T order by 1;
  pk | c_int | c_bpchar |    c_text    |   c_date   |       c_timestamp        |            c_array            
 ----+-------+----------+--------------+------------+--------------------------+-------------------------------
   1 |     6 |          |              |            |                          | 
   2 |     6 |          |              |            |                          | 
-  5 |     8 | abc      | abcdef       |            |                          | 
-  6 |     8 | abc      | abcdef       |            |                          | 
-  8 |     8 | abc      | abcdefghijkl | 2016-06-12 |                          | 
-  9 |     8 | abc      | abcdefghijkl | 2009-12-28 | Sun Sep 11 00:00:00 2016 | 
- 12 |     8 | abc      | abcdefghijkl | 2009-12-28 | Sat Jan 30 00:00:00 1971 | {This,is,abcd,the,real,world}
- 13 |       | abc      | abcdefghijkl | 2009-12-28 | Sat Jan 30 00:00:00 1971 | {This,is,a,fantasy}
- 15 |       |          |              |            |                          | 
   3 |     8 | abcd     |              |            |                          | 
   4 |     8 | abcd     |              |            |                          | 
-  7 |     8 | abc      | abcdefghijkl | 2016-06-12 |                          | 
- 10 |     8 | abc      | abcdefghijkl | 2009-12-28 | Sun Sep 11 00:00:00 2016 | 
- 11 |     8 | abc      | abcdefghijkl | 2009-12-28 | Sat Jan 30 00:00:00 1971 | {This,is,abcd,the,real,world}
- 14 |       | abc      | abcdefghijkl | 2009-12-28 | Sat Jan 30 00:00:00 1971 | {This,is,a,fantasy}
+  5 |     8 | abc      | abcdef       |            |                          | 
+  6 |     8 | abc      | abcdef       |            |                          | 
+  7 |     8 | abc      | abcdefghijkl | 06-12-2016 |                          | 
+  8 |     8 | abc      | abcdefghijkl | 06-12-2016 |                          | 
+  9 |     8 | abc      | abcdefghijkl | 12-28-2009 | Sun Sep 11 00:00:00 2016 | 
+ 10 |     8 | abc      | abcdefghijkl | 12-28-2009 | Sun Sep 11 00:00:00 2016 | 
+ 11 |     8 | abc      | abcdefghijkl | 12-28-2009 | Sat Jan 30 00:00:00 1971 | {This,is,abcd,the,real,world}
+ 12 |     8 | abc      | abcdefghijkl | 12-28-2009 | Sat Jan 30 00:00:00 1971 | {This,is,abcd,the,real,world}
+ 13 |       | abc      | abcdefghijkl | 12-28-2009 | Sat Jan 30 00:00:00 1971 | {This,is,a,fantasy}
+ 14 |       | abc      | abcdefghijkl | 12-28-2009 | Sat Jan 30 00:00:00 1971 | {This,is,a,fantasy}
+ 15 |       |          |              |            |                          | 
  16 |       |          |              |            |                          | 
 (16 rows)
 

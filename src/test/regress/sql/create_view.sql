@@ -513,19 +513,19 @@ rollback;
 
 create type nestedcomposite as (x int8_tbl);
 create view tt15v as select row(i)::nestedcomposite from int8_tbl i;
-select * from tt15v;
+select * from tt15v order by 1;
 select pg_get_viewdef('tt15v', true);
-select row(i.*::int8_tbl)::nestedcomposite from int8_tbl i;
+select row(i.*::int8_tbl)::nestedcomposite from int8_tbl i order by 1;
 
 create view tt16v as select * from int8_tbl i, lateral(values(i)) ss;
-select * from tt16v;
+select * from tt16v order by 1,2,3;
 select pg_get_viewdef('tt16v', true);
-select * from int8_tbl i, lateral(values(i.*::int8_tbl)) ss;
+select * from int8_tbl i, lateral(values(i.*::int8_tbl)) ss order by 1,2,3;
 
 create view tt17v as select * from int8_tbl i where i in (values(i));
-select * from tt17v;
+select * from tt17v order by 1,2;
 select pg_get_viewdef('tt17v', true);
-select * from int8_tbl i where i.* in (values(i.*::int8_tbl));
+select * from int8_tbl i where i.* in (values(i.*::int8_tbl)) order by 1,2;
 
 -- check unique-ification of overlength names
 

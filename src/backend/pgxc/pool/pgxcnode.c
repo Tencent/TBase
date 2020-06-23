@@ -4635,9 +4635,9 @@ pgxc_node_set_query(PGXCNodeHandle *handle, const char *set_query)
 
         if (msgtype == 'E')    /* ErrorResponse */
         {
-		    PGXCNodeHandleError(handle, msg, msglen);
-            PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_ERROR_FATAL);
-            elog(ERROR,"pgxc_node_set_query: %s",handle->error);
+                        PGXCNodeHandleError(handle, msg, msglen);
+                        PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_ERROR_FATAL);
+                        elog(ERROR,"pgxc_node_set_query: %s",handle->error);
             break;
         }
 
@@ -4915,6 +4915,13 @@ PGXCNodeHandleError(PGXCNodeHandle *handle, char *msg_body, int len)
 
     message_combine = palloc(MAX_ERROR_MSG_LENGTH);
 
+#ifdef _PG_REGRESS_
+    snprintf(message_combine, MAX_ERROR_MSG_LENGTH,
+             "message:%s,detail:%s,hint:%s ",
+             message ? message : "",
+             detail  ? detail  : "",
+             hint ? hint: "");
+#else
     snprintf(message_combine, MAX_ERROR_MSG_LENGTH,
              "nodename:%s,backend_pid:%d,message:%s,detail:%s,hint:%s ",
              handle->nodename,
@@ -4922,6 +4929,7 @@ PGXCNodeHandleError(PGXCNodeHandle *handle, char *msg_body, int len)
              message ? message : "",
              detail  ? detail  : "",
              hint ? hint: "");
+#endif
     add_error_message(handle,message_combine);
 
     pfree(message_combine);

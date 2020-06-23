@@ -371,7 +371,7 @@ copy t_drop from stdin;
 4002	'2019-08-01'	'lllllllll'
 4003	'2019-08-01'	'lllllllll'
 \.
-copy (select * from t_drop where f2 = timestamp without time zone '2019-07-01 00:00:00') to stdout;
+copy (select * from t_drop where f2 = timestamp without time zone '2019-07-01 00:00:00' order by 1,2,3) to stdout;
 
 --truncate--
 truncate table t_drop partition for(timestamp without time zone '2019-01-01 00:00:00');

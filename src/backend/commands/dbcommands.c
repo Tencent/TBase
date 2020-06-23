@@ -912,11 +912,17 @@ dropdb(const char *dbname, bool missing_ok)
      * As in CREATE DATABASE, check this after other error conditions.
      */
     if (CountOtherDBBackends(db_id, &notherbackends, &npreparedxacts))
+	{
+#ifndef _PG_REGRESS_
         ereport(ERROR,
                 (errcode(ERRCODE_OBJECT_IN_USE),
                  errmsg("database \"%s\" is being accessed by other users",
                         dbname),
                  errdetail_busy_db(notherbackends, npreparedxacts)));
+#else
+		elog(ERROR, "database \"%s\" is being accessed by other users", dbname);
+#endif
+	}
 
     /*
      * Check if there are subscriptions defined in the target database.
@@ -2141,10 +2147,15 @@ errdetail_busy_db(int notherbackends, int npreparedxacts)
         errdetail("There are %d other session(s) and %d prepared transaction(s) using the database.",
                   notherbackends, npreparedxacts);
     else if (notherbackends > 0)
+#ifdef _PG_REGRESS_
+		errdetail_plural("There is other session using the database.",
+						 "There are other sessions using the database.",0);
+#else
         errdetail_plural("There is %d other session using the database.",
                          "There are %d other sessions using the database.",
                          notherbackends,
                          notherbackends);
+#endif
     else
         errdetail_plural("There is %d prepared transaction using the database.",
                          "There are %d prepared transactions using the database.",
