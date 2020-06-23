@@ -71,7 +71,7 @@ SELECT sum((3 = ANY(SELECT lag(x) over(order by x)
 SELECT min(generate_series(1, 3)) OVER() FROM few;
 
 -- SRFs are normally computed after window functions
-SELECT id,lag(id) OVER(), count(*) OVER(), generate_series(1,3) FROM few;
+SELECT id,lag(id) OVER(), count(*) OVER(), generate_series(1,3) FROM few ORDER BY 1, 4;
 -- unless referencing SRFs
 SELECT SUM(count(*)) OVER(PARTITION BY generate_series(1,3) ORDER BY generate_series(1,3)), generate_series(1,3) g FROM few GROUP BY g;
 
@@ -142,7 +142,7 @@ SELECT a, generate_series(1,2) FROM (VALUES(1),(2),(3)) r(a) LIMIT 2 OFFSET 2;
 SELECT 1 LIMIT generate_series(1,3);
 
 -- tSRF in correlated subquery, referencing table outside
-SELECT (SELECT generate_series(1,3) LIMIT 1 OFFSET few.id) FROM few;
+SELECT (SELECT generate_series(1,3) LIMIT 1 OFFSET few.id) FROM few order by 1;
 -- tSRF in correlated subquery, referencing SRF outside
 SELECT (SELECT generate_series(1,3) LIMIT 1 OFFSET g.i) FROM generate_series(0,3) g(i);
 

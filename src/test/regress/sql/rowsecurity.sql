@@ -299,7 +299,7 @@ SELECT * FROM t1 WHERE f_leak(b) ORDER BY a FOR SHARE;
 EXPLAIN (COSTS OFF) SELECT * FROM t1 WHERE f_leak(b) FOR SHARE;
 
 -- union all query
-SELECT a, b, oid FROM t2 UNION ALL SELECT a, b, oid FROM t3;
+SELECT a, b, oid FROM t2 UNION ALL SELECT a, b, oid FROM t3 order by oid;
 EXPLAIN (COSTS OFF) SELECT a, b, oid FROM t2 UNION ALL SELECT a, b, oid FROM t3;
 
 -- superuser is allowed to bypass RLS checks

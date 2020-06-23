@@ -2223,6 +2223,7 @@ select aa, bb, unique1, unique1
 --
 -- regression test: check handling of empty-FROM subquery underneath outer join
 --
+set enable_nestloop to off;
 explain (costs off)
 select * from int8_tbl i1 left join (int8_tbl i2 join
   (select 123 as x) ss on i2.q1 = x) on i1.q2 = i2.q2
@@ -2256,6 +2257,7 @@ order by 1, 2;
  4567890123456789 |  4567890123456789 | 123 | 4567890123456789 | 123
 (5 rows)
 
+reset enable_nestloop;
 --
 -- regression test: check a case where join_clause_is_movable_into() gives
 -- an imprecise result, causing an assertion failure
@@ -3336,8 +3338,8 @@ select b.unique1 from
   join int4_tbl i1 on b.thousand = f1
   right join int4_tbl i2 on i2.f1 = b.tenthous
   order by 1;
-                                                 QUERY PLAN                                                  
--------------------------------------------------------------------------------------------------------------
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all
    ->  Sort
          Sort Key: b.unique1
@@ -3348,23 +3350,25 @@ select b.unique1 from
                ->  Materialize
                      ->  Remote Subquery Scan on all
                            Distribute results by H: tenthous
-                           ->  Nested Loop
-                                 Join Filter: (b.thousand = i1.f1)
-                                 ->  Nested Loop Left Join
-                                       Join Filter: (b.unique1 = 42)
+                           ->  Nested Loop Left Join
+                                 Join Filter: (b.unique1 = 42)
+                                 ->  Remote Subquery Scan on all
+                                       Distribute results by H: unique1
                                        ->  Nested Loop
                                              ->  Remote Subquery Scan on all
                                                    Distribute results by H: unique2
-                                                   ->  Index Scan using tenk1_thous_tenthous on tenk1 b
-                                                         Index Cond: (i2.f1 = tenthous)
+                                                   ->  Nested Loop
+                                                         ->  Seq Scan on int4_tbl i1
+                                                         ->  Index Scan using tenk1_thous_tenthous on tenk1 b
+                                                               Index Cond: ((thousand = i1.f1) AND (i2.f1 = tenthous))
                                              ->  Index Scan using tenk1_unique1 on tenk1 a
                                                    Index Cond: (unique1 = b.unique2)
-                                       ->  Materialize
-                                             ->  Remote Subquery Scan on all
-                                                   ->  Index Only Scan using tenk1_thous_tenthous on tenk1 c
-                                                         Index Cond: (thousand = a.thousand)
-                                 ->  Seq Scan on int4_tbl i1
-(26 rows)
+                                 ->  Materialize
+                                       ->  Remote Subquery Scan on all
+                                             Distribute results by H: 42
+                                             ->  Index Only Scan using tenk1_thous_tenthous on tenk1 c
+                                                   Index Cond: (thousand = a.thousand)
+(28 rows)
 
 select b.unique1 from
   tenk1 a join tenk1 b on a.unique1 = b.unique2
@@ -3573,6 +3577,9 @@ using (join_key);
 --
 -- test successful handling of nested outer joins with degenerate join quals
 --
+set enable_nestloop to on;
+set enable_hashjoin to off;
+set enable_mergejoin to off;
 explain (verbose, costs off)
 select t1.* from
   text_tbl t1
@@ -3584,13 +3591,13 @@ select t1.* from
   on (t1.f1 = b1.d1)
   left join int4_tbl i4
   on (i8.q2 = i4.f1);
-                                 QUERY PLAN                                 
-----------------------------------------------------------------------------
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    Output: t1.f1
-   ->  Hash Left Join
+   ->  Nested Loop Left Join
          Output: t1.f1
-         Hash Cond: (i8.q2 = i4.f1)
+         Join Filter: (i8.q2 = i4.f1)
          ->  Nested Loop Left Join
                Output: t1.f1, i8.q2
                Join Filter: (t1.f1 = '***'::text)
@@ -3598,23 +3605,23 @@ select t1.* from
                      Output: t1.f1
                ->  Materialize
                      Output: i8.q2
-                     ->  Hash Right Join
+                     ->  Nested Loop Left Join
                            Output: i8.q2
-                           Hash Cond: ((NULL::integer) = i8b1.q2)
-                           ->  Hash Left Join
+                           Join Filter: ((NULL::integer) = i8b1.q2)
+                           ->  Seq Scan on public.int8_tbl i8b1
+                                 Output: i8b1.q1, i8b1.q2
+                           ->  Materialize
                                  Output: i8.q2, (NULL::integer)
-                                 Hash Cond: (i8.q1 = i8b2.q1)
-                                 ->  Seq Scan on public.int8_tbl i8
-                                       Output: i8.q1, i8.q2
-                                 ->  Hash
-                                       Output: i8b2.q1, (NULL::integer)
-                                       ->  Seq Scan on public.int8_tbl i8b2
-                                             Output: i8b2.q1, NULL::integer
-                           ->  Hash
-                                 Output: i8b1.q2
-                                 ->  Seq Scan on public.int8_tbl i8b1
-                                       Output: i8b1.q2
-         ->  Hash
+                                 ->  Nested Loop Left Join
+                                       Output: i8.q2, (NULL::integer)
+                                       Join Filter: (i8.q1 = i8b2.q1)
+                                       ->  Seq Scan on public.int8_tbl i8
+                                             Output: i8.q1, i8.q2
+                                       ->  Materialize
+                                             Output: i8b2.q1, (NULL::integer)
+                                             ->  Seq Scan on public.int8_tbl i8b2
+                                                   Output: i8b2.q1, NULL::integer
+         ->  Materialize
                Output: i4.f1
                ->  Seq Scan on public.int4_tbl i4
                      Output: i4.f1
@@ -3647,13 +3654,13 @@ select t1.* from
   on (t1.f1 = b1.d1)
   left join int4_tbl i4
   on (i8.q2 = i4.f1);
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    Output: t1.f1
-   ->  Hash Left Join
+   ->  Nested Loop Left Join
          Output: t1.f1
-         Hash Cond: (i8.q2 = i4.f1)
+         Join Filter: (i8.q2 = i4.f1)
          ->  Nested Loop Left Join
                Output: t1.f1, i8.q2
                Join Filter: (t1.f1 = '***'::text)
@@ -3661,27 +3668,27 @@ select t1.* from
                      Output: t1.f1
                ->  Materialize
                      Output: i8.q2
-                     ->  Hash Right Join
+                     ->  Nested Loop Left Join
                            Output: i8.q2
-                           Hash Cond: ((NULL::integer) = i8b1.q2)
-                           ->  Hash Right Join
+                           Join Filter: ((NULL::integer) = i8b1.q2)
+                           ->  Seq Scan on public.int8_tbl i8b1
+                                 Output: i8b1.q1, i8b1.q2
+                           ->  Materialize
                                  Output: i8.q2, (NULL::integer)
-                                 Hash Cond: (i8b2.q1 = i8.q1)
-                                 ->  Nested Loop
-                                       Output: i8b2.q1, NULL::integer
-                                       ->  Seq Scan on public.int8_tbl i8b2
-                                             Output: i8b2.q1, i8b2.q2
-                                       ->  Materialize
-                                             ->  Seq Scan on public.int4_tbl i4b2
-                                 ->  Hash
-                                       Output: i8.q1, i8.q2
+                                 ->  Nested Loop Left Join
+                                       Output: i8.q2, (NULL::integer)
+                                       Join Filter: (i8.q1 = i8b2.q1)
                                        ->  Seq Scan on public.int8_tbl i8
                                              Output: i8.q1, i8.q2
-                           ->  Hash
-                                 Output: i8b1.q2
-                                 ->  Seq Scan on public.int8_tbl i8b1
-                                       Output: i8b1.q2
-         ->  Hash
+                                       ->  Materialize
+                                             Output: i8b2.q1, (NULL::integer)
+                                             ->  Nested Loop
+                                                   Output: i8b2.q1, NULL::integer
+                                                   ->  Seq Scan on public.int8_tbl i8b2
+                                                         Output: i8b2.q1, i8b2.q2
+                                                   ->  Materialize
+                                                         ->  Seq Scan on public.int4_tbl i4b2
+         ->  Materialize
                Output: i4.f1
                ->  Seq Scan on public.int4_tbl i4
                      Output: i4.f1
@@ -3715,13 +3722,13 @@ select t1.* from
   on (t1.f1 = b1.d1)
   left join int4_tbl i4
   on (i8.q2 = i4.f1);
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    Output: t1.f1
-   ->  Hash Left Join
+   ->  Nested Loop Left Join
          Output: t1.f1
-         Hash Cond: (i8.q2 = i4.f1)
+         Join Filter: (i8.q2 = i4.f1)
          ->  Nested Loop Left Join
                Output: t1.f1, i8.q2
                Join Filter: (t1.f1 = '***'::text)
@@ -3729,30 +3736,30 @@ select t1.* from
                      Output: t1.f1
                ->  Materialize
                      Output: i8.q2
-                     ->  Hash Right Join
+                     ->  Nested Loop Left Join
                            Output: i8.q2
-                           Hash Cond: ((NULL::integer) = i8b1.q2)
-                           ->  Hash Right Join
+                           Join Filter: ((NULL::integer) = i8b1.q2)
+                           ->  Seq Scan on public.int8_tbl i8b1
+                                 Output: i8b1.q1, i8b1.q2
+                           ->  Materialize
                                  Output: i8.q2, (NULL::integer)
-                                 Hash Cond: (i8b2.q1 = i8.q1)
-                                 ->  Hash Join
-                                       Output: i8b2.q1, NULL::integer
-                                       Hash Cond: (i8b2.q1 = i4b2.f1)
-                                       ->  Seq Scan on public.int8_tbl i8b2
-                                             Output: i8b2.q1, i8b2.q2
-                                       ->  Hash
-                                             Output: i4b2.f1
-                                             ->  Seq Scan on public.int4_tbl i4b2
-                                                   Output: i4b2.f1
-                                 ->  Hash
-                                       Output: i8.q1, i8.q2
+                                 ->  Nested Loop Left Join
+                                       Output: i8.q2, (NULL::integer)
+                                       Join Filter: (i8.q1 = i8b2.q1)
                                        ->  Seq Scan on public.int8_tbl i8
                                              Output: i8.q1, i8.q2
-                           ->  Hash
-                                 Output: i8b1.q2
-                                 ->  Seq Scan on public.int8_tbl i8b1
-                                       Output: i8b1.q2
-         ->  Hash
+                                       ->  Materialize
+                                             Output: i8b2.q1, (NULL::integer)
+                                             ->  Nested Loop
+                                                   Output: i8b2.q1, NULL::integer
+                                                   Join Filter: (i8b2.q1 = i4b2.f1)
+                                                   ->  Seq Scan on public.int8_tbl i8b2
+                                                         Output: i8b2.q1, i8b2.q2
+                                                   ->  Materialize
+                                                         Output: i4b2.f1
+                                                         ->  Seq Scan on public.int4_tbl i4b2
+                                                               Output: i4b2.f1
+         ->  Materialize
                Output: i4.f1
                ->  Seq Scan on public.int4_tbl i4
                      Output: i4.f1
@@ -3825,6 +3832,9 @@ select * from
  doh! | 123 | 456 | doh!              |   
 (2 rows)
 
+reset enable_nestloop;
+reset enable_hashjoin;
+reset enable_mergejoin;
 --
 -- test for appropriate join order in the presence of lateral references
 --
@@ -3835,8 +3845,8 @@ select * from
   on i8.q2 = 123,
   lateral (select i8.q1, t2.f1 from text_tbl t2 limit 1) as ss
 where t1.f1 = ss.f1;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Nested Loop
    Output: t1.f1, i8.q1, i8.q2, (i8.q1), t2.f1
    Join Filter: (t1.f1 = t2.f1)
@@ -3851,15 +3861,17 @@ where t1.f1 = ss.f1;
                      ->  Seq Scan on public.int8_tbl i8
                            Output: i8.q1, i8.q2
                            Filter: (i8.q2 = 123)
-   ->  Limit
+   ->  Materialize
          Output: (i8.q1), t2.f1
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               Output: i8.q1, t2.f1
-               ->  Limit
-                     Output: (i8.q1), t2.f1
-                     ->  Seq Scan on public.text_tbl t2
-                           Output: i8.q1, t2.f1
-(22 rows)
+         ->  Limit
+               Output: (i8.q1), t2.f1
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Output: i8.q1, t2.f1
+                     ->  Limit
+                           Output: (i8.q1), t2.f1
+                           ->  Seq Scan on public.text_tbl t2
+                                 Output: i8.q1, t2.f1
+(24 rows)
 
 select * from
   text_tbl t1
@@ -3880,8 +3892,8 @@ select * from
   lateral (select i8.q1, t2.f1 from text_tbl t2 limit 1) as ss1,
   lateral (select ss1.* from text_tbl t3 limit 1) as ss2
 where t1.f1 = ss2.f1;
-                              QUERY PLAN                               
------------------------------------------------------------------------
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
  Nested Loop
    Output: t1.f1, i8.q1, i8.q2, (i8.q1), t2.f1, ((i8.q1)), (t2.f1)
    Join Filter: (t1.f1 = (t2.f1))
@@ -3898,23 +3910,27 @@ where t1.f1 = ss2.f1;
                            ->  Seq Scan on public.int8_tbl i8
                                  Output: i8.q1, i8.q2
                                  Filter: (i8.q2 = 123)
-         ->  Limit
-               Output: (i8.q1), t2.f1
-               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                     Output: i8.q1, t2.f1
-                     ->  Limit
-                           Output: (i8.q1), t2.f1
-                           ->  Seq Scan on public.text_tbl t2
-                                 Output: i8.q1, t2.f1
-   ->  Limit
-         Output: ((i8.q1)), (t2.f1)
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+         ->  Materialize
                Output: (i8.q1), t2.f1
                ->  Limit
-                     Output: ((i8.q1)), (t2.f1)
-                     ->  Seq Scan on public.text_tbl t3
-                           Output: (i8.q1), t2.f1
-(32 rows)
+                     Output: (i8.q1), t2.f1
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Output: i8.q1, t2.f1
+                           ->  Limit
+                                 Output: (i8.q1), t2.f1
+                                 ->  Seq Scan on public.text_tbl t2
+                                       Output: i8.q1, t2.f1
+   ->  Materialize
+         Output: ((i8.q1)), (t2.f1)
+         ->  Limit
+               Output: ((i8.q1)), (t2.f1)
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Output: (i8.q1), t2.f1
+                     ->  Limit
+                           Output: ((i8.q1)), (t2.f1)
+                           ->  Seq Scan on public.text_tbl t3
+                                 Output: (i8.q1), t2.f1
+(36 rows)
 
 select * from
   text_tbl t1
@@ -3965,18 +3981,20 @@ where tt1.f1 = ss1.c0;
                            ->  Seq Scan on public.text_tbl tt4
                                  Output: tt4.f1
                                  Filter: (tt4.f1 = 'foo'::text)
-   ->  Subquery Scan on ss1
+   ->  Materialize
          Output: ss1.c0
-         Filter: (ss1.c0 = 'foo'::text)
-         ->  Limit
-               Output: (tt4.f1)
-               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                     Output: tt4.f1
-                     ->  Limit
-                           Output: (tt4.f1)
-                           ->  Seq Scan on public.text_tbl tt5
-                                 Output: tt4.f1
-(38 rows)
+         ->  Subquery Scan on ss1
+               Output: ss1.c0
+               Filter: (ss1.c0 = 'foo'::text)
+               ->  Limit
+                     Output: (tt4.f1)
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Output: tt4.f1
+                           ->  Limit
+                                 Output: (tt4.f1)
+                                 ->  Seq Scan on public.text_tbl tt5
+                                       Output: tt4.f1
+(40 rows)
 
 select 1 from
   text_tbl as tt1
@@ -4002,8 +4020,8 @@ select ss2.* from
   on i41.f1 = ss1.c1,
   lateral (select i41.*, i8.*, ss1.* from text_tbl limit 1) ss2
 where ss1.c2 = 0;
-                                     QUERY PLAN                                     
-------------------------------------------------------------------------------------
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
  Nested Loop
    Output: (i41.f1), (i8.q1), (i8.q2), (i42.f1), (i43.f1), ((42))
    ->  Remote Subquery Scan on all (datanode_1)
@@ -4027,15 +4045,17 @@ where ss1.c2 = 0;
                      Output: i42.f1
                      ->  Seq Scan on public.int4_tbl i42
                            Output: i42.f1
-   ->  Limit
+   ->  Materialize
          Output: (i41.f1), (i8.q1), (i8.q2), (i42.f1), (i43.f1), ((42))
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               Output: i41.f1, i8.q1, i8.q2, i42.f1, i43.f1, (42)
-               ->  Limit
-                     Output: (i41.f1), (i8.q1), (i8.q2), (i42.f1), (i43.f1), ((42))
-                     ->  Seq Scan on public.text_tbl
-                           Output: i41.f1, i8.q1, i8.q2, i42.f1, i43.f1, (42)
-(31 rows)
+         ->  Limit
+               Output: (i41.f1), (i8.q1), (i8.q2), (i42.f1), (i43.f1), ((42))
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Output: i41.f1, i8.q1, i8.q2, i42.f1, i43.f1, (42)
+                     ->  Limit
+                           Output: (i41.f1), (i8.q1), (i8.q2), (i42.f1), (i43.f1), ((42))
+                           ->  Seq Scan on public.text_tbl
+                                 Output: i41.f1, i8.q1, i8.q2, i42.f1, i43.f1, (42)
+(33 rows)
 
 select ss2.* from
   int4_tbl i41
@@ -4059,18 +4079,19 @@ select * from
   left join
     (tenk1 as a1 full join (select 1 as id) as yy on (a1.unique1 = yy.id))
   on (xx.id = coalesce(yy.id));
-                           QUERY PLAN                            
------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Nested Loop Left Join
    Join Filter: ((1) = COALESCE((1)))
    ->  Result
-   ->  Hash Full Join
-         Hash Cond: (a1.unique1 = (1))
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               ->  Seq Scan on tenk1 a1
-         ->  Hash
-               ->  Result
-(9 rows)
+   ->  Materialize
+         ->  Hash Full Join
+               Hash Cond: (a1.unique1 = (1))
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     ->  Seq Scan on tenk1 a1
+               ->  Hash
+                     ->  Result
+(10 rows)
 
 select * from
   (select 1 as id) as xx
@@ -4699,8 +4720,8 @@ select * from generate_series(100,200) g,
 explain (num_nodes off, nodes off, costs off)
   select count(*) from tenk1 a,
     tenk1 b join lateral (values(a.unique1)) ss(x) on b.unique2 = ss.x;
-                                     QUERY PLAN                                     
-------------------------------------------------------------------------------------
+                            QUERY PLAN                            
+------------------------------------------------------------------
  Finalize Aggregate
    ->  Remote Subquery Scan on all
          ->  Partial Aggregate
@@ -4710,7 +4731,7 @@ explain (num_nodes off, nodes off, costs off)
                      ->  Hash
                            ->  Remote Subquery Scan on all
                                  Distribute results by H: unique2
-                                 ->  Index Only Scan using tenk1_unique2 on tenk1 b
+                                 ->  Seq Scan on tenk1 b
 (10 rows)
 
 select count(*) from tenk1 a,
@@ -4724,8 +4745,8 @@ select count(*) from tenk1 a,
 explain (num_nodes off, nodes off, costs off)
   select count(*) from tenk1 a,
     tenk1 b join lateral (values(a.unique1),(-1)) ss(x) on b.unique2 = ss.x;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
+                     QUERY PLAN                      
+-----------------------------------------------------
  Aggregate
    ->  Hash Join
          Hash Cond: ("*VALUES*".column1 = b.unique2)
@@ -4735,7 +4756,7 @@ explain (num_nodes off, nodes off, costs off)
                ->  Values Scan on "*VALUES*"
          ->  Hash
                ->  Remote Subquery Scan on all
-                     ->  Index Only Scan using tenk1_unique2 on tenk1 b
+                     ->  Seq Scan on tenk1 b
 (10 rows)
 
 select count(*) from tenk1 a,
@@ -4746,6 +4767,8 @@ select count(*) from tenk1 a,
 (1 row)
 
 -- lateral injecting a strange outer join condition
+set enable_hashjoin to off;
+set enable_mergejoin to off;
 explain (num_nodes off, nodes off, costs off)
   select * from int8_tbl a,
     int8_tbl x left join lateral (select a.q1 from int4_tbl y) ss(z)
@@ -4758,11 +4781,11 @@ explain (num_nodes off, nodes off, costs off)
          Sort Key: a.q1, a.q2, x.q1, x.q2, (a.q1)
          ->  Nested Loop
                ->  Seq Scan on int8_tbl a
-               ->  Hash Right Join
-                     Hash Cond: ((a.q1) = x.q2)
-                     ->  Seq Scan on int4_tbl y
-                     ->  Hash
-                           ->  Seq Scan on int8_tbl x
+               ->  Nested Loop Left Join
+                     Join Filter: (x.q2 = (a.q1))
+                     ->  Seq Scan on int8_tbl x
+                     ->  Materialize
+                           ->  Seq Scan on int4_tbl y
 (10 rows)
 
 select * from int8_tbl a,
@@ -4830,27 +4853,29 @@ select * from int8_tbl a,
  4567890123456789 |  4567890123456789 | 4567890123456789 |  4567890123456789 | 4567890123456789
 (57 rows)
 
+reset enable_hashjoin;
+reset enable_mergejoin;
 -- lateral reference to a join alias variable
 select * from (select f1/2 as x from int4_tbl) ss1 join int4_tbl i4 on x = f1,
-  lateral (select x) ss2(y);
+  lateral (select x) ss2(y) order by 1,2,3;
  x | f1 | y 
 ---+----+---
  0 |  0 | 0
 (1 row)
 
 select * from (select f1 as x from int4_tbl) ss1 join int4_tbl i4 on x = f1,
-  lateral (values(x)) ss2(y);
+  lateral (values(x)) ss2(y) order by 1,2,3;
       x      |     f1      |      y      
 -------------+-------------+-------------
+ -2147483647 | -2147483647 | -2147483647
+     -123456 |     -123456 |     -123456
            0 |           0 |           0
       123456 |      123456 |      123456
-     -123456 |     -123456 |     -123456
   2147483647 |  2147483647 |  2147483647
- -2147483647 | -2147483647 | -2147483647
 (5 rows)
 
 select * from ((select f1/2 as x from int4_tbl) ss1 join int4_tbl i4 on x = f1) j,
-  lateral (select x) ss2(y);
+  lateral (select x) ss2(y) order by 1,2,3;
  x | f1 | y 
 ---+----+---
  0 |  0 | 0
@@ -4858,7 +4883,7 @@ select * from ((select f1/2 as x from int4_tbl) ss1 join int4_tbl i4 on x = f1) 
 
 -- lateral references requiring pullup
 select * from (values(1)) x(lb),
-  lateral generate_series(lb,4) x4;
+  lateral generate_series(lb,4) x4 order by 1,2;
  lb | x4 
 ----+----
   1 |  1
@@ -4868,27 +4893,9 @@ select * from (values(1)) x(lb),
 (4 rows)
 
 select * from (select f1/1000000000 from int4_tbl) x(lb),
-  lateral generate_series(lb,4) x4;
+  lateral generate_series(lb,4) x4 order by 1,2;
  lb | x4 
 ----+----
-  0 |  0
-  0 |  1
-  0 |  2
-  0 |  3
-  0 |  4
-  0 |  0
-  0 |  1
-  0 |  2
-  0 |  3
-  0 |  4
-  0 |  0
-  0 |  1
-  0 |  2
-  0 |  3
-  0 |  4
-  2 |  2
-  2 |  3
-  2 |  4
  -2 | -2
  -2 | -1
  -2 |  0
@@ -4896,10 +4903,28 @@ select * from (select f1/1000000000 from int4_tbl) x(lb),
  -2 |  2
  -2 |  3
  -2 |  4
+  0 |  0
+  0 |  0
+  0 |  0
+  0 |  1
+  0 |  1
+  0 |  1
+  0 |  2
+  0 |  2
+  0 |  2
+  0 |  3
+  0 |  3
+  0 |  3
+  0 |  4
+  0 |  4
+  0 |  4
+  2 |  2
+  2 |  3
+  2 |  4
 (25 rows)
 
 select * from (values(1)) x(lb),
-  lateral (values(lb)) y(lbcopy);
+  lateral (values(lb)) y(lbcopy) order by 1,2;
  lb | lbcopy 
 ----+--------
   1 |      1
@@ -5176,6 +5201,8 @@ select * from int4_tbl i left join
   2147483647 | 
 (5 rows)
 
+set enable_hashjoin to off;
+set enable_mergejoin to off;
 explain (num_nodes off, nodes off, verbose, costs off)
 select * from int4_tbl a,
   lateral (
@@ -5189,12 +5216,12 @@ select * from int4_tbl a,
          Output: a.f1, b.f1, c.q1, c.q2
          ->  Seq Scan on public.int4_tbl a
                Output: a.f1
-         ->  Hash Left Join
+         ->  Nested Loop Left Join
                Output: b.f1, c.q1, c.q2
-               Hash Cond: (b.f1 = c.q1)
+               Join Filter: (b.f1 = c.q1)
                ->  Seq Scan on public.int4_tbl b
                      Output: b.f1
-               ->  Hash
+               ->  Materialize
                      Output: c.q1, c.q2
                      ->  Seq Scan on public.int8_tbl c
                            Output: c.q1, c.q2
@@ -5204,36 +5231,38 @@ select * from int4_tbl a,
 select * from int4_tbl a,
   lateral (
     select * from int4_tbl b left join int8_tbl c on (b.f1 = q1 and a.f1 = q2)
-  ) ss;
+  ) ss order by 1,2,3,4;
      f1      |     f1      | q1 | q2 
 -------------+-------------+----+----
-           0 |           0 |    |   
-           0 |      123456 |    |   
-           0 |     -123456 |    |   
-           0 |  2147483647 |    |   
-           0 | -2147483647 |    |   
-      123456 |           0 |    |   
-      123456 |      123456 |    |   
-      123456 |     -123456 |    |   
-      123456 |  2147483647 |    |   
-      123456 | -2147483647 |    |   
-     -123456 |           0 |    |   
-     -123456 |      123456 |    |   
-     -123456 |     -123456 |    |   
-     -123456 |  2147483647 |    |   
-     -123456 | -2147483647 |    |   
-  2147483647 |           0 |    |   
-  2147483647 |      123456 |    |   
-  2147483647 |     -123456 |    |   
-  2147483647 |  2147483647 |    |   
-  2147483647 | -2147483647 |    |   
+ -2147483647 | -2147483647 |    |   
+ -2147483647 |     -123456 |    |   
  -2147483647 |           0 |    |   
  -2147483647 |      123456 |    |   
- -2147483647 |     -123456 |    |   
  -2147483647 |  2147483647 |    |   
- -2147483647 | -2147483647 |    |   
+     -123456 | -2147483647 |    |   
+     -123456 |     -123456 |    |   
+     -123456 |           0 |    |   
+     -123456 |      123456 |    |   
+     -123456 |  2147483647 |    |   
+           0 | -2147483647 |    |   
+           0 |     -123456 |    |   
+           0 |           0 |    |   
+           0 |      123456 |    |   
+           0 |  2147483647 |    |   
+      123456 | -2147483647 |    |   
+      123456 |     -123456 |    |   
+      123456 |           0 |    |   
+      123456 |      123456 |    |   
+      123456 |  2147483647 |    |   
+  2147483647 | -2147483647 |    |   
+  2147483647 |     -123456 |    |   
+  2147483647 |           0 |    |   
+  2147483647 |      123456 |    |   
+  2147483647 |  2147483647 |    |   
 (25 rows)
 
+reset enable_hashjoin;
+reset enable_mergejoin;
 -- lateral reference in a PlaceHolderVar evaluated at join level
 explain (num_nodes off, nodes off, verbose, costs off)
 select * from
@@ -5476,44 +5505,46 @@ lateral (select * from int8_tbl t1,
                                      where q2 = (select greatest(t1.q1,t2.q2))
                                        and (select v.id=0)) offset 0) ss2) ss
          where t1.q1 = ss.q2) ss0;
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Nested Loop
    Output: "*VALUES*".column1, t1.q1, t1.q2, ss2.q1, ss2.q2
    ->  Remote Subquery Scan on all (datanode_1)
          Output: t1.q1, t1.q2
          ->  Seq Scan on public.int8_tbl t1
                Output: t1.q1, t1.q2
-   ->  Nested Loop
+   ->  Materialize
          Output: "*VALUES*".column1, ss2.q1, ss2.q2
-         ->  Values Scan on "*VALUES*"
-               Output: "*VALUES*".column1
-         ->  Materialize
-               Output: ss2.q1, ss2.q2
-               ->  Remote Subquery Scan on all (datanode_1)
+         ->  Nested Loop
+               Output: "*VALUES*".column1, ss2.q1, ss2.q2
+               ->  Values Scan on "*VALUES*"
+                     Output: "*VALUES*".column1
+               ->  Materialize
                      Output: ss2.q1, ss2.q2
-                     ->  Subquery Scan on ss2
+                     ->  Remote Subquery Scan on all (datanode_1)
                            Output: ss2.q1, ss2.q2
-                           Filter: (t1.q1 = ss2.q2)
-                           ->  Seq Scan on public.int8_tbl t2
-                                 Output: t2.q1, t2.q2
-                                 Filter: (SubPlan 3)
-                                 SubPlan 3
-                                   ->  Remote Subquery Scan on all (datanode_1)
-                                         Output: t3.q2
-                                         ->  Result
+                           ->  Subquery Scan on ss2
+                                 Output: ss2.q1, ss2.q2
+                                 Filter: (t1.q1 = ss2.q2)
+                                 ->  Seq Scan on public.int8_tbl t2
+                                       Output: t2.q1, t2.q2
+                                       Filter: (SubPlan 3)
+                                       SubPlan 3
+                                         ->  Remote Subquery Scan on all (datanode_1)
                                                Output: t3.q2
-                                               One-Time Filter: $4
-                                               InitPlan 1 (returns $2)
-                                                 ->  Result
-                                                       Output: GREATEST($0, t2.q2)
-                                               InitPlan 2 (returns $4)
-                                                 ->  Result
-                                                       Output: ($3 = 0)
-                                               ->  Seq Scan on public.int8_tbl t3
-                                                     Output: t3.q1, t3.q2
-                                                     Filter: (t3.q2 = $2)
-(35 rows)
+                                               ->  Result
+                                                     Output: t3.q2
+                                                     One-Time Filter: $4
+                                                     InitPlan 1 (returns $2)
+                                                       ->  Result
+                                                             Output: GREATEST($0, t2.q2)
+                                                     InitPlan 2 (returns $4)
+                                                       ->  Result
+                                                             Output: ($3 = 0)
+                                                     ->  Seq Scan on public.int8_tbl t3
+                                                           Output: t3.q1, t3.q2
+                                                           Filter: (t3.q2 = $2)
+(37 rows)
 
 select * from (values (0), (1)) v(id),
 lateral (select * from int8_tbl t1,
@@ -6064,34 +6095,48 @@ from onek t1, tenk1 t2
 where exists (select 1 from tenk1 t3
               where t3.thousand = t1.unique1 and t3.tenthous = t2.hundred)
       and t1.unique1 < 1;
-                                                                                                          QUERY PLAN                                                                                                           
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                QUERY PLAN                                                                                                                 
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    Output: t1.unique1, t2.hundred
    ->  Nested Loop
          Output: t1.unique1, t2.hundred
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                Output: t1.unique1, t3.tenthous
+               Distribute results by H: tenthous
                ->  Hash Join
                      Output: t1.unique1, t3.tenthous
                      Hash Cond: (t3.thousand = t1.unique1)
                      ->  HashAggregate
                            Output: t3.thousand, t3.tenthous
                            Group Key: t3.thousand, t3.tenthous
-                           ->  Seq Scan on public.tenk1 t3
+                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                  Output: t3.unique1, t3.unique2, t3.two, t3.four, t3.ten, t3.twenty, t3.hundred, t3.thousand, t3.twothousand, t3.fivethous, t3.tenthous, t3.odd, t3.even, t3.stringu1, t3.stringu2, t3.string4
+                                 Distribute results by H: thousand
+                                 ->  HashAggregate
+                                       Output: t3.unique1, t3.unique2, t3.two, t3.four, t3.ten, t3.twenty, t3.hundred, t3.thousand, t3.twothousand, t3.fivethous, t3.tenthous, t3.odd, t3.even, t3.stringu1, t3.stringu2, t3.string4
+                                       Group Key: t3.thousand, t3.tenthous
+                                       ->  Seq Scan on public.tenk1 t3
+                                             Output: t3.unique1, t3.unique2, t3.two, t3.four, t3.ten, t3.twenty, t3.hundred, t3.thousand, t3.twothousand, t3.fivethous, t3.tenthous, t3.odd, t3.even, t3.stringu1, t3.stringu2, t3.string4
                      ->  Hash
                            Output: t1.unique1
                            ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                  Output: t1.unique1
-                                 Sort Key: t1.unique1
-                                 ->  Index Only Scan using onek_unique1 on public.onek t1
+                                 ->  Bitmap Heap Scan on public.onek t1
                                        Output: t1.unique1
-                                       Index Cond: (t1.unique1 < 1)
-         ->  Index Only Scan using tenk1_hundred on public.tenk1 t2
+                                       Recheck Cond: (t1.unique1 < 1)
+                                       ->  Bitmap Index Scan on onek_unique1
+                                             Index Cond: (t1.unique1 < 1)
+         ->  Materialize
                Output: t2.hundred
-               Index Cond: (t2.hundred = t3.tenthous)
-(25 rows)
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Output: t2.hundred
+                     Distribute results by H: hundred
+                     Sort Key: t2.hundred
+                     ->  Index Only Scan using tenk1_hundred on public.tenk1 t2
+                           Output: t2.hundred
+                           Index Cond: (t2.hundred = t3.tenthous)
+(39 rows)
 
 -- ... unless it actually is unique
 create table j3 as select unique1, tenthous from onek;
@@ -6103,8 +6148,8 @@ from onek t1, tenk1 t2
 where exists (select 1 from j3
               where j3.unique1 = t1.unique1 and j3.tenthous = t2.hundred)
       and t1.unique1 < 1;
-                                     QUERY PLAN                                     
-------------------------------------------------------------------------------------
+                                                                                                       QUERY PLAN                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    Output: t1.unique1, t2.hundred
    ->  Nested Loop
@@ -6113,15 +6158,17 @@ where exists (select 1 from j3
                Output: t1.unique1, j3.tenthous
                ->  Nested Loop
                      Output: t1.unique1, j3.tenthous
-                     ->  Index Only Scan using onek_unique1 on public.onek t1
-                           Output: t1.unique1
-                           Index Cond: (t1.unique1 < 1)
+                     ->  Bitmap Heap Scan on public.onek t1
+                           Output: t1.unique1, t1.unique2, t1.two, t1.four, t1.ten, t1.twenty, t1.hundred, t1.thousand, t1.twothousand, t1.fivethous, t1.tenthous, t1.odd, t1.even, t1.stringu1, t1.stringu2, t1.string4
+                           Recheck Cond: (t1.unique1 < 1)
+                           ->  Bitmap Index Scan on onek_unique1
+                                 Index Cond: (t1.unique1 < 1)
                      ->  Index Only Scan using j3_unique1_tenthous_idx on public.j3
                            Output: j3.unique1, j3.tenthous
                            Index Cond: (j3.unique1 = t1.unique1)
          ->  Index Only Scan using tenk1_hundred on public.tenk1 t2
                Output: t2.hundred
                Index Cond: (t2.hundred = j3.tenthous)
-(17 rows)
+(19 rows)
 
 drop table j3;

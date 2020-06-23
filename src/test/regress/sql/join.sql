@@ -404,6 +404,8 @@ select aa, bb, unique1, unique1
 --
 -- regression test: check handling of empty-FROM subquery underneath outer join
 --
+set enable_nestloop to off;
+
 explain (costs off)
 select * from int8_tbl i1 left join (int8_tbl i2 join
   (select 123 as x) ss on i2.q1 = x) on i1.q2 = i2.q2
@@ -412,6 +414,8 @@ order by 1, 2;
 select * from int8_tbl i1 left join (int8_tbl i2 join
   (select 123 as x) ss on i2.q1 = x) on i1.q2 = i2.q2
 order by 1, 2;
+
+reset enable_nestloop;
 
 --
 -- regression test: check a case where join_clause_is_movable_into() gives
@@ -1097,6 +1101,9 @@ using (join_key);
 --
 -- test successful handling of nested outer joins with degenerate join quals
 --
+set enable_nestloop to on;
+set enable_hashjoin to off;
+set enable_mergejoin to off;
 
 explain (verbose, costs off)
 select t1.* from
@@ -1188,6 +1195,9 @@ select * from
   left join int4_tbl i4
   on i8.q1 = i4.f1;
 
+reset enable_nestloop;
+reset enable_hashjoin;
+reset enable_mergejoin;
 --
 -- test for appropriate join order in the presence of lateral references
 --
@@ -1576,6 +1586,9 @@ select count(*) from tenk1 a,
   tenk1 b join lateral (values(a.unique1),(-1)) ss(x) on b.unique2 = ss.x;
 
 -- lateral injecting a strange outer join condition
+set enable_hashjoin to off;
+set enable_mergejoin to off;
+
 explain (num_nodes off, nodes off, costs off)
   select * from int8_tbl a,
     int8_tbl x left join lateral (select a.q1 from int4_tbl y) ss(z)
@@ -1585,6 +1598,9 @@ select * from int8_tbl a,
   int8_tbl x left join lateral (select a.q1 from int4_tbl y) ss(z)
     on x.q2 = ss.z
   order by a.q1, a.q2, x.q1, x.q2, ss.z;
+
+reset enable_hashjoin;
+reset enable_mergejoin;
 
 -- lateral reference to a join alias variable
 select * from (select f1/2 as x from int4_tbl) ss1 join int4_tbl i4 on x = f1,
@@ -1658,6 +1674,8 @@ select * from int4_tbl i left join
   lateral (select coalesce(i) from int2_tbl j where i.f1 = j.f1) k on true;
 select * from int4_tbl i left join
   lateral (select coalesce(i) from int2_tbl j where i.f1 = j.f1) k on true order by 1;
+set enable_hashjoin to off;
+set enable_mergejoin to off;
 explain (num_nodes off, nodes off, verbose, costs off)
 select * from int4_tbl a,
   lateral (
@@ -1667,6 +1685,8 @@ select * from int4_tbl a,
   lateral (
     select * from int4_tbl b left join int8_tbl c on (b.f1 = q1 and a.f1 = q2)
   ) ss order by 1,2,3,4;
+reset enable_hashjoin;
+reset enable_mergejoin;
 
 -- lateral reference in a PlaceHolderVar evaluated at join level
 explain (num_nodes off, nodes off, verbose, costs off)

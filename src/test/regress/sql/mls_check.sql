@@ -1732,7 +1732,7 @@ select * from xixi where i = 11;
 --case: insert into select from join 
 \c - godlike 
 insert into lala2 select a.i,a.j,b._cls from lala a, lala3 b where a.i = b.i;
-select * from lala2;
+select * from lala2 order by i;
 
 --ROUND1. end
 truncate table xixi;
