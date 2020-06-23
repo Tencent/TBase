@@ -100,14 +100,14 @@ explain (costs off)
 explain (costs off)
 	select  sum(parallel_restricted(unique1)) from tenk1
 	group by(parallel_restricted(unique1));
-                        QUERY PLAN                         
------------------------------------------------------------
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
  HashAggregate
    Group Key: parallel_restricted(unique1)
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Gather
                Workers Planned: 4
-               ->  Parallel Seq Scan on tenk1
+               ->  Parallel Index Only Scan using tenk1_unique1 on tenk1
 (6 rows)
 
 -- test parallel plans for queries containing un-correlated subplans.
@@ -255,8 +255,8 @@ set enable_hashjoin to off;
 set enable_nestloop to off;
 explain (costs off)
 	select  count(*) from tenk1, tenk2 where tenk1.unique1 = tenk2.unique1;
-                              QUERY PLAN                               
------------------------------------------------------------------------
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
  Finalize Aggregate
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Gather
@@ -264,13 +264,9 @@ explain (costs off)
                ->  Partial Aggregate
                      ->  Parallel Merge Join
                            Merge Cond: (tenk1.unique1 = tenk2.unique1)
-                           ->  Sort
-                                 Sort Key: tenk1.unique1
-                                 ->  Parallel Seq Scan on tenk1
-                           ->  Sort
-                                 Sort Key: tenk2.unique1
-                                 ->  Seq Scan on tenk2
-(13 rows)
+                           ->  Parallel Index Only Scan using tenk1_unique1 on tenk1
+                           ->  Index Only Scan using tenk2_unique1 on tenk2
+(9 rows)
 
 select  count(*) from tenk1, tenk2 where tenk1.unique1 = tenk2.unique1;
  count 
