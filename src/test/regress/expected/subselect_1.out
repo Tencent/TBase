@@ -870,7 +870,7 @@ select * from int4_tbl where
                      SubPlan 1
                        ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                              Output: a.unique1
-                             ->  Seq Scan on public.tenk1 a
+                             ->  Index Only Scan using tenk1_unique1 on public.tenk1 a
                                    Output: a.unique1
          ->  Materialize
                Output: b.ten
