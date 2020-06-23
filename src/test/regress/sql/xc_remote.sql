@@ -131,7 +131,6 @@ DROP SEQUENCE seqtest5;
 -- DELETE cases
 -- Coordinator quals
 CREATE SEQUENCE seqtest7 START 1;
-select * from rel_rep;
 DELETE FROM rel_rep WHERE a < nextval('seqtest7') + 1;
 DELETE FROM rel_rr WHERE a < nextval('seqtest7') - 3;
 DELETE FROM rel_hash WHERE a < nextval('seqtest7') - 3;
