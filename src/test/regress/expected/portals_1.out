@@ -1196,22 +1196,22 @@ DROP TABLE uctest;
 begin;
 create function nochange(int) returns int
   as 'select $1 limit 1' language sql stable;
-declare c cursor for select * from int8_tbl limit nochange(3);
+declare c cursor for select * from int8_tbl order by 1,2 limit nochange(3);
 fetch all from c;
-        q1        |        q2        
-------------------+------------------
-              123 |              456
-              123 | 4567890123456789
- 4567890123456789 |              123
+        q1        |        q2         
+------------------+-------------------
+              123 |               456
+              123 |  4567890123456789
+ 4567890123456789 | -4567890123456789
 (3 rows)
 
 move backward all in c;
 fetch all from c;
-        q1        |        q2        
-------------------+------------------
-              123 |              456
-              123 | 4567890123456789
- 4567890123456789 |              123
+        q1        |        q2         
+------------------+-------------------
+              123 |               456
+              123 |  4567890123456789
+ 4567890123456789 | -4567890123456789
 (3 rows)
 
 rollback;

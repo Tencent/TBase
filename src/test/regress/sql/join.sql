@@ -1588,19 +1588,19 @@ select * from int8_tbl a,
 
 -- lateral reference to a join alias variable
 select * from (select f1/2 as x from int4_tbl) ss1 join int4_tbl i4 on x = f1,
-  lateral (select x) ss2(y);
+  lateral (select x) ss2(y) order by 1,2,3;
 select * from (select f1 as x from int4_tbl) ss1 join int4_tbl i4 on x = f1,
-  lateral (values(x)) ss2(y);
+  lateral (values(x)) ss2(y) order by 1,2,3;
 select * from ((select f1/2 as x from int4_tbl) ss1 join int4_tbl i4 on x = f1) j,
-  lateral (select x) ss2(y);
+  lateral (select x) ss2(y) order by 1,2,3;
 
 -- lateral references requiring pullup
 select * from (values(1)) x(lb),
-  lateral generate_series(lb,4) x4;
+  lateral generate_series(lb,4) x4 order by 1,2;
 select * from (select f1/1000000000 from int4_tbl) x(lb),
-  lateral generate_series(lb,4) x4;
+  lateral generate_series(lb,4) x4 order by 1,2;
 select * from (values(1)) x(lb),
-  lateral (values(lb)) y(lbcopy);
+  lateral (values(lb)) y(lbcopy) order by 1,2;
 select * from (values(1)) x(lb),
   lateral (select lb from int4_tbl) y(lbcopy);
 select * from
@@ -1666,7 +1666,7 @@ select * from int4_tbl a,
 select * from int4_tbl a,
   lateral (
     select * from int4_tbl b left join int8_tbl c on (b.f1 = q1 and a.f1 = q2)
-  ) ss;
+  ) ss order by 1,2,3,4;
 
 -- lateral reference in a PlaceHolderVar evaluated at join level
 explain (num_nodes off, nodes off, verbose, costs off)

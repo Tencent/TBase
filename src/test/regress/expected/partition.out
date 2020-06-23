@@ -859,11 +859,11 @@ insert into t_drop select generate_series(200, 2226),'2019-02-01','a';
 ERROR:  inserted value is not in range of partitioned table, please check the value of paritition key
 insert into t_drop select generate_series(200, 2226),'2019-06-01','ffffff';
 copy t_drop from stdin;
-copy (select * from t_drop where f2 = timestamp without time zone '2019-07-01 00:00:00') to stdout;
-3001	Mon Jul 01 00:00:00 2019	'hhhhhhh'                     
-3003	Mon Jul 01 00:00:00 2019	'hhhhhhh'                     
+copy (select * from t_drop where f2 = timestamp without time zone '2019-07-01 00:00:00' order by 1,2,3) to stdout;
 3000	Mon Jul 01 00:00:00 2019	'hhhhhhh'                     
+3001	Mon Jul 01 00:00:00 2019	'hhhhhhh'                     
 3002	Mon Jul 01 00:00:00 2019	'hhhhhhh'                     
+3003	Mon Jul 01 00:00:00 2019	'hhhhhhh'                     
 --truncate--
 truncate table t_drop partition for(timestamp without time zone '2019-01-01 00:00:00');
 ERROR:  relation "t_drop_part_0" does not exist

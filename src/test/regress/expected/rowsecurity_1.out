@@ -2487,43 +2487,40 @@ CREATE POLICY p2 ON t1 TO regress_rls_carol USING ((a % 4) = 0);
 ALTER TABLE t1 ENABLE ROW LEVEL SECURITY;
 -- Prepare as regress_rls_bob
 SET ROLE regress_rls_bob;
-PREPARE role_inval AS SELECT * FROM t1 order by 1;
+PREPARE role_inval AS SELECT * FROM t1;
 -- Check plan
 EXPLAIN (COSTS OFF) EXECUTE role_inval;
-                     QUERY PLAN                      
------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Sort
-         Sort Key: a
-         ->  Seq Scan on t1
-               Filter: ((a % 2) = 0)
-(5 rows)
+            QUERY PLAN            
+----------------------------------
+ Remote Fast Query Execution
+   Node/s: datanode_1, datanode_2
+   ->  Seq Scan on t1
+         Filter: ((a % 2) = 0)
+(4 rows)
 
 -- Change to regress_rls_carol
 SET ROLE regress_rls_carol;
 -- Check plan- should be different
 EXPLAIN (COSTS OFF) EXECUTE role_inval;
-                     QUERY PLAN                      
------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Sort
-         Sort Key: a
-         ->  Seq Scan on t1
-               Filter: ((a % 4) = 0)
-(5 rows)
+            QUERY PLAN            
+----------------------------------
+ Remote Fast Query Execution
+   Node/s: datanode_1, datanode_2
+   ->  Seq Scan on t1
+         Filter: ((a % 4) = 0)
+(4 rows)
 
 -- Change back to regress_rls_bob
 SET ROLE regress_rls_bob;
 -- Check plan- should be back to original
 EXPLAIN (COSTS OFF) EXECUTE role_inval;
-                     QUERY PLAN                      
------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Sort
-         Sort Key: a
-         ->  Seq Scan on t1
-               Filter: ((a % 2) = 0)
-(5 rows)
+            QUERY PLAN            
+----------------------------------
+ Remote Fast Query Execution
+   Node/s: datanode_1, datanode_2
+   ->  Seq Scan on t1
+         Filter: ((a % 2) = 0)
+(4 rows)
 
 --
 -- CTE and RLS

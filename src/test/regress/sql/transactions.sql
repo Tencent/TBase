@@ -445,7 +445,7 @@ BEGIN
 END $$;
 
 BEGIN;
-DECLARE ok CURSOR FOR SELECT * FROM int8_tbl;
+DECLARE ok CURSOR FOR SELECT * FROM int8_tbl order by 1,2;
 DECLARE ctt CURSOR FOR SELECT create_temp_tab();
 FETCH ok;
 SAVEPOINT s1;

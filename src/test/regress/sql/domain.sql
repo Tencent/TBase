@@ -133,8 +133,8 @@ insert into dcomptable values (array[row(1,2)]::dcomptypea);  -- fail on uniquen
 insert into dcomptable (d1[1]) values(row(9,10));
 insert into dcomptable (d1[1].r) values(11);
 
-select * from dcomptable;
-select d1[2], d1[1].r, d1[1].i from dcomptable;
+select * from dcomptable order by 1;
+select d1[2], d1[1].r, d1[1].i from dcomptable order by 1,2,3;
 update dcomptable set d1[2] = row(d1[2].i, d1[2].r);
 select * from dcomptable order by 1;
 update dcomptable set d1[1].r = d1[1].r + 1 where d1[1].i > 0;

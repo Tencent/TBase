@@ -63,53 +63,60 @@ SELECT * FROM writetest; -- ok
 (0 rows)
 
 SAVEPOINT x;
-ERROR:  SAVEPOINT is not yet supported.
 SET TRANSACTION READ ONLY; -- ok
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 SELECT * FROM writetest; -- ok
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ a 
+---
+(0 rows)
+
 SET TRANSACTION READ ONLY; -- ok
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 SET TRANSACTION READ WRITE; --fail
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  cannot set transaction read-write mode inside a read-only transaction
 COMMIT;
 BEGIN;
 SET TRANSACTION READ WRITE; -- ok
 SAVEPOINT x;
-ERROR:  SAVEPOINT is not yet supported.
 SET TRANSACTION READ WRITE; -- ok
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 SET TRANSACTION READ ONLY; -- ok
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 SELECT * FROM writetest; -- ok
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ a 
+---
+(0 rows)
+
 SET TRANSACTION READ ONLY; -- ok
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 SET TRANSACTION READ WRITE; --fail
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  cannot set transaction read-write mode inside a read-only transaction
 COMMIT;
 BEGIN;
 SET TRANSACTION READ WRITE; -- ok
 SAVEPOINT x;
-ERROR:  SAVEPOINT is not yet supported.
 SET TRANSACTION READ ONLY; -- ok
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 SELECT * FROM writetest; -- ok
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ a 
+---
+(0 rows)
+
 ROLLBACK TO SAVEPOINT x;
-ERROR:  no such savepoint
 SHOW transaction_read_only;  -- off
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ transaction_read_only 
+-----------------------
+ off
+(1 row)
+
 SAVEPOINT y;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 SET TRANSACTION READ ONLY; -- ok
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 SELECT * FROM writetest; -- ok
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ a 
+---
+(0 rows)
+
 RELEASE SAVEPOINT y;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 SHOW transaction_read_only;  -- off
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ transaction_read_only 
+-----------------------
+ off
+(1 row)
+
 COMMIT;
 SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY;
 DROP TABLE writetest; -- fail
@@ -145,270 +152,221 @@ CREATE TABLE foobar (a int);
 BEGIN;
 	CREATE TABLE foo (a int);
 	SAVEPOINT one;
-ERROR:  SAVEPOINT is not yet supported.
 		DROP TABLE foo;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		CREATE TABLE bar (a int);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	ROLLBACK TO SAVEPOINT one;
-ERROR:  no such savepoint
 	RELEASE SAVEPOINT one;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	SAVEPOINT two;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		CREATE TABLE baz (a int);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	RELEASE SAVEPOINT two;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	drop TABLE foobar;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	CREATE TABLE barbaz (a int);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 COMMIT;
 -- should exist: barbaz, baz, foo
 SELECT * FROM foo;		-- should be empty
-ERROR:  relation "foo" does not exist
-LINE 1: SELECT * FROM foo;
-                      ^
+ a 
+---
+(0 rows)
+
 SELECT * FROM bar;		-- shouldn't exist
 ERROR:  relation "bar" does not exist
 LINE 1: SELECT * FROM bar;
                       ^
 SELECT * FROM barbaz;	-- should be empty
-ERROR:  relation "barbaz" does not exist
-LINE 1: SELECT * FROM barbaz;
-                      ^
+ a 
+---
+(0 rows)
+
 SELECT * FROM baz;		-- should be empty
-ERROR:  relation "baz" does not exist
-LINE 1: SELECT * FROM baz;
-                      ^
+ a 
+---
+(0 rows)
+
 -- inserts
 BEGIN;
 	INSERT INTO foo VALUES (1);
-ERROR:  relation "foo" does not exist
-LINE 1: INSERT INTO foo VALUES (1);
-                    ^
 	SAVEPOINT one;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		INSERT into bar VALUES (1);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  relation "bar" does not exist
+LINE 1: INSERT into bar VALUES (1);
+                    ^
 	ROLLBACK TO one;
-ERROR:  no such savepoint
 	RELEASE SAVEPOINT one;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	SAVEPOINT two;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		INSERT into barbaz VALUES (1);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	RELEASE two;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	SAVEPOINT three;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		SAVEPOINT four;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 			INSERT INTO foo VALUES (2);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		RELEASE SAVEPOINT four;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	ROLLBACK TO SAVEPOINT three;
-ERROR:  no such savepoint
 	RELEASE SAVEPOINT three;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	INSERT INTO foo VALUES (3);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 COMMIT;
 SELECT * FROM foo ORDER BY a;		-- should have 1 and 3
-ERROR:  relation "foo" does not exist
-LINE 1: SELECT * FROM foo ORDER BY a;
-                      ^
+ a 
+---
+ 1
+ 3
+(2 rows)
+
 SELECT * FROM barbaz ORDER BY a;	-- should have 1
-ERROR:  relation "barbaz" does not exist
-LINE 1: SELECT * FROM barbaz ORDER BY a;
-                      ^
+ a 
+---
+ 1
+(1 row)
+
 -- test whole-tree commit
 BEGIN;
 	SAVEPOINT one;
-ERROR:  SAVEPOINT is not yet supported.
 		SELECT foo;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  column "foo" does not exist
+LINE 1: SELECT foo;
+               ^
 	ROLLBACK TO SAVEPOINT one;
-ERROR:  no such savepoint
 	RELEASE SAVEPOINT one;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	SAVEPOINT two;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		CREATE TABLE savepoints (a int);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		SAVEPOINT three;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 			INSERT INTO savepoints VALUES (1);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 			SAVEPOINT four;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 				INSERT INTO savepoints VALUES (2);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 				SAVEPOINT five;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 					INSERT INTO savepoints VALUES (3);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 				ROLLBACK TO SAVEPOINT five;
-ERROR:  no such savepoint
 COMMIT;
 COMMIT;		-- should not be in a transaction block
 WARNING:  there is no transaction in progress
 SELECT * FROM savepoints ORDER BY 1;
-ERROR:  relation "savepoints" does not exist
-LINE 1: SELECT * FROM savepoints ORDER BY 1;
-                      ^
+ a 
+---
+ 1
+ 2
+(2 rows)
+
 -- test whole-tree rollback
 BEGIN;
 	SAVEPOINT one;
-ERROR:  SAVEPOINT is not yet supported.
 		DELETE FROM savepoints WHERE a=1;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	RELEASE SAVEPOINT one;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	SAVEPOINT two;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		DELETE FROM savepoints WHERE a=1;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		SAVEPOINT three;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 			DELETE FROM savepoints WHERE a=2;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 ROLLBACK;
 COMMIT;		-- should not be in a transaction block
 WARNING:  there is no transaction in progress
 		
 SELECT * FROM savepoints ORDER BY 1;
-ERROR:  relation "savepoints" does not exist
-LINE 1: SELECT * FROM savepoints ORDER BY 1;
-                      ^
+ a 
+---
+ 1
+ 2
+(2 rows)
+
 -- test whole-tree commit on an aborted subtransaction
 BEGIN;
 	INSERT INTO savepoints VALUES (4);
-ERROR:  relation "savepoints" does not exist
-LINE 1: INSERT INTO savepoints VALUES (4);
-                    ^
 	SAVEPOINT one;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		INSERT INTO savepoints VALUES (5);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		SELECT foo;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  column "foo" does not exist
+LINE 1: SELECT foo;
+               ^
 COMMIT;
 SELECT * FROM savepoints ORDER BY a;
-ERROR:  relation "savepoints" does not exist
-LINE 1: SELECT * FROM savepoints ORDER BY a;
-                      ^
+ a 
+---
+ 1
+ 2
+(2 rows)
+
 BEGIN;
 	INSERT INTO savepoints VALUES (6);
-ERROR:  relation "savepoints" does not exist
-LINE 1: INSERT INTO savepoints VALUES (6);
-                    ^
 	SAVEPOINT one;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		INSERT INTO savepoints VALUES (7);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	RELEASE SAVEPOINT one;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	INSERT INTO savepoints VALUES (8);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 COMMIT;
 -- rows 6 and 8 should have been created by the same xact
 SELECT a.xmin = b.xmin FROM savepoints a, savepoints b WHERE a.a=6 AND b.a=8;
-ERROR:  relation "savepoints" does not exist
-LINE 1: SELECT a.xmin = b.xmin FROM savepoints a, savepoints b WHERE...
-                                    ^
+ ?column? 
+----------
+ t
+(1 row)
+
 -- rows 6 and 7 should have been created by different xacts
 SELECT a.xmin = b.xmin FROM savepoints a, savepoints b WHERE a.a=6 AND b.a=7;
-ERROR:  relation "savepoints" does not exist
-LINE 1: SELECT a.xmin = b.xmin FROM savepoints a, savepoints b WHERE...
-                                    ^
+ ?column? 
+----------
+ f
+(1 row)
+
 BEGIN;
 	INSERT INTO savepoints VALUES (9);
-ERROR:  relation "savepoints" does not exist
-LINE 1: INSERT INTO savepoints VALUES (9);
-                    ^
 	SAVEPOINT one;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		INSERT INTO savepoints VALUES (10);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	ROLLBACK TO SAVEPOINT one;
-ERROR:  no such savepoint
 		INSERT INTO savepoints VALUES (11);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 COMMIT;
 SELECT a FROM savepoints WHERE a in (9, 10, 11) ORDER BY a;
-ERROR:  relation "savepoints" does not exist
-LINE 1: SELECT a FROM savepoints WHERE a in (9, 10, 11) ORDER BY a;
-                      ^
+ a  
+----
+  9
+ 11
+(2 rows)
+
 -- rows 9 and 11 should have been created by different xacts
 SELECT a.xmin = b.xmin FROM savepoints a, savepoints b WHERE a.a=9 AND b.a=11;
-ERROR:  relation "savepoints" does not exist
-LINE 1: SELECT a.xmin = b.xmin FROM savepoints a, savepoints b WHERE...
-                                    ^
+ ?column? 
+----------
+ f
+(1 row)
+
 BEGIN;
 	INSERT INTO savepoints VALUES (12);
-ERROR:  relation "savepoints" does not exist
-LINE 1: INSERT INTO savepoints VALUES (12);
-                    ^
 	SAVEPOINT one;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		INSERT INTO savepoints VALUES (13);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		SAVEPOINT two;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 			INSERT INTO savepoints VALUES (14);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	ROLLBACK TO SAVEPOINT one;
-ERROR:  no such savepoint
 		INSERT INTO savepoints VALUES (15);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		SAVEPOINT two;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 			INSERT INTO savepoints VALUES (16);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 			SAVEPOINT three;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 				INSERT INTO savepoints VALUES (17);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 COMMIT;
 SELECT a FROM savepoints WHERE a BETWEEN 12 AND 17 ORDER BY a;
-ERROR:  relation "savepoints" does not exist
-LINE 1: SELECT a FROM savepoints WHERE a BETWEEN 12 AND 17 ORDER BY ...
-                      ^
+ a  
+----
+ 12
+ 15
+ 16
+ 17
+(4 rows)
+
 BEGIN;
 	INSERT INTO savepoints VALUES (18);
-ERROR:  relation "savepoints" does not exist
-LINE 1: INSERT INTO savepoints VALUES (18);
-                    ^
 	SAVEPOINT one;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		INSERT INTO savepoints VALUES (19);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		SAVEPOINT two;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 			INSERT INTO savepoints VALUES (20);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	ROLLBACK TO SAVEPOINT one;
-ERROR:  no such savepoint
 		INSERT INTO savepoints VALUES (21);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	ROLLBACK TO SAVEPOINT one;
-ERROR:  no such savepoint
 		INSERT INTO savepoints VALUES (22);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 COMMIT;
 SELECT a FROM savepoints WHERE a BETWEEN 18 AND 22 ORDER BY a;
-ERROR:  relation "savepoints" does not exist
-LINE 1: SELECT a FROM savepoints WHERE a BETWEEN 18 AND 22 ORDER BY ...
-                      ^
+ a  
+----
+ 18
+ 22
+(2 rows)
+
 DROP TABLE savepoints;
-ERROR:  table "savepoints" does not exist
 -- only in a transaction block:
 SAVEPOINT one;
-ERROR:  SAVEPOINT is not yet supported.
+ERROR:  SAVEPOINT can only be used in transaction blocks
 ROLLBACK TO SAVEPOINT one;
 ERROR:  ROLLBACK TO SAVEPOINT can only be used in transaction blocks
 RELEASE SAVEPOINT one;
@@ -416,17 +374,19 @@ ERROR:  RELEASE SAVEPOINT can only be used in transaction blocks
 -- Only "rollback to" allowed in aborted state
 BEGIN;
   SAVEPOINT one;
-ERROR:  SAVEPOINT is not yet supported.
   SELECT 0/0;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  division by zero
   SAVEPOINT two;    -- ignored till the end of ...
 ERROR:  current transaction is aborted, commands ignored until end of transaction block
   RELEASE SAVEPOINT one;      -- ignored till the end of ...
 ERROR:  current transaction is aborted, commands ignored until end of transaction block
   ROLLBACK TO SAVEPOINT one;
-ERROR:  no such savepoint
   SELECT 1;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ ?column? 
+----------
+        1
+(1 row)
+
 COMMIT;
 SELECT 1;			-- this should work
  ?column? 
@@ -438,36 +398,66 @@ SELECT 1;			-- this should work
 BEGIN;
 	DECLARE c CURSOR FOR SELECT unique2 FROM tenk1 ORDER BY unique2;
 	SAVEPOINT one;
-ERROR:  SAVEPOINT is not yet supported.
 		FETCH 10 FROM c;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ unique2 
+---------
+       0
+       1
+       2
+       3
+       4
+       5
+       6
+       7
+       8
+       9
+(10 rows)
+
 	ROLLBACK TO SAVEPOINT one;
-ERROR:  no such savepoint
 		FETCH 10 FROM c;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ unique2 
+---------
+      10
+      11
+      12
+      13
+      14
+      15
+      16
+      17
+      18
+      19
+(10 rows)
+
 	RELEASE SAVEPOINT one;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	FETCH 10 FROM c;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ unique2 
+---------
+      20
+      21
+      22
+      23
+      24
+      25
+      26
+      27
+      28
+      29
+(10 rows)
+
 	CLOSE c;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	DECLARE c CURSOR FOR SELECT unique2/0 FROM tenk1 ORDER BY unique2;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	SAVEPOINT two;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		FETCH 10 FROM c;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  division by zero
 	ROLLBACK TO SAVEPOINT two;
-ERROR:  no such savepoint
 	-- c is now dead to the world ...
 		FETCH 10 FROM c;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  portal "c" cannot be run
 	ROLLBACK TO SAVEPOINT two;
-ERROR:  no such savepoint
 	RELEASE SAVEPOINT two;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	FETCH 10 FROM c;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  portal "c" cannot be run
 COMMIT;
 --
 -- Check that "stable" functions are really stable.  They should not be
@@ -565,28 +555,21 @@ rollback;
 -- test case for problems with dropping an open relation during abort
 BEGIN;
 	savepoint x;
-ERROR:  SAVEPOINT is not yet supported.
 		CREATE TABLE koju (a INT UNIQUE);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		INSERT INTO koju VALUES (1);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 		INSERT INTO koju VALUES (1);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  duplicate key value violates unique constraint "koju_a_key"
+DETAIL:  Key (a)=(1) already exists.
 	rollback to x;
-ERROR:  no such savepoint
 	CREATE TABLE koju (a INT UNIQUE);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	INSERT INTO koju VALUES (1);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 	INSERT INTO koju VALUES (1);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  duplicate key value violates unique constraint "koju_a_key"
+DETAIL:  Key (a)=(1) already exists.
 ROLLBACK;
 DROP TABLE foo;
-ERROR:  table "foo" does not exist
 DROP TABLE baz;
-ERROR:  table "baz" does not exist
 DROP TABLE barbaz;
-ERROR:  table "barbaz" does not exist
 -- test case for problems with revalidating an open relation during abort
 create function inverse(int) returns float8 as
 $$
@@ -606,22 +589,20 @@ drop function inverse(int);
 -- performed in the aborted subtransaction
 begin;
 savepoint x;
-ERROR:  SAVEPOINT is not yet supported.
 create table abc (a int);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 insert into abc values (5);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 insert into abc values (10);
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 declare foo cursor for select * from abc order by a;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
 fetch from foo;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ a 
+---
+ 5
+(1 row)
+
 rollback to x;
-ERROR:  no such savepoint
 -- should fail
 fetch from foo;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  cursor "foo" does not exist
 commit;
 begin;
 create table abc (a int);
@@ -636,13 +617,19 @@ fetch from foo;
 (1 row)
 
 savepoint x;
-ERROR:  SAVEPOINT is not yet supported.
 fetch from foo;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ a  
+----
+ 10
+(1 row)
+
 rollback to x;
-ERROR:  no such savepoint
 fetch from foo;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ a  
+----
+ 15
+(1 row)
+
 abort;
 -- Test for proper cleanup after a failure in a cursor portal
 -- that was created in an outer subtransaction
@@ -658,7 +645,7 @@ BEGIN
   RETURN 'foo';
 END $$;
 BEGIN;
-DECLARE ok CURSOR FOR SELECT * FROM int8_tbl;
+DECLARE ok CURSOR FOR SELECT * FROM int8_tbl order by 1,2;
 DECLARE ctt CURSOR FOR SELECT create_temp_tab();
 FETCH ok;
  q1  | q2  
@@ -667,17 +654,25 @@ FETCH ok;
 (1 row)
 
 SAVEPOINT s1;
-ERROR:  SAVEPOINT is not yet supported.
 FETCH ok;  -- should work
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ q1  |        q2        
+-----+------------------
+ 123 | 4567890123456789
+(1 row)
+
 FETCH ctt; -- error occurs here
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  division by zero
+CONTEXT:  SQL statement "INSERT INTO new_table SELECT invert(0.0)"
+PL/pgSQL function create_temp_tab() line 6 at SQL statement
 ROLLBACK TO s1;
-ERROR:  no such savepoint
 FETCH ok;  -- should work
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+        q1        |        q2         
+------------------+-------------------
+ 4567890123456789 | -4567890123456789
+(1 row)
+
 FETCH ctt; -- must be rejected
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ERROR:  portal "ctt" cannot be run
 COMMIT;
 DROP FUNCTION create_temp_tab();
 DROP FUNCTION invert(x float8);

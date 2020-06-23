@@ -1573,17 +1573,17 @@ insert into upsert values(5, 'purple') on conflict (key) do update set color = '
 insert into upsert values(6, 'white') on conflict (key) do update set color = 'updated ' || upsert.color;
 insert into upsert values(7, 'pink') on conflict (key) do update set color = 'updated ' || upsert.color;
 insert into upsert values(8, 'yellow') on conflict (key) do update set color = 'updated ' || upsert.color;
-select * from upsert;
+select * from upsert order by 1,2;
  key | color  
 -----+--------
    1 | black
    2 | red
-   5 | purple
-   6 | white
-   8 | yellow
    3 | orange
    4 | green
+   5 | purple
+   6 | white
    7 | pink
+   8 | yellow
 (8 rows)
 
 drop table upsert;

@@ -1314,6 +1314,56 @@ mvtest_tvv| SELECT sum(mvtest_tv.totamt) AS grandtot
    FROM mvtest_tv;
 mvtest_tvvmv| SELECT mvtest_tvvm.grandtot
    FROM mvtest_tvvm;
+pg_audit_fga_conf_detail| SELECT pg_get_userbyid(s.auditor_id) AS auditor,
+    n.nspname AS object_schema,
+    v.relname AS object_name,
+    s.policy_name,
+    s.audit_columns,
+    s.audit_condition_str AS audit_condition,
+    s.audit_enable,
+    s.statement_types,
+    s.audit_column_opts,
+    m.nspname AS handler_schema,
+    p.proname AS handler_module
+   FROM ((((pg_audit_fga_conf s
+     JOIN pg_class v ON ((s.object_id = v.oid)))
+     JOIN pg_namespace n ON ((v.relnamespace = n.oid)))
+     LEFT JOIN pg_namespace m ON ((s.handler_schema = m.oid)))
+     LEFT JOIN pg_proc p ON ((s.handler_module = p.oid)));
+pg_audit_fga_policy_columns_detail| SELECT pg_get_userbyid(s.auditor_id) AS auditor,
+    n.nspname AS object_schema,
+    v.relname AS object_name,
+    s.policy_name,
+    s.audit_columns
+   FROM pg_audit_fga_conf s,
+    pg_class v,
+    pg_namespace n
+  WHERE ((s.object_id = v.oid) AND (v.relnamespace = n.oid));
+pg_audit_obj_conf_detail| SELECT pg_get_userbyid(s.auditor_id) AS auditor,
+    v.relname AS object_class,
+    pg_describe_object(s.class_id, s.object_id, s.object_sub_id) AS object_desc,
+    pg_get_audit_action_name(s.action_id) AS action_name,
+    pg_get_audit_action_mode(s.action_mode) AS action_mode,
+    s.action_ison
+   FROM pg_audit_obj_conf s,
+    pg_class v
+  WHERE (s.class_id = v.oid);
+pg_audit_obj_def_opts_detail| SELECT pg_get_userbyid(s.auditor_id) AS auditor,
+    pg_get_audit_action_name(s.action_id) AS action_name,
+    pg_get_audit_action_mode(s.action_mode) AS action_mode,
+    s.action_ison
+   FROM pg_audit_obj_def_opts s;
+pg_audit_stmt_conf_detail| SELECT pg_get_userbyid(s.auditor_id) AS auditor,
+    pg_get_audit_action_name(s.action_id) AS action_name,
+    pg_get_audit_action_mode(s.action_mode) AS action_mode,
+    s.action_ison
+   FROM pg_audit_stmt_conf s;
+pg_audit_user_conf_detail| SELECT pg_get_userbyid(s.auditor_id) AS auditor,
+    pg_get_userbyid(s.user_id) AS user_name,
+    pg_get_audit_action_name(s.action_id) AS action_name,
+    pg_get_audit_action_mode(s.action_mode) AS action_mode,
+    s.action_ison
+   FROM pg_audit_user_conf s;
 pg_available_extension_versions| SELECT e.name,
     e.version,
     (x.extname IS NOT NULL) AS installed,
@@ -2778,7 +2828,7 @@ select * from rules_src;
  11 | 130
 (2 rows)
 
-select * from rules_log;
+select * from rules_log order by 1,2,3;
  f1 | f2  | tag 
 ----+-----+-----
   1 |   2 | old
@@ -2809,21 +2859,21 @@ select * from rules_src;
  11 | 13
 (2 rows)
 
-select * from rules_log;
+select * from rules_log order by 1,2,3;
  f1 | f2  | tag 
 ----+-----+-----
   1 |   2 | old
   1 |   3 | new
+  1 |   3 | new
   1 |   3 | old
   1 |  30 | new
   1 |  30 | old
-  1 |   3 | new
  11 |  12 | old
+ 11 |  13 | new
  11 |  13 | new
  11 |  13 | old
  11 | 130 | new
  11 | 130 | old
- 11 |  13 | new
 (12 rows)
 
 create rule r3 as on delete to rules_src do notify rules_src_deletion;
