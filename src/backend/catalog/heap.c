@@ -1906,9 +1906,12 @@ GetRelationDistributionNodes(PGXCSubCluster *subcluster, int *numnodes)
         return 1;
 #endif
     }
-
-    /* Return a sorted array of node OIDs */
-    return SortRelationDistributionNodes(nodes, *numnodes);
+#ifdef __COLD_HOT__
+	return -1;
+#else
+	/* Return a sorted array of node OIDs */
+	return SortRelationDistributionNodes(nodes, *numnodes);
+#endif
 }
 
 /*

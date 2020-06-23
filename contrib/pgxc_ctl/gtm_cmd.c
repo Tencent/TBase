@@ -163,6 +163,7 @@ int add_gtmMaster(char *name, char *host, int port, char *dir)
     char date[MAXTOKEN+1];
     FILE *f;
     int    rc;
+    char *__port_s__ = NULL;
 
     if (is_none(name))
     {
@@ -188,7 +189,7 @@ int add_gtmMaster(char *name, char *host, int port, char *dir)
     assign_sval(VAR_gtmName, Strdup(name));
     assign_sval(VAR_gtmMasterServer, Strdup(host));
     snprintf(port_s, MAXTOKEN, "%d", port);
-    char *__port_s__ = Strdup(port_s);
+    __port_s__ = Strdup(port_s);
     assign_sval(VAR_gtmMasterPort, __port_s__);
     assign_sval(VAR_gtmMasterDir, Strdup(dir));
     makeServerList();
@@ -233,6 +234,7 @@ int add_gtmSlave(char *name, char *host, int port, char *dir)
     char date[MAXTOKEN+1];
     FILE *f;
     int    rc;
+    char *__dir__ = NULL;
 
     if (isVarYes(VAR_gtmSlave))
     {
@@ -265,7 +267,7 @@ int add_gtmSlave(char *name, char *host, int port, char *dir)
     assign_sval(VAR_gtmSlaveServer, Strdup(host));
     snprintf(port_s, MAXTOKEN, "%d", port);
     assign_sval(VAR_gtmSlavePort, Strdup(port_s));
-    char *__dir__ = Strdup(dir);
+    __dir__ = Strdup(dir);
     assign_sval(VAR_gtmSlaveDir, __dir__);
     makeServerList();
     if ((f = fopen(pgxc_ctl_config_path, "a")) == NULL)

@@ -223,7 +223,7 @@ StoreStartXid(TransactionId transactionid)
  * not associating next_xid with the current transaction.
  */
 bool
-TransactionIdIsCurrentGlobalTransactionId(TransactionId xid)
+TransactIdIsCurentGlobalTransacId(TransactionId xid)
 {
     return TransactionIdIsValid(next_xid) && TransactionIdEquals(xid, next_xid);
 }
