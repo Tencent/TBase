@@ -173,7 +173,10 @@ extern ForeignPath *create_foreignscan_path(PlannerInfo *root, RelOptInfo *rel,
                         Path *fdw_outerpath,
                         List *fdw_private);
 
-extern Relids calc_nestloop_required_outer(Path *outer_path, Path *inner_path);
+extern Relids calc_nestloop_required_outer(Relids outerrelids,
+							 Relids outer_paramrels,
+							 Relids innerrelids,
+							 Relids inner_paramrels);
 extern Relids calc_non_nestloop_required_outer(Path *outer_path, Path *inner_path);
 
 extern NestPath *create_nestloop_path(PlannerInfo *root,
@@ -349,6 +352,8 @@ extern ParamPathInfo *get_joinrel_parampathinfo(PlannerInfo *root,
                           List **restrict_clauses);
 extern ParamPathInfo *get_appendrel_parampathinfo(RelOptInfo *appendrel,
                             Relids required_outer);
+extern ParamPathInfo *find_param_path_info(RelOptInfo *rel,
+                                        Relids required_outer);
 
 #ifdef __TBASE__
 extern Path *create_redistribute_grouping_path(PlannerInfo *root, 

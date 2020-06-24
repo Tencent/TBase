@@ -1106,12 +1106,8 @@ get_baserel_parampathinfo(PlannerInfo *root, RelOptInfo *baserel,
     Assert(!bms_overlap(baserel->relids, required_outer));
 
     /* If we already have a PPI for this parameterization, just return it */
-    foreach(lc, baserel->ppilist)
-    {
-        ppi = (ParamPathInfo *) lfirst(lc);
-        if (bms_equal(ppi->ppi_req_outer, required_outer))
+	if ((ppi = find_param_path_info(baserel, required_outer)))
             return ppi;
-    }
 
     /*
      * Identify all joinclauses that are movable to this base rel given this
@@ -1348,12 +1344,8 @@ get_joinrel_parampathinfo(PlannerInfo *root, RelOptInfo *joinrel,
     *restrict_clauses = list_concat(pclauses, *restrict_clauses);
 
     /* If we already have a PPI for this parameterization, just return it */
-    foreach(lc, joinrel->ppilist)
-    {
-        ppi = (ParamPathInfo *) lfirst(lc);
-        if (bms_equal(ppi->ppi_req_outer, required_outer))
+	if ((ppi = find_param_path_info(joinrel, required_outer)))
             return ppi;
-    }
 
     /* Estimate the number of rows returned by the parameterized join */
     rows = get_parameterized_joinrel_size(root, joinrel,
@@ -1392,7 +1384,6 @@ ParamPathInfo *
 get_appendrel_parampathinfo(RelOptInfo *appendrel, Relids required_outer)
 {
     ParamPathInfo *ppi;
-    ListCell   *lc;
 
     /* Unparameterized paths have no ParamPathInfo */
     if (bms_is_empty(required_outer))
@@ -1401,12 +1392,8 @@ get_appendrel_parampathinfo(RelOptInfo *appendrel, Relids required_outer)
     Assert(!bms_overlap(appendrel->relids, required_outer));
 
     /* If we already have a PPI for this parameterization, just return it */
-    foreach(lc, appendrel->ppilist)
-    {
-        ppi = (ParamPathInfo *) lfirst(lc);
-        if (bms_equal(ppi->ppi_req_outer, required_outer))
+	if ((ppi = find_param_path_info(appendrel, required_outer)))
             return ppi;
-    }
 
     /* Else build the ParamPathInfo */
     ppi = makeNode(ParamPathInfo);
@@ -1416,4 +1403,24 @@ get_appendrel_parampathinfo(RelOptInfo *appendrel, Relids required_outer)
     appendrel->ppilist = lappend(appendrel->ppilist, ppi);
 
     return ppi;
+}
+
+/*
+ * Returns a ParamPathInfo for the parameterization given by required_outer, if
+ * already available in the given rel. Returns NULL otherwise.
+ */
+ParamPathInfo *
+find_param_path_info(RelOptInfo *rel, Relids required_outer)
+{
+	ListCell   *lc;
+
+	foreach(lc, rel->ppilist)
+	{
+		ParamPathInfo *ppi = (ParamPathInfo *) lfirst(lc);
+
+		if (bms_equal(ppi->ppi_req_outer, required_outer))
+			return ppi;
+	}
+
+	return NULL;
 }
