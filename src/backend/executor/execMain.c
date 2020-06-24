@@ -44,6 +44,7 @@
 #include "access/xact.h"
 #include "catalog/namespace.h"
 #include "catalog/partition.h"
+#include "catalog/pg_inherits_fn.h"
 #include "catalog/pg_publication.h"
 #ifdef _MLS_
 #include "catalog/pg_class.h"
@@ -3696,9 +3697,12 @@ ExecSetupPartitionTupleRouting(Relation rel,
     int            i;
     ResultRelInfo *leaf_part_rri;
 
-    /* Get the tuple-routing information and lock partitions */
-    *pd = RelationGetPartitionDispatchInfo(rel, RowExclusiveLock, num_parted,
-                                           &leaf_parts);
+   /*
+    * Get the information about the partition tree after locking all the
+    * partitions.
+    */
+   (void) find_all_inheritors(RelationGetRelid(rel), RowExclusiveLock, NULL);
+   *pd = RelationGetPartitionDispatchInfo(rel, num_parted, &leaf_parts);
     *num_partitions = list_length(leaf_parts);
     *partitions = (ResultRelInfo *) palloc0(*num_partitions *
                                            sizeof(ResultRelInfo));
