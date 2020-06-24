@@ -1664,11 +1664,17 @@ select * from
 
 -- lateral can result in join conditions appearing below their
 -- real semantic level
+set enable_nestloop to on;
+set enable_hashjoin to off;
+set enable_mergejoin to off;
 explain (num_nodes off, nodes off, verbose, costs off)
 select * from int4_tbl i left join
   lateral (select * from int2_tbl j where i.f1 = j.f1) k on true;
 select * from int4_tbl i left join
   lateral (select * from int2_tbl j where i.f1 = j.f1) k on true order by 1;
+reset enable_nestloop;
+reset enable_hashjoin;
+reset enable_mergejoin
 explain (num_nodes off, nodes off, verbose, costs off)
 select * from int4_tbl i left join
   lateral (select coalesce(i) from int2_tbl j where i.f1 = j.f1) k on true;

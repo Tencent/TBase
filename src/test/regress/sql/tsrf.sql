@@ -71,7 +71,7 @@ SELECT sum((3 = ANY(SELECT lag(x) over(order by x)
 SELECT min(generate_series(1, 3)) OVER() FROM few;
 
 -- SRFs are normally computed after window functions
-SELECT id,lag(id) OVER(), count(*) OVER(), generate_series(1,3) FROM few ORDER BY 1, 4;
+SELECT id,lag(id) OVER(), count(*) OVER(), generate_series(1,3) FROM few ORDER BY 1, 2, 4;
 -- unless referencing SRFs
 SELECT SUM(count(*)) OVER(PARTITION BY generate_series(1,3) ORDER BY generate_series(1,3)), generate_series(1,3) g FROM few GROUP BY g;
 
