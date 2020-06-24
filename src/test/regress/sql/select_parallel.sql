@@ -34,6 +34,12 @@ select length(stringu1) from tenk1 group by length(stringu1);
 explain (costs off)
 	select stringu1, count(*) from tenk1 group by stringu1 order by stringu1;
 
+explain (costs off)
+	select count(stringu1) as num, (CASE WHEN length(stringu1) > 5 THEN 'LONG' ELSE 'SHORT' END) as islong
+		from tenk1 group by islong order by num;
+select count(stringu1) as num, (CASE WHEN length(stringu1) > 5 THEN 'LONG' ELSE 'SHORT' END) as islong
+	from tenk1 group by islong order by num;
+
 -- test that parallel plan for aggregates is not selected when
 -- target list contains parallel restricted clause.
 explain (costs off)

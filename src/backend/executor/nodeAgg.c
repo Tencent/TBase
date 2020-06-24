@@ -3394,65 +3394,71 @@ agg_retrieve_direct(AggState *aggstate)
  */
 static void
 agg_fill_hash_table(AggState *aggstate)
-{// #lizard forgives
+{
     TupleTableSlot *outerslot;
     ExprContext *tmpcontext = aggstate->tmpcontext;
 #ifdef __TBASE__
-    AttrNumber varattno = 0;
-    Oid           dataType = 0;
-    aggstate->tmpcxt    = NULL;
-    
+    AttrNumber varattno = InvalidAttrNumber;
+    Oid                dataType = InvalidOid;
+
+    aggstate->tmpcxt = NULL;
+
+    /* get the redistribution hashfunc for parallel execution */
     if (IsParallelWorker() && aggstate->state)
     {
-        AttrNumber group_col = 0;
-        TargetEntry *en      = NULL;
+        AttrNumber group_col = InvalidAttrNumber;
+        TargetEntry *tle      = NULL;
             
         if (aggstate->aggstrategy != AGG_HASHED || 
             list_length(aggstate->all_grouped_cols) == 0)
         {
-            elog(ERROR, "mismatch plan while ReDistribute-Data.");
+            elog(ERROR, "plan mismatched while redistributing data across "
+                          "parallel workers.");
         }
         
-        /* get first groupby column in targetlist */
+        /*
+        * all_grouped_cols was sorted by AttributeNum in descending order, get
+        * first group-by column in targetlist .
+        *
+        * TODO: choose column with better distribution to avoid data skew
+        * within parallel workers
+        */
         group_col = llast_int(aggstate->all_grouped_cols);
 
         if (group_col < 1)
         {
-            elog(ERROR, "group column AttrNumber is smaller than 1.");
+            elog(ERROR, "invalid group by AttrNumber %d found while "
+                         "redistributing data across parallel workers.", group_col);
         }
 
-        /* get the groupby column's datatype and AttrNumber of input from outer plan */
-        en = (TargetEntry *)lfirst(list_nth_cell(aggstate->ss.ps.plan->lefttree->targetlist, group_col - 1));
+		/*
+		 * get DataType and AttrNumber of the redistribution group-by column
+		 * from outer plan
+		 */
+		tle = (TargetEntry *) lfirst(list_nth_cell(
+				   aggstate->ss.ps.plan->lefttree->targetlist, group_col - 1));
 
-        if (IsA(en->expr, Var))
-        {
-            Var *var = (Var *)en->expr;
+		dataType = exprType((Node*) tle->expr);
+		varattno = group_col;
 
-            dataType = var->vartype;
-            varattno = group_col;
+		aggstate->hashfunc = hash_func_ptr(dataType);
+		aggstate->dataType = dataType;
 
-            aggstate->hashfunc = hash_func_ptr(dataType);
-            aggstate->dataType = dataType;
+		/* could not find hash function for given data type */
+		if (!aggstate->hashfunc)
+		{
+			elog(ERROR, "could not find hash function for given data type:%u",
+					dataType);
+		}
 
-            /* could not find hash function for given data type */
-            if (!aggstate->hashfunc)
-            {
-                elog(ERROR, "could not find hash function for given data type:%u", dataType);
-            }
-        }
-        else
-        {
-            elog(ERROR, "could not get AttrNumber and data type of group column.");
-        }
+		/* initialize resources */
+		InitializeReDistribute(aggstate->state, &aggstate->file);
 
-        /* initialize resources */
-        InitializeReDistribute(aggstate->state, &aggstate->file);
+		aggstate->tmpcxt = AllocSetContextCreate(CurrentMemoryContext,
+												 "ExecAgg temp memoryContext",
+												 ALLOCSET_DEFAULT_SIZES);
 
-        aggstate->tmpcxt = AllocSetContextCreate(CurrentMemoryContext,
-                                             "ExecAgg temp memoryContext",
-                                             ALLOCSET_DEFAULT_SIZES);
-
-        elog(LOG, "worker:%d redistributed in HashAgg.", ParallelWorkerNumber);
+		elog(LOG, "worker:%d redistributed in HashAgg.", ParallelWorkerNumber);
     }
 #endif
 
