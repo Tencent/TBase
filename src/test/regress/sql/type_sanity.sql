@@ -104,6 +104,14 @@ WHERE p1.typinput = p2.oid AND NOT
       p2.proargtypes[1] = 'oid'::regtype AND
       p2.proargtypes[2] = 'int4'::regtype));
 
+-- Check that all and only those functions with a variadic type have
+-- a variadic argument.
+SELECT oid::regprocedure, proargmodes, provariadic
+FROM pg_proc
+WHERE (proargmodes IS NOT NULL AND 'v' = any(proargmodes))
+    IS DISTINCT FROM
+    (provariadic != 0);
+
 -- As of 8.0, this check finds refcursor, which is borrowing
 -- other types' I/O routines
 SELECT p1.oid, p1.typname, p2.oid, p2.proname
