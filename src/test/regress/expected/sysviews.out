@@ -113,6 +113,7 @@ select name, setting from pg_settings where name like 'enable%';
  enable_multi_cluster_print        | off
  enable_nestloop                   | on
  enable_nestloop_suppression       | off
+ enable_partition_wise_join        | off
  enable_null_string                | off
  enable_oracle_compatible          | off
  enable_parallel_ddl               | off

@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * prep.h
- *      prototypes for files in optimizer/prep/
+ *	  prototypes for files in optimizer/prep/
  *
  *
  * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
@@ -41,7 +41,7 @@ extern Expr *canonicalize_qual(Expr *qual);
 extern List *preprocess_targetlist(PlannerInfo *root, List *tlist);
 
 extern List *preprocess_onconflict_targetlist(List *tlist,
-                                 int result_relation, List *range_table);
+								 int result_relation, List *range_table);
 
 extern PlanRowMark *get_plan_rowmark(List *rowmarks, Index rtindex);
 
@@ -53,9 +53,15 @@ extern RelOptInfo *plan_set_operations(PlannerInfo *root);
 extern void expand_inherited_tables(PlannerInfo *root);
 
 extern Node *adjust_appendrel_attrs(PlannerInfo *root, Node *node,
-                       AppendRelInfo *appinfo);
+					   AppendRelInfo *appinfo);
 
 extern Node *adjust_appendrel_attrs_multilevel(PlannerInfo *root, Node *node,
-                                  RelOptInfo *child_rel);
+								  RelOptInfo *child_rel);
 
-#endif                            /* PREP_H */
+extern SpecialJoinInfo *build_child_join_sjinfo(PlannerInfo *root,
+                                               SpecialJoinInfo *parent_sjinfo,
+                                               Relids left_relids, Relids right_relids);
+extern Relids adjust_child_relids_multilevel(PlannerInfo *root, Relids relids,
+                                                          Relids child_relids, Relids top_parent_relids);
+
+#endif							/* PREP_H */

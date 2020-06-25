@@ -193,6 +193,7 @@ test: xml
 test: event_trigger
 test: fast_default
 test: stats
+test: partition_join
 test: xc_create_function
 test: xc_groupby
 test: xc_distkey

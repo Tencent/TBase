@@ -95,6 +95,7 @@ select name, setting from pg_settings where name like 'enable%';
  enable_multi_cluster           | on
  enable_multi_cluster_print     | off
  enable_nestloop                | on
+ enable_partition_wise_join     | off
  enable_oracle_compatible       | off
  enable_pgbouncer               | off
  enable_plpgsql_debug_print     | off

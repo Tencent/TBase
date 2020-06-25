@@ -77,6 +77,7 @@ extern bool enable_mergejoin;
 extern bool enable_hashjoin;
 extern bool enable_fast_query_shipping;
 extern bool enable_gathermerge;
+extern bool enable_partition_wise_join;
 extern bool enable_nestloop_suppression;
 extern int	constraint_exclusion;
 

@@ -312,6 +312,8 @@ extern LimitPath *create_limit_path(PlannerInfo *root, RelOptInfo *rel,
 extern Path *reparameterize_path(PlannerInfo *root, Path *path,
                     Relids required_outer,
                     double loop_count);
+extern Path *reparameterize_path_by_child(PlannerInfo *root, Path *path,
+                                                        RelOptInfo *child_rel);
 
 extern Path *create_remotesubplan_path(PlannerInfo *root, Path *subpath,
                                         Distribution *distribution);
@@ -354,6 +356,10 @@ extern ParamPathInfo *get_appendrel_parampathinfo(RelOptInfo *appendrel,
                             Relids required_outer);
 extern ParamPathInfo *find_param_path_info(RelOptInfo *rel,
                                         Relids required_outer);
+extern RelOptInfo *build_child_join_rel(PlannerInfo *root,
+                                        RelOptInfo *outer_rel, RelOptInfo *inner_rel,
+                                        RelOptInfo *parent_joinrel, List *restrictlist,
+                                        SpecialJoinInfo *sjinfo, JoinType jointype);
 
 #ifdef __TBASE__
 extern Path *create_redistribute_grouping_path(PlannerInfo *root, 
