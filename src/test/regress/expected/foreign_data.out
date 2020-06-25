@@ -1518,6 +1518,7 @@ ERROR:  foreign table "pt2_1" does not exist
  c2     | text    |           |          |         | extended |              | 
  c3     | date    |           |          |         | plain    |              | 
 Partition key: LIST (c1)
+Number of partitions: 0
 Distribute By: HASH(c1)
 Location Nodes: ALL DATANODES
 
@@ -1578,6 +1579,7 @@ ALTER TABLE pt2 ALTER c2 SET NOT NULL;
  c2     | text    |           | not null |         | extended |              | 
  c3     | date    |           |          |         | plain    |              | 
 Partition key: LIST (c1)
+Number of partitions: 0
 Distribute By: HASH(c1)
 Location Nodes: ALL DATANODES
 
@@ -1601,6 +1603,7 @@ ALTER TABLE pt2 ADD CONSTRAINT pt2chk1 CHECK (c1 > 0);
 Partition key: LIST (c1)
 Check constraints:
     "pt2chk1" CHECK (c1 > 0)
+Number of partitions: 0
 Distribute By: HASH(c1)
 Location Nodes: ALL DATANODES
 

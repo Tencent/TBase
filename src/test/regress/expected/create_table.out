@@ -431,13 +431,15 @@ ERROR:  cannot inherit from partitioned table "partitioned2"
  c      | text    |           |          | 
  d      | text    |           |          | 
 Partition key: RANGE (a oid_ops, plusone(b), c, d COLLATE "C")
+Number of partitions: 0
 
-\d partitioned2
+\d+ partitioned2
             Table "public.partitioned2"
- Column |  Type   | Collation | Nullable | Default 
---------+---------+-----------+----------+---------
- a      | integer |           |          | 
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ a      | integer |           |          |         | plain   |              | 
 Partition key: LIST (((a + 1)))
+Number of partitions: 0
 
 DROP TABLE partitioned, partitioned2;
 --
@@ -877,6 +879,7 @@ SELECT obj_description('parted_col_comment'::regclass);
  a      | integer |           |          |         | plain    |              | Partition key
  b      | text    |           |          |         | extended |              | 
 Partition key: LIST (a)
+Number of partitions: 0
 Distribute By: HASH(a)
 Location Nodes: ALL DATANODES
 
