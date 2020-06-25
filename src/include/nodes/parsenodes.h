@@ -849,7 +849,8 @@ typedef struct PartitionBy
 typedef struct PartitionSpec
 {
     NodeTag        type;
-    char       *strategy;        /* partitioning strategy ('list' or 'range') */
+        char       *strategy;           /* partitioning strategy ('hash', 'list' or
+                                                                 * 'range') */
     List       *partParams;        /* List of PartitionElems */
 #ifdef __TBASE__
     PartitionBy *interval;      /* used for interval partition */
@@ -858,6 +859,7 @@ typedef struct PartitionSpec
 } PartitionSpec;
 
 /* Internal codes for partitioning strategies */
+#define PARTITION_STRATEGY_HASH         'h'
 #define PARTITION_STRATEGY_LIST        'l'
 #define PARTITION_STRATEGY_RANGE    'r'
 #ifdef __TBASE__
@@ -877,6 +879,10 @@ typedef struct PartitionBoundSpec
 
     char        strategy;        /* see PARTITION_STRATEGY codes above */
 	bool		is_default;		/* is it a default partition bound? */
+
+	/* Partitioning info for HASH strategy: */
+	int			modulus;
+	int			remainder;
 
     /* Partitioning info for LIST strategy: */
     List       *listdatums;        /* List of Consts (or A_Consts in raw tree) */

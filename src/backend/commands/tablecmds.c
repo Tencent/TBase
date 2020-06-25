@@ -535,7 +535,7 @@ static void RangeVarCallbackForAlterRelation(const RangeVar *rv, Oid relid,
 static bool is_partition_attr(Relation rel, AttrNumber attnum, bool *used_in_expr);
 static PartitionSpec *transformPartitionSpec(Relation rel, PartitionSpec *partspec, char *strategy);
 static void ComputePartitionAttrs(Relation rel, List *partParams, AttrNumber *partattrs,
-                      List **partexprs, Oid *partopclass, Oid *partcollation);
+					  List **partexprs, Oid *partopclass, Oid *partcollation, char strategy);
 static void CreateInheritance(Relation child_rel, Relation parent_rel);
 static void RemoveInheritance(Relation child_rel, Relation parent_rel);
 static ObjectAddress ATExecAttachPartition(List **wqueue, Relation rel,
@@ -1167,7 +1167,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 #endif
         ComputePartitionAttrs(rel, stmt->partspec->partParams,
                               partattrs, &partexprs, partopclass,
-                              partcollation);
+							  partcollation, strategy);
 
         StorePartitionKey(rel, strategy, partnatts, partattrs, partexprs,
                           partopclass, partcollation);
@@ -16134,7 +16134,9 @@ transformPartitionSpec(Relation rel, PartitionSpec *partspec, char *strategy)
     newspec->location = partspec->location;
 
     /* Parse partitioning strategy name */
-    if (pg_strcasecmp(partspec->strategy, "list") == 0)
+	if (pg_strcasecmp(partspec->strategy, "hash") == 0)
+		*strategy = PARTITION_STRATEGY_HASH;
+	else if (pg_strcasecmp(partspec->strategy, "list") == 0)
         *strategy = PARTITION_STRATEGY_LIST;
     else if (pg_strcasecmp(partspec->strategy, "range") == 0)
         *strategy = PARTITION_STRATEGY_RANGE;
@@ -16211,10 +16213,12 @@ transformPartitionSpec(Relation rel, PartitionSpec *partspec, char *strategy)
  */
 static void
 ComputePartitionAttrs(Relation rel, List *partParams, AttrNumber *partattrs,
-                      List **partexprs, Oid *partopclass, Oid *partcollation)
-{// #lizard forgives
+					  List **partexprs, Oid *partopclass, Oid *partcollation,
+					  char strategy)
+{
     int            attn;
     ListCell   *lc;
+	Oid			am_oid;
 
     attn = 0;
     foreach(lc, partParams)
@@ -16374,25 +16378,41 @@ ComputePartitionAttrs(Relation rel, List *partParams, AttrNumber *partattrs,
         partcollation[attn] = attcollation;
 
         /*
-         * Identify a btree opclass to use. Currently, we use only btree
-         * operators, which seems enough for list and range partitioning.
+		 * Identify the appropriate operator class.  For list and range
+		 * partitioning, we use a btree operator class; hash partitioning uses
+		 * a hash operator class.
          */
+		if (strategy == PARTITION_STRATEGY_HASH)
+			am_oid = HASH_AM_OID;
+		else
+			am_oid = BTREE_AM_OID;
+
         if (!pelem->opclass)
         {
-            partopclass[attn] = GetDefaultOpClass(atttype, BTREE_AM_OID);
+			partopclass[attn] = GetDefaultOpClass(atttype, am_oid);
 
             if (!OidIsValid(partopclass[attn]))
+			{
+				if (strategy == PARTITION_STRATEGY_HASH)
+					ereport(ERROR,
+							(errcode(ERRCODE_UNDEFINED_OBJECT),
+							 errmsg("data type %s has no default hash operator class",
+									format_type_be(atttype)),
+							 errhint("You must specify a hash operator class or define a default hash operator class for the data type.")));
+				else
                 ereport(ERROR,
                         (errcode(ERRCODE_UNDEFINED_OBJECT),
                          errmsg("data type %s has no default btree operator class",
                                 format_type_be(atttype)),
                          errhint("You must specify a btree operator class or define a default btree operator class for the data type.")));
+
+			}
         }
         else
             partopclass[attn] = ResolveOpClass(pelem->opclass,
                                                atttype,
-                                               "btree",
-                                               BTREE_AM_OID);
+											   am_oid == HASH_AM_OID ? "hash" : "btree",
+											   am_oid);
 
         attn++;
     }

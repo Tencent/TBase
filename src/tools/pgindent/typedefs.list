@@ -1562,6 +1562,7 @@ PartitionDispatch
 PartitionDispatchData
 PartitionElem
 PartitionKey
+PartitionHashBound
 PartitionListValue
 PartitionRangeBound
 PartitionRangeDatum
