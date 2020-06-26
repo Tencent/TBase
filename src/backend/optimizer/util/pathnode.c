@@ -5088,6 +5088,19 @@ create_nestloop_path(PlannerInfo *root,
 
     alternate = set_joinpath_distribution(root, pathnode);
 #endif
+
+#ifdef __TBASE__
+	/*
+	 * Since set_joinpath_distribution() could add additional pathnode such as
+	 * RemoteSubplan, the result of initial_cost_nestloop() needs to be
+	 * recalculated.
+	 */
+	initial_cost_nestloop(root, workspace, jointype,
+						  pathnode->outerjoinpath,
+						  pathnode->innerjoinpath,
+						  extra);
+#endif
+
     final_cost_nestloop(root, pathnode, workspace, extra);
 
 #ifdef XCP
@@ -5097,6 +5110,17 @@ create_nestloop_path(PlannerInfo *root,
     foreach(lc, alternate)
     {
         NestPath *altpath = (NestPath *) lfirst(lc);
+
+#ifdef __TBASE__
+		/*
+		 * Recalculate the initial cost of alternate path
+		 */
+		initial_cost_nestloop(root, workspace, jointype,
+							  altpath->outerjoinpath,
+							  altpath->innerjoinpath,
+							  extra);
+#endif
+
         final_cost_nestloop(root, altpath, workspace, extra);
         if (altpath->path.total_cost < pathnode->path.total_cost)
             pathnode = altpath;
@@ -5180,6 +5204,19 @@ create_mergejoin_path(PlannerInfo *root,
     /* pathnode->skip_mark_restore will be set by final_cost_mergejoin */
     /* pathnode->materialize_inner will be set by final_cost_mergejoin */
 
+#ifdef __TBASE__
+	/*
+	 * Since set_joinpath_distribution() could add additional pathnode such as
+	 * RemoteSubplan, the result of initial_cost_mergejoin() needs to be
+	 * recalculated.
+	 */
+	initial_cost_mergejoin(root, workspace, jointype, mergeclauses,
+						   pathnode->jpath.outerjoinpath,
+						   pathnode->jpath.innerjoinpath,
+						   outersortkeys, innersortkeys,
+						   extra);
+#endif
+
     final_cost_mergejoin(root, pathnode, workspace, extra);
 
 #ifdef XCP
@@ -5189,6 +5226,18 @@ create_mergejoin_path(PlannerInfo *root,
     foreach(lc, alternate)
     {
         MergePath *altpath = (MergePath *) lfirst(lc);
+
+#ifdef __TBASE__
+		/*
+		 * Recalculate the initial cost of alternate path
+		 */
+		initial_cost_mergejoin(root, workspace, jointype, mergeclauses,
+							   altpath->jpath.outerjoinpath,
+							   altpath->jpath.innerjoinpath,
+							   outersortkeys, innersortkeys,
+							   extra);
+#endif
+
         final_cost_mergejoin(root, altpath, workspace, extra);
         if (altpath->jpath.path.total_cost < pathnode->jpath.path.total_cost)
             pathnode = altpath;
@@ -5277,8 +5326,23 @@ create_hashjoin_path(PlannerInfo *root,
 #ifdef XCP
     alternate = set_joinpath_distribution(root, (JoinPath *) pathnode);
 #endif
-    /* final_cost_hashjoin will fill in pathnode->num_batches */
 
+#ifdef __TBASE__
+	/*
+	 * Since set_joinpath_distribution() could add additional pathnode such as
+	 * RemoteSubplan, the result of initial_cost_hashjoin() needs to be
+	 * recalculated.
+	 */
+	initial_cost_hashjoin(root,
+						  workspace,
+						  jointype,
+						  hashclauses,
+						  pathnode->jpath.outerjoinpath,
+						  pathnode->jpath.innerjoinpath,
+						  extra);
+#endif
+
+	/* final_cost_hashjoin will fill in pathnode->num_batches */
     final_cost_hashjoin(root, pathnode, workspace, extra);
 
 #ifdef XCP
@@ -5288,6 +5352,20 @@ create_hashjoin_path(PlannerInfo *root,
     foreach(lc, alternate)
     {
         HashPath *altpath = (HashPath *) lfirst(lc);
+
+#ifdef __TBASE__
+		/*
+		 * Recalculate the initial cost of alternate path
+		 */
+		initial_cost_hashjoin(root,
+							  workspace,
+							  jointype,
+							  hashclauses,
+							  altpath->jpath.outerjoinpath,
+							  altpath->jpath.innerjoinpath,
+							  extra);
+#endif
+
         final_cost_hashjoin(root, altpath, workspace, extra);
         if (altpath->jpath.path.total_cost < pathnode->jpath.path.total_cost)
             pathnode = altpath;

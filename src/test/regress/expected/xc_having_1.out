@@ -151,34 +151,26 @@ explain (verbose true, costs false, nodes false) select count(*), sum(xc_having_
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all
    Output: count(*), sum((xc_having_tab1.val * xc_having_tab2.val)), avg((xc_having_tab1.val * xc_having_tab2.val)), ((sum((xc_having_tab1.val * xc_having_tab2.val)))::double precision / (count(*))::double precision), xc_having_tab1.val2, xc_having_tab2.val2
-   ->  GroupAggregate
+   ->  HashAggregate
          Output: count(*), sum((xc_having_tab1.val * xc_having_tab2.val)), avg((xc_having_tab1.val * xc_having_tab2.val)), ((sum((xc_having_tab1.val * xc_having_tab2.val)))::double precision / (count(*))::double precision), xc_having_tab1.val2, xc_having_tab2.val2
          Group Key: xc_having_tab1.val2, xc_having_tab2.val2
-         ->  Merge Join
+         ->  Hash Join
                Output: xc_having_tab1.val2, xc_having_tab2.val2, xc_having_tab1.val, xc_having_tab2.val
-               Merge Cond: (xc_having_tab1.val2 = xc_having_tab2.val2)
+               Hash Cond: (xc_having_tab1.val2 = xc_having_tab2.val2)
                Join Filter: ((xc_having_tab1.val2 + xc_having_tab2.val2) > 2)
                ->  Remote Subquery Scan on all
                      Output: xc_having_tab1.val, xc_having_tab1.val2
                      Distribute results by H: val2
-                     Sort Key: xc_having_tab1.val2
-                     ->  Sort
+                     ->  Seq Scan on public.xc_having_tab1
                            Output: xc_having_tab1.val, xc_having_tab1.val2
-                           Sort Key: xc_having_tab1.val2
-                           ->  Seq Scan on public.xc_having_tab1
-                                 Output: xc_having_tab1.val, xc_having_tab1.val2
-               ->  Materialize
+               ->  Hash
                      Output: xc_having_tab2.val, xc_having_tab2.val2
                      ->  Remote Subquery Scan on all
                            Output: xc_having_tab2.val, xc_having_tab2.val2
                            Distribute results by H: val2
-                           Sort Key: xc_having_tab2.val2
-                           ->  Sort
+                           ->  Seq Scan on public.xc_having_tab2
                                  Output: xc_having_tab2.val, xc_having_tab2.val2
-                                 Sort Key: xc_having_tab2.val2
-                                 ->  Seq Scan on public.xc_having_tab2
-                                       Output: xc_having_tab2.val, xc_having_tab2.val2
-(29 rows)
+(21 rows)
 
 -- group by and having, without aggregate in the target list
 select val2 from xc_having_tab1 group by val2 having sum(val) > 8;

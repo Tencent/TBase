@@ -85,30 +85,22 @@ explain (verbose true, costs false, nodes false) select count(*), sum(xc_groupby
                ->  Partial HashAggregate
                      Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, PARTIAL count(*), PARTIAL sum((xc_groupby_tab1.val * xc_groupby_tab2.val)), PARTIAL avg((xc_groupby_tab1.val * xc_groupby_tab2.val))
                      Group Key: xc_groupby_tab1.val2, xc_groupby_tab2.val2
-                     ->  Merge Full Join
+                     ->  Hash Full Join
                            Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
-                           Merge Cond: (xc_groupby_tab1.val2 = xc_groupby_tab2.val2)
+                           Hash Cond: (xc_groupby_tab1.val2 = xc_groupby_tab2.val2)
                            ->  Remote Subquery Scan on all
                                  Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
                                  Distribute results by H: val2
-                                 Sort Key: xc_groupby_tab1.val2
-                                 ->  Sort
+                                 ->  Seq Scan on public.xc_groupby_tab1
                                        Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
-                                       Sort Key: xc_groupby_tab1.val2
-                                       ->  Seq Scan on public.xc_groupby_tab1
-                                             Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
-                           ->  Materialize
+                           ->  Hash
                                  Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
                                  ->  Remote Subquery Scan on all
                                        Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
                                        Distribute results by H: val2
-                                       Sort Key: xc_groupby_tab2.val2
-                                       ->  Sort
+                                       ->  Seq Scan on public.xc_groupby_tab2
                                              Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
-                                             Sort Key: xc_groupby_tab2.val2
-                                             ->  Seq Scan on public.xc_groupby_tab2
-                                                   Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
-(34 rows)
+(26 rows)
 
 -- aggregates over aggregates
 select sum(y) from (select sum(val) y, val2%2 x from xc_groupby_tab1 group by val2) q1 group by x order by 1;
@@ -2125,30 +2117,22 @@ explain (verbose true, costs false, nodes false) select count(*), sum(xc_groupby
                            ->  Sort
                                  Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
                                  Sort Key: xc_groupby_tab1.val2, xc_groupby_tab2.val2
-                                 ->  Merge Full Join
+                                 ->  Hash Full Join
                                        Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
-                                       Merge Cond: (xc_groupby_tab1.val2 = xc_groupby_tab2.val2)
+                                       Hash Cond: (xc_groupby_tab1.val2 = xc_groupby_tab2.val2)
                                        ->  Remote Subquery Scan on all
                                              Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
                                              Distribute results by H: val2
-                                             Sort Key: xc_groupby_tab1.val2
-                                             ->  Sort
+                                             ->  Seq Scan on public.xc_groupby_tab1
                                                    Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
-                                                   Sort Key: xc_groupby_tab1.val2
-                                                   ->  Seq Scan on public.xc_groupby_tab1
-                                                         Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
-                                       ->  Materialize
+                                       ->  Hash
                                              Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
                                              ->  Remote Subquery Scan on all
                                                    Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
                                                    Distribute results by H: val2
-                                                   Sort Key: xc_groupby_tab2.val2
-                                                   ->  Sort
+                                                   ->  Seq Scan on public.xc_groupby_tab2
                                                          Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
-                                                         Sort Key: xc_groupby_tab2.val2
-                                                         ->  Seq Scan on public.xc_groupby_tab2
-                                                               Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
-(40 rows)
+(32 rows)
 
 -- aggregates over aggregates
 select sum(y) from (select sum(val) y, val2%2 x from xc_groupby_tab1 group by val2) q1 group by x;
@@ -3736,30 +3720,22 @@ explain (verbose true, costs false, nodes false) select count(*), sum(xc_groupby
                ->  Partial HashAggregate
                      Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, PARTIAL count(*), PARTIAL sum((xc_groupby_tab1.val * xc_groupby_tab2.val)), PARTIAL avg((xc_groupby_tab1.val * xc_groupby_tab2.val))
                      Group Key: xc_groupby_tab1.val2, xc_groupby_tab2.val2
-                     ->  Merge Full Join
+                     ->  Hash Full Join
                            Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
-                           Merge Cond: (xc_groupby_tab1.val2 = xc_groupby_tab2.val2)
+                           Hash Cond: (xc_groupby_tab1.val2 = xc_groupby_tab2.val2)
                            ->  Remote Subquery Scan on all
                                  Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
                                  Distribute results by H: val2
-                                 Sort Key: xc_groupby_tab1.val2
-                                 ->  Sort
+                                 ->  Seq Scan on public.xc_groupby_tab1
                                        Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
-                                       Sort Key: xc_groupby_tab1.val2
-                                       ->  Seq Scan on public.xc_groupby_tab1
-                                             Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
-                           ->  Materialize
+                           ->  Hash
                                  Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
                                  ->  Remote Subquery Scan on all
                                        Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
                                        Distribute results by H: val2
-                                       Sort Key: xc_groupby_tab2.val2
-                                       ->  Sort
+                                       ->  Seq Scan on public.xc_groupby_tab2
                                              Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
-                                             Sort Key: xc_groupby_tab2.val2
-                                             ->  Seq Scan on public.xc_groupby_tab2
-                                                   Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
-(34 rows)
+(26 rows)
 
 -- aggregates over aggregates
 select sum(y) from (select sum(val) y, val2%2 x from xc_groupby_tab1 group by val2) q1 group by x order by 1;
@@ -5824,30 +5800,22 @@ explain (verbose true, costs false, nodes false) select count(*), sum(xc_groupby
                            ->  Sort
                                  Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
                                  Sort Key: xc_groupby_tab1.val2, xc_groupby_tab2.val2
-                                 ->  Merge Full Join
+                                 ->  Hash Full Join
                                        Output: xc_groupby_tab1.val2, xc_groupby_tab2.val2, xc_groupby_tab1.val, xc_groupby_tab2.val
-                                       Merge Cond: (xc_groupby_tab1.val2 = xc_groupby_tab2.val2)
+                                       Hash Cond: (xc_groupby_tab1.val2 = xc_groupby_tab2.val2)
                                        ->  Remote Subquery Scan on all
                                              Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
                                              Distribute results by H: val2
-                                             Sort Key: xc_groupby_tab1.val2
-                                             ->  Sort
+                                             ->  Seq Scan on public.xc_groupby_tab1
                                                    Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
-                                                   Sort Key: xc_groupby_tab1.val2
-                                                   ->  Seq Scan on public.xc_groupby_tab1
-                                                         Output: xc_groupby_tab1.val, xc_groupby_tab1.val2
-                                       ->  Materialize
+                                       ->  Hash
                                              Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
                                              ->  Remote Subquery Scan on all
                                                    Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
                                                    Distribute results by H: val2
-                                                   Sort Key: xc_groupby_tab2.val2
-                                                   ->  Sort
+                                                   ->  Seq Scan on public.xc_groupby_tab2
                                                          Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
-                                                         Sort Key: xc_groupby_tab2.val2
-                                                         ->  Seq Scan on public.xc_groupby_tab2
-                                                               Output: xc_groupby_tab2.val, xc_groupby_tab2.val2
-(40 rows)
+(32 rows)
 
 -- aggregates over aggregates
 select sum(y) from (select sum(val) y, val2%2 x from xc_groupby_tab1 group by val2) q1 group by x;

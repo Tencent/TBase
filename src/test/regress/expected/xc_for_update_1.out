@@ -209,47 +209,47 @@ ERROR:  FOR UPDATE is not allowed with joins
 explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1, t2, t3 for share of t1,t2 nowait;
 ERROR:  FOR SHARE is not allowed with joins
 explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 join t2 on (t1.val2 = t2.val2) join t3 on (t1.val2 = t3.val2);
-                             QUERY PLAN                              
----------------------------------------------------------------------
+                            QUERY PLAN                             
+-------------------------------------------------------------------
  Remote Subquery Scan on all
    Output: t1.val, t1.val2, t2.val, t2.val2, t3.val, t3.val2
    ->  Merge Join
          Output: t1.val, t1.val2, t2.val, t2.val2, t3.val, t3.val2
-         Merge Cond: (t3.val2 = t1.val2)
-         ->  Remote Subquery Scan on all
-               Output: t3.val, t3.val2
-               Distribute results by H: val2
-               Sort Key: t3.val2
-               ->  Sort
-                     Output: t3.val, t3.val2
-                     Sort Key: t3.val2
-                     ->  Seq Scan on public.t3
-                           Output: t3.val, t3.val2
-         ->  Materialize
+         Merge Cond: (t1.val2 = t3.val2)
+         ->  Merge Join
                Output: t1.val, t1.val2, t2.val, t2.val2
-               ->  Merge Join
-                     Output: t1.val, t1.val2, t2.val, t2.val2
-                     Merge Cond: (t1.val2 = t2.val2)
-                     ->  Remote Subquery Scan on all
+               Merge Cond: (t1.val2 = t2.val2)
+               ->  Remote Subquery Scan on all
+                     Output: t1.val, t1.val2
+                     Distribute results by H: val2
+                     Sort Key: t1.val2
+                     ->  Sort
                            Output: t1.val, t1.val2
-                           Distribute results by H: val2
                            Sort Key: t1.val2
-                           ->  Sort
+                           ->  Seq Scan on public.t1
                                  Output: t1.val, t1.val2
-                                 Sort Key: t1.val2
-                                 ->  Seq Scan on public.t1
-                                       Output: t1.val, t1.val2
-                     ->  Materialize
+               ->  Materialize
+                     Output: t2.val, t2.val2
+                     ->  Remote Subquery Scan on all
                            Output: t2.val, t2.val2
-                           ->  Remote Subquery Scan on all
+                           Distribute results by H: val2
+                           Sort Key: t2.val2
+                           ->  Sort
                                  Output: t2.val, t2.val2
-                                 Distribute results by H: val2
                                  Sort Key: t2.val2
-                                 ->  Sort
+                                 ->  Seq Scan on public.t2
                                        Output: t2.val, t2.val2
-                                       Sort Key: t2.val2
-                                       ->  Seq Scan on public.t2
-                                             Output: t2.val, t2.val2
+         ->  Materialize
+               Output: t3.val, t3.val2
+               ->  Remote Subquery Scan on all
+                     Output: t3.val, t3.val2
+                     Distribute results by H: val2
+                     Sort Key: t3.val2
+                     ->  Sort
+                           Output: t3.val, t3.val2
+                           Sort Key: t3.val2
+                           ->  Seq Scan on public.t3
+                                 Output: t3.val, t3.val2
 (39 rows)
 
 explain (costs off, num_nodes off, nodes off, verbose on)  select * from t1 join t2 on (t1.val2 = t2.val2) join t3 on (t1.val2 = t3.val2) for update;
@@ -262,12 +262,12 @@ select * from t1 join t2 on (t1.val2 = t2.val2) join t3 on (t1.val2 = t3.val2);
  val | val2 | val | val2 | val | val2 
 -----+------+-----+------+-----+------
    1 |   11 |   3 |   11 |   5 |   11
-   1 |   11 |   4 |   11 |   5 |   11
-   2 |   11 |   3 |   11 |   5 |   11
-   2 |   11 |   4 |   11 |   5 |   11
    1 |   11 |   3 |   11 |   6 |   11
+   1 |   11 |   4 |   11 |   5 |   11
    1 |   11 |   4 |   11 |   6 |   11
+   2 |   11 |   3 |   11 |   5 |   11
    2 |   11 |   3 |   11 |   6 |   11
+   2 |   11 |   4 |   11 |   5 |   11
    2 |   11 |   4 |   11 |   6 |   11
 (8 rows)
 

@@ -79,6 +79,7 @@ ALTER TABLE ab1 ALTER a SET STATISTICS 0;
 INSERT INTO ab1 SELECT a, a%23 FROM generate_series(1, 1000) a;
 CREATE STATISTICS ab1_a_b_stats ON a, b FROM ab1;
 ANALYZE ab1;
+WARNING:  statistics object "public.ab1_a_b_stats" could not be computed for relation "public.ab1"
 SELECT
   (stxndistinct IS NOT NULL) AS ndistinct,
   (stxdependencies IS NOT NULL) AS dependencies
@@ -91,6 +92,7 @@ FROM pg_statistic_ext WHERE stxname = 'ab1_a_b_stats';
 ALTER TABLE ab1 ALTER a SET STATISTICS -1;
 -- partial analyze doesn't build stats either
 ANALYZE ab1 (a);
+WARNING:  statistics object "public.ab1_a_b_stats" could not be computed for relation "public.ab1"
 SELECT
   (stxndistinct IS NOT NULL) AS ndistinct,
   (stxdependencies IS NOT NULL) AS dependencies
@@ -226,7 +228,7 @@ EXPLAIN (COSTS off)
    ->  Finalize HashAggregate
          Group Key: a, b, c, d
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               Distribute results by H: d
+               Distribute results by H: a
                ->  Partial GroupAggregate
                      Group Key: a, b, c, d
                      ->  Sort
@@ -242,7 +244,7 @@ EXPLAIN (COSTS off)
    ->  Finalize HashAggregate
          Group Key: b, c, d
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               Distribute results by H: d
+               Distribute results by H: b
                ->  Partial GroupAggregate
                      Group Key: b, c, d
                      ->  Sort
@@ -257,7 +259,7 @@ SELECT stxkind, stxndistinct
   FROM pg_statistic_ext WHERE stxrelid = 'ndistinct'::regclass;
  stxkind |                      stxndistinct                       
 ---------+---------------------------------------------------------
- {d,f}   | {"3, 4": 161, "3, 6": 161, "4, 6": 161, "3, 4, 6": 161}
+ {d,f}   | {"3, 4": 301, "3, 6": 301, "4, 6": 301, "3, 4, 6": 301}
 (1 row)
 
 -- Hash Aggregate, thanks to estimates improved by the statistic
@@ -313,7 +315,7 @@ EXPLAIN (COSTS off)
    ->  Finalize HashAggregate
          Group Key: a, b, c, d
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               Distribute results by H: d
+               Distribute results by H: a
                ->  Partial GroupAggregate
                      Group Key: a, b, c, d
                      ->  Sort
@@ -329,7 +331,7 @@ EXPLAIN (COSTS off)
    ->  Finalize HashAggregate
          Group Key: b, c, d
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               Distribute results by H: d
+               Distribute results by H: b
                ->  Partial GroupAggregate
                      Group Key: b, c, d
                      ->  Sort
@@ -346,9 +348,9 @@ INSERT INTO ndistinct (a, b, c, filler1)
 ANALYZE ndistinct;
 SELECT stxkind, stxndistinct
   FROM pg_statistic_ext WHERE stxrelid = 'ndistinct'::regclass;
- stxkind |                        stxndistinct                        
----------+------------------------------------------------------------
- {d,f}   | {"3, 4": 2378, "3, 6": 800, "4, 6": 1632, "3, 4, 6": 6060}
+ stxkind |                        stxndistinct                         
+---------+-------------------------------------------------------------
+ {d,f}   | {"3, 4": 2550, "3, 6": 800, "4, 6": 1632, "3, 4, 6": 10000}
 (1 row)
 
 -- plans using Group Aggregate, thanks to using correct esimates

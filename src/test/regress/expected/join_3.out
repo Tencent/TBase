@@ -2478,8 +2478,8 @@ where not exists (
               ) a1 on t3.c2 = a1.c1
   where t1.c1 = t2.c2
 );
-                                             QUERY PLAN                                              
------------------------------------------------------------------------------------------------------
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Hash Anti Join
          Hash Cond: (t1.c1 = t2.c2)
@@ -2487,36 +2487,33 @@ where not exists (
          ->  Hash
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                      Distribute results by H: c2
-                     ->  Merge Left Join
-                           Merge Cond: (t3.c2 = t5.c1)
+                     ->  Merge Right Join
+                           Merge Cond: (t5.c1 = t3.c2)
                            ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: c2
-                                 ->  Sort
-                                       Sort Key: t3.c2
-                                       ->  Merge Left Join
-                                             Merge Cond: (t2.c3 = t3.c1)
-                                             ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                                   Distribute results by H: c3
-                                                   ->  Sort
-                                                         Sort Key: t2.c3
-                                                         ->  Seq Scan on tt4x t2
+                                 Distribute results by H: c1
+                                 ->  Merge Join
+                                       Merge Cond: (t4.c2 = t5.c1)
+                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                             Distribute results by H: c2
                                              ->  Sort
-                                                   Sort Key: t3.c1
-                                                   ->  Seq Scan on tt4x t3
+                                                   Sort Key: t4.c2
+                                                   ->  Seq Scan on tt4x t4
+                                       ->  Sort
+                                             Sort Key: t5.c1
+                                             ->  Seq Scan on tt4x t5
                            ->  Materialize
                                  ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: c1
-                                       ->  Merge Join
-                                             Merge Cond: (t4.c2 = t5.c1)
-                                             ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                                   Distribute results by H: c2
-                                                   ->  Sort
-                                                         Sort Key: t4.c2
-                                                         ->  Seq Scan on tt4x t4
-                                             ->  Sort
-                                                   Sort Key: t5.c1
-                                                   ->  Seq Scan on tt4x t5
-(36 rows)
+                                       Distribute results by H: c2
+                                       ->  Sort
+                                             Sort Key: t3.c2
+                                             ->  Hash Left Join
+                                                   Hash Cond: (t2.c3 = t3.c1)
+                                                   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                                         Distribute results by H: c3
+                                                         ->  Seq Scan on tt4x t2
+                                                   ->  Hash
+                                                         ->  Seq Scan on tt4x t3
+(33 rows)
 
 --
 -- regression test for problems of the sort depicted in bug #3494
@@ -3084,24 +3081,24 @@ select t1.unique2, t1.stringu1, t2.unique1, t2.stringu2 from
   left join tenk1 t2
   on (subq1.y1 = t2.unique1)
 where t1.unique2 < 42 and t1.stringu1 > t2.stringu2;
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
  Nested Loop
    Join Filter: (t1.stringu1 > t2.stringu2)
    ->  Nested Loop
-         Join Filter: ((0) = i1.f1)
          ->  Nested Loop
-               ->  Nested Loop
-                     Join Filter: ((1) = (1))
-                     ->  Result
-                     ->  Result
-               ->  Materialize
+               Join Filter: ((1) = (1))
+               ->  Hash Join
+                     Hash Cond: (i1.f1 = (0))
                      ->  Remote Subquery Scan on all
-                           ->  Index Scan using tenk1_unique2 on tenk1 t1
-                                 Index Cond: ((unique2 = (11)) AND (unique2 < 42))
+                           ->  Seq Scan on int4_tbl i1
+                     ->  Hash
+                           ->  Result
+               ->  Result
          ->  Materialize
                ->  Remote Subquery Scan on all
-                     ->  Seq Scan on int4_tbl i1
+                     ->  Index Scan using tenk1_unique2 on tenk1 t1
+                           Index Cond: ((unique2 = (11)) AND (unique2 < 42))
    ->  Materialize
          ->  Remote Subquery Scan on all
                ->  Index Scan using tenk1_unique1 on tenk1 t2
@@ -3244,19 +3241,19 @@ where t1.unique1 = 1;
          ->  Materialize
                ->  Remote Subquery Scan on all
                      Distribute results by H: hundred
-                     ->  Nested Loop
+                     ->  Hash Join
+                           Hash Cond: (t3.unique2 = t2.thousand)
                            Join Filter: (t1.ten = t3.ten)
                            ->  Remote Subquery Scan on all
-                                 Distribute results by H: thousand
-                                 ->  Bitmap Heap Scan on tenk1 t2
-                                       Recheck Cond: (t1.hundred = hundred)
-                                       ->  Bitmap Index Scan on tenk1_hundred
-                                             Index Cond: (t1.hundred = hundred)
-                           ->  Materialize
+                                 Distribute results by H: unique2
+                                 ->  Seq Scan on tenk1 t3
+                           ->  Hash
                                  ->  Remote Subquery Scan on all
-                                       Distribute results by H: unique2
-                                       ->  Index Scan using tenk1_unique2 on tenk1 t3
-                                             Index Cond: (unique2 = t2.thousand)
+                                       Distribute results by H: thousand
+                                       ->  Bitmap Heap Scan on tenk1 t2
+                                             Recheck Cond: (t1.hundred = hundred)
+                                             ->  Bitmap Index Scan on tenk1_hundred
+                                                   Index Cond: (t1.hundred = hundred)
 (22 rows)
 
 explain (num_nodes off, nodes off, costs off)
@@ -3275,19 +3272,19 @@ where t1.unique1 = 1;
          ->  Materialize
                ->  Remote Subquery Scan on all
                      Distribute results by H: hundred
-                     ->  Nested Loop
+                     ->  Hash Join
+                           Hash Cond: (t3.unique2 = t2.thousand)
                            Join Filter: ((t1.ten + t2.ten) = t3.ten)
                            ->  Remote Subquery Scan on all
-                                 Distribute results by H: thousand
-                                 ->  Bitmap Heap Scan on tenk1 t2
-                                       Recheck Cond: (t1.hundred = hundred)
-                                       ->  Bitmap Index Scan on tenk1_hundred
-                                             Index Cond: (t1.hundred = hundred)
-                           ->  Materialize
+                                 Distribute results by H: unique2
+                                 ->  Seq Scan on tenk1 t3
+                           ->  Hash
                                  ->  Remote Subquery Scan on all
-                                       Distribute results by H: unique2
-                                       ->  Index Scan using tenk1_unique2 on tenk1 t3
-                                             Index Cond: (unique2 = t2.thousand)
+                                       Distribute results by H: thousand
+                                       ->  Bitmap Heap Scan on tenk1 t2
+                                             Recheck Cond: (t1.hundred = hundred)
+                                             ->  Bitmap Index Scan on tenk1_hundred
+                                                   Index Cond: (t1.hundred = hundred)
 (22 rows)
 
 explain (num_nodes off, nodes off, costs off)
@@ -3295,31 +3292,31 @@ select count(*) from
   tenk1 a join tenk1 b on a.unique1 = b.unique2
   left join tenk1 c on a.unique2 = b.unique1 and c.thousand = a.thousand
   join int4_tbl on b.thousand = f1;
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
  Finalize Aggregate
    ->  Remote Subquery Scan on all
          ->  Partial Aggregate
-               ->  Nested Loop Left Join
+               ->  Hash Right Join
+                     Hash Cond: (c.thousand = a.thousand)
                      Join Filter: (a.unique2 = b.unique1)
                      ->  Remote Subquery Scan on all
                            Distribute results by H: thousand
-                           ->  Nested Loop
-                                 ->  Remote Subquery Scan on all
-                                       Distribute results by H: unique2
-                                       ->  Nested Loop
-                                             ->  Seq Scan on int4_tbl
-                                             ->  Bitmap Heap Scan on tenk1 b
-                                                   Recheck Cond: (thousand = int4_tbl.f1)
-                                                   ->  Bitmap Index Scan on tenk1_thous_tenthous
-                                                         Index Cond: (thousand = int4_tbl.f1)
-                                 ->  Index Scan using tenk1_unique1 on tenk1 a
-                                       Index Cond: (unique1 = b.unique2)
-                     ->  Materialize
+                           ->  Seq Scan on tenk1 c
+                     ->  Hash
                            ->  Remote Subquery Scan on all
                                  Distribute results by H: thousand
-                                 ->  Index Only Scan using tenk1_thous_tenthous on tenk1 c
-                                       Index Cond: (thousand = a.thousand)
+                                 ->  Nested Loop
+                                       ->  Remote Subquery Scan on all
+                                             Distribute results by H: unique2
+                                             ->  Nested Loop
+                                                   ->  Seq Scan on int4_tbl
+                                                   ->  Bitmap Heap Scan on tenk1 b
+                                                         Recheck Cond: (thousand = int4_tbl.f1)
+                                                         ->  Bitmap Index Scan on tenk1_thous_tenthous
+                                                               Index Cond: (thousand = int4_tbl.f1)
+                                       ->  Index Scan using tenk1_unique1 on tenk1 a
+                                             Index Cond: (unique1 = b.unique2)
 (23 rows)
 
 select count(*) from
@@ -3338,20 +3335,22 @@ select b.unique1 from
   join int4_tbl i1 on b.thousand = f1
   right join int4_tbl i2 on i2.f1 = b.tenthous
   order by 1;
-                                                      QUERY PLAN                                                       
------------------------------------------------------------------------------------------------------------------------
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all
    ->  Sort
          Sort Key: b.unique1
-         ->  Nested Loop Left Join
+         ->  Hash Right Join
+               Hash Cond: (b.tenthous = i2.f1)
                ->  Remote Subquery Scan on all
-                     Distribute results by H: f1
-                     ->  Seq Scan on int4_tbl i2
-               ->  Materialize
-                     ->  Remote Subquery Scan on all
-                           Distribute results by H: tenthous
-                           ->  Nested Loop Left Join
-                                 Join Filter: (b.unique1 = 42)
+                     Distribute results by H: tenthous
+                     ->  Hash Right Join
+                           Hash Cond: (c.thousand = a.thousand)
+                           Join Filter: (b.unique1 = 42)
+                           ->  Remote Subquery Scan on all
+                                 Distribute results by H: 42
+                                 ->  Seq Scan on tenk1 c
+                           ->  Hash
                                  ->  Remote Subquery Scan on all
                                        Distribute results by H: unique1
                                        ->  Nested Loop
@@ -3359,16 +3358,17 @@ select b.unique1 from
                                                    Distribute results by H: unique2
                                                    ->  Nested Loop
                                                          ->  Seq Scan on int4_tbl i1
-                                                         ->  Index Scan using tenk1_thous_tenthous on tenk1 b
-                                                               Index Cond: ((thousand = i1.f1) AND (i2.f1 = tenthous))
+                                                         ->  Bitmap Heap Scan on tenk1 b
+                                                               Recheck Cond: (thousand = i1.f1)
+                                                               ->  Bitmap Index Scan on tenk1_thous_tenthous
+                                                                     Index Cond: (thousand = i1.f1)
                                              ->  Index Scan using tenk1_unique1 on tenk1 a
                                                    Index Cond: (unique1 = b.unique2)
-                                 ->  Materialize
-                                       ->  Remote Subquery Scan on all
-                                             Distribute results by H: 42
-                                             ->  Index Only Scan using tenk1_thous_tenthous on tenk1 c
-                                                   Index Cond: (thousand = a.thousand)
-(28 rows)
+               ->  Hash
+                     ->  Remote Subquery Scan on all
+                           Distribute results by H: f1
+                           ->  Seq Scan on int4_tbl i2
+(31 rows)
 
 select b.unique1 from
   tenk1 a join tenk1 b on a.unique1 = b.unique2
@@ -3487,22 +3487,20 @@ select a.unique1, b.unique1, c.unique1, coalesce(b.twothousand, a.twothousand)
 ---------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Nested Loop Left Join
-         ->  Nested Loop Left Join
+         ->  Hash Right Join
+               Hash Cond: (b.thousand = a.unique1)
                Filter: (COALESCE(b.twothousand, a.twothousand) = 44)
-               ->  Index Scan using tenk1_unique2 on tenk1 a
-                     Index Cond: (unique2 < 10)
-               ->  Materialize
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Distribute results by H: thousand
-                           ->  Bitmap Heap Scan on tenk1 b
-                                 Recheck Cond: (thousand = a.unique1)
-                                 ->  Bitmap Index Scan on tenk1_thous_tenthous
-                                       Index Cond: (thousand = a.unique1)
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: thousand
+                     ->  Seq Scan on tenk1 b
+               ->  Hash
+                     ->  Index Scan using tenk1_unique2 on tenk1 a
+                           Index Cond: (unique2 < 10)
          ->  Materialize
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                      ->  Index Scan using tenk1_unique2 on tenk1 c
                            Index Cond: ((unique2 = COALESCE(b.twothousand, a.twothousand)) AND (unique2 = 44))
-(17 rows)
+(15 rows)
 
 select a.unique1, b.unique1, c.unique1, coalesce(b.twothousand, a.twothousand)
   from tenk1 a left join tenk1 b on b.thousand = a.unique1                        left join tenk1 c on c.unique2 = coalesce(b.twothousand, a.twothousand)
@@ -3527,33 +3525,33 @@ left join
    using (join_key)
   ) foo3
 using (join_key);
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Nested Loop Left Join
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Hash Right Join
    Output: "*VALUES*".column1, i1.f1, (666)
-   Join Filter: ("*VALUES*".column1 = i1.f1)
-   ->  Values Scan on "*VALUES*"
-         Output: "*VALUES*".column1
-   ->  Materialize
-         Output: i1.f1, (666)
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+   Hash Cond: (i1.f1 = "*VALUES*".column1)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+         Output: i1.f1, 666
+         ->  Nested Loop Left Join
                Output: i1.f1, 666
-               ->  Nested Loop Left Join
-                     Output: i1.f1, 666
-                     ->  Remote Subquery Scan on all (datanode_1)
+               ->  Remote Subquery Scan on all (datanode_1)
+                     Output: i1.f1
+                     Distribute results by H: f1
+                     ->  Seq Scan on public.int4_tbl i1
                            Output: i1.f1
-                           Distribute results by H: f1
-                           ->  Seq Scan on public.int4_tbl i1
-                                 Output: i1.f1
-                     ->  Materialize
+               ->  Materialize
+                     Output: i2.unique2
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                            Output: i2.unique2
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: unique2
+                           Sort Key: i2.unique2
+                           ->  Index Only Scan using tenk1_unique2 on public.tenk1 i2
                                  Output: i2.unique2
-                                 Distribute results by H: unique2
-                                 Sort Key: i2.unique2
-                                 ->  Index Only Scan using tenk1_unique2 on public.tenk1 i2
-                                       Output: i2.unique2
-                                       Index Cond: (i2.unique2 = i1.f1)
+                                 Index Cond: (i2.unique2 = i1.f1)
+   ->  Hash
+         Output: "*VALUES*".column1
+         ->  Values Scan on "*VALUES*"
+               Output: "*VALUES*".column1
 (25 rows)
 
 select foo1.join_key as foo1_id, foo3.join_key AS foo3_id, bug_field from
@@ -4720,18 +4718,18 @@ select * from generate_series(100,200) g,
 explain (num_nodes off, nodes off, costs off)
   select count(*) from tenk1 a,
     tenk1 b join lateral (values(a.unique1)) ss(x) on b.unique2 = ss.x;
-                            QUERY PLAN                            
-------------------------------------------------------------------
+                         QUERY PLAN                         
+------------------------------------------------------------
  Finalize Aggregate
    ->  Remote Subquery Scan on all
          ->  Partial Aggregate
                ->  Hash Join
-                     Hash Cond: (a.unique1 = b.unique2)
-                     ->  Seq Scan on tenk1 a
+                     Hash Cond: (b.unique2 = a.unique1)
+                     ->  Remote Subquery Scan on all
+                           Distribute results by H: unique2
+                           ->  Seq Scan on tenk1 b
                      ->  Hash
-                           ->  Remote Subquery Scan on all
-                                 Distribute results by H: unique2
-                                 ->  Seq Scan on tenk1 b
+                           ->  Seq Scan on tenk1 a
 (10 rows)
 
 select count(*) from tenk1 a,
@@ -5462,20 +5460,18 @@ select * from
          Output: int4_tbl.f1
          ->  Remote Subquery Scan on all
                Output: int4_tbl.f1
-               ->  Nested Loop Semi Join
+               ->  Nested Loop
                      Output: int4_tbl.f1
                      Join Filter: (int4_tbl.f1 = tenk1.unique1)
-                     ->  Remote Subquery Scan on all
-                           Output: int4_tbl.f1
-                           Distribute results by H: f1
-                           ->  Seq Scan on public.int4_tbl
-                                 Output: int4_tbl.f1
-                     ->  Materialize
+                     ->  HashAggregate
                            Output: tenk1.unique1
+                           Group Key: tenk1.unique1
                            ->  Index Scan using tenk1_unique2 on public.tenk1
                                  Output: tenk1.unique1
                                  Index Cond: (tenk1.unique2 = "*VALUES*".column2)
-(21 rows)
+                     ->  Seq Scan on public.int4_tbl
+                           Output: int4_tbl.f1
+(19 rows)
 
 select * from
   (values (0,9998), (1,1000)) v(id,x),
@@ -5498,46 +5494,42 @@ lateral (select * from int8_tbl t1,
                                      where q2 = (select greatest(t1.q1,t2.q2))
                                        and (select v.id=0)) offset 0) ss2) ss
          where t1.q1 = ss.q2) ss0;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
  Nested Loop
    Output: "*VALUES*".column1, t1.q1, t1.q2, ss2.q1, ss2.q2
-   ->  Remote Subquery Scan on all (datanode_1)
-         Output: t1.q1, t1.q2
-         ->  Seq Scan on public.int8_tbl t1
-               Output: t1.q1, t1.q2
+   ->  Values Scan on "*VALUES*"
+         Output: "*VALUES*".column1
    ->  Materialize
-         Output: "*VALUES*".column1, ss2.q1, ss2.q2
-         ->  Nested Loop
-               Output: "*VALUES*".column1, ss2.q1, ss2.q2
-               ->  Values Scan on "*VALUES*"
-                     Output: "*VALUES*".column1
-               ->  Materialize
-                     Output: ss2.q1, ss2.q2
-                     ->  Remote Subquery Scan on all (datanode_1)
+         Output: t1.q1, t1.q2, ss2.q1, ss2.q2
+         ->  Remote Subquery Scan on all (datanode_1)
+               Output: t1.q1, t1.q2, ss2.q1, ss2.q2
+               ->  Nested Loop
+                     Output: t1.q1, t1.q2, ss2.q1, ss2.q2
+                     ->  Seq Scan on public.int8_tbl t1
+                           Output: t1.q1, t1.q2
+                     ->  Subquery Scan on ss2
                            Output: ss2.q1, ss2.q2
-                           ->  Subquery Scan on ss2
-                                 Output: ss2.q1, ss2.q2
-                                 Filter: (t1.q1 = ss2.q2)
-                                 ->  Seq Scan on public.int8_tbl t2
-                                       Output: t2.q1, t2.q2
-                                       Filter: (SubPlan 3)
-                                       SubPlan 3
-                                         ->  Remote Subquery Scan on all (datanode_1)
+                           Filter: (t1.q1 = ss2.q2)
+                           ->  Seq Scan on public.int8_tbl t2
+                                 Output: t2.q1, t2.q2
+                                 Filter: (SubPlan 3)
+                                 SubPlan 3
+                                   ->  Remote Subquery Scan on all (datanode_1)
+                                         Output: t3.q2
+                                         ->  Result
                                                Output: t3.q2
-                                               ->  Result
-                                                     Output: t3.q2
-                                                     One-Time Filter: $4
-                                                     InitPlan 1 (returns $2)
-                                                       ->  Result
-                                                             Output: GREATEST($0, t2.q2)
-                                                     InitPlan 2 (returns $4)
-                                                       ->  Result
-                                                             Output: ($3 = 0)
-                                                     ->  Seq Scan on public.int8_tbl t3
-                                                           Output: t3.q1, t3.q2
-                                                           Filter: (t3.q2 = $2)
-(37 rows)
+                                               One-Time Filter: $4
+                                               InitPlan 1 (returns $2)
+                                                 ->  Result
+                                                       Output: GREATEST($0, t2.q2)
+                                               InitPlan 2 (returns $4)
+                                                 ->  Result
+                                                       Output: ($3 = 0)
+                                               ->  Seq Scan on public.int8_tbl t3
+                                                     Output: t3.q1, t3.q2
+                                                     Filter: (t3.q2 = $2)
+(33 rows)
 
 select * from (values (0), (1)) v(id),
 lateral (select * from int8_tbl t1,

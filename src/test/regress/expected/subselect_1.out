@@ -853,11 +853,11 @@ explain (verbose, costs off)
 select * from int4_tbl where
   (case when f1 in (select unique1 from tenk1 a) then f1 else null end) in
   (select ten from tenk1 b);
-                                                  QUERY PLAN                                                   
----------------------------------------------------------------------------------------------------------------
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    Output: int4_tbl.f1
-   ->  Nested Loop Semi Join
+   ->  Hash Join
          Output: int4_tbl.f1
          Join Filter: ((CASE WHEN (hashed SubPlan 1) THEN int4_tbl.f1 ELSE NULL::integer END) = b.ten)
          ->  Remote Subquery Scan on all (datanode_1)
@@ -872,12 +872,23 @@ select * from int4_tbl where
                                    Output: a.unique1
          ->  Materialize
                Output: b.ten
-               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               ->  HashAggregate
                      Output: b.ten
-                     Distribute results by H: ten
-                     ->  Seq Scan on public.tenk1 b
+                     Group Key: b.ten
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                            Output: b.ten
-(22 rows)
+                           Distribute results by H: ten
+                           ->  HashAggregate
+                                 Output: b.ten
+                                 Group Key: b.ten
+                                 ->  Seq Scan on public.tenk1 b
+                                       Output: b.ten
+         SubPlan 1
+           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                 Output: a.unique1
+                 ->  Seq Scan on public.tenk1 a
+                       Output: a.unique1
+(26 rows)
 
 select * from int4_tbl where
   (case when f1 in (select unique1 from tenk1 a) then f1 else null end) in

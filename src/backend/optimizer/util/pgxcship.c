@@ -1189,6 +1189,10 @@ pgxc_shippability_walker(Node *node, Shippability_context *sc_context)
              */
             if (query->commandType != CMD_SELECT && list_length(query->rtable) > 1)
             {
+                /*
+				 * Try to shipping insert with multiple rtables. Skip FQS if it
+				 * contains subquery.
+				 */
                 if(query->commandType == CMD_INSERT && query->onConflict)
                 {
                     ListCell *cell;

@@ -206,19 +206,21 @@ EXPLAIN (COSTS off)
 
 EXPLAIN (COSTS off)
  SELECT COUNT(*) FROM ndistinct GROUP BY a, b, c;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Finalize HashAggregate
+   ->  Finalize GroupAggregate
          Group Key: a, b, c
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               Distribute results by H: a
-               ->  Partial GroupAggregate
-                     Group Key: a, b, c
-                     ->  Sort
-                           Sort Key: a, b, c
-                           ->  Seq Scan on ndistinct
-(10 rows)
+         ->  Sort
+               Sort Key: a, b, c
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: a
+                     ->  Partial GroupAggregate
+                           Group Key: a, b, c
+                           ->  Sort
+                                 Sort Key: a, b, c
+                                 ->  Seq Scan on ndistinct
+(12 rows)
 
 EXPLAIN (COSTS off)
  SELECT COUNT(*) FROM ndistinct GROUP BY a, b, c, d;
@@ -238,19 +240,21 @@ EXPLAIN (COSTS off)
 
 EXPLAIN (COSTS off)
  SELECT COUNT(*) FROM ndistinct GROUP BY b, c, d;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Finalize HashAggregate
+   ->  Finalize GroupAggregate
          Group Key: b, c, d
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               Distribute results by H: b
-               ->  Partial GroupAggregate
-                     Group Key: b, c, d
-                     ->  Sort
-                           Sort Key: b, c, d
-                           ->  Seq Scan on ndistinct
-(10 rows)
+         ->  Sort
+               Sort Key: b, c, d
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: b
+                     ->  Partial GroupAggregate
+                           Group Key: b, c, d
+                           ->  Sort
+                                 Sort Key: b, c, d
+                                 ->  Seq Scan on ndistinct
+(12 rows)
 
 -- correct command
 CREATE STATISTICS s10 ON a, b, c FROM ndistinct;
@@ -455,17 +459,21 @@ EXPLAIN (COSTS off)
 
 EXPLAIN (COSTS off)
  SELECT COUNT(*) FROM ndistinct GROUP BY a, b, c;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Finalize HashAggregate
+   ->  Finalize GroupAggregate
          Group Key: a, b, c
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               Distribute results by H: b
-               ->  Partial HashAggregate
-                     Group Key: a, b, c
-                     ->  Seq Scan on ndistinct
-(8 rows)
+         ->  Sort
+               Sort Key: a, b, c
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: b
+                     ->  Partial GroupAggregate
+                           Group Key: a, b, c
+                           ->  Sort
+                                 Sort Key: a, b, c
+                                 ->  Seq Scan on ndistinct
+(12 rows)
 
 EXPLAIN (COSTS off)
  SELECT COUNT(*) FROM ndistinct GROUP BY a, b, c, d;
@@ -483,17 +491,21 @@ EXPLAIN (COSTS off)
 
 EXPLAIN (COSTS off)
  SELECT COUNT(*) FROM ndistinct GROUP BY b, c, d;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Finalize HashAggregate
+   ->  Finalize GroupAggregate
          Group Key: b, c, d
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               Distribute results by H: d
-               ->  Partial HashAggregate
-                     Group Key: b, c, d
-                     ->  Seq Scan on ndistinct
-(8 rows)
+         ->  Sort
+               Sort Key: b, c, d
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: d
+                     ->  Partial GroupAggregate
+                           Group Key: b, c, d
+                           ->  Sort
+                                 Sort Key: b, c, d
+                                 ->  Seq Scan on ndistinct
+(12 rows)
 
 EXPLAIN (COSTS off)
  SELECT COUNT(*) FROM ndistinct GROUP BY a, d;

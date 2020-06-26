@@ -207,13 +207,13 @@ explain (costs off)
                            QUERY PLAN                            
 -----------------------------------------------------------------
  Nested Loop
+   Join Filter: (ec1.ff = ec2.x1)
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-         ->  Seq Scan on ec2
-               Filter: (x1 = '42'::int8alias2)
+         ->  Seq Scan on ec1
    ->  Materialize
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               ->  Index Scan using ec1_pkey on ec1
-                     Index Cond: (ff = ec2.x1)
+               ->  Seq Scan on ec2
+                     Filter: (x1 = '42'::int8alias2)
 (8 rows)
 
 create unique index ec1_expr1 on ec1((ff + 1));
