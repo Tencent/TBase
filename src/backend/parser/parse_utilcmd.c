@@ -137,6 +137,7 @@ typedef struct
 #endif
     bool        ispartitioned;    /* true if table is partitioned */
     PartitionBoundSpec *partbound;    /* transformed FOR VALUES */
+	bool            ofType;                 /* true if statement contains OF typename */
 } CreateStmtContext;
 
 /* State shared by transformCreateSchemaStmt and its subroutines */
@@ -375,6 +376,8 @@ transformCreateStmt(CreateStmt *stmt, const char *queryString)
 #else
     cxt.ispartitioned = stmt->partspec != NULL;
 #endif
+	cxt.partbound = stmt->partbound;
+	cxt.ofType = (stmt->ofTypename != NULL);
     /*
      * Notice that we allow OIDs here only for plain tables, even though
      * foreign tables also support them.  This is necessary because the
@@ -1048,6 +1051,15 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
                 {
                     Type        ctype;
                     Oid            typeOid;
+
+					if (cxt->ofType)
+						ereport(ERROR,
+									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									 errmsg("identity colums are not supported on typed tables")));
+					if (cxt->partbound)
+						ereport(ERROR,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("identify columns are not supported on partitions")));
 
                     ctype = typenameType(cxt->pstate, column->typeName, NULL);
                     typeOid = HeapTupleGetOid(ctype);
@@ -3316,6 +3328,7 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
 #endif
     cxt.ispartitioned = (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE);
     cxt.partbound = NULL;
+	cxt.ofType = false;
 
     /*
      * The only subtypes that currently require parse transformation handling
