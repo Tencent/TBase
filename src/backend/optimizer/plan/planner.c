@@ -1235,6 +1235,7 @@ inheritance_planner(PlannerInfo *root)
 	Query	   *parent_parse;
 	Bitmapset  *parent_relids = bms_make_singleton(top_parentRTindex);
 	PlannerInfo **parent_roots = NULL;
+	bool		partColsUpdated = false;
 
     Assert(parse->commandType != CMD_INSERT);
 
@@ -1306,7 +1307,8 @@ inheritance_planner(PlannerInfo *root)
     if (parent_rte->relkind == RELKIND_PARTITIONED_TABLE)
 	{
 		nominalRelation = top_parentRTindex;
-		partitioned_rels = get_partitioned_child_rels(root, top_parentRTindex);
+		partitioned_rels = get_partitioned_child_rels(root, top_parentRTindex,
+													  &partColsUpdated);
 		/* The root partitioned table is included as a child rel */
 		Assert(list_length(partitioned_rels) >= 1);
 	}
@@ -1680,6 +1682,7 @@ inheritance_planner(PlannerInfo *root)
                                      parse->canSetTag,
                                      nominalRelation,
                                      partitioned_rels,
+									 partColsUpdated,
                                      resultRelations,
                                      subpaths,
                                      subroots,
@@ -2354,6 +2357,7 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
                                         parse->canSetTag,
                                         parse->resultRelation,
                                         NIL,
+										false,
                                         list_make1_int(parse->resultRelation),
                                         list_make1(path),
                                         list_make1(root),
@@ -7840,16 +7844,23 @@ grouping_distribution_match(PlannerInfo *root, Query *parse, Path *path,
 /*
  * get_partitioned_child_rels
  *        Returns a list of the RT indexes of the partitioned child relations
- *        with rti as the root parent RT index.
+ *      with rti as the root parent RT index. Also sets
+ *      *part_cols_updated to true if any of the root rte's updated
+ *      columns is used in the partition key either of the relation whose RTI
+ *      is specified or of any child relation.
  *
  * Note: This function might get called even for range table entries that
  * are not partitioned tables; in such a case, it will simply return NIL.
  */
 List *
-get_partitioned_child_rels(PlannerInfo *root, Index rti)
+get_partitioned_child_rels(PlannerInfo *root, Index rti,
+                          bool *part_cols_updated)
 {
     List       *result = NIL;
     ListCell   *l;
+
+    if (part_cols_updated)
+        *part_cols_updated = false;
 
     foreach(l, root->pcinfo_list)
     {
@@ -7858,6 +7869,8 @@ get_partitioned_child_rels(PlannerInfo *root, Index rti)
         if (pc->parent_relid == rti)
         {
             result = pc->child_rels;
+			if (part_cols_updated)
+				*part_cols_updated = pc->part_cols_updated;
             break;
         }
     }

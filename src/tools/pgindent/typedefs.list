@@ -1568,6 +1568,7 @@ PartitionRangeBound
 PartitionRangeDatum
 PartitionRangeDatumKind
 PartitionSpec
+PartitionTupleRouting
 PartitionedChildRelInfo
 PasswordType
 Path

@@ -1070,8 +1070,8 @@ typedef struct ModifyTableState
     /* Tuple-routing support info */
     struct TransitionCaptureState *mt_transition_capture;
     /* controls transition table population */
-    TupleConversionMap **mt_transition_tupconv_maps;
-    /* Per plan/partition tuple conversion */
+        TupleConversionMap **mt_per_subplan_tupconv_maps;
+        /* Per plan map for tuple conversion from child to root */
 #ifdef __TBASE__
     /* used for interval partition */
     bool        haspartparent;
