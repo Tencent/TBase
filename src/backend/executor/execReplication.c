@@ -404,7 +404,7 @@ ExecSimpleRelationInsert(EState *estate, TupleTableSlot *slot)
 
         /* Check the constraints of the tuple */
         if (rel->rd_att->constr)
-            ExecConstraints(resultRelInfo, slot, estate);
+			ExecConstraints(resultRelInfo, slot, estate, true);
 
 #ifdef _MLS_
         if (is_mls_user())
@@ -491,7 +491,7 @@ ExecSimpleRelationUpdate(EState *estate, EPQState *epqstate,
 
         /* Check the constraints of the tuple */
         if (rel->rd_att->constr)
-            ExecConstraints(resultRelInfo, slot, estate);
+			ExecConstraints(resultRelInfo, slot, estate, true);
 
 #ifdef _MLS_
         if (is_mls_user())

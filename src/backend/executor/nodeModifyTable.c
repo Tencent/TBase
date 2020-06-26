@@ -628,7 +628,7 @@ ExecInsert(ModifyTableState *mtstate,
 
         /* Check the constraints of the tuple */
         if (resultRelationDesc->rd_att->constr || check_partition_constr)
-            ExecConstraints(resultRelInfo, slot, estate);
+                    ExecConstraints(resultRelInfo, slot, estate, true);			
 
 #ifdef _MLS_
         if (is_mls_user())
@@ -1367,7 +1367,7 @@ lreplace:;
          * tuple-routing is performed here, hence the slot remains unchanged.
          */
         if (resultRelationDesc->rd_att->constr || resultRelInfo->ri_PartitionCheck)
-            ExecConstraints(resultRelInfo, slot, estate);
+			ExecConstraints(resultRelInfo, slot, estate, true);
 
 #ifdef _MLS_
         if (is_mls_user())

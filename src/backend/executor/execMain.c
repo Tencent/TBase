@@ -2210,16 +2210,12 @@ ExecRelCheck(ResultRelInfo *resultRelInfo,
  * ExecPartitionCheck --- check that tuple meets the partition constraint.
  *
  * Exported in executor.h for outside use.
+ * Returns true if it meets the partition constraint, else returns false.
  */
-void
+bool
 ExecPartitionCheck(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
                    EState *estate)
 {
-    Relation    rel = resultRelInfo->ri_RelationDesc;
-    TupleDesc    tupdesc = RelationGetDescr(rel);
-    Bitmapset  *modifiedCols;
-    Bitmapset  *insertedCols;
-    Bitmapset  *updatedCols;
     ExprContext *econtext;
 
     /*
@@ -2247,12 +2243,29 @@ ExecPartitionCheck(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
      * As in case of the catalogued constraints, we treat a NULL result as
      * success here, not a failure.
      */
-    if (!ExecCheck(resultRelInfo->ri_PartitionCheckExpr, econtext))
-    {
-        char       *val_desc;
-        Relation    orig_rel = rel;
+    return ExecCheck(resultRelInfo->ri_PartitionCheckExpr, econtext);
+}
 
-        /* See the comment above. */
+/*
+ * ExecPartitionCheckEmitError - Form and emit an error message after a failed
+ * partition constraint check.
+ */
+void
+ExecPartitionCheckEmitError(ResultRelInfo *resultRelInfo,
+                           TupleTableSlot *slot,
+                           EState *estate)
+    {
+   Relation    rel = resultRelInfo->ri_RelationDesc;
+        Relation    orig_rel = rel;
+   TupleDesc   tupdesc = RelationGetDescr(rel);
+   char       *val_desc;
+   Bitmapset  *modifiedCols;
+   Bitmapset  *insertedCols;
+   Bitmapset  *updatedCols;
+   /*
+    * Need to first convert the tuple to the root partitioned table's row
+    * type. For details, check similar comments in ExecConstraints().
+    */
         if (resultRelInfo->ri_PartitionRoot)
         {
             HeapTuple    tuple = ExecFetchSlotTuple(slot);
@@ -2266,7 +2279,7 @@ ExecPartitionCheck(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
                                          gettext_noop("could not convert row type"));
             if (map != NULL)
             {
-                tuple = do_convert_tuple(tuple, map, rel);
+            tuple = do_convert_tuple(tuple, map);
                 ExecSetSlotDescriptor(slot, tupdesc);
                 ExecStoreTuple(tuple, slot, InvalidBuffer, false);
             }
@@ -2286,13 +2299,12 @@ ExecPartitionCheck(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
                         RelationGetRelationName(orig_rel)),
                  val_desc ? errdetail("Failing row contains %s.", val_desc) : 0));
     }
-}
 
 /*
  * ExecConstraints - check constraints of the tuple in 'slot'
  *
- * This checks the traditional NOT NULL and check constraints, as well as
- * the partition constraint, if any.
+ * This checks the traditional NOT NULL and check constraints, and if
+ * requested, checks the partition constraint.
  *
  * Note: 'slot' contains the tuple to check the constraints of, which may
  * have been converted from the original input tuple after tuple routing.
@@ -2300,8 +2312,9 @@ ExecPartitionCheck(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
  */
 void
 ExecConstraints(ResultRelInfo *resultRelInfo,
-                TupleTableSlot *slot, EState *estate)
-{// #lizard forgives
+				TupleTableSlot *slot, EState *estate,
+				bool check_partition_constraint)
+{
     Relation    rel = resultRelInfo->ri_RelationDesc;
     TupleDesc    tupdesc = RelationGetDescr(rel);
     TupleConstr *constr = tupdesc->constr;
@@ -2415,8 +2428,9 @@ ExecConstraints(ResultRelInfo *resultRelInfo,
         }
     }
 
-    if (resultRelInfo->ri_PartitionCheck)
-        ExecPartitionCheck(resultRelInfo, slot, estate);
+	if (check_partition_constraint && resultRelInfo->ri_PartitionCheck &&
+		!ExecPartitionCheck(resultRelInfo, slot, estate))
+		ExecPartitionCheckEmitError(resultRelInfo, slot, estate);
 }
 
 
