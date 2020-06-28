@@ -1066,12 +1066,15 @@ typedef struct ModifyTableState
     TupleTableSlot *mt_existing;    /* slot to store existing target tuple in */
     List       *mt_excludedtlist;    /* the excluded pseudo relation's tlist  */
     TupleTableSlot *mt_conflproj;    /* CONFLICT ... SET ... projection target */
-        struct PartitionTupleRouting *mt_partition_tuple_routing;
+
     /* Tuple-routing support info */
+        struct PartitionTupleRouting *mt_partition_tuple_routing;
+
+	/* controls transition table population for specified operation */
     struct TransitionCaptureState *mt_transition_capture;
-    /* controls transition table population */
-        TupleConversionMap **mt_per_subplan_tupconv_maps;
+
         /* Per plan map for tuple conversion from child to root */
+        TupleConversionMap **mt_per_subplan_tupconv_maps;
 #ifdef __TBASE__
     /* used for interval partition */
     bool        haspartparent;
