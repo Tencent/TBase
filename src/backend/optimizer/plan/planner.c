@@ -203,6 +203,26 @@ static bool can_push_down_grouping(PlannerInfo *root, Query *parse, Path *path);
 static bool can_push_down_window(PlannerInfo *root, Path *path);
 static void adjust_paths_for_srfs(PlannerInfo *root, RelOptInfo *rel,
                       List *targets, List *targets_contain_srfs);
+static void add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
+                         RelOptInfo *grouped_rel, PathTarget *target,
+                         PathTarget *partial_grouping_target,
+                         const AggClauseCosts *agg_costs,
+                         const AggClauseCosts *agg_final_costs,
+                         grouping_sets_data *gd, bool can_sort, bool can_hash,
+                         double dNumGroups, List *havingQual);
+static void add_partial_paths_to_grouping_rel(PlannerInfo *root,
+                                 RelOptInfo *input_rel,
+                                 RelOptInfo *grouped_rel,
+                                 PathTarget *target,
+                                 PathTarget *partial_grouping_target,
+                                 AggClauseCosts *agg_partial_costs,
+                                 AggClauseCosts *agg_final_costs,
+                                 grouping_sets_data *gd,
+                                 bool can_sort,
+                                 bool can_hash,
+                                 List *havingQual);
+static bool can_parallel_agg(PlannerInfo *root, RelOptInfo *input_rel,
+                RelOptInfo *grouped_rel, const AggClauseCosts *agg_costs);
 #ifdef __TBASE__
 static Path *adjust_modifytable_subpath(PlannerInfo *root, Query *parse, Path *path);
 #endif
@@ -3899,15 +3919,12 @@ create_grouping_paths(PlannerInfo *root,
     PathTarget *partial_grouping_target = NULL;
     AggClauseCosts agg_partial_costs;    /* parallel only */
     AggClauseCosts agg_final_costs; /* parallel only */
-    Size        hashaggtablesize;
     double        dNumGroups;
-    double        dNumPartialGroups = 0;
     bool        can_hash;
     bool        can_sort;
     bool        try_parallel_aggregation;
     bool        try_distributed_aggregation;
 
-    ListCell   *lc;
 
     /* For now, do all work in the (GROUP_AGG, NULL) upperrel */
     grouped_rel = fetch_upper_rel(root, UPPERREL_GROUP_AGG, NULL);
@@ -4041,44 +4058,11 @@ create_grouping_paths(PlannerInfo *root,
                 (gd ? gd->any_hashable : grouping_is_hashable(parse->groupClause)));
 
     /*
-     * If grouped_rel->consider_parallel is true, then paths that we generate
-     * for this grouping relation could be run inside of a worker, but that
-     * doesn't mean we can actually use the PartialAggregate/FinalizeAggregate
-     * execution strategy.  Figure that out.
-     */
-    if (!grouped_rel->consider_parallel)
-    {
-        /* Not even parallel-safe. */
-        try_parallel_aggregation = false;
-    }
-    else if (input_rel->partial_pathlist == NIL)
-    {
-        /* Nothing to use as input for partial aggregate. */
-        try_parallel_aggregation = false;
-    }
-    else if (!parse->hasAggs && parse->groupClause == NIL)
-    {
-        /*
-         * We don't know how to do parallel aggregation unless we have either
-         * some aggregates or a grouping clause.
+     * Figure out whether a PartialAggregate/Finalize Aggregate execution
+     * strategy is viable.
          */
-        try_parallel_aggregation = false;
-    }
-    else if (parse->groupingSets)
-    {
-        /* We don't know how to do grouping sets in parallel. */
-        try_parallel_aggregation = false;
-    }
-    else if (agg_costs->hasNonPartial || agg_costs->hasNonSerial)
-    {
-        /* Insufficient support for partial mode. */
-        try_parallel_aggregation = false;
-    }
-    else
-    {
-        /* Everything looks good. */
-        try_parallel_aggregation = true;
-    }
+	 try_parallel_aggregation = can_parallel_agg(root, input_rel, grouped_rel,
+                                                 agg_costs);
 
     /*
      * The distributed aggregation however works even if there are no partial
@@ -4133,8 +4117,6 @@ create_grouping_paths(PlannerInfo *root,
      */
     if (try_parallel_aggregation)
     {
-        Path       *cheapest_partial_path = linitial(input_rel->partial_pathlist);
-
         /*
          * Build target list for partial aggregate paths.  These paths cannot
          * just emit the same tlist as regular aggregate paths, because (1) we
@@ -4143,11 +4125,6 @@ create_grouping_paths(PlannerInfo *root,
          * partial mode.
          */
         partial_grouping_target = make_partial_grouping_target(root, target);
-
-        /* Estimate number of partial groups. */
-        dNumPartialGroups = get_number_of_groups(root,
-                                                 cheapest_partial_path->rows,
-                                                 gd);
 
         /*
          * Collect statistics about aggregates for estimating costs of
@@ -4171,97 +4148,11 @@ create_grouping_paths(PlannerInfo *root,
                                  &agg_final_costs);
         }
 
-        if (can_sort)
-        {
-            /* This was checked before setting try_parallel_aggregation */
-            Assert(parse->hasAggs || parse->groupClause);
-
-            /*
-             * Use any available suitably-sorted path as input, and also
-             * consider sorting the cheapest partial path.
-             */
-            foreach(lc, input_rel->partial_pathlist)
-            {
-                Path       *path = (Path *) lfirst(lc);
-                bool        is_sorted;
-
-                is_sorted = pathkeys_contained_in(root->group_pathkeys,
-                                                  path->pathkeys);
-                if (path == cheapest_partial_path || is_sorted)
-                {
-                    /* Sort the cheapest partial path, if it isn't already */
-                    if (!is_sorted)
-                        path = (Path *) create_sort_path(root,
-                                                         grouped_rel,
-                                                         path,
-                                                         root->group_pathkeys,
-                                                         -1.0);
-
-                    if (parse->hasAggs)
-                        add_partial_path(grouped_rel, (Path *)
-                                         create_agg_path(root,
-                                                         grouped_rel,
-                                                         path,
-                                                         partial_grouping_target,
-                                                         parse->groupClause ? AGG_SORTED : AGG_PLAIN,
-                                                         AGGSPLIT_INITIAL_SERIAL,
-                                                         parse->groupClause,
-                                                         NIL,
-                                                         &agg_partial_costs,
-                                                         dNumPartialGroups));
-                    else
-                        add_partial_path(grouped_rel, (Path *)
-                                         create_group_path(root,
-                                                           grouped_rel,
-                                                           path,
-                                                           partial_grouping_target,
-                                                           parse->groupClause,
-                                                           NIL,
-                                                           dNumPartialGroups));
-                }
-            }
-        }
-
-        if (can_hash)
-        {
-            /* Checked above */
-            Assert(parse->hasAggs || parse->groupClause);
-
-            hashaggtablesize =
-                estimate_hashagg_tablesize(cheapest_partial_path,
-                                           &agg_partial_costs,
-                                           dNumPartialGroups);
-
-            /*
-             * Tentatively produce a partial HashAgg Path, depending on if it
-             * looks as if the hash table will fit in work_mem.
-             */
-#ifdef __TBASE__
-			if (hashaggtablesize < work_mem * 1024L || g_hybrid_hash_agg)
-#else
-            if (hashaggtablesize < work_mem * 1024L)
-#endif
-            {
-				AggPath *aggpath = (AggPath *)
-                                 create_agg_path(root,
-                                                 grouped_rel,
-                                                 cheapest_partial_path,
+	    add_partial_paths_to_grouping_rel(root, input_rel, grouped_rel, target,
                                                  partial_grouping_target,
-                                                 AGG_HASHED,
-                                                 AGGSPLIT_INITIAL_SERIAL,
-                                                 parse->groupClause,
-                                                 NIL,
-                                                 &agg_partial_costs,
-												 dNumPartialGroups);
-#ifdef __TBASE__
-				if (hashaggtablesize >= work_mem * 1024L)
-				{
-					aggpath->hybrid = true;
-				}
-#endif
-				add_partial_path(grouped_rel, (Path *)aggpath);
-            }
-        }
+	                                      &agg_partial_costs, &agg_final_costs,
+	                                      gd, can_sort, can_hash,
+	                                      (List *) parse->havingQual);
     }
 #ifdef __TBASE__
 	else
@@ -4300,6 +4191,67 @@ create_grouping_paths(PlannerInfo *root,
      */
 
     /* Build final grouping paths */
+	add_paths_to_grouping_rel(root, input_rel, grouped_rel, target,
+	                          partial_grouping_target, agg_costs,
+	                          &agg_final_costs, gd, can_sort, can_hash,
+	                          dNumGroups, (List *) parse->havingQual);
+
+	/* Generate XL aggregate paths, with distributed 2-phase aggregation. */
+
+	/*
+	 * If there were no partial paths, we did not initialize any of the
+	 * partial paths above. If that's the case, initialize here.
+	 *
+	 * XXX The reason why the initialization block at the beginning is not
+	 * simply performed unconditionally is that we may skip it if we've been
+	 * successful in fully pushing down any of the aggregates, and entirely
+	 * skip generating the XL paths.
+	 *
+	 * XXX Can we simply use the same estimates as regular partial aggregates,
+	 * or do we need to invent something else? It might be a better idea to
+	 * use estimates for the whole result here (e.g. total number of groups)
+	 * instead of the partial ones. Underestimates often have more severe
+	 * consequences (e.g. OOM with HashAggregate) than overestimates, so this
+	 * seems like a more defensive approach.
+	 *
+	 * XXX After thinking a bit more about the estimation, it may depend on
+	 * pushdown - if the aggregate is fully pushed down (as above, we can
+	 * probably use dNumGroups/numberOfNodes as a cardinality estimate, as
+	 * we know the per-node groupings won't overlap. But here we need to be
+	 * more careful.
+	 */
+	if (try_distributed_aggregation)
+	{
+		partial_grouping_target = make_partial_grouping_target(root, target);
+
+		/* Estimate number of partial groups. */
+		dNumPartialGroups = get_number_of_groups(root,
+												 cheapest_path->rows,
+												 gd);
+
+		/*
+		 * Collect statistics about aggregates for estimating costs of
+		 * performing aggregation in parallel.
+		 */
+		MemSet(&agg_partial_costs, 0, sizeof(AggClauseCosts));
+		MemSet(&agg_final_costs, 0, sizeof(AggClauseCosts));
+		if (parse->hasAggs)
+		{
+			/* partial phase */
+			get_agg_clause_costs(root, (Node *) partial_grouping_target->exprs,
+								 AGGSPLIT_INITIAL_SERIAL,
+								 &agg_partial_costs);
+
+			/* final phase */
+			get_agg_clause_costs(root, (Node *) target->exprs,
+								 AGGSPLIT_FINAL_DESERIAL,
+								 &agg_final_costs);
+			get_agg_clause_costs(root, parse->havingQual,
+								 AGGSPLIT_FINAL_DESERIAL,
+								 &agg_final_costs);
+		}
+
+		/* Build final XL grouping paths */
     if (can_sort)
     {
         /*
@@ -4324,115 +4276,119 @@ create_grouping_paths(PlannerInfo *root,
              */
             if (path == cheapest_path || is_sorted)
             {
-#ifdef __TBASE__
-                bool try_redistribute_grouping = false;
-                double dNumLocalGroups;
-                PathTarget * local_grouping_target = make_partial_grouping_target(root, target);
+					/*
+					 * We can't really beat paths that we managed to fully push
+					 * down above, so we can skip them entirely.
+					 *
+					 * XXX Not constructing any paths, so we can do this before
+					 * adding the Sort path.
+					 */
+					if (can_push_down_grouping(root, parse, path))
+						continue;
 
-				grouped_rel->reltarget = local_grouping_target;
-
-                /* Estimate number of partial groups. */
-                dNumLocalGroups = get_number_of_groups(root,
-                                                         cheapest_path->rows,
-                                                         gd);
-#endif
-
-#ifdef __TBASE__
-                if (olap_optimizer && !has_cold_hot_table)
-                {
-                    if (!is_sorted && !agg_costs->hasOnlyDistinct)
+					/* Sort the cheapest-total path if it isn't already sorted */
+					if (!is_sorted)
                         path = (Path *) create_sort_path(root,
                                                          grouped_rel,
                                                          path,
                                                          root->group_pathkeys,
                                                          -1.0);
-                }
-                else
-                {
+
+					/* Now decide what to stick atop it */
+					if (parse->groupingSets)
+					{
+						/*
+						 * TODO 2-phase aggregation for grouping sets paths not
+						 * supported yet, but this the place where such paths
+						 * should be constructed.
+						 */
+					}
+					else if (parse->hasAggs)
+					{
+						/*
+						 * We have aggregation, possibly with plain GROUP BY. Make
+						 * an AggPath.
+						 */
+
+						path = (Path *) create_agg_path(root,
+														grouped_rel,
+														path,
+														partial_grouping_target,
+										parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+														AGGSPLIT_INITIAL_SERIAL,
+														parse->groupClause,
+														NIL,
+														&agg_partial_costs,
+														dNumPartialGroups);
+
+#ifdef __TBASE__
+						if (olap_optimizer && !has_cold_hot_table)
+						{
+							/* redistribute local grouping results among datanodes */
+							path = create_redistribute_grouping_path(root, parse, path);
+                        }
+                        else
+                        {
+							path = create_remotesubplan_path(root, path, NULL);
+						}
+#else
+						path = create_remotesubplan_path(root, path, NULL);
 #endif
-                /* Sort the cheapest-total path if it isn't already sorted */
-                if (!is_sorted)
-                    path = (Path *) create_sort_path(root,
+
+#ifdef __TBASE__
+						if (parse->groupClause && olap_optimizer && !has_cold_hot_table && 
+							(!is_sorted || root->group_pathkeys))
+						{
+                            path = (Path *) create_sort_path(root,
                                                      grouped_rel,
                                                      path,
                                                      root->group_pathkeys,
                                                      -1.0);
-#ifdef __TBASE__
-                }
+                        }
 #endif
-                /*
-                 * If the grouping can't be fully pushed down, redistribute the
-                 * path on top of the (sorted) path. If if can be pushed down,
-                 * disable construction of complex distributed paths.
-                 */
-                if (! can_push_down_grouping(root, parse, path))
-#ifdef __TBASE__
-                {
-                    /* some special aggs cannot be parallel executed, such as count(distinct) */
-                    if(agg_costs->hasNonPartial || agg_costs->hasNonSerial ||
-                        parse->groupingSets || path->pathtype == T_Agg ||
-                        path->pathtype == T_Group || !olap_optimizer || has_cold_hot_table)
-                    {
-                        if (agg_costs->hasOnlyDistinct && olap_optimizer && !parse->groupingSets
-                            && !has_cold_hot_table)
-                            path = create_redistribute_grouping_path(root, parse, path);
-                        else
-                            path = create_remotesubplan_path(root, path, NULL);
-
-						if (agg_costs->hasOnlyDistinct && olap_optimizer &&
-                            !has_cold_hot_table)
-                        {
-							if (root->group_pathkeys)
-							{
-								path = (Path *) create_sort_path(root,
+                        /*
+						 * We generate two paths, differing in the second phase
+						 * implementation (sort and hash).
+                        */
+						{
+							Path *agg_path = (Path *)
+									 create_agg_path(root,
 												 grouped_rel,
 												 path,
-												 root->group_pathkeys,
-												 -1.0);
-							}
-                        }
-                    }
-                    else
-                    {
-                        /*
-                          * If the grouping can not be fully pushed down, we adopt another
-                          * strategy instead. 
-                          * 1. do grouping on each datanode locally
-                          * 2. re-distribute grouping results among datanodes, then do the 
-                          *     final grouping
-                                           */
+													 target,
+											 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+													 AGGSPLIT_FINAL_DESERIAL,
+													 parse->groupClause,
+													 (List *) parse->havingQual,
+													 &agg_final_costs,
+													 dNumGroups);
                                            
-                        try_redistribute_grouping = true;
+							//agg_path->parallel_safe = true;
 
-                        /* step 1 */
-                        if (parse->groupingSets)
-                        {
-                            /*
-                             * TODO 2-phase aggregation for grouping sets paths not
-                             * supported yet, but this the place where such paths
-                             * should be constructed.
-                             */
+							add_path(grouped_rel, agg_path);
                         }
-                        else if (parse->hasAggs)
-                        {
-                            /*
-                             * We have aggregation, possibly with plain GROUP BY. Make
-                             * an AggPath.
-                             */
 
-                            path = (Path *) create_agg_path(root,
+						if (can_hash)
+						{
+							Path *agg_path = (Path *)
+									 create_agg_path(root,
                                                             grouped_rel,
                                                             path,
-                                                            local_grouping_target,
-                                            parse->groupClause ? AGG_SORTED : AGG_PLAIN,
-                                                            AGGSPLIT_INITIAL_SERIAL,
+													 target,
+													 AGG_HASHED,
+													 AGGSPLIT_FINAL_DESERIAL,
                                                             parse->groupClause,
-                                                            NIL,
-                                                            &agg_partial_costs,
-                                                            dNumLocalGroups);
-                        }
-                        else if (parse->groupClause)
-                        {
+													 (List *) parse->havingQual,
+													 &agg_final_costs,
+													 dNumGroups);
+
+							//agg_path->parallel_safe = true;
+							
+							add_path(grouped_rel, agg_path);
+						}
+                    }
+                    else if (parse->groupClause)
+                    {
                             /*
                              * We have GROUP BY without aggregation or grouping sets.
                              * Make a GroupPath.
@@ -4440,1209 +4396,98 @@ create_grouping_paths(PlannerInfo *root,
                             path = (Path *) create_group_path(root,
                                                               grouped_rel,
                                                               path,
-                                                              local_grouping_target,
+														  partial_grouping_target,
                                                               parse->groupClause,
                                                               NIL,
-                                                              dNumLocalGroups);
-                        }
-                        else
-                        {
-                            /* Other cases should have been handled above */
-                            Assert(false);
-                        }
-
-                        /* step 2*/
-                            path = create_redistribute_grouping_path(root, parse, path);
-                        }
-                    }
-#else
-                    path = create_remotesubplan_path(root, path, NULL);
-#endif
-
-                else
-                    try_distributed_aggregation = false;
+														  dNumPartialGroups);
 
 #ifdef __TBASE__
-                if(try_redistribute_grouping)
-                {
-                    /*
-                      * do final grouping at each datanode
-                      */
-                      
-                    /* Now decide what to stick atop it */
-                    if (parse->groupingSets)
-                    {
-                        /*
-                         * TODO 2-phase aggregation for grouping sets paths not
-                         * supported yet, but this the place where such paths
-                         * should be constructed.
-                         */
-                    }
-                    else if (parse->hasAggs)
-                    {
-                        /*
-                         * We generate two paths, differing in the second phase
-                         * implementation (sort and hash).
-                         */
-                        Path *remote_path = path;
-                        
-                        if (parse->groupClause)
+						if (olap_optimizer && !has_cold_hot_table)
+						{
+							/* redistribute local grouping results among datanodes */
+                            path = create_redistribute_grouping_path(root, parse, path);
+                        }
+						else
+						{
+							path = create_remotesubplan_path(root, path, NULL);
+                        }
+#else
+                        path = create_remotesubplan_path(root, path, NULL);
+#endif
+
+#ifdef __TBASE__
+						if (olap_optimizer && !has_cold_hot_table && (!is_sorted || root->group_pathkeys))
                         {
-                            if (!is_sorted || root->group_pathkeys)
-                            {
                                 path = (Path *) create_sort_path(root,
                                                                  grouped_rel,
                                                                  path,
                                                                  root->group_pathkeys,
                                                                  -1.0);
-                            }
                         }
-                        
-                        path = (Path *)create_agg_path(root,
+#endif
+						{
+							Path *group_path = (Path *)
+									 create_group_path(root,
                                                  grouped_rel,
                                                  path,
                                                  target,
-                                         parse->groupClause ? AGG_SORTED : AGG_PLAIN,
-                                                 AGGSPLIT_FINAL_DESERIAL,
                                                  parse->groupClause,
                                                  (List *) parse->havingQual,
-                                                 &agg_final_costs,
                                                  dNumGroups);
                         
-                        //path->parallel_safe = true;
+							//group_path->parallel_safe = true;
                         
-                        add_path(grouped_rel, path);
-
-                        if (can_hash)
-                        {
-                            path = (Path *)
-                                     create_agg_path(root,
-                                                     grouped_rel,
-                                                     remote_path,
-                                                     target,
-                                                     AGG_HASHED,
-                                                     AGGSPLIT_FINAL_DESERIAL,
-                                                     parse->groupClause,
-                                                     (List *) parse->havingQual,
-                                                     &agg_final_costs,
-                                                     dNumGroups);
-                            //path->parallel_safe = true;
-							if (g_hybrid_hash_agg)
-							{
-								AggPath *agg = (AggPath *)path;
-								agg->hybrid = true;
-							}
-                            
-                            add_path(grouped_rel, path);
-                        }
-                    }
-                    else if (parse->groupClause)
-                    {
-                        if (!is_sorted || root->group_pathkeys)
-                        {
-                            path = (Path *) create_sort_path(root,
-                                                             grouped_rel,
-                                                             path,
-                                                             root->group_pathkeys,
-                                                             -1.0);
-                        }
-
-                        path = (Path *)
-                                 create_group_path(root,
-                                                   grouped_rel,
-                                                   path,
-                                                   target,
-                                                   parse->groupClause,
-                                                   (List *) parse->havingQual,
-                                                   dNumGroups);
-
-                        //path->parallel_safe = true;
-                        
-                        /*
-                         * We have GROUP BY without aggregation or grouping sets.
-                         * Make a GroupPath.
-                         */
-                        add_path(grouped_rel, path);
-
-                    }
-                    else
-                    {
-                        /* Other cases should have been handled above */
-                        Assert(false);
-                    }
-                }
-                else
-                {
-#endif
-
-                /* Now decide what to stick atop it */
-                if (parse->groupingSets)
-                {
-                    consider_groupingsets_paths(root, grouped_rel,
-                                                path, true, can_hash, target,
-                                                gd, agg_costs, dNumGroups);
-                }
-                else if (parse->hasAggs)
-                {
-#ifdef __TBASE__
-                    bool parallel_aware = false;
-                    bool parallel_safe  = false;
-                    Path *agg_path      = NULL;
-
-					if (root->group_pathkeys && olap_optimizer && 
-						!has_cold_hot_table && agg_costs->hasOnlyDistinct)
-					{
-						if (!pathkeys_contained_in(root->group_pathkeys,
-											  path->pathkeys))
-						{
-							path = (Path *) create_sort_path(root,
-											 grouped_rel,
-											 path,
-											 root->group_pathkeys,
-											 -1.0);
-					  	}
-					}
-
-                    if (path->pathtype == T_Sort && olap_optimizer && !has_cold_hot_table)
-                    {
-                        SortPath   *pathnode = (SortPath *)path;
-
-                        if (pathnode->subpath->pathtype == T_Gather || agg_costs->hasOnlyDistinct)
-                        {
-                            path->parallel_aware = true;
-                            parallel_aware       = true;
-                            parallel_safe        = true;
-                        }
-                    }
-
-                    agg_path = (Path *)
-                             create_agg_path(root,
-                                             grouped_rel,
-                                             path,
-                                             target,
-                                             parse->groupClause ? AGG_SORTED : AGG_PLAIN,
-                                             AGGSPLIT_SIMPLE,
-                                             parse->groupClause,
-                                             (List *) parse->havingQual,
-                                             agg_costs,
-                                             dNumGroups);
-                    agg_path->parallel_aware = parallel_aware;
-                    agg_path->parallel_safe  = parallel_safe;
-
-                    add_path(grouped_rel, agg_path);
-#else
-                    /*
-                     * We have aggregation, possibly with plain GROUP BY. Make
-                     * an AggPath.
-                     */
-                    add_path(grouped_rel, (Path *)
-                             create_agg_path(root,
-                                             grouped_rel,
-                                             path,
-                                             target,
-                                             parse->groupClause ? AGG_SORTED : AGG_PLAIN,
-                                             AGGSPLIT_SIMPLE,
-                                             parse->groupClause,
-                                             (List *) parse->havingQual,
-                                             agg_costs,
-                                             dNumGroups));
-#endif
-                }
-                else if (parse->groupClause)
-                {
-#ifdef __TBASE__
-                    bool parallel_aware = false;
-                    bool parallel_safe    = false;
-                    Path *group_path      = NULL;
-
-					if (root->group_pathkeys && olap_optimizer && 
-						!has_cold_hot_table && agg_costs->hasOnlyDistinct)
-					{
-						if (!pathkeys_contained_in(root->group_pathkeys,
-											  path->pathkeys))
-						{
-							path = (Path *) create_sort_path(root,
-											 grouped_rel,
-											 path,
-											 root->group_pathkeys,
-											 -1.0);
-					  	}
-					}
-
-                    if (path->pathtype == T_Sort && olap_optimizer && !has_cold_hot_table)
-                    {
-                        SortPath   *pathnode = (SortPath *)path;
-
-                        if (pathnode->subpath->pathtype == T_Gather)
-                        {
-                            path->parallel_aware = true;
-                            parallel_aware       = true;
-                            parallel_safe        = true;
-                        }
-                    }
-
-                    group_path = (Path *)
-                             create_group_path(root,
-                                               grouped_rel,
-                                               path,
-                                               target,
-                                               parse->groupClause,
-                                               (List *) parse->havingQual,
-                                               dNumGroups);
-                    group_path->parallel_aware = parallel_aware;
-                    group_path->parallel_safe  = parallel_safe;
-                    add_path(grouped_rel, group_path);
-#else
-
-                    /*
-                     * We have GROUP BY without aggregation or grouping sets.
-                     * Make a GroupPath.
-                     */
-                    add_path(grouped_rel, (Path *)
-                             create_group_path(root,
-                                               grouped_rel,
-                                               path,
-                                               target,
-                                               parse->groupClause,
-                                               (List *) parse->havingQual,
-                                               dNumGroups));
-#endif
-                }
-                else
-                {
-                    /* Other cases should have been handled above */
-                    Assert(false);
-                }
-#ifdef __TBASE__
-                }
-#endif
-            }
-        }
-
-        /*
-         * Now generate a complete GroupAgg Path atop of the cheapest partial
-         * path.  We can do this using either Gather or Gather Merge.
-         */
-        if (grouped_rel->partial_pathlist)
-        {
-#ifdef __TBASE__
-            bool       redistribute_group PG_USED_FOR_ASSERTS_ONLY = false;
-#endif
-            Path       *path = (Path *) linitial(grouped_rel->partial_pathlist);
-#ifdef __TBASE__
-            double        total_groups = 0;
-
-            if (olap_optimizer && !has_cold_hot_table)
-            {
-                total_groups = path->rows;
-            }
-            else
-                total_groups = path->rows * path->parallel_workers;
-#else
-            double        total_groups = path->rows * path->parallel_workers;
-#endif
-            path = (Path *) create_gather_path(root,
-                                               grouped_rel,
-                                               path,
-                                               partial_grouping_target,
-                                               NULL,
-                                               &total_groups);
-            /*
-             * Since Gather's output is always unsorted, we'll need to sort,
-             * unless there's no GROUP BY clause or a degenerate (constant)
-             * one, in which case there will only be a single group.
-             */
-#ifdef __TBASE__
-            if (!olap_optimizer || has_cold_hot_table)
-            {
-#endif
-            if (root->group_pathkeys)
-                path = (Path *) create_sort_path(root,
-                                                 grouped_rel,
-                                                 path,
-                                                 root->group_pathkeys,
-                                                 -1.0);
-#ifdef __TBASE__
-            }
-#endif
-            /*
-             * If the grouping can't be fully pushed down, we'll push down the
-             * first phase of the aggregate, and redistribute only the partial
-             * results.
-             *
-             * If if can be pushed down, disable construction of complex
-             * distributed paths.
-             *
-             * XXX Keep this after the Sort node, to make the path sorted.
-             */
-            if (! can_push_down_grouping(root, parse, path))
-#ifdef __TBASE__
-            {
-                if (olap_optimizer && !has_cold_hot_table)
-                {
-                    /* redistribute local grouping results among datanodes */
-                    path = create_redistribute_grouping_path(root, parse, path);
-                    redistribute_group = true;
-                }
-                else
-                    path = create_remotesubplan_path(root, path, NULL);
-            }
-#else
-            path = create_remotesubplan_path(root, path, NULL);
-#endif
-
-            else
-                try_distributed_aggregation = false;
-
-#ifdef __TBASE__
-            /*
-             * Since Gather's output is always unsorted, we'll need to sort,
-             * unless there's no GROUP BY clause or a degenerate (constant)
-             * one, in which case there will only be a single group.
-             */
-            if (olap_optimizer && !has_cold_hot_table)
-            {
-                if (root->group_pathkeys)
-                {
-                    path = (Path *) create_sort_path(root,
-                                                     grouped_rel,
-                                                     path,
-                                                     root->group_pathkeys,
-                                                     -1.0);
-                        path->parallel_aware = true;
-                }
-            }
-#endif
-            if (parse->hasAggs)
-            {
-                Path *agg_path = NULL;
-
-                agg_path = (Path *)
-                         create_agg_path(root,
-                                         grouped_rel,
-                                         path,
-                                         target,
-                                         parse->groupClause ? AGG_SORTED : AGG_PLAIN,
-                                         AGGSPLIT_FINAL_DESERIAL,
-                                         parse->groupClause,
-                                         (List *) parse->havingQual,
-                                         &agg_final_costs,
-                                         dNumGroups);
-
-                if (olap_optimizer && !has_cold_hot_table)
-                {
-                    agg_path->parallel_safe = true;
-                    agg_path->parallel_aware = true;
-                }
-                
-                add_path(grouped_rel, agg_path);
-            }
-            else
-            {
-                Path *group_path = NULL;
-
-                group_path = (Path *)
-                         create_group_path(root,
-                                           grouped_rel,
-                                           path,
-                                           target,
-                                           parse->groupClause,
-                                           (List *) parse->havingQual,
-                                           dNumGroups);
-
-                if (olap_optimizer && !has_cold_hot_table)
-                {
-                    group_path->parallel_safe = true;
-                    group_path->parallel_aware = true;
-                }
-                
-                add_path(grouped_rel, group_path);
-            }
-
-            /*
-             * The point of using Gather Merge rather than Gather is that it
-             * can preserve the ordering of the input path, so there's no
-             * reason to try it unless (1) it's possible to produce more than
-             * one output row and (2) we want the output path to be ordered.
-             */
-            if (parse->groupClause != NIL && root->group_pathkeys != NIL)
-            {
-                foreach(lc, grouped_rel->partial_pathlist)
-                {
-                    Path       *subpath = (Path *) lfirst(lc);
-                    Path       *gmpath;
-                    double        total_groups;
-
-                    /*
-                     * It's useful to consider paths that are already properly
-                     * ordered for Gather Merge, because those don't need a
-                     * sort.  It's also useful to consider the cheapest path,
-                     * because sorting it in parallel and then doing Gather
-                     * Merge may be better than doing an unordered Gather
-                     * followed by a sort.  But there's no point in
-                     * considering non-cheapest paths that aren't already
-                     * sorted correctly.
-                     */
-                    if (path != subpath &&
-                        !pathkeys_contained_in(root->group_pathkeys,
-                                               subpath->pathkeys))
-                        continue;
-
-#ifdef __TBASE__
-                    if (olap_optimizer && !has_cold_hot_table)
-                        total_groups = subpath->rows;
-                    else
-#endif
-                    total_groups = subpath->rows * subpath->parallel_workers;
-
-
-#ifdef __TBASE__
-                    if (olap_optimizer && !has_cold_hot_table)
-                    {
-                    gmpath = (Path *) create_gather_path(root,
-                                                         grouped_rel,
-                                                         subpath,
-                                                         partial_grouping_target,
-                                                         NULL,
-                                                         &total_groups);
-                    }
-                    else
-#endif
-                    gmpath = (Path *)
-                        create_gather_merge_path(root,
-                                                 grouped_rel,
-                                                 subpath,
-                                                 partial_grouping_target,
-                                                 root->group_pathkeys,
-                                                 NULL,
-                                                 &total_groups);
-
-                    /*
-                     * If the grouping can't be fully pushed down, we'll push down the
-                     * first phase of the aggregate, and redistribute only the partial
-                     * results.
-                     */
-                    redistribute_group = false;
-
-                    if (! can_push_down_grouping(root, parse, gmpath))
-#ifdef __TBASE__
-                    {
-                        if (olap_optimizer && !has_cold_hot_table)
-                        {
-                            /* redistribute local grouping results among datanodes */
-                            gmpath = create_redistribute_grouping_path(root, parse, gmpath);
-                            redistribute_group = true;
-                        }
-                        else
-                        {
-                            gmpath = create_remotesubplan_path(root, gmpath, NULL);
-                        }
-                    }
-#else
-                    gmpath = create_remotesubplan_path(root, gmpath, NULL);
-#endif
-
-#ifdef __TBASE__
-                    /*
-                     * Since Gather's output is always unsorted, we'll need to sort,
-                     * unless there's no GROUP BY clause or a degenerate (constant)
-                     * one, in which case there will only be a single group.
-                     */
-                    if (olap_optimizer && !has_cold_hot_table)
-                    {
-                        if (root->group_pathkeys)
-                        {
-                            gmpath = (Path *) create_sort_path(root,
-                                                              grouped_rel,
-                                                              gmpath,
-                                                              root->group_pathkeys,
-                                                              -1.0);
-
-                                gmpath->parallel_aware = true;
-                        }
-                    }
-#endif
-                    if (parse->hasAggs)
-                    {
-                        Path *agg_path = NULL;
-
-                        agg_path = (Path *)
-                                 create_agg_path(root,
-                                                 grouped_rel,
-                                                 gmpath,
-                                                 target,
-                                                 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
-                                                 AGGSPLIT_FINAL_DESERIAL,
-                                                 parse->groupClause,
-                                                 (List *) parse->havingQual,
-                                                 &agg_final_costs,
-                                                 dNumGroups);
-                        if (olap_optimizer && !has_cold_hot_table)
-                        {
-                            agg_path->parallel_safe = true;
-                            agg_path->parallel_aware = true;
-                        }
-                        
-                        add_path(grouped_rel, agg_path);
-                    }
-                    else
-                    {
-                        Path *group_path = NULL;
-
-                        group_path = (Path *)
-                                 create_group_path(root,
-                                                   grouped_rel,
-                                                   gmpath,
-                                                   target,
-                                                   parse->groupClause,
-                                                   (List *) parse->havingQual,
-                                                   dNumGroups);
-
-                        if (olap_optimizer && !has_cold_hot_table)
-                        {
-                            group_path->parallel_safe = true;
-                            group_path->parallel_aware = true;
-                        }
-                        
-                        add_path(grouped_rel, group_path);
-                    }
-                }
-            }
-        }
-    }
-
-    if (can_hash)
-    {
-        if (parse->groupingSets)
-        {
-            /*
-             * Try for a hash-only groupingsets path over unsorted input.
-             */
-            consider_groupingsets_paths(root, grouped_rel,
-                                        cheapest_path, false, true, target,
-                                        gd, agg_costs, dNumGroups);
-        }
-        else
-        {
-            hashaggtablesize = estimate_hashagg_tablesize(cheapest_path,
-                                                          agg_costs,
-                                                          dNumGroups);
-
-            /*
-             * Provided that the estimated size of the hashtable does not
-             * exceed work_mem, we'll generate a HashAgg Path, although if we
-             * were unable to sort above, then we'd better generate a Path, so
-             * that we at least have one.
-             */
-#ifdef __TBASE__
-			if (hashaggtablesize < work_mem * 1024L || g_hybrid_hash_agg ||
-				grouped_rel->pathlist == NIL)
-#else
-            if (hashaggtablesize < work_mem * 1024L ||
-                grouped_rel->pathlist == NIL)
-#endif
-            {
-                /* Don't mess with the cheapest path directly. */
-                Path *path = cheapest_path;
-#ifdef __TBASE__
-                bool try_redistribute_grouping = false;
-#endif
-
-                /*
-                 * If the grouping can't be fully pushed down, we'll push down the
-                 * first phase of the aggregate, and redistribute only the partial
-                 * results.
-                 *
-                 * If if can be pushed down, disable construction of complex
-                 * distributed paths.
-                 */
-                if (! can_push_down_grouping(root, parse, path))
-#ifdef XCP
-                {
-                    /* some special aggs cannot be parallel executed, such as count(distinct) */
-                    if(agg_costs->hasNonPartial || agg_costs->hasNonSerial || 
-                        path->pathtype == T_Agg || path->pathtype == T_Group ||
-                        !olap_optimizer || has_cold_hot_table)
-                    {
-                        if (agg_costs->hasOnlyDistinct && olap_optimizer && !has_cold_hot_table)
-                            path = create_redistribute_grouping_path(root, parse, path);
-                        else
-                            path = create_remotesubplan_path(root, path, NULL);
-                    }
-                    else
-                    {
-                        /*
-                          * If the grouping can not be fully pushed down, we adopt another
-                          * strategy instead. 
-                          * 1. do grouping on each datanode locally
-                          * 2. re-distribute grouping results among datanodes, then do the 
-                          *     final grouping
-                                        */
-						AggClauseCosts hashagg_partial_costs;
-                        PathTarget * local_grouping_target = make_partial_grouping_target(root, target);
-
-                        /* Estimate number of partial groups. */
-                        double dNumLocalGroups = get_number_of_groups(root,
-                                                                 cheapest_path->rows,
-                                                                 gd);
-                        try_redistribute_grouping = true;
-
-						MemSet(&hashagg_partial_costs, 0, sizeof(AggClauseCosts));
-				
-						get_agg_clause_costs(root, (Node *) local_grouping_target->exprs,
-								 AGGSPLIT_INITIAL_SERIAL,
-								 &hashagg_partial_costs);
-                        
-                        /* step 1 */
-                        path = (Path *) create_agg_path(root,
-                                                        grouped_rel,
-                                                        cheapest_path,
-                                                        local_grouping_target,
-                                                        AGG_HASHED,
-                                                        AGGSPLIT_INITIAL_SERIAL,
-                                                        parse->groupClause,
-                                                        NIL,
-														&hashagg_partial_costs,
-                                                        dNumLocalGroups);
-
-#ifdef __TBASE__
-						if (hashaggtablesize >= work_mem * 1024L && g_hybrid_hash_agg)
-						{
-							AggPath *aggpath = (AggPath *)path;
-
-							aggpath->hybrid = true;
+							add_path(grouped_rel, group_path);
 						}
-#endif
 
-                        /* step 2 */
-                        path = create_redistribute_grouping_path(root, parse, path);
-                    }
-                }
-#else
-                path = create_remotesubplan_path(root, path, NULL);
-#endif
-                else
-                    try_distributed_aggregation = false;
-
-                /*
-                 * We just need an Agg over the cheapest-total input path,
-                 * since input order won't matter.
-                 */
-#ifdef __TBASE__
-                if(try_redistribute_grouping)
-                {
-					AggClauseCosts hashagg_final_costs;
-					Path *agg_path;
-
-					MemSet(&hashagg_final_costs, 0, sizeof(AggClauseCosts));
-
-					get_agg_clause_costs(root, (Node *) target->exprs,
-								 AGGSPLIT_FINAL_DESERIAL,
-								 &hashagg_final_costs);
-					get_agg_clause_costs(root, parse->havingQual,
-								 AGGSPLIT_FINAL_DESERIAL,
-								 &hashagg_final_costs);
-											
-					agg_path = (Path *)
-                                 create_agg_path(root,
-                                                 grouped_rel,
-                                                 path,
-                                                 target,
-                                                 AGG_HASHED,
-                                                 AGGSPLIT_FINAL_DESERIAL,
-                                                 parse->groupClause,
-                                                 (List *) parse->havingQual,
-												 &hashagg_final_costs,
-                                                 dNumGroups);
-#ifdef __TBASE__
-					if (hashaggtablesize >= work_mem * 1024L && g_hybrid_hash_agg)
-					{
-						AggPath *aggpath = (AggPath *)agg_path;
-
-						aggpath->hybrid = true;
 					}
-#endif
-                    //agg_path->parallel_safe = true;
-                    
-                    add_path(grouped_rel, agg_path);
-                }
-                else
-                {
-                    bool parallel_aware = false;
-                    bool parallel_safe  = false;
-                    Path *agg_path      = NULL;
-
-                    if ((path->pathtype == T_Gather || agg_costs->hasOnlyDistinct) && olap_optimizer
-                        && !has_cold_hot_table)
-                    {
-                        parallel_safe = true;
-                        parallel_aware = true;
-                    }
-                    
-                    agg_path = (Path *)
-                         create_agg_path(root, grouped_rel,
-                                         path,
-                                         target,
-                                         AGG_HASHED,
-                                         AGGSPLIT_SIMPLE,
-                                         parse->groupClause,
-                                         (List *) parse->havingQual,
-                                         agg_costs,
-                                         dNumGroups);
-                    agg_path->parallel_aware = parallel_aware;
-                    agg_path->parallel_safe  = parallel_safe;
-#ifdef __TBASE__
-					if (hashaggtablesize >= work_mem * 1024L && g_hybrid_hash_agg)
+					else
 					{
-						AggPath *aggpath = (AggPath *)agg_path;
-
-						aggpath->hybrid = true;
+						/* Other cases should have been handled above */
+						Assert(false);
 					}
-#endif
-                    add_path(grouped_rel, agg_path);
-                }
-#else
-                add_path(grouped_rel, (Path *)
-                         create_agg_path(root, grouped_rel,
-                                         path,
-                                         target,
-                                         AGG_HASHED,
-                                         AGGSPLIT_SIMPLE,
-                                         parse->groupClause,
-                                         (List *) parse->havingQual,
-                                         agg_costs,
-                                         dNumGroups));
-#endif
-            }
-        }
-
-        /*
-         * Generate a HashAgg Path atop of the cheapest partial path. Once
-         * again, we'll only do this if it looks as though the hash table
-         * won't exceed work_mem.
-         */
-        if (grouped_rel->partial_pathlist)
-        {
-            bool       redistribute_group = false;
-            Path       *path = (Path *) linitial(grouped_rel->partial_pathlist);
-
-            hashaggtablesize = estimate_hashagg_tablesize(path,
-                                                          &agg_final_costs,
-                                                          dNumGroups);
-
-#ifdef __TBASE__
-			if (hashaggtablesize < work_mem * 1024L || g_hybrid_hash_agg)
-#else
-            if (hashaggtablesize < work_mem * 1024L)
-#endif
-            {
-#ifdef __TBASE__
-                double        total_groups = 0;
-
-                if (olap_optimizer && !has_cold_hot_table)
-                {
-                    total_groups = path->rows;
-                }
-                else
-                    total_groups = path->rows * path->parallel_workers;
-#else
-                double        total_groups = path->rows * path->parallel_workers;
-#endif
-                path = (Path *) create_gather_path(root,
-                                                   grouped_rel,
-                                                   path,
-                                                   partial_grouping_target,
-                                                   NULL,
-                                                   &total_groups);
-                /*
-                * If the grouping can't be fully pushed down, we'll push down the
-                * first phase of the aggregate, and redistribute only the partial
-                * results.
-                *
-                * If if can be pushed down, disable construction of complex
-                * distributed paths.
-                */
-                if (! can_push_down_grouping(root, parse, path))
-#ifdef __TBASE__
-                {
-                    if (olap_optimizer && !has_cold_hot_table)
-                    {
-                        /* redistribute local grouping results among datanodes */
-                        path = create_redistribute_grouping_path(root, parse, path);
-                        redistribute_group = true;
-                    }
-                    else
-                    {
-                        path = create_remotesubplan_path(root, path, NULL);
-                    }
-                }
-#else
-                    path = create_remotesubplan_path(root, path, NULL);
-#endif
-                else
-                    try_distributed_aggregation = false;
-
-#ifdef __TBASE__
-                if (!redistribute_group)
-                {
-                    Path *agg_path = (Path *)
-                         create_agg_path(root,
-                                         grouped_rel,
-                                         path,
-                                         target,
-                                         AGG_HASHED,
-                                         AGGSPLIT_FINAL_DESERIAL,
-                                         parse->groupClause,
-                                         (List *) parse->havingQual,
-                                         &agg_final_costs,
-                                         dNumGroups);
-
-                    if (olap_optimizer && !has_cold_hot_table)
-                    {
-                        agg_path->parallel_aware = true;
-                        agg_path->parallel_safe  = true;
-                    }
-#ifdef __TBASE__
-					if (hashaggtablesize >= work_mem * 1024L && g_hybrid_hash_agg)
-					{
-						AggPath *aggpath = (AggPath *)agg_path;
-
-						aggpath->hybrid = true;
-					}
-#endif
-                    add_path(grouped_rel, agg_path);
-                }
-                else
-                {
-#endif        
-                Path *agg_path = (Path *)
-                         create_agg_path(root,
-                                         grouped_rel,
-                                         path,
-                                         target,
-                                         AGG_HASHED,
-                                         AGGSPLIT_FINAL_DESERIAL,
-                                         parse->groupClause,
-                                         (List *) parse->havingQual,
-                                         &agg_final_costs,
-                                         dNumGroups);
-
-                if (olap_optimizer && !has_cold_hot_table)
-                {
-                    agg_path->parallel_aware = true;
-                    agg_path->parallel_safe = true;
-                }
-#ifdef __TBASE__
-				if (hashaggtablesize >= work_mem * 1024L && g_hybrid_hash_agg)
-				{
-					AggPath *aggpath = (AggPath *)agg_path;
-
-					aggpath->hybrid = true;
 				}
-#endif
-                add_path(grouped_rel, agg_path);
-#ifdef __TBASE__
-                }
-#endif
-            }
-        }
-    }
-
-    /* Generate XL aggregate paths, with distributed 2-phase aggregation. */
-
-    /*
-     * If there were no partial paths, we did not initialize any of the
-     * partial paths above. If that's the case, initialize here.
-     *
-     * XXX The reason why the initialization block at the beginning is not
-     * simply performed unconditionally is that we may skip it if we've been
-     * successful in fully pushing down any of the aggregates, and entirely
-     * skip generating the XL paths.
-     *
-     * XXX Can we simply use the same estimates as regular partial aggregates,
-     * or do we need to invent something else? It might be a better idea to
-     * use estimates for the whole result here (e.g. total number of groups)
-     * instead of the partial ones. Underestimates often have more severe
-     * consequences (e.g. OOM with HashAggregate) than overestimates, so this
-     * seems like a more defensive approach.
-     *
-     * XXX After thinking a bit more about the estimation, it may depend on
-     * pushdown - if the aggregate is fully pushed down (as above, we can
-     * probably use dNumGroups/numberOfNodes as a cardinality estimate, as
-     * we know the per-node groupings won't overlap. But here we need to be
-     * more careful.
-     */
-    if (try_distributed_aggregation)
-    {
-        partial_grouping_target = make_partial_grouping_target(root, target);
-
-#ifdef __TBASE__
-		grouped_rel->reltarget = partial_grouping_target;
-#endif
-        /* Estimate number of partial groups. */
-        dNumPartialGroups = get_number_of_groups(root,
-                                                 cheapest_path->rows,
-                                                 gd);
-
-        /*
-         * Collect statistics about aggregates for estimating costs of
-         * performing aggregation in parallel.
-         */
-        MemSet(&agg_partial_costs, 0, sizeof(AggClauseCosts));
-        MemSet(&agg_final_costs, 0, sizeof(AggClauseCosts));
-        if (parse->hasAggs)
-        {
-            /* partial phase */
-            get_agg_clause_costs(root, (Node *) partial_grouping_target->exprs,
-                                 AGGSPLIT_INITIAL_SERIAL,
-                                 &agg_partial_costs);
-
-            /* final phase */
-            get_agg_clause_costs(root, (Node *) target->exprs,
-                                 AGGSPLIT_FINAL_DESERIAL,
-                                 &agg_final_costs);
-            get_agg_clause_costs(root, parse->havingQual,
-                                 AGGSPLIT_FINAL_DESERIAL,
-                                 &agg_final_costs);
-        }
-
-        /* Build final XL grouping paths */
-        if (can_sort)
-        {
-            /*
-             * Use any available suitably-sorted path as input, and also consider
-             * sorting the cheapest-total path.
-             */
-            foreach(lc, input_rel->pathlist)
-            {
-                Path       *path = (Path *) lfirst(lc);
-                bool        is_sorted;
-
-                is_sorted = pathkeys_contained_in(root->group_pathkeys,
-                        path->pathkeys);
-
-                /*
-                 * XL: Can it happen that the cheapest path can't be pushed down,
-                 * while some other path could be? Perhaps we should move the check
-                 * if a path can be pushed down up, and add another OR condition
-                 * to consider all paths that can be pushed down?
-                 *
-                 * if (path == cheapest_path || is_sorted || can_push_down)
-                 */
-                if (path == cheapest_path || is_sorted)
-                {
-                    /*
-                     * We can't really beat paths that we managed to fully push
-                     * down above, so we can skip them entirely.
-                     *
-                     * XXX Not constructing any paths, so we can do this before
-                     * adding the Sort path.
-                     */
-                    if (can_push_down_grouping(root, parse, path))
-                        continue;
-
-                    /* Sort the cheapest-total path if it isn't already sorted */
-                    if (!is_sorted)
-                        path = (Path *) create_sort_path(root,
-                                                         grouped_rel,
-                                                         path,
-                                                         root->group_pathkeys,
-                                                         -1.0);
-
-                    /* Now decide what to stick atop it */
-                    if (parse->groupingSets)
-                    {
-                        /*
-                         * TODO 2-phase aggregation for grouping sets paths not
-                         * supported yet, but this the place where such paths
-                         * should be constructed.
-                         */
-                    }
-                    else if (parse->hasAggs)
-                    {
-                        /*
-                         * We have aggregation, possibly with plain GROUP BY. Make
-                         * an AggPath.
-                         */
-
-                        path = (Path *) create_agg_path(root,
-                                                        grouped_rel,
-                                                        path,
-                                                        partial_grouping_target,
-                                        parse->groupClause ? AGG_SORTED : AGG_PLAIN,
-                                                        AGGSPLIT_INITIAL_SERIAL,
-                                                        parse->groupClause,
-                                                        NIL,
-                                                        &agg_partial_costs,
-                                                        dNumPartialGroups);
-
-#ifdef __TBASE__
-                        if (olap_optimizer && !has_cold_hot_table)
-                        {
-                            /* redistribute local grouping results among datanodes */
-                            path = create_redistribute_grouping_path(root, parse, path);
-                        }
-                        else
-                        {
-                            path = create_remotesubplan_path(root, path, NULL);
-                        }
-#else
-                        path = create_remotesubplan_path(root, path, NULL);
-#endif
-
-#ifdef __TBASE__
-                        if (parse->groupClause && olap_optimizer && !has_cold_hot_table && 
-                            (!is_sorted || root->group_pathkeys))
-                        {
-                            path = (Path *) create_sort_path(root,
-                                                             grouped_rel,
-                                                             path,
-                                                             root->group_pathkeys,
-                                                             -1.0);
-                        }
-#endif
-                        /*
-                         * We generate two paths, differing in the second phase
-                         * implementation (sort and hash).
-                         */
-                        {
-                            Path *agg_path = (Path *)
-                                     create_agg_path(root,
-                                                     grouped_rel,
-                                                     path,
-                                                     target,
-                                             parse->groupClause ? AGG_SORTED : AGG_PLAIN,
-                                                     AGGSPLIT_FINAL_DESERIAL,
-                                                     parse->groupClause,
-                                                     (List *) parse->havingQual,
-                                                     &agg_final_costs,
-                                                     dNumGroups);
-
-                            //agg_path->parallel_safe = true;
-                            
-                            add_path(grouped_rel, agg_path);
-                        }
-
-                        if (can_hash)
-                        {
-                            Path *agg_path = (Path *)
-                                     create_agg_path(root,
-                                                     grouped_rel,
-                                                     path,
-                                                     target,
-                                                     AGG_HASHED,
-                                                     AGGSPLIT_FINAL_DESERIAL,
-                                                     parse->groupClause,
-                                                     (List *) parse->havingQual,
-                                                     &agg_final_costs,
-                                                     dNumGroups);
-
-                            //agg_path->parallel_safe = true;
-                            
-                            add_path(grouped_rel, agg_path);
-                        }
-                    }
-                    else if (parse->groupClause)
-                    {
-                        /*
-                         * We have GROUP BY without aggregation or grouping sets.
-                         * Make a GroupPath.
-                         */
-                        path = (Path *) create_group_path(root,
-                                                          grouped_rel,
-                                                          path,
-                                                          partial_grouping_target,
-                                                          parse->groupClause,
-                                                          NIL,
-                                                          dNumPartialGroups);
-
-#ifdef __TBASE__
-                        if (olap_optimizer && !has_cold_hot_table)
-                        {
-                            /* redistribute local grouping results among datanodes */
-                            path = create_redistribute_grouping_path(root, parse, path);
-                        }
-                        else
-                        {
-                            path = create_remotesubplan_path(root, path, NULL);
-                        }
-#else
-                        path = create_remotesubplan_path(root, path, NULL);
-#endif
-
-#ifdef __TBASE__
-                        if (olap_optimizer && !has_cold_hot_table && (!is_sorted || root->group_pathkeys))
-                        {
-                            path = (Path *) create_sort_path(root,
-                                                             grouped_rel,
-                                                             path,
-                                                             root->group_pathkeys,
-                                                              -1.0);
-                        }
-#endif
-                        {
-                            Path *group_path = (Path *)
-                                     create_group_path(root,
-                                                       grouped_rel,
-                                                       path,
-                                                       target,
-                                                       parse->groupClause,
-                                                       (List *) parse->havingQual,
-                                                       dNumGroups);
-
-                            //group_path->parallel_safe = true;
-                            
-                            add_path(grouped_rel, group_path);
-                        }
-
-                    }
-                    else
-                    {
-                        /* Other cases should have been handled above */
-                        Assert(false);
-                    }
-                }
-            }
-        }
+			}
+		}
 
         if (can_hash)
         {
-            hashaggtablesize = estimate_hashagg_tablesize(cheapest_path,
-                                                          agg_costs,
-                                                          dNumGroups);
+			hashaggtablesize = estimate_hashagg_tablesize(cheapest_path,
+														  agg_costs,
+														  dNumGroups);
 
-            /*
-             * Provided that the estimated size of the hashtable does not exceed
-             * work_mem, we'll generate a HashAgg Path, although if we were unable
-             * to sort above, then we'd better generate a Path, so that we at
-             * least have one.
-             */
+			/*
+			 * Provided that the estimated size of the hashtable does not exceed
+			 * work_mem, we'll generate a HashAgg Path, although if we were unable
+			 * to sort above, then we'd better generate a Path, so that we at
+			 * least have one.
+			 */
 #ifdef __TBASE__
 			if (hashaggtablesize < work_mem * 1024L || g_hybrid_hash_agg ||
 				grouped_rel->pathlist == NIL)
 #else
-            if (hashaggtablesize < work_mem * 1024L ||
-                grouped_rel->pathlist == NIL)
+			if (hashaggtablesize < work_mem * 1024L ||
+				grouped_rel->pathlist == NIL)
 #endif
-            {
-                /* If the whole aggregate was pushed down, we're done. */
-                if (! can_push_down_grouping(root, parse, cheapest_path))
-                {
-                    Path *path, *agg_path;
+			{
+				/* If the whole aggregate was pushed down, we're done. */
+				if (! can_push_down_grouping(root, parse, cheapest_path))
+				{
+					Path *path, *agg_path;
 
-                    path = (Path *) create_agg_path(root,
-                                           grouped_rel,
-                                           cheapest_path,
-                                           partial_grouping_target,
-                                           AGG_HASHED,
-                                           AGGSPLIT_INITIAL_SERIAL,
-                                           parse->groupClause,
-                                           NIL,
-                                           &agg_partial_costs,
-                                           dNumPartialGroups);
+					path = (Path *) create_agg_path(root,
+										   grouped_rel,
+										   cheapest_path,
+										   partial_grouping_target,
+										   AGG_HASHED,
+										   AGGSPLIT_INITIAL_SERIAL,
+										   parse->groupClause,
+										   NIL,
+										   &agg_partial_costs,
+										   dNumPartialGroups);
 
-                    /* keep partially aggregated path for the can_sort branch */
-                    agg_path = path;
+					/* keep partially aggregated path for the can_sort branch */
+					agg_path = path;
 #ifdef __TBASE__
 					if (hashaggtablesize >= work_mem * 1024L && g_hybrid_hash_agg)
 					{
@@ -5653,139 +4498,139 @@ create_grouping_paths(PlannerInfo *root,
 #endif
 
 #ifdef __TBASE__
-                    if (olap_optimizer && !has_cold_hot_table)
-                    {
-                        /* redistribute local grouping results among datanodes */
-                        path = create_redistribute_grouping_path(root, parse, path);
-                    }
-                    else
-                    {
-                        path = create_remotesubplan_path(root, path, NULL);
-                    }
+					if (olap_optimizer && !has_cold_hot_table)
+					{
+						/* redistribute local grouping results among datanodes */
+						path = create_redistribute_grouping_path(root, parse, path);
+					}
+					else
+					{
+						path = create_remotesubplan_path(root, path, NULL);
+					}
 #else
-                    path = create_remotesubplan_path(root, path, NULL);
+					path = create_remotesubplan_path(root, path, NULL);
 #endif
-                    /* Generate paths with both hash and sort second phase. */
-                    {
-                        Path *agg_path = (Path *)
-                                 create_agg_path(root,
-                                                 grouped_rel,
-                                                 path,
-                                                 target,
-                                                 AGG_HASHED,
-                                                 AGGSPLIT_FINAL_DESERIAL,
-                                                 parse->groupClause,
-                                                 (List *) parse->havingQual,
-                                                 &agg_final_costs,
-                                                 dNumGroups);
+					/* Generate paths with both hash and sort second phase. */
+					{
+						Path *agg_path = (Path *)
+                                     create_agg_path(root,
+                                                     grouped_rel,
+												 path,
+                                                     target,
+                                                     AGG_HASHED,
+                                                     AGGSPLIT_FINAL_DESERIAL,
+                                                     parse->groupClause,
+                                                     (List *) parse->havingQual,
+                                                     &agg_final_costs,
+                                                     dNumGroups);
 
-                        //agg_path->parallel_safe = true;
+						//agg_path->parallel_safe = true;
 #ifdef __TBASE__
 						if (hashaggtablesize >= work_mem * 1024L && g_hybrid_hash_agg)
-						{
+							{
 							AggPath *aggpath = (AggPath *)agg_path;
-
+                            
 							aggpath->hybrid = true;
-						}
+                        }
 #endif
-                        add_path(grouped_rel, agg_path);
+						add_path(grouped_rel, agg_path);
                     }
 
-                    if (can_sort)
+					if (can_sort)
                     {
 #ifdef __TBASE__
-                        if (!olap_optimizer || has_cold_hot_table)
+						if (!olap_optimizer || has_cold_hot_table)
 #endif
                             path = (Path *) create_sort_path(root,
-                                     grouped_rel,
-                                     agg_path,
-                                     root->group_pathkeys,
-                                     -1.0);
+                                                             grouped_rel,
+									 agg_path,
+                                                             root->group_pathkeys,
+                                                             -1.0);
 
 #ifdef __TBASE__
-                        if (olap_optimizer && !has_cold_hot_table)
+						if (olap_optimizer && !has_cold_hot_table)
                         {
-                            /* redistribute local grouping results among datanodes */
-                            path = create_redistribute_grouping_path(root, parse, agg_path);
+							/* redistribute local grouping results among datanodes */
+							path = create_redistribute_grouping_path(root, parse, agg_path);
                         }
                         else
                         {
-                            path = create_remotesubplan_path(root, path, NULL);
-                        }
+							path = create_remotesubplan_path(root, path, NULL);
+						}
 #else
-                        path = create_remotesubplan_path(root, path, NULL);
+						path = create_remotesubplan_path(root, path, NULL);
 #endif
 
 #ifdef __TBASE__
-                        if (olap_optimizer && !has_cold_hot_table)
-                        {
-                            /*
-                             * AGG_HASHED aggregate paths are always unsorted, so add
-                             * a Sorted node for the final AGG_SORTED step.
-                             */
-                            path = (Path *) create_sort_path(root,
-                                                             grouped_rel,
-                                                             path,
-                                                             root->group_pathkeys,
-                                                             -1.0);
-                        }
+						if (olap_optimizer && !has_cold_hot_table)
+						{
+							/*
+							 * AGG_HASHED aggregate paths are always unsorted, so add
+							 * a Sorted node for the final AGG_SORTED step.
+							 */
+							path = (Path *) create_sort_path(root,
+											 grouped_rel,
+											 path,
+											 root->group_pathkeys,
+											 -1.0);
+					  	}
 #endif
 
-                        path = (Path *)
-                                 create_agg_path(root,
-                                                 grouped_rel,
-                                                 path,
-                                                 target,
-                                         parse->groupClause ? AGG_SORTED : AGG_PLAIN,
-                                                 AGGSPLIT_FINAL_DESERIAL,
-                                                 parse->groupClause,
-                                                 (List *) parse->havingQual,
-                                                 &agg_final_costs,
-                                                 dNumGroups);
+						path = (Path *)
+                             create_agg_path(root,
+                                             grouped_rel,
+                                             path,
+                                             target,
+                                             parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+												 AGGSPLIT_FINAL_DESERIAL,
+                                             parse->groupClause,
+                                             (List *) parse->havingQual,
+												 &agg_final_costs,
+                                             dNumGroups);
 
-                        //path->parallel_safe = true;
+						//path->parallel_safe = true;
 
-                        add_path(grouped_rel, path);
-                    }
-                }
-            }
+						add_path(grouped_rel, path);
+					}
+				}
+			}
         }
     }
 
-    /* Give a helpful error if we failed to find any implementation */
-    if (grouped_rel->pathlist == NIL)
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("could not implement GROUP BY"),
-                 errdetail("Some of the datatypes only support hashing, while others only support sorting.")));
+	/* Give a helpful error if we failed to find any implementation */
+	if (grouped_rel->pathlist == NIL)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("could not implement GROUP BY"),
+				 errdetail("Some of the datatypes only support hashing, while others only support sorting.")));
 
-    /*
-     * If there is an FDW that's responsible for all baserels of the query,
-     * let it consider adding ForeignPaths.
-     */
-    if (grouped_rel->fdwroutine &&
-        grouped_rel->fdwroutine->GetForeignUpperPaths)
-        grouped_rel->fdwroutine->GetForeignUpperPaths(root, UPPERREL_GROUP_AGG,
-                                                      input_rel, grouped_rel);
+                    /*
+	 * If there is an FDW that's responsible for all baserels of the query,
+	 * let it consider adding ForeignPaths.
+                     */
+	if (grouped_rel->fdwroutine &&
+		grouped_rel->fdwroutine->GetForeignUpperPaths)
+		grouped_rel->fdwroutine->GetForeignUpperPaths(root, UPPERREL_GROUP_AGG,
+													  input_rel, grouped_rel);
 
-    /* Let extensions possibly add some more paths */
-    if (create_upper_paths_hook)
-        (*create_upper_paths_hook) (root, UPPERREL_GROUP_AGG,
-                                    input_rel, grouped_rel);
+	/* Let extensions possibly add some more paths */
+	if (create_upper_paths_hook)
+		(*create_upper_paths_hook) (root, UPPERREL_GROUP_AGG,
+									input_rel, grouped_rel);
 
-    /* Now choose the best path(s) */
-    set_cheapest(grouped_rel);
-    /*
-     * We've been using the partial pathlist for the grouped relation to hold
-     * partially aggregated paths, but that's actually a little bit bogus
-     * because it's unsafe for later planning stages -- like ordered_rel ---
-     * to get the idea that they can use these partial paths as if they didn't
-     * need a FinalizeAggregate step.  Zap the partial pathlist at this stage
-     * so we don't get confused.
-     */
-    grouped_rel->partial_pathlist = NIL;
+	/* Now choose the best path(s) */
+	set_cheapest(grouped_rel);
+        /*
+	 * We've been using the partial pathlist for the grouped relation to hold
+	 * partially aggregated paths, but that's actually a little bit bogus
+	 * because it's unsafe for later planning stages -- like ordered_rel ---
+	 * to get the idea that they can use these partial paths as if they didn't
+	 * need a FinalizeAggregate step.  Zap the partial pathlist at this stage
+	 * so we don't get confused.
+         */
+	grouped_rel->partial_pathlist = NIL;
 
-    return grouped_rel;
+	return grouped_rel;
 }
 
 
@@ -5797,360 +4642,360 @@ create_grouping_paths(PlannerInfo *root,
  */
 static void
 consider_groupingsets_paths(PlannerInfo *root,
-                            RelOptInfo *grouped_rel,
-                            Path *path,
-                            bool is_sorted,
-                            bool can_hash,
-                            PathTarget *target,
-                            grouping_sets_data *gd,
-                            const AggClauseCosts *agg_costs,
-                            double dNumGroups)
-{// #lizard forgives
-    Query       *parse = root->parse;
-
-    /*
-     * If we're not being offered sorted input, then only consider plans that
-     * can be done entirely by hashing.
-     *
-     * We can hash everything if it looks like it'll fit in work_mem. But if
-     * the input is actually sorted despite not being advertised as such, we
-     * prefer to make use of that in order to use less memory.
-     *
-     * If none of the grouping sets are sortable, then ignore the work_mem
-     * limit and generate a path anyway, since otherwise we'll just fail.
-     */
-    if (!is_sorted)
-    {
-        List       *new_rollups = NIL;
-        RollupData *unhashed_rollup = NULL;
-        List       *sets_data;
-        List       *empty_sets_data = NIL;
-        List       *empty_sets = NIL;
-        ListCell   *lc;
-        ListCell   *l_start = list_head(gd->rollups);
-        AggStrategy strat = AGG_HASHED;
-        Size        hashsize;
-        double        exclude_groups = 0.0;
-
-        Assert(can_hash);
-
-        if (pathkeys_contained_in(root->group_pathkeys, path->pathkeys))
-        {
-            unhashed_rollup = lfirst(l_start);
-            exclude_groups = unhashed_rollup->numGroups;
-            l_start = lnext(l_start);
-        }
-
-        hashsize = estimate_hashagg_tablesize(path,
-                                              agg_costs,
-                                              dNumGroups - exclude_groups);
-
-        /*
-         * gd->rollups is empty if we have only unsortable columns to work
-         * with.  Override work_mem in that case; otherwise, we'll rely on the
-         * sorted-input case to generate usable mixed paths.
-         */
-        if (hashsize > work_mem * 1024L && gd->rollups)
-            return;                /* nope, won't fit */
-
-        /*
-         * We need to burst the existing rollups list into individual grouping
-         * sets and recompute a groupClause for each set.
-         */
-        sets_data = list_copy(gd->unsortable_sets);
-
-        for_each_cell(lc, l_start)
-        {
-            RollupData *rollup = lfirst(lc);
+							RelOptInfo *grouped_rel,
+							Path *path,
+							bool is_sorted,
+							bool can_hash,
+							PathTarget *target,
+							grouping_sets_data *gd,
+							const AggClauseCosts *agg_costs,
+							double dNumGroups)
+{
+	Query	   *parse = root->parse;
 
             /*
-             * If we find an unhashable rollup that's not been skipped by the
-             * "actually sorted" check above, we can't cope; we'd need sorted
-             * input (with a different sort order) but we can't get that here.
-             * So bail out; we'll get a valid path from the is_sorted case
-             * instead.
+	 * If we're not being offered sorted input, then only consider plans that
+	 * can be done entirely by hashing.
              *
-             * The mere presence of empty grouping sets doesn't make a rollup
-             * unhashable (see preprocess_grouping_sets), we handle those
-             * specially below.
-             */
-            if (!rollup->hashable)
-                return;
-            else
-                sets_data = list_concat(sets_data, list_copy(rollup->gsets_data));
-        }
-        foreach(lc, sets_data)
-        {
-            GroupingSetData *gs = lfirst(lc);
-            List       *gset = gs->set;
-            RollupData *rollup;
-
-            if (gset == NIL)
-            {
-                /* Empty grouping sets can't be hashed. */
-                empty_sets_data = lappend(empty_sets_data, gs);
-                empty_sets = lappend(empty_sets, NIL);
-            }
-            else
-            {
-                rollup = makeNode(RollupData);
-
-                rollup->groupClause = preprocess_groupclause(root, gset);
-                rollup->gsets_data = list_make1(gs);
-                rollup->gsets = remap_to_groupclause_idx(rollup->groupClause,
-                                                         rollup->gsets_data,
-                                                         gd->tleref_to_colnum_map);
-                rollup->numGroups = gs->numGroups;
-                rollup->hashable = true;
-                rollup->is_hashed = true;
-                new_rollups = lappend(new_rollups, rollup);
-            }
-        }
-
-        /*
-         * If we didn't find anything nonempty to hash, then bail.  We'll
-         * generate a path from the is_sorted case.
-         */
-        if (new_rollups == NIL)
-            return;
-
-        /*
-         * If there were empty grouping sets they should have been in the
-         * first rollup.
-         */
-        Assert(!unhashed_rollup || !empty_sets);
-
-        if (unhashed_rollup)
-        {
-            new_rollups = lappend(new_rollups, unhashed_rollup);
-            strat = AGG_MIXED;
-        }
-        else if (empty_sets)
-        {
-            RollupData *rollup = makeNode(RollupData);
-
-            rollup->groupClause = NIL;
-            rollup->gsets_data = empty_sets_data;
-            rollup->gsets = empty_sets;
-            rollup->numGroups = list_length(empty_sets);
-            rollup->hashable = false;
-            rollup->is_hashed = false;
-            new_rollups = lappend(new_rollups, rollup);
-            strat = AGG_MIXED;
-        }
-
-        /*
-         * If the grouping can't be fully pushed down, redistribute the
-         * path on top of the (sorted) path. If if can be pushed down,
-         * disable construction of complex distributed paths.
-         */
-        if (! can_push_down_grouping(root, parse, path))
-            path = create_remotesubplan_path(root, path, NULL);
-
-        add_path(grouped_rel, (Path *)
-                 create_groupingsets_path(root,
-                                          grouped_rel,
-                                          path,
-                                          target,
-                                          (List *) parse->havingQual,
-                                          strat,
-                                          new_rollups,
-                                          agg_costs,
-                                          dNumGroups));
-        return;
-    }
-
-    /*
-     * If we have sorted input but nothing we can do with it, bail.
-     */
-    if (list_length(gd->rollups) == 0)
-        return;
-
-    /*
-     * Given sorted input, we try and make two paths: one sorted and one mixed
-     * sort/hash. (We need to try both because hashagg might be disabled, or
-     * some columns might not be sortable.)
-     *
-     * can_hash is passed in as false if some obstacle elsewhere (such as
-     * ordered aggs) means that we shouldn't consider hashing at all.
-     */
-    if (can_hash && gd->any_hashable)
-    {
-        List       *rollups = NIL;
-        List       *hash_sets = list_copy(gd->unsortable_sets);
-        double        availspace = (work_mem * 1024.0);
-        ListCell   *lc;
-
-        /*
-         * Account first for space needed for groups we can't sort at all.
-         */
-        availspace -= (double) estimate_hashagg_tablesize(path,
-                                                          agg_costs,
-                                                          gd->dNumHashGroups);
-
-        if (availspace > 0 && list_length(gd->rollups) > 1)
-        {
-            double        scale;
-            int            num_rollups = list_length(gd->rollups);
-            int            k_capacity;
-            int           *k_weights = palloc(num_rollups * sizeof(int));
-            Bitmapset  *hash_items = NULL;
-            int            i;
-
-            /*
-             * We treat this as a knapsack problem: the knapsack capacity
-             * represents work_mem, the item weights are the estimated memory
-             * usage of the hashtables needed to implement a single rollup,
-             * and we really ought to use the cost saving as the item value;
-             * however, currently the costs assigned to sort nodes don't
-             * reflect the comparison costs well, and so we treat all items as
-             * of equal value (each rollup we hash instead saves us one sort).
+	 * We can hash everything if it looks like it'll fit in work_mem. But if
+	 * the input is actually sorted despite not being advertised as such, we
+	 * prefer to make use of that in order to use less memory.
              *
-             * To use the discrete knapsack, we need to scale the values to a
-             * reasonably small bounded range.  We choose to allow a 5% error
-             * margin; we have no more than 4096 rollups in the worst possible
-             * case, which with a 5% error margin will require a bit over 42MB
-             * of workspace. (Anyone wanting to plan queries that complex had
-             * better have the memory for it.  In more reasonable cases, with
-             * no more than a couple of dozen rollups, the memory usage will
-             * be negligible.)
-             *
-             * k_capacity is naturally bounded, but we clamp the values for
-             * scale and weight (below) to avoid overflows or underflows (or
-             * uselessly trying to use a scale factor less than 1 byte).
+	 * If none of the grouping sets are sortable, then ignore the work_mem
+	 * limit and generate a path anyway, since otherwise we'll just fail.
              */
-            scale = Max(availspace / (20.0 * num_rollups), 1.0);
-            k_capacity = (int) floor(availspace / scale);
-
-            /*
-             * We leave the first rollup out of consideration since it's the
-             * one that matches the input sort order.  We assign indexes "i"
-             * to only those entries considered for hashing; the second loop,
-             * below, must use the same condition.
-             */
-            i = 0;
-            for_each_cell(lc, lnext(list_head(gd->rollups)))
-            {
-                RollupData *rollup = lfirst(lc);
-
-                if (rollup->hashable)
+	if (!is_sorted)
                 {
-                    double        sz = estimate_hashagg_tablesize(path,
-                                                                agg_costs,
-                                                                rollup->numGroups);
+		List	   *new_rollups = NIL;
+		RollupData *unhashed_rollup = NULL;
+		List	   *sets_data;
+		List	   *empty_sets_data = NIL;
+		List	   *empty_sets = NIL;
+		ListCell   *lc;
+		ListCell   *l_start = list_head(gd->rollups);
+		AggStrategy strat = AGG_HASHED;
+		Size		hashsize;
+		double		exclude_groups = 0.0;
+
+		Assert(can_hash);
+
+		if (pathkeys_contained_in(root->group_pathkeys, path->pathkeys))
+                {
+			unhashed_rollup = lfirst(l_start);
+			exclude_groups = unhashed_rollup->numGroups;
+			l_start = lnext(l_start);
+                }
+                
+		hashsize = estimate_hashagg_tablesize(path,
+											  agg_costs,
+											  dNumGroups - exclude_groups);
+
+            /*
+		 * gd->rollups is empty if we have only unsortable columns to work
+		 * with.  Override work_mem in that case; otherwise, we'll rely on the
+		 * sorted-input case to generate usable mixed paths.
+             */
+		if (hashsize > work_mem * 1024L && gd->rollups)
+			return;				/* nope, won't fit */
 
                     /*
-                     * If sz is enormous, but work_mem (and hence scale) is
-                     * small, avoid integer overflow here.
+		 * We need to burst the existing rollups list into individual grouping
+		 * sets and recompute a groupClause for each set.
                      */
-                    k_weights[i] = (int) Min(floor(sz / scale),
-                                             k_capacity + 1.0);
-                    ++i;
-                }
-            }
+		sets_data = list_copy(gd->unsortable_sets);
+
+		for_each_cell(lc, l_start)
+                    {
+			RollupData *rollup = lfirst(lc);
+
+                    /*
+			 * If we find an unhashable rollup that's not been skipped by the
+			 * "actually sorted" check above, we can't cope; we'd need sorted
+			 * input (with a different sort order) but we can't get that here.
+			 * So bail out; we'll get a valid path from the is_sorted case
+			 * instead.
+			 *
+			 * The mere presence of empty grouping sets doesn't make a rollup
+			 * unhashable (see preprocess_grouping_sets), we handle those
+			 * specially below.
+                     */
+			if (!rollup->hashable)
+				return;
+			else
+				sets_data = list_concat(sets_data, list_copy(rollup->gsets_data));
+		}
+		foreach(lc, sets_data)
+                    {
+			GroupingSetData *gs = lfirst(lc);
+			List	   *gset = gs->set;
+			RollupData *rollup;
+
+			if (gset == NIL)
+                        {
+				/* Empty grouping sets can't be hashed. */
+				empty_sets_data = lappend(empty_sets_data, gs);
+				empty_sets = lappend(empty_sets, NIL);
+                        }
+                        else
+                        {
+				rollup = makeNode(RollupData);
+
+				rollup->groupClause = preprocess_groupclause(root, gset);
+				rollup->gsets_data = list_make1(gs);
+				rollup->gsets = remap_to_groupclause_idx(rollup->groupClause,
+														 rollup->gsets_data,
+														 gd->tleref_to_colnum_map);
+				rollup->numGroups = gs->numGroups;
+				rollup->hashable = true;
+				rollup->is_hashed = true;
+				new_rollups = lappend(new_rollups, rollup);
+                        }
+                    }
+
+                    /*
+		 * If we didn't find anything nonempty to hash, then bail.  We'll
+		 * generate a path from the is_sorted case.
+                     */
+		if (new_rollups == NIL)
+			return;
+
+		/*
+		 * If there were empty grouping sets they should have been in the
+		 * first rollup.
+		 */
+		Assert(!unhashed_rollup || !empty_sets);
+
+		if (unhashed_rollup)
+                    {
+			new_rollups = lappend(new_rollups, unhashed_rollup);
+			strat = AGG_MIXED;
+		}
+		else if (empty_sets)
+                        {
+			RollupData *rollup = makeNode(RollupData);
+
+			rollup->groupClause = NIL;
+			rollup->gsets_data = empty_sets_data;
+			rollup->gsets = empty_sets;
+			rollup->numGroups = list_length(empty_sets);
+			rollup->hashable = false;
+			rollup->is_hashed = false;
+			new_rollups = lappend(new_rollups, rollup);
+			strat = AGG_MIXED;
+                    }
+
+		/*
+		 * If the grouping can't be fully pushed down, redistribute the
+		 * path on top of the (sorted) path. If if can be pushed down,
+		 * disable construction of complex distributed paths.
+		 */
+		if (! can_push_down_grouping(root, parse, path))
+			path = create_remotesubplan_path(root, path, NULL);
+
+		add_path(grouped_rel, (Path *)
+				 create_groupingsets_path(root,
+                                                 grouped_rel,
+										  path,
+                                                 target,
+                                                 (List *) parse->havingQual,
+										  strat,
+										  new_rollups,
+										  agg_costs,
+										  dNumGroups));
+		return;
+                        }
+                        
+	/*
+	 * If we have sorted input but nothing we can do with it, bail.
+	 */
+	if (list_length(gd->rollups) == 0)
+		return;
+
+	/*
+	 * Given sorted input, we try and make two paths: one sorted and one mixed
+	 * sort/hash. (We need to try both because hashagg might be disabled, or
+	 * some columns might not be sortable.)
+	 *
+	 * can_hash is passed in as false if some obstacle elsewhere (such as
+	 * ordered aggs) means that we shouldn't consider hashing at all.
+	 */
+	if (can_hash && gd->any_hashable)
+                    {
+		List	   *rollups = NIL;
+		List	   *hash_sets = list_copy(gd->unsortable_sets);
+		double		availspace = (work_mem * 1024.0);
+		ListCell   *lc;
+
+		/*
+		 * Account first for space needed for groups we can't sort at all.
+		 */
+		availspace -= (double) estimate_hashagg_tablesize(path,
+														  agg_costs,
+														  gd->dNumHashGroups);
+
+		if (availspace > 0 && list_length(gd->rollups) > 1)
+                        {
+			double		scale;
+			int			num_rollups = list_length(gd->rollups);
+			int			k_capacity;
+			int		   *k_weights = palloc(num_rollups * sizeof(int));
+			Bitmapset  *hash_items = NULL;
+			int			i;
+                        
+			/*
+			 * We treat this as a knapsack problem: the knapsack capacity
+			 * represents work_mem, the item weights are the estimated memory
+			 * usage of the hashtables needed to implement a single rollup,
+			 * and we really ought to use the cost saving as the item value;
+			 * however, currently the costs assigned to sort nodes don't
+			 * reflect the comparison costs well, and so we treat all items as
+			 * of equal value (each rollup we hash instead saves us one sort).
+			 *
+			 * To use the discrete knapsack, we need to scale the values to a
+			 * reasonably small bounded range.  We choose to allow a 5% error
+			 * margin; we have no more than 4096 rollups in the worst possible
+			 * case, which with a 5% error margin will require a bit over 42MB
+			 * of workspace. (Anyone wanting to plan queries that complex had
+			 * better have the memory for it.  In more reasonable cases, with
+			 * no more than a couple of dozen rollups, the memory usage will
+			 * be negligible.)
+			 *
+			 * k_capacity is naturally bounded, but we clamp the values for
+			 * scale and weight (below) to avoid overflows or underflows (or
+			 * uselessly trying to use a scale factor less than 1 byte).
+			 */
+			scale = Max(availspace / (20.0 * num_rollups), 1.0);
+			k_capacity = (int) floor(availspace / scale);
 
             /*
-             * Apply knapsack algorithm; compute the set of items which
-             * maximizes the value stored (in this case the number of sorts
-             * saved) while keeping the total size (approximately) within
-             * capacity.
+			 * We leave the first rollup out of consideration since it's the
+			 * one that matches the input sort order.  We assign indexes "i"
+			 * to only those entries considered for hashing; the second loop,
+			 * below, must use the same condition.
              */
-            if (i > 0)
-                hash_items = DiscreteKnapsack(k_capacity, i, k_weights, NULL);
-
-            if (!bms_is_empty(hash_items))
+			i = 0;
+			for_each_cell(lc, lnext(list_head(gd->rollups)))
             {
-                rollups = list_make1(linitial(gd->rollups));
+				RollupData *rollup = lfirst(lc);
 
-                i = 0;
-                for_each_cell(lc, lnext(list_head(gd->rollups)))
+				if (rollup->hashable)
+				{
+					double		sz = estimate_hashagg_tablesize(path,
+                                                          agg_costs,
+																rollup->numGroups);
+
+                    /*
+					 * If sz is enormous, but work_mem (and hence scale) is
+					 * small, avoid integer overflow here.
+                    */
+					k_weights[i] = (int) Min(floor(sz / scale),
+											 k_capacity + 1.0);
+					++i;
+				}
+			}
+
+                /*
+			 * Apply knapsack algorithm; compute the set of items which
+			 * maximizes the value stored (in this case the number of sorts
+			 * saved) while keeping the total size (approximately) within
+			 * capacity.
+                 */
+			if (i > 0)
+				hash_items = DiscreteKnapsack(k_capacity, i, k_weights, NULL);
+
+			if (!bms_is_empty(hash_items))
+            {
+				rollups = list_make1(linitial(gd->rollups));
+
+				i = 0;
+				for_each_cell(lc, lnext(list_head(gd->rollups)))
                 {
-                    RollupData *rollup = lfirst(lc);
+					RollupData *rollup = lfirst(lc);
 
-                    if (rollup->hashable)
-                    {
-                        if (bms_is_member(i, hash_items))
-                            hash_sets = list_concat(hash_sets,
-                                                    list_copy(rollup->gsets_data));
+					if (rollup->hashable)
+					{
+						if (bms_is_member(i, hash_items))
+							hash_sets = list_concat(hash_sets,
+													list_copy(rollup->gsets_data));
                         else
-                            rollups = lappend(rollups, rollup);
-                        ++i;
+							rollups = lappend(rollups, rollup);
+						++i;
                     }
                     else
-                        rollups = lappend(rollups, rollup);
+						rollups = lappend(rollups, rollup);
+				}
+			}
+		}
+
+		if (!rollups && hash_sets)
+			rollups = list_copy(gd->rollups);
+
+		foreach(lc, hash_sets)
+		{
+			GroupingSetData *gs = lfirst(lc);
+			RollupData *rollup = makeNode(RollupData);
+				
+			Assert(gs->set != NIL);
+                        
+			rollup->groupClause = preprocess_groupclause(root, gs->set);
+			rollup->gsets_data = list_make1(gs);
+			rollup->gsets = remap_to_groupclause_idx(rollup->groupClause,
+													 rollup->gsets_data,
+													 gd->tleref_to_colnum_map);
+			rollup->numGroups = gs->numGroups;
+			rollup->hashable = true;
+			rollup->is_hashed = true;
+			rollups = lcons(rollup, rollups);
+		}
+
+		if (rollups)
+						{
+			/*
+			 * If the grouping can't be fully pushed down, redistribute the
+			 * path on top of the (sorted) path. If if can be pushed down,
+			 * disable construction of complex distributed paths.
+			 */
+			if (! can_push_down_grouping(root, parse, path))
+				path = create_remotesubplan_path(root, path, NULL);
+
+			add_path(grouped_rel, (Path *)
+					 create_groupingsets_path(root,
+											  grouped_rel,
+											  path,
+											  target,
+											  (List *) parse->havingQual,
+											  AGG_MIXED,
+											  rollups,
+											  agg_costs,
+											  dNumGroups));
+                    }
                 }
-            }
-        }
 
-        if (!rollups && hash_sets)
-            rollups = list_copy(gd->rollups);
-
-        foreach(lc, hash_sets)
-        {
-            GroupingSetData *gs = lfirst(lc);
-            RollupData *rollup = makeNode(RollupData);
-
-            Assert(gs->set != NIL);
-
-            rollup->groupClause = preprocess_groupclause(root, gs->set);
-            rollup->gsets_data = list_make1(gs);
-            rollup->gsets = remap_to_groupclause_idx(rollup->groupClause,
-                                                     rollup->gsets_data,
-                                                     gd->tleref_to_colnum_map);
-            rollup->numGroups = gs->numGroups;
-            rollup->hashable = true;
-            rollup->is_hashed = true;
-            rollups = lcons(rollup, rollups);
-        }
-
-        if (rollups)
-        {
-            /*
-             * If the grouping can't be fully pushed down, redistribute the
-             * path on top of the (sorted) path. If if can be pushed down,
-             * disable construction of complex distributed paths.
-             */
-            if (! can_push_down_grouping(root, parse, path))
-                path = create_remotesubplan_path(root, path, NULL);
-
-            add_path(grouped_rel, (Path *)
-                     create_groupingsets_path(root,
-                                              grouped_rel,
-                                              path,
-                                              target,
-                                              (List *) parse->havingQual,
-                                              AGG_MIXED,
-                                              rollups,
-                                              agg_costs,
-                                              dNumGroups));
-        }
-    }
-
-    /*
-     * Now try the simple sorted case.
-     */
-    if (!gd->unsortable_sets)
-    {
-        /*
-         * If the grouping can't be fully pushed down, redistribute the
-         * path on top of the (sorted) path. If if can be pushed down,
-         * disable construction of complex distributed paths.
-         */
-        if (! can_push_down_grouping(root, parse, path))
-            path = create_remotesubplan_path(root, path, NULL);
-
-        add_path(grouped_rel, (Path *)
-                 create_groupingsets_path(root,
-                                          grouped_rel,
-                                          path,
-                                          target,
-                                          (List *) parse->havingQual,
-                                          AGG_SORTED,
-                                          gd->rollups,
-                                          agg_costs,
-                                          dNumGroups));
-    }
-}
+                /*
+	 * Now try the simple sorted case.
+                 */
+	if (!gd->unsortable_sets)
+                {
+		/*
+		 * If the grouping can't be fully pushed down, redistribute the
+		 * path on top of the (sorted) path. If if can be pushed down,
+		 * disable construction of complex distributed paths.
+		 */
+		if (! can_push_down_grouping(root, parse, path))
+			path = create_remotesubplan_path(root, path, NULL);
+											
+		add_path(grouped_rel, (Path *)
+				 create_groupingsets_path(root,
+                                                 grouped_rel,
+                                                 path,
+                                                 target,
+                                                 (List *) parse->havingQual,
+										  AGG_SORTED,
+										  gd->rollups,
+										  agg_costs,
+										  dNumGroups));
+					}
+                }
 
 /*
  * create_window_paths
@@ -6168,79 +5013,79 @@ consider_groupingsets_paths(PlannerInfo *root,
  */
 static RelOptInfo *
 create_window_paths(PlannerInfo *root,
-                    RelOptInfo *input_rel,
-                    PathTarget *input_target,
-                    PathTarget *output_target,
-                    List *tlist,
-                    WindowFuncLists *wflists,
-                    List *activeWindows)
-{// #lizard forgives
-    RelOptInfo *window_rel;
-    ListCell   *lc;
+					RelOptInfo *input_rel,
+					PathTarget *input_target,
+					PathTarget *output_target,
+					List *tlist,
+					WindowFuncLists *wflists,
+					List *activeWindows)
+                    {
+	RelOptInfo *window_rel;
+	ListCell   *lc;
+                    
+	/* For now, do all work in the (WINDOW, NULL) upperrel */
+	window_rel = fetch_upper_rel(root, UPPERREL_WINDOW, NULL);
 
-    /* For now, do all work in the (WINDOW, NULL) upperrel */
-    window_rel = fetch_upper_rel(root, UPPERREL_WINDOW, NULL);
+	/*
+	 * If the input relation is not parallel-safe, then the window relation
+	 * can't be parallel-safe, either.  Otherwise, we need to examine the
+	 * target list and active windows for non-parallel-safe constructs.
+	 */
+	if (input_rel->consider_parallel &&
+		is_parallel_safe(root, (Node *) output_target->exprs) &&
+		is_parallel_safe(root, (Node *) activeWindows))
+		window_rel->consider_parallel = true;
 
-    /*
-     * If the input relation is not parallel-safe, then the window relation
-     * can't be parallel-safe, either.  Otherwise, we need to examine the
-     * target list and active windows for non-parallel-safe constructs.
-     */
-    if (input_rel->consider_parallel &&
-        is_parallel_safe(root, (Node *) output_target->exprs) &&
-        is_parallel_safe(root, (Node *) activeWindows))
-        window_rel->consider_parallel = true;
+	/*
+	 * If the input rel belongs to a single FDW, so does the window rel.
+	 */
+	window_rel->serverid = input_rel->serverid;
+	window_rel->userid = input_rel->userid;
+	window_rel->useridiscurrent = input_rel->useridiscurrent;
+	window_rel->fdwroutine = input_rel->fdwroutine;
 
-    /*
-     * If the input rel belongs to a single FDW, so does the window rel.
-     */
-    window_rel->serverid = input_rel->serverid;
-    window_rel->userid = input_rel->userid;
-    window_rel->useridiscurrent = input_rel->useridiscurrent;
-    window_rel->fdwroutine = input_rel->fdwroutine;
+	/*
+	 * Consider computing window functions starting from the existing
+	 * cheapest-total path (which will likely require a sort) as well as any
+	 * existing paths that satisfy root->window_pathkeys (which won't).
+	 */
+	foreach(lc, input_rel->pathlist)
+					{
+		Path	   *path = (Path *) lfirst(lc);
 
-    /*
-     * Consider computing window functions starting from the existing
-     * cheapest-total path (which will likely require a sort) as well as any
-     * existing paths that satisfy root->window_pathkeys (which won't).
-     */
-    foreach(lc, input_rel->pathlist)
-    {
-        Path       *path = (Path *) lfirst(lc);
+		if (path == input_rel->cheapest_total_path ||
+			pathkeys_contained_in(root->window_pathkeys, path->pathkeys))
+			create_one_window_path(root,
+								   window_rel,
+                                         path,
+								   input_target,
+								   output_target,
+								   tlist,
+								   wflists,
+								   activeWindows);
+            }
 
-        if (path == input_rel->cheapest_total_path ||
-            pathkeys_contained_in(root->window_pathkeys, path->pathkeys))
-            create_one_window_path(root,
-                                   window_rel,
-                                   path,
-                                   input_target,
-                                   output_target,
-                                   tlist,
-                                   wflists,
-                                   activeWindows);
-    }
+	/*
+	 * If there is an FDW that's responsible for all baserels of the query,
+	 * let it consider adding ForeignPaths.
+	 */
+	if (window_rel->fdwroutine &&
+		window_rel->fdwroutine->GetForeignUpperPaths)
+		window_rel->fdwroutine->GetForeignUpperPaths(root, UPPERREL_WINDOW,
+													 input_rel, window_rel);
 
-    /*
-     * If there is an FDW that's responsible for all baserels of the query,
-     * let it consider adding ForeignPaths.
-     */
-    if (window_rel->fdwroutine &&
-        window_rel->fdwroutine->GetForeignUpperPaths)
-        window_rel->fdwroutine->GetForeignUpperPaths(root, UPPERREL_WINDOW,
-                                                     input_rel, window_rel);
+	/* Let extensions possibly add some more paths */
+	if (create_upper_paths_hook)
+		(*create_upper_paths_hook) (root, UPPERREL_WINDOW,
+									input_rel, window_rel);
 
-    /* Let extensions possibly add some more paths */
-    if (create_upper_paths_hook)
-        (*create_upper_paths_hook) (root, UPPERREL_WINDOW,
-                                    input_rel, window_rel);
+	/* Now choose the best path(s) */
+	set_cheapest(window_rel);
 
-    /* Now choose the best path(s) */
-    set_cheapest(window_rel);
+	return window_rel;
+        }
 
-    return window_rel;
-}
-
-/*
+        /*
  * Stack window-function implementation steps atop the given Path, and
  * add the result to window_rel.
  *
@@ -6251,324 +5096,324 @@ create_window_paths(PlannerInfo *root,
  * tlist: query's target list (needed to look up pathkeys)
  * wflists: result of find_window_functions
  * activeWindows: result of select_active_windows
- */
+         */
 static void
 create_one_window_path(PlannerInfo *root,
-                       RelOptInfo *window_rel,
-                       Path *path,
-                       PathTarget *input_target,
-                       PathTarget *output_target,
-                       List *tlist,
-                       WindowFuncLists *wflists,
-                       List *activeWindows)
-{
-    PathTarget *window_target;
-    ListCell   *l;
-
-    /*
-     * Since each window clause could require a different sort order, we stack
-     * up a WindowAgg node for each clause, with sort steps between them as
-     * needed.  (We assume that select_active_windows chose a good order for
-     * executing the clauses in.)
-     *
-     * input_target should contain all Vars and Aggs needed for the result.
-     * (In some cases we wouldn't need to propagate all of these all the way
-     * to the top, since they might only be needed as inputs to WindowFuncs.
-     * It's probably not worth trying to optimize that though.)  It must also
-     * contain all window partitioning and sorting expressions, to ensure
-     * they're computed only once at the bottom of the stack (that's critical
-     * for volatile functions).  As we climb up the stack, we'll add outputs
-     * for the WindowFuncs computed at each level.
-     */
-    window_target = input_target;
-
-    foreach(l, activeWindows)
-    {
-        WindowClause *wc = (WindowClause *) lfirst(l);
-        List       *window_pathkeys;
-
-        window_pathkeys = make_pathkeys_for_window(root,
-                                                   wc,
-                                                   tlist);
-
-        /* Sort if necessary */
-        if (!pathkeys_contained_in(window_pathkeys, path->pathkeys))
+					   RelOptInfo *window_rel,
+					   Path *path,
+					   PathTarget *input_target,
+					   PathTarget *output_target,
+					   List *tlist,
+					   WindowFuncLists *wflists,
+					   List *activeWindows)
         {
-            path = (Path *) create_sort_path(root, window_rel,
-                                             path,
-                                             window_pathkeys,
-                                             -1.0);
-        }
+	PathTarget *window_target;
+	ListCell   *l;
 
-        if (lnext(l))
-        {
-            /*
-             * Add the current WindowFuncs to the output target for this
-             * intermediate WindowAggPath.  We must copy window_target to
-             * avoid changing the previous path's target.
-             *
-             * Note: a WindowFunc adds nothing to the target's eval costs; but
-             * we do need to account for the increase in tlist width.
-             */
-            ListCell   *lc2;
+	/*
+	 * Since each window clause could require a different sort order, we stack
+	 * up a WindowAgg node for each clause, with sort steps between them as
+	 * needed.  (We assume that select_active_windows chose a good order for
+	 * executing the clauses in.)
+	 *
+	 * input_target should contain all Vars and Aggs needed for the result.
+	 * (In some cases we wouldn't need to propagate all of these all the way
+	 * to the top, since they might only be needed as inputs to WindowFuncs.
+	 * It's probably not worth trying to optimize that though.)  It must also
+	 * contain all window partitioning and sorting expressions, to ensure
+	 * they're computed only once at the bottom of the stack (that's critical
+	 * for volatile functions).  As we climb up the stack, we'll add outputs
+	 * for the WindowFuncs computed at each level.
+	 */
+	window_target = input_target;
 
-            window_target = copy_pathtarget(window_target);
-            foreach(lc2, wflists->windowFuncs[wc->winref])
+	foreach(l, activeWindows)
             {
-                WindowFunc *wfunc = lfirst_node(WindowFunc, lc2);
+		WindowClause *wc = (WindowClause *) lfirst(l);
+		List	   *window_pathkeys;
 
-                add_column_to_pathtarget(window_target, (Expr *) wfunc, 0);
-                window_target->width += get_typavgwidth(wfunc->wintype, -1);
-            }
-        }
-        else
-        {
-            /* Install the goal target in the topmost WindowAgg */
-            window_target = output_target;
-        }
+		window_pathkeys = make_pathkeys_for_window(root,
+												   wc,
+												   tlist);
 
-        /* We can't really push down window functions for now. */
-        if (!can_push_down_window(root, path))
-            path = create_remotesubplan_path(root, path, NULL);
+		/* Sort if necessary */
+		if (!pathkeys_contained_in(window_pathkeys, path->pathkeys))
+                {
+			path = (Path *) create_sort_path(root, window_rel,
+                                                   path,
+											 window_pathkeys,
+											 -1.0);
+		}
 
-        path = (Path *)
-            create_windowagg_path(root, window_rel, path, window_target,
-                                  wflists->windowFuncs[wc->winref],
-                                  wc,
-                                  window_pathkeys);
+		if (lnext(l))
+		{
+                /*
+			 * Add the current WindowFuncs to the output target for this
+			 * intermediate WindowAggPath.  We must copy window_target to
+			 * avoid changing the previous path's target.
+                *
+			 * Note: a WindowFunc adds nothing to the target's eval costs; but
+			 * we do need to account for the increase in tlist width.
+                */
+			ListCell   *lc2;
+
+			window_target = copy_pathtarget(window_target);
+			foreach(lc2, wflists->windowFuncs[wc->winref])
+					{
+				WindowFunc *wfunc = lfirst_node(WindowFunc, lc2);
+
+				add_column_to_pathtarget(window_target, (Expr *) wfunc, 0);
+				window_target->width += get_typavgwidth(wfunc->wintype, -1);
+					}
+                }
+                else
+                {
+			/* Install the goal target in the topmost WindowAgg */
+			window_target = output_target;
+                }
+
+		/* We can't really push down window functions for now. */
+		if (!can_push_down_window(root, path))
+			path = create_remotesubplan_path(root, path, NULL);
+
+		path = (Path *)
+			create_windowagg_path(root, window_rel, path, window_target,
+								  wflists->windowFuncs[wc->winref],
+								  wc,
+								  window_pathkeys);
     }
 
-    add_path(window_rel, path);
+	add_path(window_rel, path);
 }
 
-/*
+    /*
  * create_distinct_paths
- *
+     *
  * Build a new upperrel containing Paths for SELECT DISTINCT evaluation.
- *
+     *
  * input_rel: contains the source-data Paths
- *
+     *
  * Note: input paths should already compute the desired pathtarget, since
  * Sort/Unique won't project anything.
- */
+     */
 static RelOptInfo *
 create_distinct_paths(PlannerInfo *root,
-                      RelOptInfo *input_rel)
-{// #lizard forgives
-    Query       *parse = root->parse;
-    Path       *cheapest_input_path = input_rel->cheapest_total_path;
-    RelOptInfo *distinct_rel;
-    double        numDistinctRows;
-    bool        allow_hash;
-    Path       *path;
-    ListCell   *lc;
-
-    /* For now, do all work in the (DISTINCT, NULL) upperrel */
-    distinct_rel = fetch_upper_rel(root, UPPERREL_DISTINCT, NULL);
-
-    /*
-     * We don't compute anything at this level, so distinct_rel will be
-     * parallel-safe if the input rel is parallel-safe.  In particular, if
-     * there is a DISTINCT ON (...) clause, any path for the input_rel will
-     * output those expressions, and will not be parallel-safe unless those
-     * expressions are parallel-safe.
-     */
-    distinct_rel->consider_parallel = input_rel->consider_parallel;
-
-    /*
-     * If the input rel belongs to a single FDW, so does the distinct_rel.
-     */
-    distinct_rel->serverid = input_rel->serverid;
-    distinct_rel->userid = input_rel->userid;
-    distinct_rel->useridiscurrent = input_rel->useridiscurrent;
-    distinct_rel->fdwroutine = input_rel->fdwroutine;
-
-    /* Estimate number of distinct rows there will be */
-    if (parse->groupClause || parse->groupingSets || parse->hasAggs ||
-        root->hasHavingQual)
+					  RelOptInfo *input_rel)
     {
+	Query	   *parse = root->parse;
+	Path	   *cheapest_input_path = input_rel->cheapest_total_path;
+	RelOptInfo *distinct_rel;
+	double		numDistinctRows;
+	bool		allow_hash;
+	Path	   *path;
+	ListCell   *lc;
+
+	/* For now, do all work in the (DISTINCT, NULL) upperrel */
+	distinct_rel = fetch_upper_rel(root, UPPERREL_DISTINCT, NULL);
+
         /*
-         * If there was grouping or aggregation, use the number of input rows
-         * as the estimated number of DISTINCT rows (ie, assume the input is
-         * already mostly unique).
+	 * We don't compute anything at this level, so distinct_rel will be
+	 * parallel-safe if the input rel is parallel-safe.  In particular, if
+	 * there is a DISTINCT ON (...) clause, any path for the input_rel will
+	 * output those expressions, and will not be parallel-safe unless those
+	 * expressions are parallel-safe.
          */
-        numDistinctRows = cheapest_input_path->rows;
-    }
-    else
-    {
-        /*
-         * Otherwise, the UNIQUE filter has effects comparable to GROUP BY.
-         */
-        List       *distinctExprs;
+	distinct_rel->consider_parallel = input_rel->consider_parallel;
 
-        distinctExprs = get_sortgrouplist_exprs(parse->distinctClause,
-                                                parse->targetList);
-        numDistinctRows = estimate_num_groups(root, distinctExprs,
-                                              cheapest_input_path->rows,
-                                              NULL);
-    }
+	/*
+	 * If the input rel belongs to a single FDW, so does the distinct_rel.
+	 */
+	distinct_rel->serverid = input_rel->serverid;
+	distinct_rel->userid = input_rel->userid;
+	distinct_rel->useridiscurrent = input_rel->useridiscurrent;
+	distinct_rel->fdwroutine = input_rel->fdwroutine;
 
-    /*
-     * Consider sort-based implementations of DISTINCT, if possible.
-     */
-    if (grouping_is_sortable(parse->distinctClause))
-    {
-        /*
-         * First, if we have any adequately-presorted paths, just stick a
-         * Unique node on those.  Then consider doing an explicit sort of the
-         * cheapest input path and Unique'ing that.
-         *
-         * When we have DISTINCT ON, we must sort by the more rigorous of
-         * DISTINCT and ORDER BY, else it won't have the desired behavior.
-         * Also, if we do have to do an explicit sort, we might as well use
-         * the more rigorous ordering to avoid a second sort later.  (Note
-         * that the parser will have ensured that one clause is a prefix of
-         * the other.)
-         */
-        List       *needed_pathkeys;
-
-        if (parse->hasDistinctOn &&
-            list_length(root->distinct_pathkeys) <
-            list_length(root->sort_pathkeys))
-            needed_pathkeys = root->sort_pathkeys;
-        else
-            needed_pathkeys = root->distinct_pathkeys;
-
-        foreach(lc, input_rel->pathlist)
+	/* Estimate number of distinct rows there will be */
+	if (parse->groupClause || parse->groupingSets || parse->hasAggs ||
+		root->hasHavingQual)
         {
-            Path       *path = (Path *) lfirst(lc);
-
-            if (pathkeys_contained_in(needed_pathkeys, path->pathkeys))
+            /*
+		 * If there was grouping or aggregation, use the number of input rows
+		 * as the estimated number of DISTINCT rows (ie, assume the input is
+		 * already mostly unique).
+             */
+		numDistinctRows = cheapest_input_path->rows;
+	}
+	else
             {
+		/*
+		 * Otherwise, the UNIQUE filter has effects comparable to GROUP BY.
+		 */
+		List	   *distinctExprs;
+
+		distinctExprs = get_sortgrouplist_exprs(parse->distinctClause,
+												parse->targetList);
+		numDistinctRows = estimate_num_groups(root, distinctExprs,
+											  cheapest_input_path->rows,
+											  NULL);
+	}
+
                 /*
-                 * Make sure the distribution matches the distinct clause,
-                 * needed by the UNIQUE path.
-                 *
-                 * FIXME This could probably benefit from pushing a UNIQUE
-                 * to the remote side, and only doing a merge locally.
+	 * Consider sort-based implementations of DISTINCT, if possible.
                  */
-                if (!grouping_distribution_match(root, parse, path, parse->distinctClause))
-                    path = create_remotesubplan_path(root, path, NULL);
+	if (grouping_is_sortable(parse->distinctClause))
+                {
+                    /*
+		 * First, if we have any adequately-presorted paths, just stick a
+		 * Unique node on those.  Then consider doing an explicit sort of the
+		 * cheapest input path and Unique'ing that.
+                     *
+		 * When we have DISTINCT ON, we must sort by the more rigorous of
+		 * DISTINCT and ORDER BY, else it won't have the desired behavior.
+		 * Also, if we do have to do an explicit sort, we might as well use
+		 * the more rigorous ordering to avoid a second sort later.  (Note
+		 * that the parser will have ensured that one clause is a prefix of
+		 * the other.)
+                     */
+		List	   *needed_pathkeys;
 
-                add_path(distinct_rel, (Path *)
-                         create_upper_unique_path(root, distinct_rel,
-                                                  path,
-                                                  list_length(root->distinct_pathkeys),
-                                                  numDistinctRows));
-            }
-        }
+		if (parse->hasDistinctOn &&
+			list_length(root->distinct_pathkeys) <
+			list_length(root->sort_pathkeys))
+			needed_pathkeys = root->sort_pathkeys;
+		else
+			needed_pathkeys = root->distinct_pathkeys;
 
-        /* For explicit-sort case, always use the more rigorous clause */
-        if (list_length(root->distinct_pathkeys) <
-            list_length(root->sort_pathkeys))
-        {
-            needed_pathkeys = root->sort_pathkeys;
-            /* Assert checks that parser didn't mess up... */
-            Assert(pathkeys_contained_in(root->distinct_pathkeys,
-                                         needed_pathkeys));
-        }
-        else
-            needed_pathkeys = root->distinct_pathkeys;
+		foreach(lc, input_rel->pathlist)
+                    {
+			Path	   *path = (Path *) lfirst(lc);
 
-        path = cheapest_input_path;
-        if (!pathkeys_contained_in(needed_pathkeys, path->pathkeys))
-            path = (Path *) create_sort_path(root, distinct_rel,
-                                             path,
-                                             needed_pathkeys,
-                                             -1.0);
+			if (pathkeys_contained_in(needed_pathkeys, path->pathkeys))
+                    {
+                        /*
+				 * Make sure the distribution matches the distinct clause,
+				 * needed by the UNIQUE path.
+				 *
+				 * FIXME This could probably benefit from pushing a UNIQUE
+				 * to the remote side, and only doing a merge locally.
+                         */
+				if (!grouping_distribution_match(root, parse, path, parse->distinctClause))
+					path = create_remotesubplan_path(root, path, NULL);
 
-        /* In case of grouping / distribution mismatch, inject remote scan. */
-        if (!grouping_distribution_match(root, parse, path, parse->distinctClause))
-            path = create_remotesubplan_path(root, path, NULL);
+				add_path(distinct_rel, (Path *)
+						 create_upper_unique_path(root, distinct_rel,
+                                                        path,
+												  list_length(root->distinct_pathkeys),
+												  numDistinctRows));
+			}
+		}
 
-        add_path(distinct_rel, (Path *)
-                 create_upper_unique_path(root, distinct_rel,
-                                          path,
-                                          list_length(root->distinct_pathkeys),
-                                          numDistinctRows));
-    }
+		/* For explicit-sort case, always use the more rigorous clause */
+		if (list_length(root->distinct_pathkeys) <
+			list_length(root->sort_pathkeys))
+                        {
+			needed_pathkeys = root->sort_pathkeys;
+			/* Assert checks that parser didn't mess up... */
+			Assert(pathkeys_contained_in(root->distinct_pathkeys,
+										 needed_pathkeys));
+                        }
+                        else
+			needed_pathkeys = root->distinct_pathkeys;
 
-    /*
-     * Consider hash-based implementations of DISTINCT, if possible.
-     *
-     * If we were not able to make any other types of path, we *must* hash or
-     * die trying.  If we do have other choices, there are several things that
-     * should prevent selection of hashing: if the query uses DISTINCT ON
-     * (because it won't really have the expected behavior if we hash), or if
-     * enable_hashagg is off, or if it looks like the hashtable will exceed
-     * work_mem.
-     *
-     * Note: grouping_is_hashable() is much more expensive to check than the
-     * other gating conditions, so we want to do it last.
-     */
-    if (distinct_rel->pathlist == NIL)
-        allow_hash = true;        /* we have no alternatives */
-    else if (parse->hasDistinctOn || !enable_hashagg)
-        allow_hash = false;        /* policy-based decision not to hash */
-    else
-    {
-        Size        hashentrysize;
+		path = cheapest_input_path;
+		if (!pathkeys_contained_in(needed_pathkeys, path->pathkeys))
+			path = (Path *) create_sort_path(root, distinct_rel,
+                                                             path,
+											 needed_pathkeys,
+                                                             -1.0);
 
-        /* Estimate per-hash-entry space at tuple width... */
-        hashentrysize = MAXALIGN(cheapest_input_path->pathtarget->width) +
-            MAXALIGN(SizeofMinimalTupleHeader);
-        /* plus the per-hash-entry overhead */
-        hashentrysize += hash_agg_entry_size(0);
+		/* In case of grouping / distribution mismatch, inject remote scan. */
+		if (!grouping_distribution_match(root, parse, path, parse->distinctClause))
+			path = create_remotesubplan_path(root, path, NULL);
 
-        /* Allow hashing only if hashtable is predicted to fit in work_mem */
-        allow_hash = (hashentrysize * numDistinctRows <= work_mem * 1024L);
-    }
+		add_path(distinct_rel, (Path *)
+				 create_upper_unique_path(root, distinct_rel,
+										  path,
+										  list_length(root->distinct_pathkeys),
+										  numDistinctRows));
+                        }
 
-    if (allow_hash && grouping_is_hashable(parse->distinctClause))
-    {
-        Path *input_path = cheapest_input_path;
+                        /*
+	 * Consider hash-based implementations of DISTINCT, if possible.
+	 *
+	 * If we were not able to make any other types of path, we *must* hash or
+	 * die trying.  If we do have other choices, there are several things that
+	 * should prevent selection of hashing: if the query uses DISTINCT ON
+	 * (because it won't really have the expected behavior if we hash), or if
+	 * enable_hashagg is off, or if it looks like the hashtable will exceed
+	 * work_mem.
+	 *
+	 * Note: grouping_is_hashable() is much more expensive to check than the
+	 * other gating conditions, so we want to do it last.
+                         */
+	if (distinct_rel->pathlist == NIL)
+		allow_hash = true;		/* we have no alternatives */
+	else if (parse->hasDistinctOn || !enable_hashagg)
+		allow_hash = false;		/* policy-based decision not to hash */
+	else
+                        {
+		Size		hashentrysize;
 
-        /* If needed, inject RemoteSubplan redistributing the data. */
-        if (!grouping_distribution_match(root, parse, input_path, parse->distinctClause))
-            input_path = create_remotesubplan_path(root, input_path, NULL);
+		/* Estimate per-hash-entry space at tuple width... */
+		hashentrysize = MAXALIGN(cheapest_input_path->pathtarget->width) +
+			MAXALIGN(SizeofMinimalTupleHeader);
+		/* plus the per-hash-entry overhead */
+		hashentrysize += hash_agg_entry_size(0);
+                            
+		/* Allow hashing only if hashtable is predicted to fit in work_mem */
+		allow_hash = (hashentrysize * numDistinctRows <= work_mem * 1024L);
+                        }
 
-        /* XXX Maybe we can make this a 2-phase aggregate too? */
+	if (allow_hash && grouping_is_hashable(parse->distinctClause))
+                        {
+		Path *input_path = cheapest_input_path;
 
-        /* Generate hashed aggregate path --- no sort needed */
-        add_path(distinct_rel, (Path *)
-                 create_agg_path(root,
-                                 distinct_rel,
-                                 input_path,
-                                 input_path->pathtarget,
-                                 AGG_HASHED,
-                                 AGGSPLIT_SIMPLE,
-                                 parse->distinctClause,
-                                 NIL,
-                                 NULL,
-                                 numDistinctRows));
-    }
+		/* If needed, inject RemoteSubplan redistributing the data. */
+		if (!grouping_distribution_match(root, parse, input_path, parse->distinctClause))
+			input_path = create_remotesubplan_path(root, input_path, NULL);
 
-    /* Give a helpful error if we failed to find any implementation */
-    if (distinct_rel->pathlist == NIL)
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("could not implement DISTINCT"),
-                 errdetail("Some of the datatypes only support hashing, while others only support sorting.")));
+		/* XXX Maybe we can make this a 2-phase aggregate too? */
 
-    /*
-     * If there is an FDW that's responsible for all baserels of the query,
-     * let it consider adding ForeignPaths.
-     */
-    if (distinct_rel->fdwroutine &&
-        distinct_rel->fdwroutine->GetForeignUpperPaths)
-        distinct_rel->fdwroutine->GetForeignUpperPaths(root, UPPERREL_DISTINCT,
-                                                       input_rel, distinct_rel);
+		/* Generate hashed aggregate path --- no sort needed */
+		add_path(distinct_rel, (Path *)
+                                     create_agg_path(root,
+								 distinct_rel,
+								 input_path,
+								 input_path->pathtarget,
+                                                     AGG_HASHED,
+								 AGGSPLIT_SIMPLE,
+								 parse->distinctClause,
+								 NIL,
+								 NULL,
+								 numDistinctRows));
+	}
 
-    /* Let extensions possibly add some more paths */
-    if (create_upper_paths_hook)
-        (*create_upper_paths_hook) (root, UPPERREL_DISTINCT,
-                                    input_rel, distinct_rel);
+	/* Give a helpful error if we failed to find any implementation */
+	if (distinct_rel->pathlist == NIL)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("could not implement DISTINCT"),
+				 errdetail("Some of the datatypes only support hashing, while others only support sorting.")));
+                            
+	/*
+	 * If there is an FDW that's responsible for all baserels of the query,
+	 * let it consider adding ForeignPaths.
+	 */
+	if (distinct_rel->fdwroutine &&
+		distinct_rel->fdwroutine->GetForeignUpperPaths)
+		distinct_rel->fdwroutine->GetForeignUpperPaths(root, UPPERREL_DISTINCT,
+													   input_rel, distinct_rel);
 
-    /* Now choose the best path(s) */
-    set_cheapest(distinct_rel);
+	/* Let extensions possibly add some more paths */
+	if (create_upper_paths_hook)
+		(*create_upper_paths_hook) (root, UPPERREL_DISTINCT,
+									input_rel, distinct_rel);
 
-    return distinct_rel;
-}
+	/* Now choose the best path(s) */
+	set_cheapest(distinct_rel);
+
+	return distinct_rel;
+                    }
 
 /*
  * create_ordered_paths
@@ -6582,113 +5427,113 @@ create_distinct_paths(PlannerInfo *root,
  * input_rel: contains the source-data Paths
  * target: the output tlist the result Paths must emit
  * limit_tuples: estimated bound on the number of output tuples,
- *        or -1 if no LIMIT or couldn't estimate
+ *		or -1 if no LIMIT or couldn't estimate
  */
 static RelOptInfo *
 create_ordered_paths(PlannerInfo *root,
-                     RelOptInfo *input_rel,
-                     PathTarget *target,
-                     double limit_tuples)
-{// #lizard forgives
-    Path       *cheapest_input_path = input_rel->cheapest_total_path;
-    RelOptInfo *ordered_rel;
-    ListCell   *lc;
+					 RelOptInfo *input_rel,
+					 PathTarget *target,
+					 double limit_tuples)
+                    {
+	Path	   *cheapest_input_path = input_rel->cheapest_total_path;
+	RelOptInfo *ordered_rel;
+	ListCell   *lc;
 
-    /* For now, do all work in the (ORDERED, NULL) upperrel */
-    ordered_rel = fetch_upper_rel(root, UPPERREL_ORDERED, NULL);
+	/* For now, do all work in the (ORDERED, NULL) upperrel */
+	ordered_rel = fetch_upper_rel(root, UPPERREL_ORDERED, NULL);
 
-    /*
-     * If the input relation is not parallel-safe, then the ordered relation
-     * can't be parallel-safe, either.  Otherwise, it's parallel-safe if the
-     * target list is parallel-safe.
-     */
-    if (input_rel->consider_parallel &&
-        is_parallel_safe(root, (Node *) target->exprs))
-        ordered_rel->consider_parallel = true;
+                        /*
+	 * If the input relation is not parallel-safe, then the ordered relation
+	 * can't be parallel-safe, either.  Otherwise, it's parallel-safe if the
+	 * target list is parallel-safe.
+                         */
+	if (input_rel->consider_parallel &&
+		is_parallel_safe(root, (Node *) target->exprs))
+		ordered_rel->consider_parallel = true;
 
-    /*
-     * If the input rel belongs to a single FDW, so does the ordered_rel.
-     */
-    ordered_rel->serverid = input_rel->serverid;
-    ordered_rel->userid = input_rel->userid;
-    ordered_rel->useridiscurrent = input_rel->useridiscurrent;
-    ordered_rel->fdwroutine = input_rel->fdwroutine;
+	/*
+	 * If the input rel belongs to a single FDW, so does the ordered_rel.
+	 */
+	ordered_rel->serverid = input_rel->serverid;
+	ordered_rel->userid = input_rel->userid;
+	ordered_rel->useridiscurrent = input_rel->useridiscurrent;
+	ordered_rel->fdwroutine = input_rel->fdwroutine;
 
-    foreach(lc, input_rel->pathlist)
-    {
-        Path       *path = (Path *) lfirst(lc);
-        bool        is_sorted;
+	foreach(lc, input_rel->pathlist)
+                        {
+		Path	   *path = (Path *) lfirst(lc);
+		bool		is_sorted;
 
-        is_sorted = pathkeys_contained_in(root->sort_pathkeys,
-                                          path->pathkeys);
-        if (path == cheapest_input_path || is_sorted)
-        {
-            if (!is_sorted)
-            {
-                /* An explicit sort here can take advantage of LIMIT */
-                path = (Path *) create_sort_path(root,
-                                                 ordered_rel,
+		is_sorted = pathkeys_contained_in(root->sort_pathkeys,
+										  path->pathkeys);
+		if (path == cheapest_input_path || is_sorted)
+		{
+			if (!is_sorted)
+                        {
+				/* An explicit sort here can take advantage of LIMIT */
+                            path = (Path *) create_sort_path(root,
+												 ordered_rel,
+                                                             path,
+												 root->sort_pathkeys,
+												 limit_tuples);
+                        }
+
+			/* Add projection step if needed */
+			if (path->pathtarget != target)
+				path = apply_projection_to_path(root, ordered_rel,
+												path, target);
+                            
+			add_path(ordered_rel, path);
+                        }
+                    }
+
+            /*
+	 * generate_gather_paths() will have already generated a simple Gather
+	 * path for the best parallel path, if any, and the loop above will have
+	 * considered sorting it.  Similarly, generate_gather_paths() will also
+	 * have generated order-preserving Gather Merge plans which can be used
+	 * without sorting if they happen to match the sort_pathkeys, and the loop
+	 * above will have handled those as well.  However, there's one more
+	 * possibility: it may make sense to sort the cheapest partial path
+	 * according to the required output order and then use Gather Merge.
+             */
+	if (ordered_rel->consider_parallel && root->sort_pathkeys != NIL &&
+		input_rel->partial_pathlist != NIL)
+                    {
+		Path	   *cheapest_partial_path;
+
+		cheapest_partial_path = linitial(input_rel->partial_pathlist);
+
+                            /*
+		 * If cheapest partial path doesn't need a sort, this is redundant
+		 * with what's already been tried.
+                             */
+		if (!pathkeys_contained_in(root->sort_pathkeys,
+								   cheapest_partial_path->pathkeys))
+		{
+			Path	   *path;
+			double		total_groups;
+
+                            path = (Path *) create_sort_path(root,
+											 ordered_rel,
+											 cheapest_partial_path,
+											 root->sort_pathkeys,
+                                                             -1.0);
+
+			total_groups = cheapest_partial_path->rows *
+				cheapest_partial_path->parallel_workers;
+                        path = (Path *)
+				create_gather_merge_path(root, ordered_rel,
                                                  path,
-                                                 root->sort_pathkeys,
-                                                 limit_tuples);
-            }
+										 target, root->sort_pathkeys, NULL,
+										 &total_groups);
 
-            /* Add projection step if needed */
-            if (path->pathtarget != target)
-                path = apply_projection_to_path(root, ordered_rel,
-                                                path, target);
+			/* Add projection step if needed */
+			if (path->pathtarget != target)
+				path = apply_projection_to_path(root, ordered_rel,
+												path, target);
 
-            add_path(ordered_rel, path);
-        }
-    }
-
-    /*
-     * generate_gather_paths() will have already generated a simple Gather
-     * path for the best parallel path, if any, and the loop above will have
-     * considered sorting it.  Similarly, generate_gather_paths() will also
-     * have generated order-preserving Gather Merge plans which can be used
-     * without sorting if they happen to match the sort_pathkeys, and the loop
-     * above will have handled those as well.  However, there's one more
-     * possibility: it may make sense to sort the cheapest partial path
-     * according to the required output order and then use Gather Merge.
-     */
-    if (ordered_rel->consider_parallel && root->sort_pathkeys != NIL &&
-        input_rel->partial_pathlist != NIL)
-    {
-        Path       *cheapest_partial_path;
-
-        cheapest_partial_path = linitial(input_rel->partial_pathlist);
-
-        /*
-         * If cheapest partial path doesn't need a sort, this is redundant
-         * with what's already been tried.
-         */
-        if (!pathkeys_contained_in(root->sort_pathkeys,
-                                   cheapest_partial_path->pathkeys))
-        {
-            Path       *path;
-            double        total_groups;
-
-            path = (Path *) create_sort_path(root,
-                                             ordered_rel,
-                                             cheapest_partial_path,
-                                             root->sort_pathkeys,
-                                             -1.0);
-
-            total_groups = cheapest_partial_path->rows *
-                cheapest_partial_path->parallel_workers;
-            path = (Path *)
-                create_gather_merge_path(root, ordered_rel,
-                                         path,
-                                         target, root->sort_pathkeys, NULL,
-                                         &total_groups);
-
-            /* Add projection step if needed */
-            if (path->pathtarget != target)
-                path = apply_projection_to_path(root, ordered_rel,
-                                                path, target);
-
-            add_path(ordered_rel, path);
+			add_path(ordered_rel, path);
         }
     }
 
@@ -6696,29 +5541,29 @@ create_ordered_paths(PlannerInfo *root,
      * If there is an FDW that's responsible for all baserels of the query,
      * let it consider adding ForeignPaths.
      */
-    if (ordered_rel->fdwroutine &&
-        ordered_rel->fdwroutine->GetForeignUpperPaths)
-        ordered_rel->fdwroutine->GetForeignUpperPaths(root, UPPERREL_ORDERED,
-                                                      input_rel, ordered_rel);
+	if (ordered_rel->fdwroutine &&
+		ordered_rel->fdwroutine->GetForeignUpperPaths)
+		ordered_rel->fdwroutine->GetForeignUpperPaths(root, UPPERREL_ORDERED,
+													  input_rel, ordered_rel);
 
     /* Let extensions possibly add some more paths */
     if (create_upper_paths_hook)
-        (*create_upper_paths_hook) (root, UPPERREL_ORDERED,
-                                    input_rel, ordered_rel);
+		(*create_upper_paths_hook) (root, UPPERREL_ORDERED,
+									input_rel, ordered_rel);
 
     /*
-     * No need to bother with set_cheapest here; grouping_planner does not
-     * need us to do it.
+	 * No need to bother with set_cheapest here; grouping_planner does not
+	 * need us to do it.
      */
-    Assert(ordered_rel->pathlist != NIL);
+	Assert(ordered_rel->pathlist != NIL);
 
-    return ordered_rel;
+	return ordered_rel;
 }
 
 
 /*
  * make_group_input_target
- *      Generate appropriate PathTarget for initial input to grouping nodes.
+ *	  Generate appropriate PathTarget for initial input to grouping nodes.
  *
  * If there is grouping or aggregation, the scan/join subplan cannot emit
  * the query's final targetlist; for example, it certainly can't emit any
@@ -6732,9 +5577,9 @@ create_ordered_paths(PlannerInfo *root,
  * except GROUP BY items into their component variables; other expressions
  * will be computed by the upper plan nodes rather than by the subplan.
  * For example, given a query like
- *        SELECT a+b,SUM(c+d) FROM table GROUP BY a+b;
+ *		SELECT a+b,SUM(c+d) FROM table GROUP BY a+b;
  * we want to pass this targetlist to the subplan:
- *        a+b,c,d
+ *		a+b,c,d
  * where the a+b target will be used by the Sort/Group steps, and the
  * other targets will be used for computing the final results.
  *
@@ -6747,78 +5592,78 @@ static PathTarget *
 make_group_input_target(PlannerInfo *root, PathTarget *final_target)
 {
     Query       *parse = root->parse;
-    PathTarget *input_target;
-    List       *non_group_cols;
-    List       *non_group_vars;
-    int            i;
-    ListCell   *lc;
+	PathTarget *input_target;
+	List	   *non_group_cols;
+	List	   *non_group_vars;
+	int			i;
+	ListCell   *lc;
 
     /*
-     * We must build a target containing all grouping columns, plus any other
-     * Vars mentioned in the query's targetlist and HAVING qual.
-     */
-    input_target = create_empty_pathtarget();
-    non_group_cols = NIL;
+	 * We must build a target containing all grouping columns, plus any other
+	 * Vars mentioned in the query's targetlist and HAVING qual.
+	 */
+	input_target = create_empty_pathtarget();
+	non_group_cols = NIL;
 
-    i = 0;
-    foreach(lc, final_target->exprs)
-    {
-        Expr       *expr = (Expr *) lfirst(lc);
-        Index        sgref = get_pathtarget_sortgroupref(final_target, i);
+	i = 0;
+	foreach(lc, final_target->exprs)
+	{
+		Expr	   *expr = (Expr *) lfirst(lc);
+		Index		sgref = get_pathtarget_sortgroupref(final_target, i);
 
-        if (sgref && parse->groupClause &&
-            get_sortgroupref_clause_noerr(sgref, parse->groupClause) != NULL)
+		if (sgref && parse->groupClause &&
+			get_sortgroupref_clause_noerr(sgref, parse->groupClause) != NULL)
         {
-            /*
-             * It's a grouping column, so add it to the input target as-is.
-             */
-            add_column_to_pathtarget(input_target, expr, sgref);
+			/*
+			 * It's a grouping column, so add it to the input target as-is.
+			 */
+			add_column_to_pathtarget(input_target, expr, sgref);
+		}
+		else
+		{
+			/*
+			 * Non-grouping column, so just remember the expression for later
+			 * call to pull_var_clause.
+			 */
+			non_group_cols = lappend(non_group_cols, expr);
         }
-        else
-        {
-            /*
-             * Non-grouping column, so just remember the expression for later
-             * call to pull_var_clause.
-             */
-            non_group_cols = lappend(non_group_cols, expr);
-        }
 
-        i++;
-    }
+		i++;
+	}
 
-    /*
-     * If there's a HAVING clause, we'll need the Vars it uses, too.
-     */
-    if (parse->havingQual)
-        non_group_cols = lappend(non_group_cols, parse->havingQual);
+        /*
+	 * If there's a HAVING clause, we'll need the Vars it uses, too.
+         */
+	if (parse->havingQual)
+		non_group_cols = lappend(non_group_cols, parse->havingQual);
 
-    /*
-     * Pull out all the Vars mentioned in non-group cols (plus HAVING), and
-     * add them to the input target if not already present.  (A Var used
-     * directly as a GROUP BY item will be present already.)  Note this
-     * includes Vars used in resjunk items, so we are covering the needs of
-     * ORDER BY and window specifications.  Vars used within Aggrefs and
-     * WindowFuncs will be pulled out here, too.
-     */
-    non_group_vars = pull_var_clause((Node *) non_group_cols,
-                                     PVC_RECURSE_AGGREGATES |
-                                     PVC_RECURSE_WINDOWFUNCS |
-                                     PVC_INCLUDE_PLACEHOLDERS);
-    add_new_columns_to_pathtarget(input_target, non_group_vars);
+        /*
+	 * Pull out all the Vars mentioned in non-group cols (plus HAVING), and
+	 * add them to the input target if not already present.  (A Var used
+	 * directly as a GROUP BY item will be present already.)  Note this
+	 * includes Vars used in resjunk items, so we are covering the needs of
+	 * ORDER BY and window specifications.  Vars used within Aggrefs and
+	 * WindowFuncs will be pulled out here, too.
+         */
+	non_group_vars = pull_var_clause((Node *) non_group_cols,
+									 PVC_RECURSE_AGGREGATES |
+									 PVC_RECURSE_WINDOWFUNCS |
+									 PVC_INCLUDE_PLACEHOLDERS);
+	add_new_columns_to_pathtarget(input_target, non_group_vars);
 
-    /* clean up cruft */
-    list_free(non_group_vars);
-    list_free(non_group_cols);
+	/* clean up cruft */
+	list_free(non_group_vars);
+	list_free(non_group_cols);
 
-    /* XXX this causes some redundant cost calculation ... */
-    return set_pathtarget_cost_width(root, input_target);
+	/* XXX this causes some redundant cost calculation ... */
+	return set_pathtarget_cost_width(root, input_target);
 }
 
-/*
+            /*
  * make_partial_grouping_target
- *      Generate appropriate PathTarget for output of partial aggregate
- *      (or partial grouping, if there are no aggregates) nodes.
- *
+ *	  Generate appropriate PathTarget for output of partial aggregate
+ *	  (or partial grouping, if there are no aggregates) nodes.
+             *
  * A partial aggregation node needs to emit all the same aggregates that
  * a regular aggregation node would, plus any aggregates used in HAVING;
  * except that the Aggref nodes should be marked as partial aggregates.
@@ -6829,243 +5674,243 @@ make_group_input_target(PlannerInfo *root, PathTarget *final_target)
  *
  * grouping_target is the tlist to be emitted by the topmost aggregation step.
  * We get the HAVING clause out of *root.
- */
+             */
 static PathTarget *
 make_partial_grouping_target(PlannerInfo *root, PathTarget *grouping_target)
-{
-    Query       *parse = root->parse;
-    PathTarget *partial_target;
-    List       *non_group_cols;
-    List       *non_group_exprs;
-    int            i;
-    ListCell   *lc;
-
-    partial_target = create_empty_pathtarget();
-    non_group_cols = NIL;
-
-    i = 0;
-    foreach(lc, grouping_target->exprs)
-    {
-        Expr       *expr = (Expr *) lfirst(lc);
-        Index        sgref = get_pathtarget_sortgroupref(grouping_target, i);
-
-        if (sgref && parse->groupClause &&
-            get_sortgroupref_clause_noerr(sgref, parse->groupClause) != NULL)
         {
-            /*
-             * It's a grouping column, so add it to the partial_target as-is.
-             * (This allows the upper agg step to repeat the grouping calcs.)
-             */
-            add_column_to_pathtarget(partial_target, expr, sgref);
-        }
-        else
-        {
-            /*
-             * Non-grouping column, so just remember the expression for later
-             * call to pull_var_clause.
-             */
-            non_group_cols = lappend(non_group_cols, expr);
+	Query	   *parse = root->parse;
+	PathTarget *partial_target;
+	List	   *non_group_cols;
+	List	   *non_group_exprs;
+	int			i;
+	ListCell   *lc;
+
+	partial_target = create_empty_pathtarget();
+	non_group_cols = NIL;
+
+	i = 0;
+	foreach(lc, grouping_target->exprs)
+            {
+		Expr	   *expr = (Expr *) lfirst(lc);
+		Index		sgref = get_pathtarget_sortgroupref(grouping_target, i);
+
+		if (sgref && parse->groupClause &&
+			get_sortgroupref_clause_noerr(sgref, parse->groupClause) != NULL)
+		{
+			/*
+			 * It's a grouping column, so add it to the partial_target as-is.
+			 * (This allows the upper agg step to repeat the grouping calcs.)
+			 */
+			add_column_to_pathtarget(partial_target, expr, sgref);
+            }
+            else
+            {
+			/*
+			 * Non-grouping column, so just remember the expression for later
+			 * call to pull_var_clause.
+			 */
+			non_group_cols = lappend(non_group_cols, expr);
+            }
+
+		i++;
         }
 
-        i++;
+        /*
+	 * If there's a HAVING clause, we'll need the Vars/Aggrefs it uses, too.
+         */
+	if (parse->havingQual)
+		non_group_cols = lappend(non_group_cols, parse->havingQual);
+
+        /*
+	 * Pull out all the Vars, PlaceHolderVars, and Aggrefs mentioned in
+	 * non-group cols (plus HAVING), and add them to the partial_target if not
+	 * already present.  (An expression used directly as a GROUP BY item will
+	 * be present already.)  Note this includes Vars used in resjunk items, so
+	 * we are covering the needs of ORDER BY and window specifications.
+         */
+	non_group_exprs = pull_var_clause((Node *) non_group_cols,
+									  PVC_INCLUDE_AGGREGATES |
+									  PVC_RECURSE_WINDOWFUNCS |
+									  PVC_INCLUDE_PLACEHOLDERS);
+
+	add_new_columns_to_pathtarget(partial_target, non_group_exprs);
+
+	/*
+	 * Adjust Aggrefs to put them in partial mode.  At this point all Aggrefs
+	 * are at the top level of the target list, so we can just scan the list
+	 * rather than recursing through the expression trees.
+	 */
+	foreach(lc, partial_target->exprs)
+        {
+		Aggref	   *aggref = (Aggref *) lfirst(lc);
+
+		if (IsA(aggref, Aggref))
+		{
+			Aggref	   *newaggref;
+
+        /*
+			 * We shouldn't need to copy the substructure of the Aggref node,
+			 * but flat-copy the node itself to avoid damaging other trees.
+         */
+			newaggref = makeNode(Aggref);
+			memcpy(newaggref, aggref, sizeof(Aggref));
+
+			/* For now, assume serialization is required */
+			mark_partial_aggref(newaggref, AGGSPLIT_INITIAL_SERIAL);
+
+			lfirst(lc) = newaggref;
+		}
     }
 
-    /*
-     * If there's a HAVING clause, we'll need the Vars/Aggrefs it uses, too.
-     */
-    if (parse->havingQual)
-        non_group_cols = lappend(non_group_cols, parse->havingQual);
+	/* clean up cruft */
+	list_free(non_group_exprs);
+	list_free(non_group_cols);
 
-    /*
-     * Pull out all the Vars, PlaceHolderVars, and Aggrefs mentioned in
-     * non-group cols (plus HAVING), and add them to the partial_target if not
-     * already present.  (An expression used directly as a GROUP BY item will
-     * be present already.)  Note this includes Vars used in resjunk items, so
-     * we are covering the needs of ORDER BY and window specifications.
-     */
-    non_group_exprs = pull_var_clause((Node *) non_group_cols,
-                                      PVC_INCLUDE_AGGREGATES |
-                                      PVC_RECURSE_WINDOWFUNCS |
-                                      PVC_INCLUDE_PLACEHOLDERS);
-
-    add_new_columns_to_pathtarget(partial_target, non_group_exprs);
-
-    /*
-     * Adjust Aggrefs to put them in partial mode.  At this point all Aggrefs
-     * are at the top level of the target list, so we can just scan the list
-     * rather than recursing through the expression trees.
-     */
-    foreach(lc, partial_target->exprs)
-    {
-        Aggref       *aggref = (Aggref *) lfirst(lc);
-
-        if (IsA(aggref, Aggref))
-        {
-            Aggref       *newaggref;
-
-            /*
-             * We shouldn't need to copy the substructure of the Aggref node,
-             * but flat-copy the node itself to avoid damaging other trees.
-             */
-            newaggref = makeNode(Aggref);
-            memcpy(newaggref, aggref, sizeof(Aggref));
-
-            /* For now, assume serialization is required */
-            mark_partial_aggref(newaggref, AGGSPLIT_INITIAL_SERIAL);
-
-            lfirst(lc) = newaggref;
-        }
-    }
-
-    /* clean up cruft */
-    list_free(non_group_exprs);
-    list_free(non_group_cols);
-
-    /* XXX this causes some redundant cost calculation ... */
-    return set_pathtarget_cost_width(root, partial_target);
+	/* XXX this causes some redundant cost calculation ... */
+	return set_pathtarget_cost_width(root, partial_target);
 }
 
-/*
+    /*
  * mark_partial_aggref
- *      Adjust an Aggref to make it represent a partial-aggregation step.
- *
+ *	  Adjust an Aggref to make it represent a partial-aggregation step.
+     *
  * The Aggref node is modified in-place; caller must do any copying required.
- */
+     */
 void
 mark_partial_aggref(Aggref *agg, AggSplit aggsplit)
-{
-    /* aggtranstype should be computed by this point */
-    Assert(OidIsValid(agg->aggtranstype));
-    /* ... but aggsplit should still be as the parser left it */
-    Assert(agg->aggsplit == AGGSPLIT_SIMPLE);
-
-    /* Mark the Aggref with the intended partial-aggregation mode */
-    agg->aggsplit = aggsplit;
-
-    /*
-     * Adjust result type if needed.  Normally, a partial aggregate returns
-     * the aggregate's transition type; but if that's INTERNAL and we're
-     * serializing, it returns BYTEA instead.
-     */
-    if (DO_AGGSPLIT_SKIPFINAL(aggsplit))
     {
-        if (agg->aggtranstype == INTERNALOID && DO_AGGSPLIT_SERIALIZE(aggsplit))
-            agg->aggtype = BYTEAOID;
-        else
-            agg->aggtype = agg->aggtranstype;
-    }
+	/* aggtranstype should be computed by this point */
+	Assert(OidIsValid(agg->aggtranstype));
+	/* ... but aggsplit should still be as the parser left it */
+	Assert(agg->aggsplit == AGGSPLIT_SIMPLE);
+
+	/* Mark the Aggref with the intended partial-aggregation mode */
+	agg->aggsplit = aggsplit;
+
+            /*
+	 * Adjust result type if needed.  Normally, a partial aggregate returns
+	 * the aggregate's transition type; but if that's INTERNAL and we're
+	 * serializing, it returns BYTEA instead.
+             */
+	if (DO_AGGSPLIT_SKIPFINAL(aggsplit))
+	{
+		if (agg->aggtranstype == INTERNALOID && DO_AGGSPLIT_SERIALIZE(aggsplit))
+			agg->aggtype = BYTEAOID;
+		else
+			agg->aggtype = agg->aggtranstype;
+	}
 }
 
-/*
+            /*
  * postprocess_setop_tlist
- *      Fix up targetlist returned by plan_set_operations().
+ *	  Fix up targetlist returned by plan_set_operations().
  *
  * We need to transpose sort key info from the orig_tlist into new_tlist.
  * NOTE: this would not be good enough if we supported resjunk sort keys
  * for results of set operations --- then, we'd need to project a whole
  * new tlist to evaluate the resjunk columns.  For now, just ereport if we
  * find any resjunk columns in orig_tlist.
- */
+             */
 static List *
 postprocess_setop_tlist(List *new_tlist, List *orig_tlist)
-{
-    ListCell   *l;
-    ListCell   *orig_tlist_item = list_head(orig_tlist);
+            {
+	ListCell   *l;
+	ListCell   *orig_tlist_item = list_head(orig_tlist);
 
-    foreach(l, new_tlist)
-    {
-        TargetEntry *new_tle = (TargetEntry *) lfirst(l);
-        TargetEntry *orig_tle;
+	foreach(l, new_tlist)
+                {
+		TargetEntry *new_tle = (TargetEntry *) lfirst(l);
+		TargetEntry *orig_tle;
 
-        /* ignore resjunk columns in setop result */
-        if (new_tle->resjunk)
-            continue;
+		/* ignore resjunk columns in setop result */
+		if (new_tle->resjunk)
+			continue;
 
-        Assert(orig_tlist_item != NULL);
-        orig_tle = (TargetEntry *) lfirst(orig_tlist_item);
-        orig_tlist_item = lnext(orig_tlist_item);
-        if (orig_tle->resjunk)    /* should not happen */
-            elog(ERROR, "resjunk output columns are not implemented");
-        Assert(new_tle->resno == orig_tle->resno);
-        new_tle->ressortgroupref = orig_tle->ressortgroupref;
-    }
-    if (orig_tlist_item != NULL)
-        elog(ERROR, "resjunk output columns are not implemented");
-    return new_tlist;
-}
+		Assert(orig_tlist_item != NULL);
+		orig_tle = (TargetEntry *) lfirst(orig_tlist_item);
+		orig_tlist_item = lnext(orig_tlist_item);
+		if (orig_tle->resjunk)	/* should not happen */
+			elog(ERROR, "resjunk output columns are not implemented");
+		Assert(new_tle->resno == orig_tle->resno);
+		new_tle->ressortgroupref = orig_tle->ressortgroupref;
+                }
+	if (orig_tlist_item != NULL)
+		elog(ERROR, "resjunk output columns are not implemented");
+	return new_tlist;
+            }
 
-/*
+            /*
  * select_active_windows
- *        Create a list of the "active" window clauses (ie, those referenced
- *        by non-deleted WindowFuncs) in the order they are to be executed.
- */
+ *		Create a list of the "active" window clauses (ie, those referenced
+ *		by non-deleted WindowFuncs) in the order they are to be executed.
+             */
 static List *
 select_active_windows(PlannerInfo *root, WindowFuncLists *wflists)
-{
-    List       *result;
-    List       *actives;
-    ListCell   *lc;
-
-    /* First, make a list of the active windows */
-    actives = NIL;
-    foreach(lc, root->parse->windowClause)
-    {
-        WindowClause *wc = (WindowClause *) lfirst(lc);
-
-        /* It's only active if wflists shows some related WindowFuncs */
-        Assert(wc->winref <= wflists->maxWinRef);
-        if (wflists->windowFuncs[wc->winref] != NIL)
-            actives = lappend(actives, wc);
-    }
-
-    /*
-     * Now, ensure that windows with identical partitioning/ordering clauses
-     * are adjacent in the list.  This is required by the SQL standard, which
-     * says that only one sort is to be used for such windows, even if they
-     * are otherwise distinct (eg, different names or framing clauses).
-     *
-     * There is room to be much smarter here, for example detecting whether
-     * one window's sort keys are a prefix of another's (so that sorting for
-     * the latter would do for the former), or putting windows first that
-     * match a sort order available for the underlying query.  For the moment
-     * we are content with meeting the spec.
-     */
-    result = NIL;
-    while (actives != NIL)
-    {
-        WindowClause *wc = (WindowClause *) linitial(actives);
-        ListCell   *prev;
-        ListCell   *next;
-
-        /* Move wc from actives to result */
-        actives = list_delete_first(actives);
-        result = lappend(result, wc);
-
-        /* Now move any matching windows from actives to result */
-        prev = NULL;
-        for (lc = list_head(actives); lc; lc = next)
-        {
-            WindowClause *wc2 = (WindowClause *) lfirst(lc);
-
-            next = lnext(lc);
-            /* framing options are NOT to be compared here! */
-            if (equal(wc->partitionClause, wc2->partitionClause) &&
-                equal(wc->orderClause, wc2->orderClause))
             {
-                actives = list_delete_cell(actives, lc, prev);
-                result = lappend(result, wc2);
-            }
-            else
-                prev = lc;
+	List	   *result;
+	List	   *actives;
+	ListCell   *lc;
+
+	/* First, make a list of the active windows */
+	actives = NIL;
+	foreach(lc, root->parse->windowClause)
+                {
+		WindowClause *wc = (WindowClause *) lfirst(lc);
+
+		/* It's only active if wflists shows some related WindowFuncs */
+		Assert(wc->winref <= wflists->maxWinRef);
+		if (wflists->windowFuncs[wc->winref] != NIL)
+			actives = lappend(actives, wc);
         }
+
+	/*
+	 * Now, ensure that windows with identical partitioning/ordering clauses
+	 * are adjacent in the list.  This is required by the SQL standard, which
+	 * says that only one sort is to be used for such windows, even if they
+	 * are otherwise distinct (eg, different names or framing clauses).
+	 *
+	 * There is room to be much smarter here, for example detecting whether
+	 * one window's sort keys are a prefix of another's (so that sorting for
+	 * the latter would do for the former), or putting windows first that
+	 * match a sort order available for the underlying query.  For the moment
+	 * we are content with meeting the spec.
+	 */
+	result = NIL;
+	while (actives != NIL)
+        {
+		WindowClause *wc = (WindowClause *) linitial(actives);
+		ListCell   *prev;
+		ListCell   *next;
+
+		/* Move wc from actives to result */
+		actives = list_delete_first(actives);
+		result = lappend(result, wc);
+
+		/* Now move any matching windows from actives to result */
+		prev = NULL;
+		for (lc = list_head(actives); lc; lc = next)
+        {
+			WindowClause *wc2 = (WindowClause *) lfirst(lc);
+
+			next = lnext(lc);
+			/* framing options are NOT to be compared here! */
+			if (equal(wc->partitionClause, wc2->partitionClause) &&
+				equal(wc->orderClause, wc2->orderClause))
+			{
+				actives = list_delete_cell(actives, lc, prev);
+				result = lappend(result, wc2);
+        }
+			else
+				prev = lc;
+    }
     }
 
-    return result;
+	return result;
 }
 
 /*
  * make_window_input_target
- *      Generate appropriate PathTarget for initial input to WindowAgg nodes.
+ *	  Generate appropriate PathTarget for initial input to WindowAgg nodes.
  *
  * When the query has window functions, this function computes the desired
  * target to be computed by the node just below the first WindowAgg.
@@ -7091,124 +5936,124 @@ select_active_windows(PlannerInfo *root, WindowFuncLists *wflists)
  *
  * 'final_target' is the query's final target list (in PathTarget form)
  * 'activeWindows' is the list of active windows previously identified by
- *            select_active_windows.
+ *			select_active_windows.
  *
  * The result is the PathTarget to be computed by the plan node immediately
  * below the first WindowAgg node.
  */
 static PathTarget *
 make_window_input_target(PlannerInfo *root,
-                         PathTarget *final_target,
-                         List *activeWindows)
+						 PathTarget *final_target,
+                    List *activeWindows)
 {
-    Query       *parse = root->parse;
-    PathTarget *input_target;
-    Bitmapset  *sgrefs;
-    List       *flattenable_cols;
-    List       *flattenable_vars;
-    int            i;
+	Query	   *parse = root->parse;
+	PathTarget *input_target;
+	Bitmapset  *sgrefs;
+	List	   *flattenable_cols;
+	List	   *flattenable_vars;
+	int			i;
     ListCell   *lc;
 
-    Assert(parse->hasWindowFuncs);
+	Assert(parse->hasWindowFuncs);
 
     /*
-     * Collect the sortgroupref numbers of window PARTITION/ORDER BY clauses
-     * into a bitmapset for convenient reference below.
+	 * Collect the sortgroupref numbers of window PARTITION/ORDER BY clauses
+	 * into a bitmapset for convenient reference below.
      */
-    sgrefs = NULL;
-    foreach(lc, activeWindows)
+	sgrefs = NULL;
+	foreach(lc, activeWindows)
+	{
+		WindowClause *wc = (WindowClause *) lfirst(lc);
+		ListCell   *lc2;
+
+		foreach(lc2, wc->partitionClause)
     {
-        WindowClause *wc = (WindowClause *) lfirst(lc);
-        ListCell   *lc2;
+			SortGroupClause *sortcl = (SortGroupClause *) lfirst(lc2);
 
-        foreach(lc2, wc->partitionClause)
-        {
-            SortGroupClause *sortcl = (SortGroupClause *) lfirst(lc2);
-
-            sgrefs = bms_add_member(sgrefs, sortcl->tleSortGroupRef);
-        }
-        foreach(lc2, wc->orderClause)
-        {
-            SortGroupClause *sortcl = (SortGroupClause *) lfirst(lc2);
-
-            sgrefs = bms_add_member(sgrefs, sortcl->tleSortGroupRef);
-        }
+			sgrefs = bms_add_member(sgrefs, sortcl->tleSortGroupRef);
     }
+		foreach(lc2, wc->orderClause)
+		{
+			SortGroupClause *sortcl = (SortGroupClause *) lfirst(lc2);
 
-    /* Add in sortgroupref numbers of GROUP BY clauses, too */
-    foreach(lc, parse->groupClause)
-    {
-        SortGroupClause *grpcl = (SortGroupClause *) lfirst(lc);
+			sgrefs = bms_add_member(sgrefs, sortcl->tleSortGroupRef);
+		}
+	}
 
-        sgrefs = bms_add_member(sgrefs, grpcl->tleSortGroupRef);
-    }
+	/* Add in sortgroupref numbers of GROUP BY clauses, too */
+	foreach(lc, parse->groupClause)
+	{
+		SortGroupClause *grpcl = (SortGroupClause *) lfirst(lc);
+
+		sgrefs = bms_add_member(sgrefs, grpcl->tleSortGroupRef);
+}
+
+/*
+	 * Construct a target containing all the non-flattenable targetlist items,
+	 * and save aside the others for a moment.
+ */
+	input_target = create_empty_pathtarget();
+	flattenable_cols = NIL;
+
+	i = 0;
+	foreach(lc, final_target->exprs)
+{
+		Expr	   *expr = (Expr *) lfirst(lc);
+		Index		sgref = get_pathtarget_sortgroupref(final_target, i);
 
     /*
-     * Construct a target containing all the non-flattenable targetlist items,
-     * and save aside the others for a moment.
+		 * Don't want to deconstruct window clauses or GROUP BY items.  (Note
+		 * that such items can't contain window functions, so it's okay to
+		 * compute them below the WindowAgg nodes.)
      */
-    input_target = create_empty_pathtarget();
-    flattenable_cols = NIL;
-
-    i = 0;
-    foreach(lc, final_target->exprs)
-    {
-        Expr       *expr = (Expr *) lfirst(lc);
-        Index        sgref = get_pathtarget_sortgroupref(final_target, i);
-
-        /*
-         * Don't want to deconstruct window clauses or GROUP BY items.  (Note
-         * that such items can't contain window functions, so it's okay to
-         * compute them below the WindowAgg nodes.)
-         */
-        if (sgref != 0 && bms_is_member(sgref, sgrefs))
+		if (sgref != 0 && bms_is_member(sgref, sgrefs))
         {
             /*
-             * Don't want to deconstruct this value, so add it to the input
-             * target as-is.
+			 * Don't want to deconstruct this value, so add it to the input
+			 * target as-is.
              */
-            add_column_to_pathtarget(input_target, expr, sgref);
+			add_column_to_pathtarget(input_target, expr, sgref);
         }
         else
         {
-            /*
-             * Column is to be flattened, so just remember the expression for
-             * later call to pull_var_clause.
-             */
-            flattenable_cols = lappend(flattenable_cols, expr);
+			/*
+			 * Column is to be flattened, so just remember the expression for
+			 * later call to pull_var_clause.
+			 */
+			flattenable_cols = lappend(flattenable_cols, expr);
         }
 
-        i++;
+		i++;
     }
 
-    /*
-     * Pull out all the Vars and Aggrefs mentioned in flattenable columns, and
-     * add them to the input target if not already present.  (Some might be
-     * there already because they're used directly as window/group clauses.)
-     *
-     * Note: it's essential to use PVC_INCLUDE_AGGREGATES here, so that any
-     * Aggrefs are placed in the Agg node's tlist and not left to be computed
-     * at higher levels.  On the other hand, we should recurse into
-     * WindowFuncs to make sure their input expressions are available.
-     */
-    flattenable_vars = pull_var_clause((Node *) flattenable_cols,
-                                       PVC_INCLUDE_AGGREGATES |
-                                       PVC_RECURSE_WINDOWFUNCS |
-                                       PVC_INCLUDE_PLACEHOLDERS);
-    add_new_columns_to_pathtarget(input_target, flattenable_vars);
+	/*
+	 * Pull out all the Vars and Aggrefs mentioned in flattenable columns, and
+	 * add them to the input target if not already present.  (Some might be
+	 * there already because they're used directly as window/group clauses.)
+	 *
+	 * Note: it's essential to use PVC_INCLUDE_AGGREGATES here, so that any
+	 * Aggrefs are placed in the Agg node's tlist and not left to be computed
+	 * at higher levels.  On the other hand, we should recurse into
+	 * WindowFuncs to make sure their input expressions are available.
+	 */
+	flattenable_vars = pull_var_clause((Node *) flattenable_cols,
+									   PVC_INCLUDE_AGGREGATES |
+									   PVC_RECURSE_WINDOWFUNCS |
+									   PVC_INCLUDE_PLACEHOLDERS);
+	add_new_columns_to_pathtarget(input_target, flattenable_vars);
 
-    /* clean up cruft */
-    list_free(flattenable_vars);
-    list_free(flattenable_cols);
+	/* clean up cruft */
+	list_free(flattenable_vars);
+	list_free(flattenable_cols);
 
-    /* XXX this causes some redundant cost calculation ... */
-    return set_pathtarget_cost_width(root, input_target);
+	/* XXX this causes some redundant cost calculation ... */
+	return set_pathtarget_cost_width(root, input_target);
 }
 
 /*
  * make_pathkeys_for_window
- *        Create a pathkeys list describing the required input ordering
- *        for the given WindowClause.
+ *		Create a pathkeys list describing the required input ordering
+ *		for the given WindowClause.
  *
  * The required ordering is first the PARTITION keys, then the ORDER keys.
  * In the future we might try to implement windowing using hashing, in which
@@ -7218,36 +6063,36 @@ make_window_input_target(PlannerInfo *root,
  */
 static List *
 make_pathkeys_for_window(PlannerInfo *root, WindowClause *wc,
-                         List *tlist)
+						 List *tlist)
 {
-    List       *window_pathkeys;
-    List       *window_sortclauses;
+	List	   *window_pathkeys;
+	List	   *window_sortclauses;
 
-    /* Throw error if can't sort */
-    if (!grouping_is_sortable(wc->partitionClause))
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("could not implement window PARTITION BY"),
-                 errdetail("Window partitioning columns must be of sortable datatypes.")));
-    if (!grouping_is_sortable(wc->orderClause))
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("could not implement window ORDER BY"),
-                 errdetail("Window ordering columns must be of sortable datatypes.")));
+	/* Throw error if can't sort */
+	if (!grouping_is_sortable(wc->partitionClause))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("could not implement window PARTITION BY"),
+				 errdetail("Window partitioning columns must be of sortable datatypes.")));
+	if (!grouping_is_sortable(wc->orderClause))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("could not implement window ORDER BY"),
+				 errdetail("Window ordering columns must be of sortable datatypes.")));
 
-    /* Okay, make the combined pathkeys */
-    window_sortclauses = list_concat(list_copy(wc->partitionClause),
-                                     list_copy(wc->orderClause));
-    window_pathkeys = make_pathkeys_for_sortclauses(root,
-                                                    window_sortclauses,
-                                                    tlist);
-    list_free(window_sortclauses);
-    return window_pathkeys;
+	/* Okay, make the combined pathkeys */
+	window_sortclauses = list_concat(list_copy(wc->partitionClause),
+									 list_copy(wc->orderClause));
+	window_pathkeys = make_pathkeys_for_sortclauses(root,
+													window_sortclauses,
+													tlist);
+	list_free(window_sortclauses);
+	return window_pathkeys;
 }
 
-/*
+    /*
  * make_sort_input_target
- *      Generate appropriate PathTarget for initial input to Sort step.
+ *	  Generate appropriate PathTarget for initial input to Sort step.
  *
  * If the query has ORDER BY, this function chooses the target to be computed
  * by the node just below the Sort (and DISTINCT, if any, since Unique can't
@@ -7310,209 +6155,209 @@ make_pathkeys_for_window(PlannerInfo *root, WindowClause *wc,
  *
  * In addition, *have_postponed_srfs is set to TRUE if we choose to postpone
  * any set-returning functions to after the Sort.
- */
+     */
 static PathTarget *
 make_sort_input_target(PlannerInfo *root,
-                       PathTarget *final_target,
-                       bool *have_postponed_srfs)
-{// #lizard forgives
-    Query       *parse = root->parse;
-    PathTarget *input_target;
-    int            ncols;
-    bool       *col_is_srf;
-    bool       *postpone_col;
-    bool        have_srf;
-    bool        have_volatile;
-    bool        have_expensive;
-    bool        have_srf_sortcols;
-    bool        postpone_srfs;
-    List       *postponable_cols;
-    List       *postponable_vars;
-    int            i;
-    ListCell   *lc;
+					   PathTarget *final_target,
+					   bool *have_postponed_srfs)
+{
+	Query	   *parse = root->parse;
+	PathTarget *input_target;
+	int			ncols;
+	bool	   *col_is_srf;
+	bool	   *postpone_col;
+	bool		have_srf;
+	bool		have_volatile;
+	bool		have_expensive;
+	bool		have_srf_sortcols;
+	bool		postpone_srfs;
+	List	   *postponable_cols;
+	List	   *postponable_vars;
+	int			i;
+	ListCell   *lc;
 
-    /* Shouldn't get here unless query has ORDER BY */
-    Assert(parse->sortClause);
+	/* Shouldn't get here unless query has ORDER BY */
+	Assert(parse->sortClause);
 
-    *have_postponed_srfs = false;    /* default result */
+	*have_postponed_srfs = false;	/* default result */
 
-    /* Inspect tlist and collect per-column information */
-    ncols = list_length(final_target->exprs);
-    col_is_srf = (bool *) palloc0(ncols * sizeof(bool));
-    postpone_col = (bool *) palloc0(ncols * sizeof(bool));
-    have_srf = have_volatile = have_expensive = have_srf_sortcols = false;
+	/* Inspect tlist and collect per-column information */
+	ncols = list_length(final_target->exprs);
+	col_is_srf = (bool *) palloc0(ncols * sizeof(bool));
+	postpone_col = (bool *) palloc0(ncols * sizeof(bool));
+	have_srf = have_volatile = have_expensive = have_srf_sortcols = false;
 
-    i = 0;
-    foreach(lc, final_target->exprs)
+	i = 0;
+	foreach(lc, final_target->exprs)
+	{
+		Expr	   *expr = (Expr *) lfirst(lc);
+
+    /*
+		 * If the column has a sortgroupref, assume it has to be evaluated
+		 * before sorting.  Generally such columns would be ORDER BY, GROUP
+		 * BY, etc targets.  One exception is columns that were removed from
+		 * GROUP BY by remove_useless_groupby_columns() ... but those would
+		 * only be Vars anyway.  There don't seem to be any cases where it
+		 * would be worth the trouble to double-check.
+     */
+		if (get_pathtarget_sortgroupref(final_target, i) == 0)
     {
-        Expr       *expr = (Expr *) lfirst(lc);
+        /*
+			 * Check for SRF or volatile functions.  Check the SRF case first
+			 * because we must know whether we have any postponed SRFs.
+         */
+			if (parse->hasTargetSRFs &&
+				expression_returns_set((Node *) expr))
+			{
+				/* We'll decide below whether these are postponable */
+				col_is_srf[i] = true;
+				have_srf = true;
+			}
+			else if (contain_volatile_functions((Node *) expr))
+			{
+				/* Unconditionally postpone */
+				postpone_col[i] = true;
+				have_volatile = true;
+    }
+    else
+    {
+        /*
+				 * Else check the cost.  XXX it's annoying to have to do this
+				 * when set_pathtarget_cost_width() just did it.  Refactor to
+				 * allow sharing the work?
+         */
+				QualCost	cost;
+
+				cost_qual_eval_node(&cost, (Node *) expr, root);
+
+    /*
+				 * We arbitrarily define "expensive" as "more than 10X
+				 * cpu_operator_cost".  Note this will take in any PL function
+				 * with default cost.
+     */
+				if (cost.per_tuple > 10 * cpu_operator_cost)
+				{
+					postpone_col[i] = true;
+					have_expensive = true;
+				}
+			}
+		}
+		else
+    {
+			/* For sortgroupref cols, just check if any contain SRFs */
+			if (!have_srf_sortcols &&
+				parse->hasTargetSRFs &&
+				expression_returns_set((Node *) expr))
+				have_srf_sortcols = true;
+		}
+
+		i++;
+	}
 
         /*
-         * If the column has a sortgroupref, assume it has to be evaluated
-         * before sorting.  Generally such columns would be ORDER BY, GROUP
-         * BY, etc targets.  One exception is columns that were removed from
-         * GROUP BY by remove_useless_groupby_columns() ... but those would
-         * only be Vars anyway.  There don't seem to be any cases where it
-         * would be worth the trouble to double-check.
+	 * We can postpone SRFs if we have some but none are in sortgroupref cols.
          */
-        if (get_pathtarget_sortgroupref(final_target, i) == 0)
+	postpone_srfs = (have_srf && !have_srf_sortcols);
+
+	/*
+	 * If we don't need a post-sort projection, just return final_target.
+	 */
+	if (!(postpone_srfs || have_volatile ||
+		  (have_expensive &&
+		   (parse->limitCount || root->tuple_fraction > 0))))
+		return final_target;
+
+	/*
+	 * Report whether the post-sort projection will contain set-returning
+	 * functions.  This is important because it affects whether the Sort can
+	 * rely on the query's LIMIT (if any) to bound the number of rows it needs
+	 * to return.
+	 */
+	*have_postponed_srfs = postpone_srfs;
+
+                /*
+	 * Construct the sort-input target, taking all non-postponable columns and
+	 * then adding Vars, PlaceHolderVars, Aggrefs, and WindowFuncs found in
+	 * the postponable ones.
+                 */
+	input_target = create_empty_pathtarget();
+	postponable_cols = NIL;
+
+	i = 0;
+	foreach(lc, final_target->exprs)
         {
-            /*
-             * Check for SRF or volatile functions.  Check the SRF case first
-             * because we must know whether we have any postponed SRFs.
-             */
-            if (parse->hasTargetSRFs &&
-                expression_returns_set((Node *) expr))
-            {
-                /* We'll decide below whether these are postponable */
-                col_is_srf[i] = true;
-                have_srf = true;
-            }
-            else if (contain_volatile_functions((Node *) expr))
-            {
-                /* Unconditionally postpone */
-                postpone_col[i] = true;
-                have_volatile = true;
-            }
-            else
-            {
-                /*
-                 * Else check the cost.  XXX it's annoying to have to do this
-                 * when set_pathtarget_cost_width() just did it.  Refactor to
-                 * allow sharing the work?
-                 */
-                QualCost    cost;
+		Expr	   *expr = (Expr *) lfirst(lc);
 
-                cost_qual_eval_node(&cost, (Node *) expr, root);
-
-                /*
-                 * We arbitrarily define "expensive" as "more than 10X
-                 * cpu_operator_cost".  Note this will take in any PL function
-                 * with default cost.
-                 */
-                if (cost.per_tuple > 10 * cpu_operator_cost)
-                {
-                    postpone_col[i] = true;
-                    have_expensive = true;
-                }
-            }
-        }
+		if (postpone_col[i] || (postpone_srfs && col_is_srf[i]))
+			postponable_cols = lappend(postponable_cols, expr);
         else
-        {
-            /* For sortgroupref cols, just check if any contain SRFs */
-            if (!have_srf_sortcols &&
-                parse->hasTargetSRFs &&
-                expression_returns_set((Node *) expr))
-                have_srf_sortcols = true;
-        }
+			add_column_to_pathtarget(input_target, expr,
+									 get_pathtarget_sortgroupref(final_target, i));
 
-        i++;
+		i++;
+	}
+
+	/*
+	 * Pull out all the Vars, Aggrefs, and WindowFuncs mentioned in
+	 * postponable columns, and add them to the sort-input target if not
+	 * already present.  (Some might be there already.)  We mustn't
+	 * deconstruct Aggrefs or WindowFuncs here, since the projection node
+	 * would be unable to recompute them.
+	 */
+	postponable_vars = pull_var_clause((Node *) postponable_cols,
+									   PVC_INCLUDE_AGGREGATES |
+									   PVC_INCLUDE_WINDOWFUNCS |
+									   PVC_INCLUDE_PLACEHOLDERS);
+	add_new_columns_to_pathtarget(input_target, postponable_vars);
+
+	/* clean up cruft */
+	list_free(postponable_vars);
+	list_free(postponable_cols);
+
+	/* XXX this represents even more redundant cost calculation ... */
+	return set_pathtarget_cost_width(root, input_target);
     }
 
     /*
-     * We can postpone SRFs if we have some but none are in sortgroupref cols.
-     */
-    postpone_srfs = (have_srf && !have_srf_sortcols);
-
-    /*
-     * If we don't need a post-sort projection, just return final_target.
-     */
-    if (!(postpone_srfs || have_volatile ||
-          (have_expensive &&
-           (parse->limitCount || root->tuple_fraction > 0))))
-        return final_target;
-
-    /*
-     * Report whether the post-sort projection will contain set-returning
-     * functions.  This is important because it affects whether the Sort can
-     * rely on the query's LIMIT (if any) to bound the number of rows it needs
-     * to return.
-     */
-    *have_postponed_srfs = postpone_srfs;
-
-    /*
-     * Construct the sort-input target, taking all non-postponable columns and
-     * then adding Vars, PlaceHolderVars, Aggrefs, and WindowFuncs found in
-     * the postponable ones.
-     */
-    input_target = create_empty_pathtarget();
-    postponable_cols = NIL;
-
-    i = 0;
-    foreach(lc, final_target->exprs)
-    {
-        Expr       *expr = (Expr *) lfirst(lc);
-
-        if (postpone_col[i] || (postpone_srfs && col_is_srf[i]))
-            postponable_cols = lappend(postponable_cols, expr);
-        else
-            add_column_to_pathtarget(input_target, expr,
-                                     get_pathtarget_sortgroupref(final_target, i));
-
-        i++;
-    }
-
-    /*
-     * Pull out all the Vars, Aggrefs, and WindowFuncs mentioned in
-     * postponable columns, and add them to the sort-input target if not
-     * already present.  (Some might be there already.)  We mustn't
-     * deconstruct Aggrefs or WindowFuncs here, since the projection node
-     * would be unable to recompute them.
-     */
-    postponable_vars = pull_var_clause((Node *) postponable_cols,
-                                       PVC_INCLUDE_AGGREGATES |
-                                       PVC_INCLUDE_WINDOWFUNCS |
-                                       PVC_INCLUDE_PLACEHOLDERS);
-    add_new_columns_to_pathtarget(input_target, postponable_vars);
-
-    /* clean up cruft */
-    list_free(postponable_vars);
-    list_free(postponable_cols);
-
-    /* XXX this represents even more redundant cost calculation ... */
-    return set_pathtarget_cost_width(root, input_target);
-}
-
-/*
  * get_cheapest_fractional_path
- *      Find the cheapest path for retrieving a specified fraction of all
- *      the tuples expected to be returned by the given relation.
- *
+ *	  Find the cheapest path for retrieving a specified fraction of all
+ *	  the tuples expected to be returned by the given relation.
+     *
  * We interpret tuple_fraction the same way as grouping_planner.
- *
+     *
  * We assume set_cheapest() has been run on the given rel.
- */
+     */
 Path *
 get_cheapest_fractional_path(RelOptInfo *rel, double tuple_fraction)
-{
-    Path       *best_path = rel->cheapest_total_path;
-    ListCell   *l;
-
-    /* If all tuples will be retrieved, just return the cheapest-total path */
-    if (tuple_fraction <= 0.0)
-        return best_path;
-
-    /* Convert absolute # of tuples to a fraction; no need to clamp to 0..1 */
-    if (tuple_fraction >= 1.0 && best_path->rows > 0)
-        tuple_fraction /= best_path->rows;
-
-    foreach(l, rel->pathlist)
     {
-        Path       *path = (Path *) lfirst(l);
+	Path	   *best_path = rel->cheapest_total_path;
+	ListCell   *l;
 
-        if (path == rel->cheapest_total_path ||
-            compare_fractional_path_costs(best_path, path, tuple_fraction) <= 0)
-            continue;
+	/* If all tuples will be retrieved, just return the cheapest-total path */
+	if (tuple_fraction <= 0.0)
+		return best_path;
 
-        best_path = path;
+	/* Convert absolute # of tuples to a fraction; no need to clamp to 0..1 */
+	if (tuple_fraction >= 1.0 && best_path->rows > 0)
+		tuple_fraction /= best_path->rows;
+
+	foreach(l, rel->pathlist)
+    {
+		Path	   *path = (Path *) lfirst(l);
+
+		if (path == rel->cheapest_total_path ||
+			compare_fractional_path_costs(best_path, path, tuple_fraction) <= 0)
+			continue;
+
+		best_path = path;
     }
 
-    return best_path;
+	return best_path;
 }
 
 /*
  * adjust_paths_for_srfs
- *        Fix up the Paths of the given upperrel to handle tSRFs properly.
+ *		Fix up the Paths of the given upperrel to handle tSRFs properly.
  *
  * The executor can only handle set-returning functions that appear at the
  * top level of the targetlist of a ProjectSet plan node.  If we have any SRFs
@@ -7527,95 +6372,95 @@ get_cheapest_fractional_path(RelOptInfo *rel, double tuple_fraction)
  */
 static void
 adjust_paths_for_srfs(PlannerInfo *root, RelOptInfo *rel,
-                      List *targets, List *targets_contain_srfs)
+					  List *targets, List *targets_contain_srfs)
 {
     ListCell   *lc;
 
-    Assert(list_length(targets) == list_length(targets_contain_srfs));
-    Assert(!linitial_int(targets_contain_srfs));
+	Assert(list_length(targets) == list_length(targets_contain_srfs));
+	Assert(!linitial_int(targets_contain_srfs));
 
-    /* If no SRFs appear at this plan level, nothing to do */
-    if (list_length(targets) == 1)
-        return;
+	/* If no SRFs appear at this plan level, nothing to do */
+	if (list_length(targets) == 1)
+		return;
 
     /*
-     * Stack SRF-evaluation nodes atop each path for the rel.
-     *
-     * In principle we should re-run set_cheapest() here to identify the
-     * cheapest path, but it seems unlikely that adding the same tlist eval
-     * costs to all the paths would change that, so we don't bother. Instead,
-     * just assume that the cheapest-startup and cheapest-total paths remain
-     * so.  (There should be no parameterized paths anymore, so we needn't
-     * worry about updating cheapest_parameterized_paths.)
+	 * Stack SRF-evaluation nodes atop each path for the rel.
+	 *
+	 * In principle we should re-run set_cheapest() here to identify the
+	 * cheapest path, but it seems unlikely that adding the same tlist eval
+	 * costs to all the paths would change that, so we don't bother. Instead,
+	 * just assume that the cheapest-startup and cheapest-total paths remain
+	 * so.  (There should be no parameterized paths anymore, so we needn't
+	 * worry about updating cheapest_parameterized_paths.)
      */
-    foreach(lc, rel->pathlist)
+	foreach(lc, rel->pathlist)
     {
-        Path       *subpath = (Path *) lfirst(lc);
-        Path       *newpath = subpath;
-        ListCell   *lc1,
-                   *lc2;
+		Path	   *subpath = (Path *) lfirst(lc);
+		Path	   *newpath = subpath;
+		ListCell   *lc1,
+				   *lc2;
 
-        Assert(subpath->param_info == NULL);
-        forboth(lc1, targets, lc2, targets_contain_srfs)
-        {
-            PathTarget *thistarget = (PathTarget *) lfirst(lc1);
-            bool        contains_srfs = (bool) lfirst_int(lc2);
-
-            /* If this level doesn't contain SRFs, do regular projection */
-            if (contains_srfs)
-                newpath = (Path *) create_set_projection_path(root,
-                                                              rel,
-                                                              newpath,
-                                                              thistarget);
-            else
-                newpath = (Path *) apply_projection_to_path(root,
-                                                            rel,
-                                                            newpath,
-                                                            thistarget);
-        }
-        lfirst(lc) = newpath;
-        if (subpath == rel->cheapest_startup_path)
-            rel->cheapest_startup_path = newpath;
-        if (subpath == rel->cheapest_total_path)
-            rel->cheapest_total_path = newpath;
-    }
-
-    /* Likewise for partial paths, if any */
-    foreach(lc, rel->partial_pathlist)
-    {
-        Path       *subpath = (Path *) lfirst(lc);
-        Path       *newpath = subpath;
-        ListCell   *lc1,
-                   *lc2;
-
-        Assert(subpath->param_info == NULL);
-        forboth(lc1, targets, lc2, targets_contain_srfs)
-        {
-            PathTarget *thistarget = (PathTarget *) lfirst(lc1);
-            bool        contains_srfs = (bool) lfirst_int(lc2);
-
-            /* If this level doesn't contain SRFs, do regular projection */
-            if (contains_srfs)
-                newpath = (Path *) create_set_projection_path(root,
-                                                              rel,
-                                                              newpath,
-                                                              thistarget);
-            else
+		Assert(subpath->param_info == NULL);
+		forboth(lc1, targets, lc2, targets_contain_srfs)
             {
-                /* avoid apply_projection_to_path, in case of multiple refs */
-                newpath = (Path *) create_projection_path(root,
-                                                          rel,
-                                                          newpath,
-                                                          thistarget);
-            }
-        }
-        lfirst(lc) = newpath;
-    }
-}
+			PathTarget *thistarget = (PathTarget *) lfirst(lc1);
+			bool		contains_srfs = (bool) lfirst_int(lc2);
 
-/*
+			/* If this level doesn't contain SRFs, do regular projection */
+			if (contains_srfs)
+				newpath = (Path *) create_set_projection_path(root,
+															  rel,
+															  newpath,
+															  thistarget);
+			else
+				newpath = (Path *) apply_projection_to_path(root,
+															rel,
+															newpath,
+															thistarget);
+        }
+		lfirst(lc) = newpath;
+		if (subpath == rel->cheapest_startup_path)
+			rel->cheapest_startup_path = newpath;
+		if (subpath == rel->cheapest_total_path)
+			rel->cheapest_total_path = newpath;
+    }
+
+	/* Likewise for partial paths, if any */
+	foreach(lc, rel->partial_pathlist)
+    {
+		Path	   *subpath = (Path *) lfirst(lc);
+		Path	   *newpath = subpath;
+		ListCell   *lc1,
+				   *lc2;
+
+		Assert(subpath->param_info == NULL);
+		forboth(lc1, targets, lc2, targets_contain_srfs)
+        {
+			PathTarget *thistarget = (PathTarget *) lfirst(lc1);
+			bool		contains_srfs = (bool) lfirst_int(lc2);
+
+			/* If this level doesn't contain SRFs, do regular projection */
+			if (contains_srfs)
+				newpath = (Path *) create_set_projection_path(root,
+															  rel,
+															  newpath,
+															  thistarget);
+			else
+			{
+				/* avoid apply_projection_to_path, in case of multiple refs */
+				newpath = (Path *) create_projection_path(root,
+														  rel,
+														  newpath,
+														  thistarget);
+			}
+		}
+		lfirst(lc) = newpath;
+        }
+    }
+
+    /*
  * expression_planner
- *        Perform planner's transformations on a standalone expression.
+ *		Perform planner's transformations on a standalone expression.
  *
  * Various utility commands need to evaluate expressions that are not part
  * of a plannable query.  They can do so using the executor's regular
@@ -7634,28 +6479,28 @@ adjust_paths_for_srfs(PlannerInfo *root, RelOptInfo *rel,
  * tree.  (It would actually be okay to apply fix_opfuncids to it, but since
  * we first do an expression_tree_mutator-based walk, what is returned will
  * be a new node tree.)
- */
+     */
 Expr *
 expression_planner(Expr *expr)
 {
-    Node       *result;
+	Node	   *result;
 
     /*
-     * Convert named-argument function calls, insert default arguments and
-     * simplify constant subexprs
+	 * Convert named-argument function calls, insert default arguments and
+	 * simplify constant subexprs
      */
-    result = eval_const_expressions(NULL, (Node *) expr);
+	result = eval_const_expressions(NULL, (Node *) expr);
 
-    /* Fill in opfuncid values if missing */
-    fix_opfuncids(result);
+	/* Fill in opfuncid values if missing */
+	fix_opfuncids(result);
 
-    return (Expr *) result;
+	return (Expr *) result;
 }
 
 
 /*
  * plan_cluster_use_sort
- *        Use the planner to decide how CLUSTER should implement sorting
+ *		Use the planner to decide how CLUSTER should implement sorting
  *
  * tableOid is the OID of a table to be clustered on its index indexOid
  * (which is already known to be a btree index).  Decide whether it's
@@ -7667,109 +6512,109 @@ expression_planner(Expr *expr)
 bool
 plan_cluster_use_sort(Oid tableOid, Oid indexOid)
 {
-    PlannerInfo *root;
-    Query       *query;
-    PlannerGlobal *glob;
-    RangeTblEntry *rte;
-    RelOptInfo *rel;
-    IndexOptInfo *indexInfo;
-    QualCost    indexExprCost;
-    Cost        comparisonCost;
-    Path       *seqScanPath;
-    Path        seqScanAndSortPath;
-    IndexPath  *indexScanPath;
+	PlannerInfo *root;
+	Query	   *query;
+	PlannerGlobal *glob;
+	RangeTblEntry *rte;
+	RelOptInfo *rel;
+	IndexOptInfo *indexInfo;
+	QualCost	indexExprCost;
+	Cost		comparisonCost;
+	Path	   *seqScanPath;
+	Path		seqScanAndSortPath;
+	IndexPath  *indexScanPath;
     ListCell   *lc;
 
-    /* We can short-circuit the cost comparison if indexscans are disabled */
-    if (!enable_indexscan)
-        return true;            /* use sort */
+	/* We can short-circuit the cost comparison if indexscans are disabled */
+	if (!enable_indexscan)
+		return true;			/* use sort */
 
-    /* Set up mostly-dummy planner state */
-    query = makeNode(Query);
-    query->commandType = CMD_SELECT;
+	/* Set up mostly-dummy planner state */
+	query = makeNode(Query);
+	query->commandType = CMD_SELECT;
 
-    glob = makeNode(PlannerGlobal);
+	glob = makeNode(PlannerGlobal);
 
-    root = makeNode(PlannerInfo);
-    root->parse = query;
-    root->glob = glob;
-    root->query_level = 1;
-    root->planner_cxt = CurrentMemoryContext;
-    root->wt_param_id = -1;
-    root->recursiveOk = true;
+	root = makeNode(PlannerInfo);
+	root->parse = query;
+	root->glob = glob;
+	root->query_level = 1;
+	root->planner_cxt = CurrentMemoryContext;
+	root->wt_param_id = -1;
+	root->recursiveOk = true;
 
-    /* Build a minimal RTE for the rel */
-    rte = makeNode(RangeTblEntry);
-    rte->rtekind = RTE_RELATION;
-    rte->relid = tableOid;
-    rte->relkind = RELKIND_RELATION;    /* Don't be too picky. */
-    rte->lateral = false;
-    rte->inh = false;
-    rte->inFromCl = true;
-    query->rtable = list_make1(rte);
+	/* Build a minimal RTE for the rel */
+	rte = makeNode(RangeTblEntry);
+	rte->rtekind = RTE_RELATION;
+	rte->relid = tableOid;
+	rte->relkind = RELKIND_RELATION;	/* Don't be too picky. */
+	rte->lateral = false;
+	rte->inh = false;
+	rte->inFromCl = true;
+	query->rtable = list_make1(rte);
 
-    /* Set up RTE/RelOptInfo arrays */
-    setup_simple_rel_arrays(root);
+	/* Set up RTE/RelOptInfo arrays */
+	setup_simple_rel_arrays(root);
 
-    /* Build RelOptInfo */
-    rel = build_simple_rel(root, 1, NULL);
+	/* Build RelOptInfo */
+	rel = build_simple_rel(root, 1, NULL);
 
-    /* Locate IndexOptInfo for the target index */
-    indexInfo = NULL;
-    foreach(lc, rel->indexlist)
-    {
-        indexInfo = (IndexOptInfo *) lfirst(lc);
-        if (indexInfo->indexoid == indexOid)
-            break;
-    }
+	/* Locate IndexOptInfo for the target index */
+	indexInfo = NULL;
+	foreach(lc, rel->indexlist)
+        {
+		indexInfo = (IndexOptInfo *) lfirst(lc);
+		if (indexInfo->indexoid == indexOid)
+			break;
+        }
 
-    /*
-     * It's possible that get_relation_info did not generate an IndexOptInfo
-     * for the desired index; this could happen if it's not yet reached its
-     * indcheckxmin usability horizon, or if it's a system index and we're
-     * ignoring system indexes.  In such cases we should tell CLUSTER to not
-     * trust the index contents but use seqscan-and-sort.
-     */
-    if (lc == NULL)                /* not in the list? */
-        return true;            /* use sort */
-
-    /*
-     * Rather than doing all the pushups that would be needed to use
-     * set_baserel_size_estimates, just do a quick hack for rows and width.
-     */
-    rel->rows = rel->tuples;
-    rel->reltarget->width = get_relation_data_width(tableOid, NULL);
-
-    root->total_table_pages = rel->pages;
+            /*
+	 * It's possible that get_relation_info did not generate an IndexOptInfo
+	 * for the desired index; this could happen if it's not yet reached its
+	 * indcheckxmin usability horizon, or if it's a system index and we're
+	 * ignoring system indexes.  In such cases we should tell CLUSTER to not
+	 * trust the index contents but use seqscan-and-sort.
+             */
+	if (lc == NULL)				/* not in the list? */
+		return true;			/* use sort */
 
     /*
-     * Determine eval cost of the index expressions, if any.  We need to
-     * charge twice that amount for each tuple comparison that happens during
-     * the sort, since tuplesort.c will have to re-evaluate the index
-     * expressions each time.  (XXX that's pretty inefficient...)
+	 * Rather than doing all the pushups that would be needed to use
+	 * set_baserel_size_estimates, just do a quick hack for rows and width.
      */
-    cost_qual_eval(&indexExprCost, indexInfo->indexprs, root);
-    comparisonCost = 2.0 * (indexExprCost.startup + indexExprCost.per_tuple);
+	rel->rows = rel->tuples;
+	rel->reltarget->width = get_relation_data_width(tableOid, NULL);
 
-    /* Estimate the cost of seq scan + sort */
-    seqScanPath = create_seqscan_path(root, rel, NULL, 0);
-    cost_sort(&seqScanAndSortPath, root, NIL,
-              seqScanPath->total_cost, rel->tuples, rel->reltarget->width,
-              comparisonCost, maintenance_work_mem, -1.0);
+	root->total_table_pages = rel->pages;
 
-    /* Estimate the cost of index scan */
-    indexScanPath = create_index_path(root, indexInfo,
-                                      NIL, NIL, NIL, NIL, NIL,
-                                      ForwardScanDirection, false,
-                                      NULL, 1.0, false);
+    /*
+	 * Determine eval cost of the index expressions, if any.  We need to
+	 * charge twice that amount for each tuple comparison that happens during
+	 * the sort, since tuplesort.c will have to re-evaluate the index
+	 * expressions each time.  (XXX that's pretty inefficient...)
+     */
+	cost_qual_eval(&indexExprCost, indexInfo->indexprs, root);
+	comparisonCost = 2.0 * (indexExprCost.startup + indexExprCost.per_tuple);
 
-    return (seqScanAndSortPath.total_cost < indexScanPath->path.total_cost);
+	/* Estimate the cost of seq scan + sort */
+	seqScanPath = create_seqscan_path(root, rel, NULL, 0);
+	cost_sort(&seqScanAndSortPath, root, NIL,
+			  seqScanPath->total_cost, rel->tuples, rel->reltarget->width,
+			  comparisonCost, maintenance_work_mem, -1.0);
+
+	/* Estimate the cost of index scan */
+	indexScanPath = create_index_path(root, indexInfo,
+									  NIL, NIL, NIL, NIL, NIL,
+									  ForwardScanDirection, false,
+									  NULL, 1.0, false);
+
+	return (seqScanAndSortPath.total_cost < indexScanPath->path.total_cost);
 }
 
 
 /*
  * grouping_distribution_match
- *     Check if the path distribution matches grouping distribution.
+ * 	Check if the path distribution matches grouping distribution.
  *
  * Grouping preserves distribution if the distribution key is on of the
  * grouping keys (arbitrary one). In that case it's guaranteed that groups
@@ -7786,64 +6631,64 @@ plan_cluster_use_sort(Oid tableOid, Oid indexOid)
  */
 static bool
 grouping_distribution_match(PlannerInfo *root, Query *parse, Path *path,
-                            List *clauses)
-{// #lizard forgives
-    int        i;
-    bool    matches_key = false;
-    Distribution *distribution = path->distribution;
+							List *clauses)
+{
+    int            i;
+	bool	matches_key = false;
+	Distribution *distribution = path->distribution;
 
-    int numGroupCols = list_length(clauses);
-    AttrNumber *groupColIdx = extract_grouping_cols(clauses,
-                                                    parse->targetList);
+	int numGroupCols = list_length(clauses);
+	AttrNumber *groupColIdx = extract_grouping_cols(clauses,
+													parse->targetList);
 
 #ifdef __COLD_HOT__
-    if (has_cold_hot_table)
-    {
-        if (! path->distribution)
+	if (has_cold_hot_table)
         {
-            return true;
+		if (! path->distribution)
+        {
+			return true;
         }
-        
-        return false;
+
+		return false;
     }
 #endif
 
     /*
-     * With no explicit data distribution or replicated tables, we can simply
-     * push down the whole aggregation to the remote node, without any sort
-     * of redistribution. So consider this to be a match.
+	 * With no explicit data distribution or replicated tables, we can simply
+	 * push down the whole aggregation to the remote node, without any sort
+	 * of redistribution. So consider this to be a match.
      */
-    if ((distribution == NULL) ||
-        IsLocatorReplicated(distribution->distributionType))
-        return true;
+	if ((distribution == NULL) ||
+		IsLocatorReplicated(distribution->distributionType))
+		return true;
 
-    /* But no distribution expression means 'no match'. */
-    if (distribution->distributionExpr == NULL)
-        return false;
+	/* But no distribution expression means 'no match'. */
+	if (distribution->distributionExpr == NULL)
+		return false;
 
     /*
-     * With distributed data and table distributed using an expression, we
-     * need to check if the distribution expression matches one of the
-     * grouping keys (arbitrary one).
+	 * With distributed data and table distributed using an expression, we
+	 * need to check if the distribution expression matches one of the
+	 * grouping keys (arbitrary one).
      */
-    for (i = 0; i < numGroupCols; i++)
+	for (i = 0; i < numGroupCols; i++)
     {
-        TargetEntry *te = (TargetEntry *)list_nth(parse->targetList,
-                                                  groupColIdx[i]-1);
+		TargetEntry *te = (TargetEntry *)list_nth(parse->targetList,
+												  groupColIdx[i]-1);
 
-        if (equal(te->expr, distribution->distributionExpr))
+		if (equal(te->expr, distribution->distributionExpr))
         {
-            matches_key = true;
-            break;
+			matches_key = true;
+			break;
         }
     }
 
-    return matches_key;
+	return matches_key;
 }
 
 /*
  * get_partitioned_child_rels
- *        Returns a list of the RT indexes of the partitioned child relations
+ *		Returns a list of the RT indexes of the partitioned child relations
  *      with rti as the root parent RT index. Also sets
  *      *part_cols_updated to true if any of the root rte's updated
  *      columns is used in the partition key either of the relation whose RTI
@@ -7856,26 +6701,26 @@ List *
 get_partitioned_child_rels(PlannerInfo *root, Index rti,
                           bool *part_cols_updated)
 {
-    List       *result = NIL;
-    ListCell   *l;
+	List	   *result = NIL;
+	ListCell   *l;
 
     if (part_cols_updated)
         *part_cols_updated = false;
 
-    foreach(l, root->pcinfo_list)
+	foreach(l, root->pcinfo_list)
     {
-        PartitionedChildRelInfo *pc = lfirst(l);
+		PartitionedChildRelInfo *pc = lfirst(l);
 
-        if (pc->parent_relid == rti)
-        {
-            result = pc->child_rels;
+		if (pc->parent_relid == rti)
+		{
+			result = pc->child_rels;
 			if (part_cols_updated)
 				*part_cols_updated = pc->part_cols_updated;
-            break;
-        }
+			break;
     }
+}
 
-    return result;
+	return result;
 }
 
 
@@ -7888,19 +6733,1252 @@ List *
 get_partitioned_child_rels_for_join(PlannerInfo *root, Relids join_relids)
 {
    List       *result = NIL;
-   ListCell   *l;
+    ListCell   *l;
 
    foreach(l, root->pcinfo_list)
-   {
+    {
        PartitionedChildRelInfo *pc = lfirst(l);
 
        if (bms_is_member(pc->parent_relid, join_relids))
            result = list_concat(result, list_copy(pc->child_rels));
-   }
+    }
 
    return result;
 }
 
+/*
+ * add_paths_to_grouping_rel
+ *
+ * Add non-partial paths to grouping relation.
+ */
+static void
+add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
+                          RelOptInfo *grouped_rel, PathTarget *target,
+                          PathTarget *partial_grouping_target,
+                          const AggClauseCosts *agg_costs,
+                          const AggClauseCosts *agg_final_costs,
+                          grouping_sets_data *gd, bool can_sort, bool can_hash,
+                          double dNumGroups, List *havingQual)
+{
+    Query      *parse = root->parse;
+    Path       *cheapest_path = input_rel->cheapest_total_path;
+    ListCell   *lc;
+
+	if (can_sort)
+    {
+        /*
+		 * Use any available suitably-sorted path as input, and also consider
+		 * sorting the cheapest-total path.
+         */
+	    foreach(lc, input_rel->pathlist)
+        {
+			Path	   *path = (Path *) lfirst(lc);
+			bool		is_sorted;
+
+			is_sorted = pathkeys_contained_in(root->group_pathkeys,
+											  path->pathkeys);
+
+			/*
+			 * XL: Can it happen that the cheapest path can't be pushed down,
+			 * while some other path could be? Perhaps we should move the check
+			 * if a path can be pushed down up, and add another OR condition
+			 * to consider all paths that can be pushed down?
+			 *
+			 * if (path == cheapest_path || is_sorted || can_push_down)
+			 */
+			if (path == cheapest_path || is_sorted)
+            {
+#ifdef __TBASE__
+				bool try_redistribute_grouping = false;
+				PathTarget * local_grouping_target = make_partial_grouping_target(root, target);
+
+				/* Estimate number of partial groups. */
+				double dNumLocalGroups = get_number_of_groups(root,
+														 cheapest_path->rows,
+														 gd);
+#endif
+
+#ifdef __TBASE__
+				if (olap_optimizer && !has_cold_hot_table)
+                {
+					if (!is_sorted && !agg_costs->hasOnlyDistinct)
+						path = (Path *) create_sort_path(root,
+														 grouped_rel,
+														 path,
+														 root->group_pathkeys,
+														 -1.0);
+                }
+                else
+				{
+#endif
+				    /* Sort the cheapest-total path if it isn't already sorted */
+				    if (!is_sorted)
+					    path = (Path *) create_sort_path(root,
+													 grouped_rel,
+													 path,
+													 root->group_pathkeys,
+													 -1.0);
+#ifdef __TBASE__
+                }
+#endif
+/*
+				 * If the grouping can't be fully pushed down, redistribute the
+				 * path on top of the (sorted) path. If if can be pushed down,
+				 * disable construction of complex distributed paths.
+ */
+				if (! can_push_down_grouping(root, parse, path))
+#ifdef __TBASE__
+                {
+					/* some special aggs cannot be parallel executed, such as count(distinct) */
+					if(agg_costs->hasNonPartial || agg_costs->hasNonSerial ||
+						parse->groupingSets || path->pathtype == T_Agg ||
+						path->pathtype == T_Group || !olap_optimizer || has_cold_hot_table)
+                    {
+						if (agg_costs->hasOnlyDistinct && olap_optimizer && !parse->groupingSets
+							&& !has_cold_hot_table)
+							path = create_redistribute_grouping_path(root, parse, path);
+						else
+							path = create_remotesubplan_path(root, path, NULL);
+
+						if (agg_costs->hasOnlyDistinct && olap_optimizer &&
+							!has_cold_hot_table)
+                        {
+							if (root->group_pathkeys)
+                            {
+								path = (Path *) create_sort_path(root,
+												 grouped_rel,
+												 path,
+												 root->group_pathkeys,
+												 -1.0);
+                            }
+                        }
+                    }
+					else
+					{
+                         /*
+						  * If the grouping can not be fully pushed down, we adopt another
+						  * strategy instead.
+						  * 1. do grouping on each datanode locally
+						  * 2. re-distribute grouping results among datanodes, then do the
+						  * 	final grouping
+                          */
+
+						try_redistribute_grouping = true;
+
+						/* step 1 */
+						if (parse->groupingSets)
+						{
+                            /*
+							 * TODO 2-phase aggregation for grouping sets paths not
+							 * supported yet, but this the place where such paths
+							 * should be constructed.
+                             */
+						}
+						else if (parse->hasAggs)
+                        {
+                            /*
+							 * We have aggregation, possibly with plain GROUP BY. Make
+							 * an AggPath.
+                             */
+
+							path = (Path *) create_agg_path(root,
+															grouped_rel,
+															path,
+															local_grouping_target,
+											parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+															AGGSPLIT_INITIAL_SERIAL,
+															parse->groupClause,
+															NIL,
+															&agg_partial_costs,
+															dNumLocalGroups);
+                        }
+						else if (parse->groupClause)
+                        {
+                            /*
+							 * We have GROUP BY without aggregation or grouping sets.
+							 * Make a GroupPath.
+                             */
+							path = (Path *) create_group_path(root,
+															  grouped_rel,
+															  path,
+															  local_grouping_target,
+															  parse->groupClause,
+															  NIL,
+															  dNumLocalGroups);
+						}
+						else
+						{
+							/* Other cases should have been handled above */
+							Assert(false);
+                        }
+
+						/* step 2*/
+						path = create_redistribute_grouping_path(root, parse, path);
+					}
+                }
+#else
+					path = create_remotesubplan_path(root, path, NULL);
+#endif
+
+				else
+					try_distributed_aggregation = false;
+
+#ifdef __TBASE__
+				if(try_redistribute_grouping)
+				{
+                    /*
+					 * do final grouping at each datanode
+                     */
+
+					/* Now decide what to stick atop it */
+					if (parse->groupingSets)
+					{
+						/*
+						 * TODO 2-phase aggregation for grouping sets paths not
+						 * supported yet, but this the place where such paths
+						 * should be constructed.
+						 */
+					}
+					else if (parse->hasAggs)
+					{
+						/*
+						 * We generate two paths, differing in the second phase
+						 * implementation (sort and hash).
+						 */
+						Path *remote_path = path;
+
+						if (parse->groupClause)
+						{
+							if (!is_sorted || root->group_pathkeys)
+							{
+								path = (Path *) create_sort_path(root,
+																 grouped_rel,
+																 path,
+																 root->group_pathkeys,
+																 -1.0);
+							}
+						}
+
+						path = (Path *)create_agg_path(root,
+												 grouped_rel,
+												 path,
+												 target,
+										 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+												 AGGSPLIT_FINAL_DESERIAL,
+												 parse->groupClause,
+												 havingQual,
+												 agg_final_costs,
+												 dNumGroups);
+
+						//path->parallel_safe = true;
+
+						add_path(grouped_rel, path);
+
+						if (can_hash)
+						{
+							path = (Path *)
+									 create_agg_path(root,
+													 grouped_rel,
+													 remote_path,
+													 target,
+													 AGG_HASHED,
+													 AGGSPLIT_FINAL_DESERIAL,
+													 parse->groupClause,
+													 havingQual,
+													 agg_final_costs,
+													 dNumGroups);
+							//path->parallel_safe = true;
+							if (g_hybrid_hash_agg)
+							{
+								AggPath *agg = (AggPath *)path;
+								agg->hybrid = true;
+                            }
+
+							add_path(grouped_rel, path);
+						}
+					}
+					else if (parse->groupClause)
+					{
+						if (!is_sorted || root->group_pathkeys)
+						{
+							path = (Path *) create_sort_path(root,
+															 grouped_rel,
+															 path,
+															 root->group_pathkeys,
+															 -1.0);
+						}
+
+						path = (Path *)
+								 create_group_path(root,
+												   grouped_rel,
+												   path,
+												   target,
+												   parse->groupClause,
+												   havingQual,
+												   dNumGroups);
+
+						//path->parallel_safe = true;
+
+                        /*
+						 * We have GROUP BY without aggregation or grouping sets.
+						 * Make a GroupPath.
+                         */
+						add_path(grouped_rel, path);
+
+					}
+					else
+                    {
+						/* Other cases should have been handled above */
+						Assert(false);
+					}
+				}
+				else
+				{
+#endif
+
+				/* Now decide what to stick atop it */
+				if (parse->groupingSets)
+				{
+					consider_groupingsets_paths(root, grouped_rel,
+												path, true, can_hash, target,
+												gd, agg_costs, dNumGroups);
+				}
+				else if (parse->hasAggs)
+				{
+#ifdef __TBASE__
+					bool parallel_aware = false;
+					bool parallel_safe  = false;
+					Path *agg_path      = NULL;
+
+					if (root->group_pathkeys && olap_optimizer &&
+						!has_cold_hot_table && agg_costs->hasOnlyDistinct)
+					{
+						if (!pathkeys_contained_in(root->group_pathkeys,
+											  path->pathkeys))
+						{
+							path = (Path *) create_sort_path(root,
+											 grouped_rel,
+											 path,
+											 root->group_pathkeys,
+											 -1.0);
+					  	}
+                    }
+
+					if (path->pathtype == T_Sort && olap_optimizer && !has_cold_hot_table)
+					{
+						SortPath   *pathnode = (SortPath *)path;
+
+						if (pathnode->subpath->pathtype == T_Gather || agg_costs->hasOnlyDistinct)
+						{
+							path->parallel_aware = true;
+							parallel_aware       = true;
+							parallel_safe        = true;
+						}
+					}
+
+					agg_path = (Path *)
+							 create_agg_path(root,
+											 grouped_rel,
+											 path,
+											 target,
+											 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+											 AGGSPLIT_SIMPLE,
+											 parse->groupClause,
+											 havingQual,
+											 agg_costs,
+											 dNumGroups);
+					agg_path->parallel_aware = parallel_aware;
+					agg_path->parallel_safe  = parallel_safe;
+
+					add_path(grouped_rel, agg_path);
+#else
+                    /*
+					 * We have aggregation, possibly with plain GROUP BY. Make
+					 * an AggPath.
+                     */
+					add_path(grouped_rel, (Path *)
+							 create_agg_path(root,
+											 grouped_rel,
+											 path,
+											 target,
+											 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+											 AGGSPLIT_SIMPLE,
+											 parse->groupClause,
+											 havingQual,
+											 agg_costs,
+											 dNumGroups));
+#endif
+				}
+				else if (parse->groupClause)
+				{
+#ifdef __TBASE__
+					bool parallel_aware = false;
+					bool parallel_safe	= false;
+					Path *group_path      = NULL;
+
+					if (root->group_pathkeys && olap_optimizer &&
+						!has_cold_hot_table && agg_costs->hasOnlyDistinct)
+					{
+						if (!pathkeys_contained_in(root->group_pathkeys,
+											  path->pathkeys))
+						{
+							path = (Path *) create_sort_path(root,
+											 grouped_rel,
+											 path,
+											 root->group_pathkeys,
+											 -1.0);
+					  	}
+					}
+
+					if (path->pathtype == T_Sort && olap_optimizer && !has_cold_hot_table)
+					{
+						SortPath   *pathnode = (SortPath *)path;
+
+						if (pathnode->subpath->pathtype == T_Gather)
+						{
+							path->parallel_aware = true;
+							parallel_aware       = true;
+							parallel_safe        = true;
+						}
+					}
+
+					group_path = (Path *)
+							 create_group_path(root,
+											   grouped_rel,
+											   path,
+											   target,
+											   parse->groupClause,
+											   havingQual,
+											   dNumGroups);
+					group_path->parallel_aware = parallel_aware;
+					group_path->parallel_safe  = parallel_safe;
+					add_path(grouped_rel, group_path);
+#else
+
+					/*
+					 * We have GROUP BY without aggregation or grouping sets.
+					 * Make a GroupPath.
+					 */
+					add_path(grouped_rel, (Path *)
+							 create_group_path(root,
+											   grouped_rel,
+											   path,
+											   target,
+											   parse->groupClause,
+											   havingQual,
+											   dNumGroups));
+#endif
+				}
+				else
+                {
+					/* Other cases should have been handled above */
+					Assert(false);
+				}
+#ifdef __TBASE__
+				}
+#endif
+			}
+		}
+
+        /*
+		 * Now generate a complete GroupAgg Path atop of the cheapest partial
+		 * path.  We can do this using either Gather or Gather Merge.
+		 */
+		if (grouped_rel->partial_pathlist)
+		{
+#ifdef __TBASE__
+			bool       redistribute_group PG_USED_FOR_ASSERTS_ONLY = false;
+#endif
+			Path	   *path = (Path *) linitial(grouped_rel->partial_pathlist);
+#ifdef __TBASE__
+			double		total_groups = 0;
+
+			if (olap_optimizer && !has_cold_hot_table)
+			{
+				total_groups = path->rows;
+			}
+			else
+				total_groups = path->rows * path->parallel_workers;
+#else
+			double		total_groups = path->rows * path->parallel_workers;
+#endif
+			path = (Path *) create_gather_path(root,
+											   grouped_rel,
+											   path,
+											   partial_grouping_target,
+											   NULL,
+											   &total_groups);
+			/*
+			 * Since Gather's output is always unsorted, we'll need to sort,
+			 * unless there's no GROUP BY clause or a degenerate (constant)
+			 * one, in which case there will only be a single group.
+         */
+#ifdef __TBASE__
+		    if (!olap_optimizer || has_cold_hot_table)
+            {
+#endif
+			    if (root->group_pathkeys)
+				    path = (Path *) create_sort_path(root,
+												 grouped_rel,
+												 path,
+												 root->group_pathkeys,
+												 -1.0);
+#ifdef __TBASE__
+	    	}
+#endif
+            /*
+			 * If the grouping can't be fully pushed down, we'll push down the
+			 * first phase of the aggregate, and redistribute only the partial
+			 * results.
+			 *
+			 * If if can be pushed down, disable construction of complex
+			 * distributed paths.
+			 *
+			 * XXX Keep this after the Sort node, to make the path sorted.
+             */
+			if (! can_push_down_grouping(root, parse, path))
+#ifdef __TBASE__
+            {
+				if (olap_optimizer && !has_cold_hot_table)
+                {
+					/* redistribute local grouping results among datanodes */
+					path = create_redistribute_grouping_path(root, parse, path);
+					redistribute_group = true;
+                }
+                else
+					path = create_remotesubplan_path(root, path, NULL);
+			}
+#else
+			path = create_remotesubplan_path(root, path, NULL);
+#endif
+
+			else
+				try_distributed_aggregation = false;
+
+#ifdef __TBASE__
+                /*
+			 * Since Gather's output is always unsorted, we'll need to sort,
+			 * unless there's no GROUP BY clause or a degenerate (constant)
+			 * one, in which case there will only be a single group.
+                 */
+			if (olap_optimizer && !has_cold_hot_table)
+            {
+				if (root->group_pathkeys)
+				{
+					path = (Path *) create_sort_path(root,
+													 grouped_rel,
+													 path,
+													 root->group_pathkeys,
+													 -1.0);
+						path->parallel_aware = true;
+                }
+            }
+#endif
+			if (parse->hasAggs)
+			{
+				Path *agg_path = NULL;
+
+				agg_path = (Path *)
+						 create_agg_path(root,
+										 grouped_rel,
+										 path,
+										 target,
+										 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+										 AGGSPLIT_FINAL_DESERIAL,
+										 parse->groupClause,
+										 havingQual,
+										 agg_final_costs,
+										 dNumGroups);
+
+				if (olap_optimizer && !has_cold_hot_table)
+				{
+					agg_path->parallel_safe = true;
+					agg_path->parallel_aware = true;
+				}
+
+				add_path(grouped_rel, agg_path);
+            }
+            else
+            {
+				Path *group_path = NULL;
+
+				group_path = (Path *)
+						 create_group_path(root,
+										   grouped_rel,
+										   path,
+										   target,
+										   parse->groupClause,
+										   havingQual,
+										   dNumGroups);
+
+				if (olap_optimizer && !has_cold_hot_table)
+				{
+					group_path->parallel_safe = true;
+					group_path->parallel_aware = true;
+                }
+
+				add_path(grouped_rel, group_path);
+            }
+
+            /*
+			 * The point of using Gather Merge rather than Gather is that it
+			 * can preserve the ordering of the input path, so there's no
+			 * reason to try it unless (1) it's possible to produce more than
+			 * one output row and (2) we want the output path to be ordered.
+             */
+			if (parse->groupClause != NIL && root->group_pathkeys != NIL)
+			{
+				foreach(lc, grouped_rel->partial_pathlist)
+				{
+					Path	   *subpath = (Path *) lfirst(lc);
+					Path	   *gmpath;
+					double		total_groups;
+
+                    /*
+					 * It's useful to consider paths that are already properly
+					 * ordered for Gather Merge, because those don't need a
+					 * sort.  It's also useful to consider the cheapest path,
+					 * because sorting it in parallel and then doing Gather
+					 * Merge may be better than doing an unordered Gather
+					 * followed by a sort.  But there's no point in
+					 * considering non-cheapest paths that aren't already
+					 * sorted correctly.
+                     */
+					if (path != subpath &&
+						!pathkeys_contained_in(root->group_pathkeys,
+											   subpath->pathkeys))
+						continue;
+
+#ifdef __TBASE__
+					if (olap_optimizer && !has_cold_hot_table)
+						total_groups = subpath->rows;
+					else
+#endif
+					total_groups = subpath->rows * subpath->parallel_workers;
+
+
+#ifdef __TBASE__
+					if (olap_optimizer && !has_cold_hot_table)
+                    {
+					    gmpath = (Path *) create_gather_path(root,
+													     grouped_rel,
+													     subpath,
+													     partial_grouping_target,
+													     NULL,
+													     &total_groups);
+                    }
+					else
+#endif
+					gmpath = (Path *)
+						create_gather_merge_path(root,
+												 grouped_rel,
+												 subpath,
+												 partial_grouping_target,
+												 root->group_pathkeys,
+												 NULL,
+												 &total_groups);
+
+                    /*
+					 * If the grouping can't be fully pushed down, we'll push down the
+					 * first phase of the aggregate, and redistribute only the partial
+					 * results.
+                     */
+					redistribute_group = false;
+
+					if (! can_push_down_grouping(root, parse, gmpath))
+#ifdef __TBASE__
+                    {
+						if (olap_optimizer && !has_cold_hot_table)
+						{
+							/* redistribute local grouping results among datanodes */
+							gmpath = create_redistribute_grouping_path(root, parse, gmpath);
+							redistribute_group = true;
+						}
+						else
+                        {
+							gmpath = create_remotesubplan_path(root, gmpath, NULL);
+                        }
+                    }
+#else
+					gmpath = create_remotesubplan_path(root, gmpath, NULL);
+#endif
+
+#ifdef __TBASE__
+                    /*
+					 * Since Gather's output is always unsorted, we'll need to sort,
+					 * unless there's no GROUP BY clause or a degenerate (constant)
+					 * one, in which case there will only be a single group.
+                     */
+					if (olap_optimizer && !has_cold_hot_table)
+                    {
+						if (root->group_pathkeys)
+						{
+							gmpath = (Path *) create_sort_path(root,
+															  grouped_rel,
+															  gmpath,
+															  root->group_pathkeys,
+															  -1.0);
+
+								gmpath->parallel_aware = true;
+						}
+					}
+#endif
+					if (parse->hasAggs)
+					{
+						Path *agg_path = NULL;
+
+						agg_path = (Path *)
+								 create_agg_path(root,
+												 grouped_rel,
+												 gmpath,
+												 target,
+												 parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+												 AGGSPLIT_FINAL_DESERIAL,
+												 parse->groupClause,
+												 havingQual,
+												 agg_final_costs,
+												 dNumGroups);
+						if (olap_optimizer && !has_cold_hot_table)
+						{
+							agg_path->parallel_safe = true;
+							agg_path->parallel_aware = true;
+						}
+
+						add_path(grouped_rel, agg_path);
+					}
+					else
+                    {
+						Path *group_path = NULL;
+
+						group_path = (Path *)
+								 create_group_path(root,
+												   grouped_rel,
+												   gmpath,
+												   target,
+												   parse->groupClause,
+												   havingQual,
+												   dNumGroups);
+
+						if (olap_optimizer && !has_cold_hot_table)
+                        {
+							group_path->parallel_safe = true;
+							group_path->parallel_aware = true;
+						}
+
+						add_path(grouped_rel, group_path);
+					}
+				}
+			}
+        }
+    }
+
+	if (can_hash)
+    {
+		Size        hashaggtablesize;
+
+		if (parse->groupingSets)
+        {
+			/*
+			 * Try for a hash-only groupingsets path over unsorted input.
+			 */
+			consider_groupingsets_paths(root, grouped_rel,
+										cheapest_path, false, true, target,
+										gd, agg_costs, dNumGroups);
+		}
+        else
+        {
+			hashaggtablesize = estimate_hashagg_tablesize(cheapest_path,
+														  agg_costs,
+														  dNumGroups);
+
+            /*
+			 * Provided that the estimated size of the hashtable does not
+			 * exceed work_mem, we'll generate a HashAgg Path, although if we
+			 * were unable to sort above, then we'd better generate a Path, so
+			 * that we at least have one.
+             */
+#ifdef __TBASE__
+			if (hashaggtablesize < work_mem * 1024L || g_hybrid_hash_agg ||
+				grouped_rel->pathlist == NIL)
+#else
+			if (hashaggtablesize < work_mem * 1024L ||
+				grouped_rel->pathlist == NIL)
+#endif
+            {
+				/* Don't mess with the cheapest path directly. */
+				Path *path = cheapest_path;
+#ifdef __TBASE__
+				bool try_redistribute_grouping = false;
+#endif
+
+                /*
+				 * If the grouping can't be fully pushed down, we'll push down the
+				 * first phase of the aggregate, and redistribute only the partial
+				 * results.
+				 *
+				 * If if can be pushed down, disable construction of complex
+				 * distributed paths.
+                 */
+				if (! can_push_down_grouping(root, parse, path))
+#ifdef XCP
+				{
+					/* some special aggs cannot be parallel executed, such as count(distinct) */
+					if(agg_costs->hasNonPartial || agg_costs->hasNonSerial ||
+						path->pathtype == T_Agg || path->pathtype == T_Group ||
+						!olap_optimizer || has_cold_hot_table)
+					{
+						if (agg_costs->hasOnlyDistinct && olap_optimizer && !has_cold_hot_table)
+							path = create_redistribute_grouping_path(root, parse, path);
+						else
+							path = create_remotesubplan_path(root, path, NULL);
+					}
+					else
+					{
+						/*
+						  * If the grouping can not be fully pushed down, we adopt another
+						  * strategy instead.
+						  * 1. do grouping on each datanode locally
+						  * 2. re-distribute grouping results among datanodes, then do the
+						  * 	final grouping
+										*/
+						AggClauseCosts hashagg_partial_costs;
+						PathTarget * local_grouping_target = make_partial_grouping_target(root, target);
+
+						/* Estimate number of partial groups. */
+						double dNumLocalGroups = get_number_of_groups(root,
+																 cheapest_path->rows,
+																 gd);
+						try_redistribute_grouping = true;
+
+						MemSet(&hashagg_partial_costs, 0, sizeof(AggClauseCosts));
+
+						get_agg_clause_costs(root, (Node *) local_grouping_target->exprs,
+								 AGGSPLIT_INITIAL_SERIAL,
+								 &hashagg_partial_costs);
+
+						/* step 1 */
+						path = (Path *) create_agg_path(root,
+														grouped_rel,
+														cheapest_path,
+														local_grouping_target,
+														AGG_HASHED,
+														AGGSPLIT_INITIAL_SERIAL,
+														parse->groupClause,
+														NIL,
+														&hashagg_partial_costs,
+														dNumLocalGroups);
+
+#ifdef __TBASE__
+						if (hashaggtablesize >= work_mem * 1024L && g_hybrid_hash_agg)
+						{
+							AggPath *aggpath = (AggPath *)path;
+
+							aggpath->hybrid = true;
+                        }
+#endif
+
+						/* step 2 */
+						path = create_redistribute_grouping_path(root, parse, path);
+					}
+				}
+#else
+				path = create_remotesubplan_path(root, path, NULL);
+#endif
+				else
+					try_distributed_aggregation = false;
+
+/*
+				 * We just need an Agg over the cheapest-total input path,
+				 * since input order won't matter.
+ */
+#ifdef __TBASE__
+				if(try_redistribute_grouping)
+                {
+					AggClauseCosts hashagg_final_costs;
+					Path *agg_path;
+
+					MemSet(&hashagg_final_costs, 0, sizeof(AggClauseCosts));
+
+					get_agg_clause_costs(root, (Node *) target->exprs,
+								 AGGSPLIT_FINAL_DESERIAL,
+								 &hashagg_final_costs);
+					get_agg_clause_costs(root, parse->havingQual,
+								 AGGSPLIT_FINAL_DESERIAL,
+								 &hashagg_final_costs);
+
+					agg_path = (Path *)
+								 create_agg_path(root,
+												 grouped_rel,
+												 path,
+												 target,
+												 AGG_HASHED,
+												 AGGSPLIT_FINAL_DESERIAL,
+												 parse->groupClause,
+												 havingQual,
+												 &hashagg_final_costs,
+												 dNumGroups);
+#ifdef __TBASE__
+					if (hashaggtablesize >= work_mem * 1024L && g_hybrid_hash_agg)
+					{
+						AggPath *aggpath = (AggPath *)agg_path;
+
+						aggpath->hybrid = true;
+					}
+#endif
+					//agg_path->parallel_safe = true;
+
+					add_path(grouped_rel, agg_path);
+				}
+				else
+				{
+					bool parallel_aware = false;
+					bool parallel_safe  = false;
+					Path *agg_path      = NULL;
+
+					if ((path->pathtype == T_Gather || agg_costs->hasOnlyDistinct) && olap_optimizer
+						&& !has_cold_hot_table)
+					{
+						parallel_safe = true;
+						parallel_aware = true;
+					}
+
+					agg_path = (Path *)
+						 create_agg_path(root, grouped_rel,
+										 path,
+										 target,
+										 AGG_HASHED,
+										 AGGSPLIT_SIMPLE,
+										 parse->groupClause,
+										 havingQual,
+										 agg_costs,
+										 dNumGroups);
+					agg_path->parallel_aware = parallel_aware;
+					agg_path->parallel_safe  = parallel_safe;
+#ifdef __TBASE__
+					if (hashaggtablesize >= work_mem * 1024L && g_hybrid_hash_agg)
+                    {
+						AggPath *aggpath = (AggPath *)agg_path;
+
+						aggpath->hybrid = true;
+					}
+#endif
+					add_path(grouped_rel, agg_path);
+				}
+#else
+				add_path(grouped_rel, (Path *)
+						 create_agg_path(root, grouped_rel,
+										 path,
+										 target,
+										 AGG_HASHED,
+										 AGGSPLIT_SIMPLE,
+										 parse->groupClause,
+										 havingQual,
+										 agg_costs,
+										 dNumGroups));
+#endif
+			}
+        }
+
+        /*
+		 * Generate a HashAgg Path atop of the cheapest partial path. Once
+		 * again, we'll only do this if it looks as though the hash table
+		 * won't exceed work_mem.
+         */
+		if (grouped_rel->partial_pathlist)
+		{
+			bool       redistribute_group = false;
+			Path	   *path = (Path *) linitial(grouped_rel->partial_pathlist);
+
+			hashaggtablesize = estimate_hashagg_tablesize(path,
+														  agg_final_costs,
+														  dNumGroups);
+
+#ifdef __TBASE__
+			if (hashaggtablesize < work_mem * 1024L || g_hybrid_hash_agg)
+#else
+			if (hashaggtablesize < work_mem * 1024L)
+#endif
+			{
+#ifdef __TBASE__
+				double		total_groups = 0;
+
+				if (olap_optimizer && !has_cold_hot_table)
+				{
+					total_groups = path->rows;
+				}
+				else
+					total_groups = path->rows * path->parallel_workers;
+#else
+				double		total_groups = path->rows * path->parallel_workers;
+#endif
+				path = (Path *) create_gather_path(root,
+												   grouped_rel,
+												   path,
+												   partial_grouping_target,
+												   NULL,
+												   &total_groups);
+               /*
+				* If the grouping can't be fully pushed down, we'll push down the
+				* first phase of the aggregate, and redistribute only the partial
+				* results.
+				*
+				* If if can be pushed down, disable construction of complex
+				* distributed paths.
+                */
+				if (! can_push_down_grouping(root, parse, path))
+#ifdef __TBASE__
+				{
+					if (olap_optimizer && !has_cold_hot_table)
+					{
+						/* redistribute local grouping results among datanodes */
+						path = create_redistribute_grouping_path(root, parse, path);
+						redistribute_group = true;
+					}
+					else
+					{
+						path = create_remotesubplan_path(root, path, NULL);
+					}
+				}
+#else
+					path = create_remotesubplan_path(root, path, NULL);
+#endif
+				else
+					try_distributed_aggregation = false;
+
+#ifdef __TBASE__
+				if (!redistribute_group)
+				{
+					Path *agg_path = (Path *)
+						 create_agg_path(root,
+										 grouped_rel,
+										 path,
+										 target,
+										 AGG_HASHED,
+										 AGGSPLIT_FINAL_DESERIAL,
+										 parse->groupClause,
+										 havingQual,
+										 agg_final_costs,
+										 dNumGroups);
+
+					if (olap_optimizer && !has_cold_hot_table)
+					{
+						agg_path->parallel_aware = true;
+						agg_path->parallel_safe  = true;
+                    }
+#ifdef __TBASE__
+					if (hashaggtablesize >= work_mem * 1024L && g_hybrid_hash_agg)
+					{
+						AggPath *aggpath = (AggPath *)agg_path;
+
+						aggpath->hybrid = true;
+					}
+#endif
+					add_path(grouped_rel, agg_path);
+				}
+				else
+                {
+#endif
+				Path *agg_path = (Path *)
+						 create_agg_path(root,
+										 grouped_rel,
+										 path,
+										 target,
+										 AGG_HASHED,
+										 AGGSPLIT_FINAL_DESERIAL,
+										 parse->groupClause,
+										 havingQual,
+										 agg_final_costs,
+										 dNumGroups);
+
+				if (olap_optimizer && !has_cold_hot_table)
+                {
+					agg_path->parallel_aware = true;
+					agg_path->parallel_safe = true;
+                }
+#ifdef __TBASE__
+				if (hashaggtablesize >= work_mem * 1024L && g_hybrid_hash_agg)
+				{
+					AggPath *aggpath = (AggPath *)agg_path;
+        
+					aggpath->hybrid = true;
+				}
+#endif
+				add_path(grouped_rel, agg_path);
+#ifdef __TBASE__
+                }
+#endif
+			}
+		}
+	}
+}
+
+    /*
+ * add_partial_paths_to_grouping_rel
+ *
+ * Add partial paths to grouping relation.  These paths are not fully
+ * aggregated; a FinalizeAggregate step is still required.
+     */
+static void
+add_partial_paths_to_grouping_rel(PlannerInfo *root,
+                                  RelOptInfo *input_rel,
+                                  RelOptInfo *grouped_rel,
+                                  PathTarget *target,
+                                  PathTarget *partial_grouping_target,
+                                  AggClauseCosts *agg_partial_costs,
+                                  AggClauseCosts *agg_final_costs,
+                                  grouping_sets_data *gd,
+                                  bool can_sort,
+                                  bool can_hash,
+                                  List *havingQual)
+{
+    Query      *parse = root->parse;
+    Path       *cheapest_partial_path = linitial(input_rel->partial_pathlist);
+    Size        hashaggtablesize;
+    double      dNumPartialGroups = 0;
+    ListCell   *lc;
+
+    /* Estimate number of partial groups. */
+    dNumPartialGroups = get_number_of_groups(root,
+                                             cheapest_partial_path->rows,
+                                             gd);
+
+    if (can_sort)
+    {
+        /* This should have been checked previously */
+        Assert(parse->hasAggs || parse->groupClause);
+
+    /*
+         * Use any available suitably-sorted path as input, and also consider
+         * sorting the cheapest partial path.
+     */
+        foreach(lc, input_rel->partial_pathlist)
+    {
+            Path       *path = (Path *) lfirst(lc);
+            bool        is_sorted;
+
+            is_sorted = pathkeys_contained_in(root->group_pathkeys,
+                                              path->pathkeys);
+            if (path == cheapest_partial_path || is_sorted)
+        {
+                /* Sort the cheapest partial path, if it isn't already */
+                if (!is_sorted)
+                    path = (Path *) create_sort_path(root,
+                                                     grouped_rel,
+                                                     path,
+                                                     root->group_pathkeys,
+                                                     -1.0);
+
+                if (parse->hasAggs)
+                    add_partial_path(grouped_rel, (Path *)
+                                     create_agg_path(root,
+                                                     grouped_rel,
+                                                     path,
+                                                     partial_grouping_target,
+                                                     parse->groupClause ? AGG_SORTED : AGG_PLAIN,
+                                                     AGGSPLIT_INITIAL_SERIAL,
+                                                     parse->groupClause,
+                                                     NIL,
+                                                     agg_partial_costs,
+                                                     dNumPartialGroups));
+                else
+                    add_partial_path(grouped_rel, (Path *)
+                                     create_group_path(root,
+                                                       grouped_rel,
+                                                       path,
+                                                       partial_grouping_target,
+                                                       parse->groupClause,
+                                                       NIL,
+                                                       dNumPartialGroups));
+        }
+    }
+}
+
+    if (can_hash)
+{
+        /* Checked above */
+        Assert(parse->hasAggs || parse->groupClause);
+
+        hashaggtablesize =
+            estimate_hashagg_tablesize(cheapest_partial_path,
+                                       agg_partial_costs,
+                                       dNumPartialGroups);
+
+		/*
+		 * Tentatively produce a partial HashAgg Path, depending on if it
+		 * looks as if the hash table will fit in work_mem.
+		 */
+#ifdef __TBASE__
+		if (hashaggtablesize < work_mem * 1024L || g_hybrid_hash_agg)
+#else
+		if (hashaggtablesize < work_mem * 1024L)
+#endif
+    {
+			AggPath *aggpath = (AggPath *)
+							 create_agg_path(root,
+											 grouped_rel,
+											 cheapest_partial_path,
+											 partial_grouping_target,
+											 AGG_HASHED,
+											 AGGSPLIT_INITIAL_SERIAL,
+											 parse->groupClause,
+											 NIL,
+											 agg_partial_costs,
+											 dNumPartialGroups);
+#ifdef __TBASE__
+			if (hashaggtablesize >= work_mem * 1024L)
+        {
+				aggpath->hybrid = true;
+			}
+#endif
+			add_partial_path(grouped_rel, (Path *)aggpath);
+        }
+    }
+}
+
+/*
+ * can_parallel_agg
+ *
+ * Determines whether or not parallel grouping and/or aggregation is possible.
+ * Returns true when possible, false otherwise.
+ */
+static bool
+can_parallel_agg(PlannerInfo *root, RelOptInfo *input_rel,
+                 RelOptInfo *grouped_rel, const AggClauseCosts *agg_costs)
+{
+    Query      *parse = root->parse;
+
+    if (!grouped_rel->consider_parallel)
+   {
+        /* Not even parallel-safe. */
+        return false;
+   }
+    else if (input_rel->partial_pathlist == NIL)
+    {
+        /* Nothing to use as input for partial aggregate. */
+        return false;
+    }
+    else if (!parse->hasAggs && parse->groupClause == NIL)
+    {
+        /*
+         * We don't know how to do parallel aggregation unless we have either
+         * some aggregates or a grouping clause.
+         */
+        return false;
+    }
+    else if (parse->groupingSets)
+    {
+        /* We don't know how to do grouping sets in parallel. */
+        return false;
+    }
+    else if (agg_costs->hasNonPartial || agg_costs->hasNonSerial)
+    {
+        /* Insufficient support for partial mode. */
+        return false;
+}
+
+    /* Everything looks good. */
+    return true;
+}
 
 static bool
 groupingsets_distribution_match(PlannerInfo *root, Query *parse, Path *path)
