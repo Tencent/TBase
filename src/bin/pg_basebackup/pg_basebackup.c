@@ -1751,25 +1751,21 @@ WriteRecoveryConf(void)
 
 static void
 BaseBackup(void)
-{// #lizard forgives
-    PGresult   *res;
-    char       *sysidentifier;
-    TimeLineID    latesttli;
-    TimeLineID    starttli;
-    char       *basebkp;
-    char        escaped_label[MAXPGPATH];
-    char       *maxrate_clause = NULL;
-    int            i;
-    char        xlogstart[64];
-    char        xlogend[64];
-    int            minServerMajor,
-                maxServerMajor;
-    int            serverVersion,
-                serverMajor;
-	PGconn      *connDev = NULL;
-    PGresult    *resDev = NULL;
-    char        connInfo[MAXPGPATH];
-    char        *default_dbname = " dbname=postgres";
+{
+	PGresult   *res;
+	char	   *sysidentifier;
+	TimeLineID	latesttli;
+	TimeLineID	starttli;
+	char	   *basebkp;
+	char		escaped_label[MAXPGPATH];
+	char	   *maxrate_clause = NULL;
+	int			i;
+	char		xlogstart[64];
+	char		xlogend[64];
+	int			minServerMajor,
+				maxServerMajor;
+	int			serverVersion,
+				serverMajor;
 
     Assert(conn != NULL);
 
@@ -1867,136 +1863,9 @@ BaseBackup(void)
         disconnect_and_exit(1);
     }
 
-    /*
-     * found connstr is contain 'dbname' in pg_basebackup use -d parmas
-     */
-    memset(connInfo, '\0', sizeof(connInfo));
-    if (NULL != connection_string)
-    {
-        if (NULL != strstr(connection_string,"dbname"))
-        {
-            snprintf(connInfo, sizeof(connInfo), "%s",connection_string);
-
-        }
-        else
-        {
-            snprintf(connInfo, sizeof(connInfo), "%s %s",connection_string, default_dbname);
-        }
-    }
-        /*
-         * found connstr is contain 'dbname' in pg_basebackup not use -d parmas| use -U -h -p parmas
-         */
-    else if ((NULL != dbname) || (NULL != dbport) || (NULL != dbuser))
-    {
-        if(NULL == dbname)
-        {
-            snprintf(connInfo, sizeof(connInfo), "host=%s port=%s user=%s %s", dbhost, dbport, dbuser, default_dbname);
-        }
-        else
-        {
-            snprintf(connInfo, sizeof(connInfo), "host=%s port=%s user=%s dbname=%s", dbhost, dbport, dbuser, dbname);
-        }
-    }
-    connDev = PQconnectdb(connInfo);
-
-    if (PQstatus(connDev) != CONNECTION_OK)
-    {
-        fprintf(stderr, "Connection to database failed: %s\n",
-                PQerrorMessage(connDev));
-        disconnect_and_exit(1);
-    }
-    resDev = PQexec(connDev, "select restart_lsn from pg_replication_slots order by restart_lsn asc limit 1");
-    memset(xlogstart, '\0', sizeof(xlogstart));
-    if (PQntuples(resDev) == 0)
-    {
-        strlcpy(xlogstart, PQgetvalue(res, 0, 0), sizeof(xlogstart));
-    }
-    else
-    {
-        strlcpy(xlogstart, PQgetvalue(resDev, 0, 0), sizeof(xlogstart));
-        fprintf(stderr, _("%s: In pg_replication_slots restartlsn exchange write-ahead log start point: %s\n"),
-                progname, xlogstart);
-    }
-
-    if (NULL != resDev)
-    {
-        PQclear(resDev);
-    }
-
-    if (NULL != connDev)
-    {
-        PQfinish(connDev);
-    }
-
-
-    if (verbose)
-        fprintf(stderr, _("%s: checkpoint completed\n"), progname);
-
-    /*
-     * 9.3 and later sends the TLI of the starting point. With older servers,
-     * assume it's the same as the latest timeline reported by
-     * IDENTIFY_SYSTEM.
-     */
-    if (PQnfields(res) >= 2)
-        starttli = atoi(PQgetvalue(res, 0, 1));
-    else
-        starttli = latesttli;
-    PQclear(res);
-    MemSet(xlogend, 0, sizeof(xlogend));
-
-    if (verbose && includewal != NO_WAL)
-        fprintf(stderr, _("%s: write-ahead log start point: %s on timeline %u\n"),
-                progname, xlogstart, starttli);
-
-    /*
-     * Get the header
-     */
-    res = PQgetResult(conn);
-    if (PQresultStatus(res) != PGRES_TUPLES_OK)
-    {
-        fprintf(stderr, _("%s: could not get backup header: %s"),
-                progname, PQerrorMessage(conn));
-        disconnect_and_exit(1);
-    }
-    if (PQntuples(res) < 1)
-    {
-        fprintf(stderr, _("%s: no data returned from server\n"), progname);
-        disconnect_and_exit(1);
-    }
-
-    /*
-     * Sum up the total size, for progress reporting
-     */
-    totalsize = totaldone = 0;
-    tablespacecount = PQntuples(res);
-    for (i = 0; i < PQntuples(res); i++)
-    {
-        totalsize += atol(PQgetvalue(res, i, 2));
-
-        /*
-         * Verify tablespace directories are empty. Don't bother with the
-         * first once since it can be relocated, and it will be checked before
-         * we do anything anyway.
-         */
-        if (format == 'p' && !PQgetisnull(res, i, 1))
-        {
-            char       *path = (char *) get_tablespace_mapping(PQgetvalue(res, i, 1));
-
-            verify_dir_is_empty_or_create(path, &made_tablespace_dirs, &found_tablespace_dirs);
-        }
-    }
-
-    /*
-     * When writing to stdout, require a single tablespace
-     */
-    if (format == 't' && strcmp(basedir, "-") == 0 && PQntuples(res) > 1)
-    {
-        fprintf(stderr,
-                _("%s: can only write single tablespace to stdout, database has %d\n"),
-                progname, PQntuples(res));
-        disconnect_and_exit(1);
-    }
-
+    /* start_point: get last checkpoint point position from master */
+    strlcpy(xlogstart, PQgetvalue(res, 0, 0), sizeof(xlogstart));
+    
     /*
      * If we're streaming WAL, start the streaming session before we start
      * receiving the actual data chunks.
