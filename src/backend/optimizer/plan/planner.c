@@ -140,7 +140,8 @@ static List *reorder_grouping_sets(List *groupingSets, List *sortclause);
 static void standard_qp_callback(PlannerInfo *root, void *extra);
 static double get_number_of_groups(PlannerInfo *root,
                      double path_rows,
-                     grouping_sets_data *gd);
+					 grouping_sets_data *gd,
+					 List *target_list);
 static Size estimate_hashagg_tablesize(Path *path,
                            const AggClauseCosts *agg_costs,
                            double dNumGroups);
@@ -185,7 +186,8 @@ static RelOptInfo *create_ordered_paths(PlannerInfo *root,
 static PathTarget *make_group_input_target(PlannerInfo *root,
                         PathTarget *final_target);
 static PathTarget *make_partial_grouping_target(PlannerInfo *root,
-                             PathTarget *grouping_target);
+							 PathTarget *grouping_target,
+							 Node *havingQual);
 static List *postprocess_setop_tlist(List *new_tlist, List *orig_tlist);
 static List *select_active_windows(PlannerInfo *root, WindowFuncLists *wflists);
 static PathTarget *make_window_input_target(PlannerInfo *root,
@@ -3768,7 +3770,8 @@ standard_qp_callback(PlannerInfo *root, void *extra)
  * Estimate number of groups produced by grouping clauses (1 if not grouping)
  *
  * path_rows: number of output rows from scan/join step
- * gsets: grouping set data, or NULL if not doing grouping sets
+ * gd: grouping sets data including list of grouping sets and their clauses
+ * target_list: target list containing group clause references
  *
  * If doing grouping sets, we also annotate the gsets data with the estimates
  * for each set and each individual rollup list, with a view to later
@@ -3777,7 +3780,8 @@ standard_qp_callback(PlannerInfo *root, void *extra)
 static double
 get_number_of_groups(PlannerInfo *root,
                      double path_rows,
-                     grouping_sets_data *gd)
+					 grouping_sets_data *gd,
+					 List *target_list)
 {
     Query       *parse = root->parse;
     double        dNumGroups;
@@ -3802,7 +3806,7 @@ get_number_of_groups(PlannerInfo *root,
                 ListCell   *lc;
 
                 groupExprs = get_sortgrouplist_exprs(rollup->groupClause,
-                                                     parse->targetList);
+													 target_list);
 
                 rollup->numGroups = 0.0;
 
@@ -3829,7 +3833,7 @@ get_number_of_groups(PlannerInfo *root,
                 gd->dNumHashGroups = 0;
 
                 groupExprs = get_sortgrouplist_exprs(parse->groupClause,
-                                                     parse->targetList);
+													 target_list);
 
                 forboth(lc, gd->hash_sets_idx, lc2, gd->unsortable_sets)
                 {
@@ -3851,7 +3855,7 @@ get_number_of_groups(PlannerInfo *root,
         {
             /* Plain GROUP BY */
             groupExprs = get_sortgrouplist_exprs(parse->groupClause,
-                                                 parse->targetList);
+												 target_list);
 
             dNumGroups = estimate_num_groups(root, groupExprs, path_rows,
                                              NULL);
@@ -4070,7 +4074,8 @@ create_grouping_paths(PlannerInfo *root,
      */
     dNumGroups = get_number_of_groups(root,
                                       cheapest_path->rows,
-                                      gd);
+									  gd,
+									  parse->targetList);
 
     /*
      * Determine whether it's possible to perform sort-based implementations
@@ -4176,7 +4181,8 @@ create_grouping_paths(PlannerInfo *root,
          * appear in the result tlist, and (2) the Aggrefs must be set in
          * partial mode.
          */
-        partial_grouping_target = make_partial_grouping_target(root, target);
+		partial_grouping_target = make_partial_grouping_target(root, target,
+				                                               (Node *) parse->havingQual);
 
         /*
          * Collect statistics about aggregates for estimating costs of
@@ -4274,7 +4280,8 @@ create_grouping_paths(PlannerInfo *root,
 	 */
 	if (try_distributed_aggregation)
 	{
-		partial_grouping_target = make_partial_grouping_target(root, target);
+		partial_grouping_target = make_partial_grouping_target(root, target,
+				                                               (Node *) parse->havingQual);
 
 		/* Estimate number of partial groups. */
 		dNumPartialGroups = get_number_of_groups(root,
@@ -5725,10 +5732,12 @@ make_group_input_target(PlannerInfo *root, PathTarget *final_target)
  * these would be Vars that are grouped by or used in grouping expressions.)
  *
  * grouping_target is the tlist to be emitted by the topmost aggregation step.
- * We get the HAVING clause out of *root.
+ * havingQual represents the HAVING clause.
              */
 static PathTarget *
-make_partial_grouping_target(PlannerInfo *root, PathTarget *grouping_target)
+make_partial_grouping_target(PlannerInfo *root,
+							 PathTarget *grouping_target,
+							 Node *havingQual)
         {
 	Query	   *parse = root->parse;
 	PathTarget *partial_target;
@@ -5770,8 +5779,8 @@ make_partial_grouping_target(PlannerInfo *root, PathTarget *grouping_target)
         /*
 	 * If there's a HAVING clause, we'll need the Vars/Aggrefs it uses, too.
          */
-	if (parse->havingQual)
-		non_group_cols = lappend(non_group_cols, parse->havingQual);
+	if (havingQual)
+		non_group_cols = lappend(non_group_cols, havingQual);
 
         /*
 	 * Pull out all the Vars, PlaceHolderVars, and Aggrefs mentioned in
@@ -7892,7 +7901,8 @@ add_partial_paths_to_grouping_rel(PlannerInfo *root,
     /* Estimate number of partial groups. */
     dNumPartialGroups = get_number_of_groups(root,
                                              cheapest_partial_path->rows,
-                                             gd);
+											 gd,
+											 parse->targetList);
 
     if (can_sort)
     {
