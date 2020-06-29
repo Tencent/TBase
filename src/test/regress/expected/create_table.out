@@ -899,3 +899,17 @@ Distribute By: HASH(a)
 Location Nodes: ALL DATANODES
 
 DROP TABLE parted_col_comment;
+-- partition on boolean column
+create table boolspart (a bool) partition by list (a);
+create table boolspart_t partition of boolspart for values in (true);
+create table boolspart_f partition of boolspart for values in (false);
+\d+ boolspart
+                                 Table "public.boolspart"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ a      | boolean |           |          |         | plain   |              | 
+Partition key: LIST (a)
+Partitions: boolspart_f FOR VALUES IN (false),
+            boolspart_t FOR VALUES IN (true)
+
+drop table boolspart;

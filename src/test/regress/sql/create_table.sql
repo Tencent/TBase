@@ -714,3 +714,10 @@ COMMENT ON COLUMN parted_col_comment.a IS 'Partition key';
 SELECT obj_description('parted_col_comment'::regclass);
 \d+ parted_col_comment
 DROP TABLE parted_col_comment;
+
+-- partition on boolean column
+create table boolspart (a bool) partition by list (a);
+create table boolspart_t partition of boolspart for values in (true);
+create table boolspart_f partition of boolspart for values in (false);
+\d+ boolspart
+drop table boolspart;
