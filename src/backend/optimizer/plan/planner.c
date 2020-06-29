@@ -158,7 +158,6 @@ static void create_degenerate_grouping_paths(PlannerInfo *root,
 static void create_ordinary_grouping_paths(PlannerInfo *root,
 							   RelOptInfo *input_rel,
 							   PathTarget *target, RelOptInfo *grouped_rel,
-							   RelOptInfo *partially_grouped_rel,
 							   const AggClauseCosts *agg_costs,
 							   grouping_sets_data *gd);
 static void consider_groupingsets_paths(PlannerInfo *root,
@@ -3977,8 +3976,6 @@ create_grouping_paths(PlannerInfo *root,
 {// #lizard forgives
     Query       *parse = root->parse;
     RelOptInfo *grouped_rel;
-    PathTarget *partial_grouping_target = NULL;
-    bool        try_distributed_aggregation;
 
 
     /* For now, do all work in the (GROUP_AGG, NULL) upperrel */
@@ -4016,7 +4013,7 @@ create_grouping_paths(PlannerInfo *root,
 	else
     {
 	       create_ordinary_grouping_paths(root, input_rel, target, grouped_rel,
-	                                      partially_grouped_rel, agg_costs, gd);
+	    		    agg_costs, gd);
 
 	       /* Now choose the best path(s) */
 	       set_cheapest(grouped_rel);
@@ -4127,7 +4124,6 @@ create_degenerate_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
 static void
 create_ordinary_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
                               PathTarget *target, RelOptInfo *grouped_rel,
-                              RelOptInfo *partially_grouped_rel,
                               const AggClauseCosts *agg_costs,
                               grouping_sets_data *gd)
 {
@@ -4139,6 +4135,8 @@ create_ordinary_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
    bool        can_hash;
    bool        can_sort;
    bool        try_parallel_aggregation;
+    bool		try_distributed_aggregation;
+	PathTarget *partial_grouping_target = NULL;
 
 	/*
      * Estimate number of groups.
