@@ -2402,6 +2402,38 @@ _copyOnConflictExpr(const OnConflictExpr *from)
     return newnode;
 }
 
+/*
+ * _copyPartitionPruneStepOp
+ */
+static PartitionPruneStepOp *
+_copyPartitionPruneStepOp(const PartitionPruneStepOp *from)
+{
+	PartitionPruneStepOp *newnode = makeNode(PartitionPruneStepOp);
+
+	COPY_SCALAR_FIELD(step.step_id);
+	COPY_SCALAR_FIELD(opstrategy);
+	COPY_NODE_FIELD(exprs);
+	COPY_NODE_FIELD(cmpfns);
+	COPY_BITMAPSET_FIELD(nullkeys);
+
+	return newnode;
+}
+
+/*
+ * _copyPartitionPruneStepCombine
+ */
+static PartitionPruneStepCombine *
+_copyPartitionPruneStepCombine(const PartitionPruneStepCombine *from)
+{
+	PartitionPruneStepCombine *newnode = makeNode(PartitionPruneStepCombine);
+
+	COPY_SCALAR_FIELD(step.step_id);
+	COPY_SCALAR_FIELD(combineOp);
+	COPY_NODE_FIELD(source_stepids);
+
+	return newnode;
+}
+
 /* ****************************************************************
  *                        relation.h copy functions
  *
@@ -2523,21 +2555,6 @@ _copyAppendRelInfo(const AppendRelInfo *from)
     COPY_SCALAR_FIELD(child_reltype);
     COPY_NODE_FIELD(translated_vars);
     COPY_SCALAR_FIELD(parent_reloid);
-
-    return newnode;
-}
-
-/*
- * _copyPartitionedChildRelInfo
- */
-static PartitionedChildRelInfo *
-_copyPartitionedChildRelInfo(const PartitionedChildRelInfo *from)
-{
-    PartitionedChildRelInfo *newnode = makeNode(PartitionedChildRelInfo);
-
-    COPY_SCALAR_FIELD(parent_relid);
-    COPY_NODE_FIELD(child_rels);
-	COPY_SCALAR_FIELD(part_cols_updated);
 
     return newnode;
 }
@@ -5649,6 +5666,12 @@ copyObjectImpl(const void *from)
         case T_OnConflictExpr:
             retval = _copyOnConflictExpr(from);
             break;
+        case T_PartitionPruneStepOp:
+            retval = _copyPartitionPruneStepOp(from);
+            break;
+        case T_PartitionPruneStepCombine:
+            retval = _copyPartitionPruneStepCombine(from);
+            break;
 
             /*
              * RELATION NODES
@@ -5667,9 +5690,6 @@ copyObjectImpl(const void *from)
             break;
         case T_AppendRelInfo:
             retval = _copyAppendRelInfo(from);
-            break;
-        case T_PartitionedChildRelInfo:
-            retval = _copyPartitionedChildRelInfo(from);
             break;
         case T_PlaceHolderInfo:
             retval = _copyPlaceHolderInfo(from);

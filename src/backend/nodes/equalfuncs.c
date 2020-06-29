@@ -932,16 +932,6 @@ _equalAppendRelInfo(const AppendRelInfo *a, const AppendRelInfo *b)
 }
 
 static bool
-_equalPartitionedChildRelInfo(const PartitionedChildRelInfo *a, const PartitionedChildRelInfo *b)
-{
-    COMPARE_SCALAR_FIELD(parent_relid);
-    COMPARE_NODE_FIELD(child_rels);
-	COMPARE_SCALAR_FIELD(part_cols_updated);
-
-    return true;
-}
-
-static bool
 _equalPlaceHolderInfo(const PlaceHolderInfo *a, const PlaceHolderInfo *b)
 {
     COMPARE_SCALAR_FIELD(phid);
@@ -3396,9 +3386,6 @@ equal(const void *a, const void *b)
             break;
         case T_AppendRelInfo:
             retval = _equalAppendRelInfo(a, b);
-            break;
-        case T_PartitionedChildRelInfo:
-            retval = _equalPartitionedChildRelInfo(a, b);
             break;
         case T_PlaceHolderInfo:
             retval = _equalPlaceHolderInfo(a, b);

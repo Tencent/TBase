@@ -121,11 +121,6 @@ extern Expr *preprocess_phv_expression(PlannerInfo *root, Expr *expr);
 
 extern bool plan_cluster_use_sort(Oid tableOid, Oid indexOid);
 
-extern List *get_partitioned_child_rels(PlannerInfo *root, Index rti,
-						   bool *part_cols_updated);
-extern List *get_partitioned_child_rels_for_join(PlannerInfo *root,
-                                                                       Relids join_relids);
-
 extern void preprocess_rowmarks(PlannerInfo *root);
 
 #ifdef __TBASE__

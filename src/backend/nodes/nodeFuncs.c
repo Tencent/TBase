@@ -2147,6 +2147,17 @@ expression_tree_walker(Node *node,
                     return true;
             }
             break;
+		case T_PartitionPruneStepOp:
+		   {
+		       PartitionPruneStepOp *opstep = (PartitionPruneStepOp *) node;
+
+		       if (walker((Node *) opstep->exprs, context))
+		           return true;
+		   }
+		   break;
+		case T_PartitionPruneStepCombine:
+		   /* no expression subnodes */
+		   break;
         case T_JoinExpr:
             {
                 bool        left_arg_ret  = false;
@@ -2977,6 +2988,20 @@ expression_tree_mutator(Node *node,
                 return (Node *) newnode;
             }
             break;
+		case T_PartitionPruneStepOp:
+			{
+				PartitionPruneStepOp *opstep = (PartitionPruneStepOp *) node;
+				PartitionPruneStepOp *newnode;
+
+				FLATCOPY(newnode, opstep, PartitionPruneStepOp);
+				MUTATE(newnode->exprs, opstep->exprs, List *);
+
+				return (Node *) newnode;
+			}
+			break;
+		case T_PartitionPruneStepCombine:
+			/* no expression sub-nodes */
+			return (Node *) copyObject(node);
         case T_JoinExpr:
             {
                 JoinExpr   *join = (JoinExpr *) node;

@@ -1297,7 +1297,6 @@ get_relation_constraints(PlannerInfo *root,
     Index        varno = rel->relid;
     Relation    relation;
     TupleConstr *constr;
-    List       *pcqual;
 
     /*
      * We assume the relation has already been safely locked.
@@ -1383,16 +1382,27 @@ get_relation_constraints(PlannerInfo *root,
         }
     }
 
-    /* Append partition predicates, if any */
-    pcqual = RelationGetPartitionQual(relation);
+	/*
+	* Append partition predicates, if any.
+	*
+	* For selects, partition pruning uses the parent table's partition bound
+	* descriptor, instead of constraint exclusion which is driven by the
+	* individual partition's partition constraint.
+	*/
+	if (root->parse->commandType != CMD_SELECT)
+	{
+		List       *pcqual = RelationGetPartitionQual(relation);
+
     if (pcqual)
     {
         /*
-         * Run each expression through const-simplification and
-         * canonicalization similar to check constraints.
+		    * Run the partition quals through const-simplification similar to
+		    * check constraints.  We skip canonicalize_qual, though, because
+		    * partition quals should be in canonical form already; also,
+		    * since the qual is in implicit-AND format, we'd have to
+		    * explicitly convert it to explicit-AND format and back again.
          */
         pcqual = (List *) eval_const_expressions(root, (Node *) pcqual);
-        pcqual = (List *) canonicalize_qual((Expr *) pcqual);
 
         /* Fix Vars to have the desired varno */
         if (varno != 1)
@@ -1400,6 +1410,7 @@ get_relation_constraints(PlannerInfo *root,
 
         result = list_concat(result, pcqual);
     }
+	}
 
     heap_close(relation, NoLock);
 
@@ -1999,6 +2010,7 @@ set_relation_partition_info(PlannerInfo *root, RelOptInfo *rel,
 	rel->boundinfo = partition_bounds_copy(partdesc->boundinfo, partkey);
    rel->nparts = partdesc->nparts;
 	set_baserel_partition_key_exprs(relation, rel);
+	rel->partition_qual = RelationGetPartitionQual(relation);
 }
 
 /*
@@ -2011,7 +2023,8 @@ find_partition_scheme(PlannerInfo *root, Relation relation)
 {
    PartitionKey partkey = RelationGetPartitionKey(relation);
    ListCell   *lc;
-   int         partnatts;
+	int			partnatts,
+				i;
    PartitionScheme part_scheme;
 
    /* A partitioned table should have a partition key. */
@@ -2029,7 +2042,7 @@ find_partition_scheme(PlannerInfo *root, Relation relation)
            partnatts != part_scheme->partnatts)
            continue;
 
-       /* Match the partition key types. */
+		/* Match partition key type properties. */
        if (memcmp(partkey->partopfamily, part_scheme->partopfamily,
                   sizeof(Oid) * partnatts) != 0 ||
            memcmp(partkey->partopcintype, part_scheme->partopcintype,
@@ -2046,6 +2059,19 @@ find_partition_scheme(PlannerInfo *root, Relation relation)
                      sizeof(int16) * partnatts) == 0);
        Assert(memcmp(partkey->parttypbyval, part_scheme->parttypbyval,
                      sizeof(bool) * partnatts) == 0);
+
+		/*
+		 * If partopfamily and partopcintype matched, must have the same
+		 * partition comparison functions.  Note that we cannot reliably
+		 * Assert the equality of function structs themselves for they might
+		 * be different across PartitionKey's, so just Assert for the function
+		 * OIDs.
+		 */
+#ifdef USE_ASSERT_CHECKING
+		for (i = 0; i < partkey->partnatts; i++)
+			Assert(partkey->partsupfunc[i].fn_oid ==
+				   part_scheme->partsupfunc[i].fn_oid);
+#endif
 
        /* Found matching partition scheme. */
        return part_scheme;
@@ -2080,6 +2106,12 @@ find_partition_scheme(PlannerInfo *root, Relation relation)
 	part_scheme->parttypbyval = (bool *) palloc(sizeof(bool) * partnatts);
 	memcpy(part_scheme->parttypbyval, partkey->parttypbyval,
 		   sizeof(bool) * partnatts);
+
+	part_scheme->partsupfunc = (FmgrInfo *)
+		palloc(sizeof(FmgrInfo) * partnatts);
+	for (i = 0; i < partnatts; i++)
+		fmgr_info_copy(&part_scheme->partsupfunc[i], &partkey->partsupfunc[i],
+					   CurrentMemoryContext);
 
    /* Add the partitioning scheme to PlannerInfo. */
    root->part_schemes = lappend(root->part_schemes, part_scheme);

@@ -22,7 +22,7 @@ override CFLAGS += $(PTHREAD_CFLAGS)
 endif
 
 SUBDIRS = access audit bootstrap catalog contrib parser commands executor foreign lib libpq \
-	pgxc main nodes optimizer oracle port postmaster regex replication rewrite \
+	pgxc main nodes optimizer partitioning oracle port postmaster regex replication rewrite \
 	statistics storage tcop tsearch utils $(top_builddir)/src/timezone $(top_builddir)/src/interfaces/libpq
 
 include $(srcdir)/common.mk
