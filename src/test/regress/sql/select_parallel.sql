@@ -145,4 +145,29 @@ SELECT xc_node_id != 0 FROM t_worker_identifier;
 -- provoke error in worker
 select stringu1::int2 from tenk1 where unique1 = 1;
 
+-- test interaction with set-returning functions
+SAVEPOINT settings;
+
+-- multiple subqueries under a single Gather node
+-- must set parallel_setup_cost > 0 to discourage multiple Gather nodes
+SET LOCAL parallel_setup_cost = 10;
+EXPLAIN (COSTS OFF)
+SELECT unique1 FROM tenk1 WHERE fivethous = tenthous + 1
+UNION ALL
+SELECT unique1 FROM tenk1 WHERE fivethous = tenthous + 1;
+ROLLBACK TO SAVEPOINT settings;
+
+-- can't use multiple subqueries under a single Gather node due to initPlans
+EXPLAIN (COSTS OFF)
+SELECT unique1 FROM tenk1 WHERE fivethous =
+   (SELECT unique1 FROM tenk1 WHERE fivethous = 1 LIMIT 1)
+UNION ALL
+SELECT unique1 FROM tenk1 WHERE fivethous =
+   (SELECT unique2 FROM tenk1 WHERE fivethous = 1 LIMIT 1)
+ORDER BY 1;
+
+-- test interaction with SRFs
+SELECT * FROM information_schema.foreign_data_wrapper_options
+ORDER BY 1, 2, 3;
+
 rollback;
