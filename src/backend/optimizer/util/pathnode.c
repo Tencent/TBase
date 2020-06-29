@@ -1422,6 +1422,13 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
     Distribution   *distribution = NULL;
     RelOptInfo       *rel = subpath->parent;
     RemoteSubPath  *pathnode;
+#ifdef __TBASE__
+	int				num_replication;
+
+	/* IsLocatorNone() also indicates we are replicating through input nodes */
+	num_replication = (IsLocatorReplicated(distributionType) ||
+				IsLocatorNone(distributionType)) ? bms_num_members(nodes) : 1;
+#endif
 
      if (distributionType != LOCATOR_TYPE_NONE)
     {
@@ -1467,8 +1474,12 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
         /* (re)calculate costs */
         cost_remote_subplan((Path *) pathnode, subpath->startup_cost,
                             subpath->total_cost, subpath->rows, rel->reltarget->width,
+#ifdef __TBASE__
+							num_replication);
+#else
                             IsLocatorReplicated(distributionType) ?
                                     bms_num_members(nodes) : 1);
+#endif
         mpath->subpath = (Path *) pathnode;
         cost_material(&mpath->path,
                       pathnode->path.startup_cost,
@@ -1532,8 +1543,12 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
         cost_remote_subplan((Path *) pathnode,
                             input_startup_cost, input_total_cost,
                             subpath->rows, rel->reltarget->width,
+#ifdef __TBASE__
+							num_replication);
+#else
                             IsLocatorReplicated(distributionType) ?
                                     bms_num_members(nodes) : 1);
+#endif
         return (Path *) pathnode;
     }
 }
@@ -2256,6 +2271,7 @@ not_allowed_join:
                     nodes = bms_add_member(nodes, i);
 
 #ifdef __TBASE__
+                /* check if we can distribute by shard */
                 if (OidIsValid(group))
                 {
                     int      node_index;
@@ -2275,9 +2291,9 @@ not_allowed_join:
                 }
 
                 /*
-                  * if one of both is smaller enough, 
-                  * replicate the small one instead of redistribute both
-                                */
+                 * if any side is smaller enough, replicate the smaller one
+                 * instead of redistribute both of them.
+                 */
                 if(inner_size * outer_nodes < inner_size + outer_size &&
                     (pathnode->jointype != JOIN_RIGHT && pathnode->jointype != JOIN_FULL) &&
                     outerd->distributionType != LOCATOR_TYPE_REPLICATED && !redistribute_inner &&
@@ -2373,7 +2389,10 @@ not_allowed_join:
             if (new_inner_key)
             {
 #ifdef __TBASE__
-                /* replicate outer rel */
+				/*
+				 * replicate outer rel, just set LOCATOR_TYPE_NONE to remove
+				 * the path distribution.
+				 */
                 if(replicate_outer)
                 {
                     pathnode->outerjoinpath = redistribute_path(
@@ -2382,7 +2401,7 @@ not_allowed_join:
                                                 outerpathkeys,
                                                 LOCATOR_TYPE_NONE,
                                                 NULL,
-                                                NULL,
+                                                innerd->nodes,
                                                 NULL);
 
                     if (IsA(pathnode, MergePath))
@@ -2414,7 +2433,10 @@ not_allowed_join:
             if (new_outer_key)
             {
 #ifdef __TBASE__
-                /* replicate inner rel */
+                /*
+				 * replicate inner rel, just set LOCATOR_TYPE_NONE to remove
+				 * the path distribution.
+				 */
                 if(replicate_inner)
                 {
                     pathnode->innerjoinpath = redistribute_path(
@@ -2423,7 +2445,7 @@ not_allowed_join:
                                                 innerpathkeys,
                                                 LOCATOR_TYPE_NONE,
                                                 NULL,
-                                                NULL,
+                                                outerd->nodes,
                                                 NULL);
 
                     if (IsA(pathnode, MergePath))
