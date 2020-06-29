@@ -3565,7 +3565,8 @@ readnextline:
                     check_partition_constr = false;
 
                 /* Check the constraints of the tuple */
-                if (cstate->rel->rd_att->constr || check_partition_constr)
+				if (resultRelInfo->ri_RelationDesc->rd_att->constr ||
+                    check_partition_constr)
 					ExecConstraints(resultRelInfo, slot, estate, true);
 
 #ifdef _MLS_
