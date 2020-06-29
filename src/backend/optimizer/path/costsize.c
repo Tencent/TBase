@@ -2345,6 +2345,25 @@ final_cost_nestloop(PlannerInfo *root, NestPath *path,
     startup_cost += path->path.pathtarget->cost.startup;
     run_cost += path->path.pathtarget->cost.per_tuple * path->path.rows;
 
+#ifdef __TBASE__
+	/*
+	 * While NestLoop is executed it rescans inner plan. We do not want to
+	 * rescan RemoteSubplan and do not support it. So if inner_plan is a
+	 * RemoteSubplan, materialize it.
+	 *
+	 * We add materialize plannode during the create plan phase to avoid
+	 * other optimizer side affect. But we still need to add the cost here
+	 * just like mergejoin did when considering materialize_inner flag.
+	 * During join reordering phase, there should be no other node between
+	 * current nestloop and RemoteSubPath. Thus we do not need to traverse
+	 * the whole subpath to find RemoteSubPath.
+	 */
+	if (IsA(inner_path, RemoteSubPath))
+	{
+		run_cost += cpu_operator_cost * inner_path_rows;
+	}
+#endif
+
     path->path.startup_cost = startup_cost;
     path->path.total_cost = startup_cost + run_cost;
 }
