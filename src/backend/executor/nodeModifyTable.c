@@ -514,16 +514,6 @@ ExecInsert(ModifyTableState *mtstate,
 		WCOKind		wco_kind;
 
         /*
-         * We always check the partition constraint, including when the tuple
-         * got here via tuple-routing.  However we don't need to in the latter
-         * case if no BR trigger is defined on the partition.  Note that a BR
-         * trigger might modify the tuple such that the partition constraint
-         * is no longer satisfied, so we need to check in that case.
-         */
-        bool        check_partition_constr =
-        (resultRelInfo->ri_PartitionCheck != NIL);
-
-        /*
          * Constraints might reference the tableoid column, so initialize
          * t_tableOid before evaluating them.
          */
@@ -549,17 +539,21 @@ ExecInsert(ModifyTableState *mtstate,
 			ExecWithCheckOptions(wco_kind, resultRelInfo, slot, estate);
 
         /*
-         * No need though if the tuple has been routed, and a BR trigger
-         * doesn't exist.
+		 * Check the constraints of the tuple.
          */
-		if (resultRelInfo->ri_PartitionRoot != NULL &&
-            !(resultRelInfo->ri_TrigDesc &&
-              resultRelInfo->ri_TrigDesc->trig_insert_before_row))
-            check_partition_constr = false;
+		if (resultRelationDesc->rd_att->constr)
+            ExecConstraints(resultRelInfo, slot, estate);
 
-        /* Check the constraints of the tuple */
-        if (resultRelationDesc->rd_att->constr || check_partition_constr)
-                    ExecConstraints(resultRelInfo, slot, estate, true);			
+		/*
+		* Also check the tuple against the partition constraint, if there is
+		* one; except that if we got here via tuple-routing, we don't need to
+		* if there's no BR trigger defined on the partition.
+		*/
+		if (resultRelInfo->ri_PartitionCheck &&
+		   (resultRelInfo->ri_PartitionRoot == NULL ||
+		    (resultRelInfo->ri_TrigDesc &&
+		     resultRelInfo->ri_TrigDesc->trig_insert_before_row)))
+		   ExecPartitionCheck(resultRelInfo, slot, estate, true);
 
 #ifdef _MLS_
         if (is_mls_user())
@@ -1354,7 +1348,7 @@ lreplace:;
 	        */
 	    partition_constraint_failed =
 	           resultRelInfo->ri_PartitionCheck &&
-	           !ExecPartitionCheck(resultRelInfo, slot, estate);
+			!ExecPartitionCheck(resultRelInfo, slot, estate, false);
 
 	    if (!partition_constraint_failed &&
 	           resultRelInfo->ri_WithCheckOptions != NIL)
@@ -1473,7 +1467,7 @@ lreplace:;
          * checks.
          */
 	    if (resultRelationDesc->rd_att->constr)
-	    	ExecConstraints(resultRelInfo, slot, estate, false);
+	    	ExecConstraints(resultRelInfo, slot, estate);
 
 #ifdef _MLS_
         if (is_mls_user())
