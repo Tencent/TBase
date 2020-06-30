@@ -994,6 +994,22 @@ select NULL::derived::base;
  
 (1 row)
 
+-- remove redundant conversions.
+explain (verbose on, costs off) select row(i, b)::more_derived::derived::base from more_derived;
+                QUERY PLAN                 
+-------------------------------------------
+ Seq Scan on public.more_derived
+   Output: (ROW(i, b)::more_derived)::base
+(2 rows)
+
+explain (verbose on, costs off) select (1, 2)::more_derived::derived::base;
+      QUERY PLAN       
+-----------------------
+ Result
+   Output: '(1)'::base
+(2 rows)
+
+drop table more_derived;
 drop table derived;
 drop table base;
 create table p1(ff1 int) distribute by roundrobin;
