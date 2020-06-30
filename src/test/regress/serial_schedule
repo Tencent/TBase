@@ -194,6 +194,7 @@ test: identity
 test: partition_join
 test: partition_prune
 test: partition_prune_hash
+test: partition_info
 test: hash_part
 test: event_trigger
 test: fast_default
