@@ -73,9 +73,6 @@ static char *ExecBuildSlotPartitionKeyDescription(Relation rel,
  * tuple routing for partitioned tables, encapsulates it in
  * PartitionTupleRouting, and returns it.
  *
- * Note that all the relations in the partition tree are locked using the
- * RowExclusiveLock mode upon return from this function.
- *
  * While we allocate the arrays of pointers of ResultRelInfo and
  * TupleConversionMap for all partitions here, actual objects themselves are
  * lazily allocated for a given partition if a tuple is actually routed to it;
@@ -100,7 +97,6 @@ ExecSetupPartitionTupleRouting(ModifyTableState *mtstate, Relation rel)
 	 * Get the information about the partition tree after locking all the
 	 * partitions.
 	 */
-	(void) find_all_inheritors(RelationGetRelid(rel), RowExclusiveLock, NULL);
 	proute = (PartitionTupleRouting *) palloc0(sizeof(PartitionTupleRouting));
 	proute->partition_dispatch_info =
 		RelationGetPartitionDispatchInfo(rel, &proute->num_dispatch,
@@ -329,8 +325,9 @@ ExecFindPartition(ResultRelInfo *resultRelInfo, PartitionDispatch *pd,
 
 /*
  * ExecInitPartitionInfo
- *		Initialize ResultRelInfo and other information for a partition if not
- *		already done
+ *     Lock the partition and initialize ResultRelInfo.  Also setup other
+ *     information for the partition and store it in the next empty slot in
+ *     the proute->partitions array.
  *
  * Returns the ResultRelInfo
  */
@@ -346,11 +343,7 @@ ExecInitPartitionInfo(ModifyTableState *mtstate,
 	ModifyTable *node = mtstate ? (ModifyTable *) mtstate->ps.plan : NULL;
 	MemoryContext oldContext;
 
-	/*
-	 * We locked all the partitions in ExecSetupPartitionTupleRouting
-	 * including the leaf partitions.
-	 */
-	partrel = heap_open(proute->partition_oids[partidx], NoLock);
+	partrel = table_open(dispatch->partdesc->oids[partidx], RowExclusiveLock);
 
 	/*
 	 * Keep ResultRelInfo and other information for this partition in the
