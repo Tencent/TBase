@@ -2516,3 +2516,19 @@ alter table defpart_attach_test_d add check (a > 1);
 alter table defpart_attach_test attach partition defpart_attach_test_d default;
 
 drop table defpart_attach_test;
+
+-- test case where the partitioning operator is a SQL function whose
+-- evaluation results in the table's relcache being rebuilt partway through
+-- the execution of an ATTACH PARTITION command
+create function at_test_sql_partop (int4, int4) returns int language sql
+as $$ select case when $1 = $2 then 0 when $1 > $2 then 1 else -1 end; $$;
+create operator class at_test_sql_partop for type int4 using btree as
+    operator 1 < (int4, int4), operator 2 <= (int4, int4),
+    operator 3 = (int4, int4), operator 4 >= (int4, int4),
+    operator 5 > (int4, int4), function 1 at_test_sql_partop(int4, int4);
+create table at_test_sql_partop (a int) partition by range (a at_test_sql_partop);
+create table at_test_sql_partop_1 (a int);
+alter table at_test_sql_partop attach partition at_test_sql_partop_1 for values from (0) to (10);
+drop table at_test_sql_partop;
+drop operator class at_test_sql_partop using btree;
+drop function at_test_sql_partop;

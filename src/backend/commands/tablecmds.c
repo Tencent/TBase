@@ -16688,9 +16688,6 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd)
                         trigger_name, RelationGetRelationName(attachrel)),
                  errdetail("ROW triggers with transition tables are not supported on partitions")));
 
-    /* OK to create inheritance.  Rest of the checks performed there */
-    CreateInheritance(attachrel, rel);
-
 	/* Update the default partition oid */
 	if (cmd->bound->is_default)
 		update_default_partition_oid(RelationGetRelid(rel),
@@ -16703,6 +16700,9 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd)
      */
     check_new_partition_bound(RelationGetRelationName(attachrel), rel,
                               cmd->bound);
+
+	/* OK to create inheritance.  Rest of the checks performed there */
+	CreateInheritance(attachrel, rel);
 
     /* Update the pg_class entry. */
     StorePartitionBound(attachrel, rel, cmd->bound);
