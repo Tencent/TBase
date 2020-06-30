@@ -410,7 +410,6 @@ heap_create(const char *relname,
         case RELKIND_VIEW:
         case RELKIND_COMPOSITE_TYPE:
         case RELKIND_FOREIGN_TABLE:
-        case RELKIND_PARTITIONED_TABLE:
             create_storage = false;
 
             /*
@@ -420,10 +419,11 @@ heap_create(const char *relname,
             reltablespace = InvalidOid;
             break;
 
+		case RELKIND_PARTITIONED_TABLE:
 		case RELKIND_PARTITIONED_INDEX:
 			/*
-			 * Preserve tablespace so that it's used as tablespace for indexes
-			 * on future partitions.
+			 * For partitioned tables and indexes, preserve tablespace so that
+			 * it's used as the tablespace for future partitions.
 			 */
 			create_storage = false;
 			break;

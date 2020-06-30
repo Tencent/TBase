@@ -205,6 +205,19 @@ DESCR("");
  */
 #define          REPLICA_IDENTITY_INDEX    'i'
 
+/*
+ * Relation kinds that have physical storage. These relations normally have
+ * relfilenode set to non-zero, but it can also be zero if the relation is
+ * mapped.
+ */
+#define RELKIND_CAN_HAVE_STORAGE(relkind) \
+   ((relkind) == RELKIND_RELATION || \
+    (relkind) == RELKIND_INDEX || \
+    (relkind) == RELKIND_SEQUENCE || \
+    (relkind) == RELKIND_TOASTVALUE || \
+    (relkind) == RELKIND_MATVIEW)
+
+
 #ifdef _MLS_
 /* enum for relkindext column */
 #define       RELKIND_AUDIT_SYS_TABLE   'a'
