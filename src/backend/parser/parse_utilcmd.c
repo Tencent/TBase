@@ -1795,6 +1795,7 @@ generateClonedIndexStmt(CreateStmtContext *cxt, Relation source_idx,
     index->transformed = true;    /* don't need transformIndexStmt */
     index->concurrent = false;
     index->if_not_exists = false;
+	index->reset_default_tblspc = false;
 
     /*
      * We don't try to preserve the name of the source index; instead, just
@@ -2268,6 +2269,7 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
     index->transformed = false;
     index->concurrent = false;
     index->if_not_exists = false;
+	index->reset_default_tblspc = constraint->reset_default_tblspc;
 
     /*
      * If it's ALTER TABLE ADD CONSTRAINT USING INDEX, look up the index and

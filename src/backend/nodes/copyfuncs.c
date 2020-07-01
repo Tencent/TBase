@@ -3153,6 +3153,7 @@ _copyConstraint(const Constraint *from)
     COPY_NODE_FIELD(options);
     COPY_STRING_FIELD(indexname);
     COPY_STRING_FIELD(indexspace);
+	COPY_SCALAR_FIELD(reset_default_tblspc);
     COPY_STRING_FIELD(access_method);
     COPY_NODE_FIELD(where_clause);
     COPY_NODE_FIELD(pktable);
@@ -3745,6 +3746,7 @@ _copyIndexStmt(const IndexStmt *from)
     COPY_SCALAR_FIELD(transformed);
     COPY_SCALAR_FIELD(concurrent);
     COPY_SCALAR_FIELD(if_not_exists);
+	COPY_SCALAR_FIELD(reset_default_tblspc);
 #ifdef __TBASE__
     COPY_SCALAR_FIELD(parentIndexOid);
 #endif

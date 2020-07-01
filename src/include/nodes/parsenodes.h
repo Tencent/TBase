@@ -2252,6 +2252,8 @@ typedef struct Constraint
     List       *options;        /* options from WITH clause */
     char       *indexname;        /* existing index to use; otherwise NULL */
     char       *indexspace;        /* index tablespace; NULL for default */
+	bool		reset_default_tblspc;	/* reset default_tablespace prior to
+										 * creating the index */
     /* These could be, but currently are not, used for UNIQUE/PKEY: */
     char       *access_method;    /* index access method; NULL for default */
     Node       *where_clause;    /* partial index predicate */
@@ -2881,6 +2883,8 @@ typedef struct IndexStmt
     bool        transformed;    /* true when transformIndexStmt is finished */
     bool        concurrent;        /* should this be a concurrent index build? */
     bool        if_not_exists;    /* just do nothing if index already exists? */
+        bool        reset_default_tblspc;   /* reset default_tablespace prior to
+                                             * executing */
 #ifdef __TBASE__
     /* used for interval partition */
     Oid         parentIndexOid;
