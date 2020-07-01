@@ -5713,7 +5713,12 @@ DESCR("hash partition CHECK constraint");
 /* information about a partition tree */
 DATA(insert OID = 4688 ( pg_partition_tree PGNSP PGUID 12 1 1000 0 0 f f f f t t v s 1 0 2249 "2205" "{2205,2205,2205,16,23}" "{i,o,o,o,o}" "{rootrelid,relid,parentrelid,isleaf,level}" _null_ _null_ pg_partition_tree _null_ _null_ _null_ ));
 DESCR("view partition tree tables");
-DATA(insert OID = 4689 ( pg_partition_ancestors PGNSP PGUID 12 1 10 0 0 f f f f t t v s 1 0 2205 "2205" "{2205,2205}" "{i,o}" "{partitionid,relid}" _null_ _null_ pg_partition_ancestors _null_ _null_ _null_ ));
+
+/* function to get the top-most partition root parent */
+DATA(insert OID = 4689 ( pg_partition_root PGNSP PGUID 12 1 0 0 0 f f f f t f i s 1 0 2205 "2205" _null_ _null_ _null_ _null_ _null_ pg_partition_root _null_ _null_ _null_ ));
+DESCR("get top-most partition root parent");
+
+DATA(insert OID = 4690 ( pg_partition_ancestors PGNSP PGUID 12 1 10 0 0 f f f f t t v s 1 0 2205 "2205" "{2205,2205}" "{i,o}" "{partitionid,relid}" _null_ _null_ pg_partition_ancestors _null_ _null_ _null_ ));
 DESCR("view ancestors of the partition");
 DATA(insert OID = 3410 (  pg_extent_info                PGNSP PGUID 12 10 20 0 0 f f f f f t v s 1 0 2249 "2205" "{23,16,23,23,23,23,23,23,23}" "{o,o,o,o,o,o,o,o,o}" "{eid,is_occupied,shardid,freespace_cat,hwm,scan_next,scan_prev,alloc_next,alloc_prev}" _null_ _null_ pg_extent_info_oid _null_ _null_ _null_ ));
 DESCR("get extent info of a relation");

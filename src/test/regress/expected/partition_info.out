@@ -12,6 +12,18 @@ SELECT * FROM pg_partition_tree(0);
        |             |        |      
 (1 row)
 
+SELECT pg_partition_root(NULL);
+ pg_partition_root 
+-------------------
+ 
+(1 row)
+
+SELECT pg_partition_root(0);
+ pg_partition_root 
+-------------------
+ 
+(1 row)
+
 SELECT * FROM pg_partition_ancestors(NULL);
  relid 
 -------
@@ -76,6 +88,20 @@ SELECT relid, parentrelid, level, isleaf
  ptif_test01 | ptif_test0  |     0 | t
 (1 row)
 
+-- List all members using pg_partition_root with leaf table reference
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree(pg_partition_root('ptif_test01')) p
+  JOIN pg_class c ON (p.relid = c.oid);
+    relid    | parentrelid | level | isleaf 
+-------------+-------------+-------+--------
+ ptif_test   |             |     0 | f
+ ptif_test0  | ptif_test   |     1 | f
+ ptif_test1  | ptif_test   |     1 | f
+ ptif_test2  | ptif_test   |     1 | t
+ ptif_test01 | ptif_test0  |     2 | t
+ ptif_test11 | ptif_test1  |     2 | t
+(6 rows)
+
 -- List all ancestors of root and leaf tables
 SELECT * FROM pg_partition_ancestors('ptif_test01');
     relid    
@@ -123,6 +149,20 @@ SELECT relid, parentrelid, level, isleaf
  ptif_test01_index | ptif_test0_index |     0 | t
 (1 row)
 
+-- List all members using pg_partition_root with leaf index reference
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree(pg_partition_root('ptif_test01_index')) p
+  JOIN pg_class c ON (p.relid = c.oid);
+       relid       |   parentrelid    | level | isleaf 
+-------------------+------------------+-------+--------
+ ptif_test_index   |                  |     0 | f
+ ptif_test0_index  | ptif_test_index  |     1 | f
+ ptif_test1_index  | ptif_test_index  |     1 | f
+ ptif_test2_index  | ptif_test_index  |     1 | t
+ ptif_test01_index | ptif_test0_index |     2 | t
+ ptif_test11_index | ptif_test1_index |     2 | t
+(6 rows)
+
 -- List all ancestors of root and leaf indexes
 SELECT * FROM pg_partition_ancestors('ptif_test01_index');
        relid       
@@ -148,6 +188,12 @@ SELECT relid, parentrelid, level, isleaf
  ptif_normal_table |             |     0 | t
 (1 row)
 
+SELECT pg_partition_root('ptif_normal_table');
+ pg_partition_root 
+-------------------
+ ptif_normal_table
+(1 row)
+
 SELECT * FROM pg_partition_ancestors('ptif_normal_table');
  relid 
 -------
@@ -167,6 +213,18 @@ SELECT * FROM pg_partition_tree('ptif_test_matview');
  relid | parentrelid | isleaf | level 
 -------+-------------+--------+-------
        |             |        |      
+(1 row)
+
+SELECT pg_partition_root('ptif_test_view');
+ pg_partition_root 
+-------------------
+ 
+(1 row)
+
+SELECT pg_partition_root('ptif_test_matview');
+ pg_partition_root 
+-------------------
+ 
 (1 row)
 
 SELECT * FROM pg_partition_ancestors('ptif_test_view');
