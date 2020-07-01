@@ -499,6 +499,23 @@ static const SchemaQuery Query_for_list_of_constraints_with_schema = {
     NULL
 };
 
+/* partitioned relations */
+static const SchemaQuery Query_for_list_of_partitioned_relations = {
+    /* catname */
+   "pg_catalog.pg_class c",
+   /* selcondition */
+   "c.relkind IN (" CppAsString2(RELKIND_PARTITIONED_TABLE)
+       ", " CppAsString2(RELKIND_PARTITIONED_INDEX) ")",
+   /* viscondition */
+   "pg_catalog.pg_table_is_visible(c.oid)",
+   /* namespace */
+   "c.relnamespace",
+   /* result */
+   "pg_catalog.quote_ident(c.relname)",
+   /* qualresult */
+   	NULL
+};
+
 /* Relations supporting INSERT, UPDATE or DELETE */
 static const SchemaQuery Query_for_list_of_updatables = {
     /* catname */
@@ -518,6 +535,22 @@ static const SchemaQuery Query_for_list_of_updatables = {
     NULL
 };
 
+static const SchemaQuery Query_for_list_of_partitioned_indexes = {
+    /* catname */
+    "pg_catalog.pg_class c",
+	/* selcondition */
+    "c.relkind = " CppAsString2(RELKIND_PARTITIONED_INDEX),
+	/* viscondition */
+    "pg_catalog.pg_table_is_visible(c.oid)",
+	/* namespace */
+    "c.relnamespace",
+	/* result */
+    "pg_catalog.quote_ident(c.relname)",
+	/* qualresult */
+	NULL
+};
+
+/* All relations */
 static const SchemaQuery Query_for_list_of_relations = {
     /* catname */
     "pg_catalog.pg_class c",
@@ -1444,7 +1477,7 @@ psql_completion(const char *text, int start, int end)
         "\\d", "\\da", "\\dA", "\\db", "\\dc", "\\dC", "\\dd", "\\ddp", "\\dD",
         "\\des", "\\det", "\\deu", "\\dew", "\\dE", "\\df",
         "\\dF", "\\dFd", "\\dFp", "\\dFt", "\\dg", "\\di", "\\dl", "\\dL",
-        "\\dm", "\\dn", "\\do", "\\dO", "\\dp",
+		"\\dm", "\\dn", "\\do", "\\dO", "\\dp", "\\dP", "\\dPi", "\\dPt",
         "\\drds", "\\dRs", "\\dRp", "\\ds", "\\dS",
         "\\dt", "\\dT", "\\dv", "\\du", "\\dx", "\\dy",
         "\\e", "\\echo", "\\ef", "\\elif", "\\else", "\\encoding",
@@ -3471,6 +3504,12 @@ psql_completion(const char *text, int start, int end)
         COMPLETE_WITH_QUERY(Query_for_list_of_schemas);
     else if (TailMatchesCS1("\\dp") || TailMatchesCS1("\\z"))
         COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_tsvmf, NULL);
+	else if (TailMatchesCS("\\dPi*"))
+	   COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_partitioned_indexes, NULL);
+	else if (TailMatchesCS("\\dPt*"))
+	   COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_partitioned_tables, NULL);
+	else if (TailMatchesCS("\\dP*"))
+	   COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_partitioned_relations, NULL);
     else if (TailMatchesCS1("\\ds*"))
         COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_sequences, NULL);
     else if (TailMatchesCS1("\\dt*"))

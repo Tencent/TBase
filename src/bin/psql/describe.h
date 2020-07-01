@@ -63,6 +63,9 @@ extern bool listAllDbs(const char *pattern, bool verbose);
 /* \dt, \di, \ds, \dS, etc. */
 extern bool listTables(const char *tabtypes, const char *pattern, bool verbose, bool showSystem);
 
+/* \dP */
+extern bool listPartitionedTables(const char *reltypes, const char *pattern, bool verbose);
+
 /* \dD */
 extern bool listDomains(const char *pattern, bool verbose, bool showSystem);
 
@@ -103,12 +106,12 @@ extern bool listExtensionContents(const char *pattern);
 extern bool listEventTriggers(const char *pattern, bool verbose);
 
 /* \dRp */
-bool        listPublications(const char *pattern);
+bool		listPublications(const char *pattern);
 
 /* \dRp+ */
-bool        describePublications(const char *pattern);
+bool		describePublications(const char *pattern);
 
 /* \dRs */
-bool        describeSubscriptions(const char *pattern, bool verbose);
+bool		describeSubscriptions(const char *pattern, bool verbose);
 
-#endif                            /* DESCRIBE_H */
+#endif							/* DESCRIBE_H */
