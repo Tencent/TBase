@@ -34,23 +34,23 @@
 static bool
 check_rel_can_be_partition(Oid relid)
 {
-char        relkind;
+    char        relkind;
+    bool        relispartition;
 
-/* Check if relation exists */
-if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(relid)))
-    return false;
+    /* Check if relation exists */
+    if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(relid)))
+        return false;
 
-relkind = get_rel_relkind(relid);
+    relkind = get_rel_relkind(relid);
+    relispartition = get_rel_relispartition(relid);
 
-/* Only allow relation types that can appear in partition trees. */
-if (relkind != RELKIND_RELATION &&
-    relkind != RELKIND_FOREIGN_TABLE &&
-    relkind != RELKIND_INDEX &&
-    relkind != RELKIND_PARTITIONED_TABLE &&
-    relkind != RELKIND_PARTITIONED_INDEX)
-    return false;
+    /* Only allow relation types that can appear in partition trees. */
+    if (!relispartition &&
+        relkind != RELKIND_PARTITIONED_TABLE &&
+        relkind != RELKIND_PARTITIONED_INDEX)
+        return false;
 
-return true;
+    return true;
 }
 
 /*
@@ -69,9 +69,6 @@ pg_partition_tree(PG_FUNCTION_ARGS)
 	FuncCallContext *funcctx;
 	ListCell  **next;
 
-	if (!check_rel_can_be_partition(rootrelid))
-		PG_RETURN_NULL();
-
 	/* stuff done only on the first call of the function */
 	if (SRF_IS_FIRSTCALL())
 	{
@@ -81,6 +78,9 @@ pg_partition_tree(PG_FUNCTION_ARGS)
 
 		/* create a function context for cross-call persistence */
 		funcctx = SRF_FIRSTCALL_INIT();
+
+		if (!check_rel_can_be_partition(rootrelid))
+           SRF_RETURN_DONE(funcctx);
 
 		/* switch to memory context appropriate for multiple function calls */
 		oldcxt = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
@@ -189,15 +189,16 @@ pg_partition_root(PG_FUNCTION_ARGS)
    if (!check_rel_can_be_partition(relid))
        PG_RETURN_NULL();
 
+   /* fetch the list of ancestors */
+   ancestors = get_partition_ancestors(relid);
+
    /*
-    * If the relation is not a partition (it may be the partition parent),
-    * return itself as a result.
+    * If the input relation is already the top-most parent, just return
+    * itself.
     */
-   if (!get_rel_relispartition(relid))
+   if (ancestors == NIL)
        PG_RETURN_OID(relid);
 
-   /* Fetch the top-most parent */
-   ancestors = get_partition_ancestors(relid);
    rootrelid = llast_oid(ancestors);
    list_free(ancestors);
 

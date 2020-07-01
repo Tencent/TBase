@@ -8,9 +8,8 @@ SELECT * FROM pg_partition_tree(NULL);
 
 SELECT * FROM pg_partition_tree(0);
  relid | parentrelid | isleaf | level 
--------+-------------+--------+-------
-       |             |        |      
-(1 row)
+-------+-------------+--------+-------    
+(0 row)
 
 SELECT pg_partition_root(NULL);
  pg_partition_root 
@@ -43,7 +42,35 @@ CREATE TABLE ptif_test1 PARTITION OF ptif_test
   FOR VALUES FROM (0) TO (100) PARTITION BY list (b);
 CREATE TABLE ptif_test11 PARTITION OF ptif_test1 FOR VALUES IN (1);
 CREATE TABLE ptif_test2 PARTITION OF ptif_test
-  FOR VALUES FROM (100) TO (maxvalue);
+  FOR VALUES FROM (100) TO (200);
+-- This partitioned table should remain with no partitions.
+CREATE TABLE ptif_test3 PARTITION OF ptif_test
+  FOR VALUES FROM (200) TO (maxvalue) PARTITION BY list (b);
+-- Test pg_partition_root for tables
+SELECT pg_partition_root('ptif_test');
+ pg_partition_root 
+-------------------
+ ptif_test
+(1 row)
+
+SELECT pg_partition_root('ptif_test0');
+ pg_partition_root 
+-------------------
+ ptif_test
+(1 row)
+
+SELECT pg_partition_root('ptif_test01');
+ pg_partition_root 
+-------------------
+ ptif_test
+(1 row)
+
+SELECT pg_partition_root('ptif_test3');
+ pg_partition_root 
+-------------------
+ ptif_test
+(1 row)
+
 -- Test index partition tree
 CREATE INDEX ptif_test_index ON ONLY ptif_test (a);
 CREATE INDEX ptif_test0_index ON ONLY ptif_test0 (a);
@@ -56,6 +83,33 @@ CREATE INDEX ptif_test11_index ON ptif_test11 (a);
 ALTER INDEX ptif_test1_index ATTACH PARTITION ptif_test11_index;
 CREATE INDEX ptif_test2_index ON ptif_test2 (a);
 ALTER INDEX ptif_test_index ATTACH PARTITION ptif_test2_index;
+CREATE INDEX ptif_test3_index ON ptif_test3 (a);
+ALTER INDEX ptif_test_index ATTACH PARTITION ptif_test3_index;
+-- Test pg_partition_root for indexes
+SELECT pg_partition_root('ptif_test_index');
+ pg_partition_root 
+-------------------
+ ptif_test_index
+(1 row)
+
+SELECT pg_partition_root('ptif_test0_index');
+ pg_partition_root 
+-------------------
+ ptif_test_index
+(1 row)
+
+SELECT pg_partition_root('ptif_test01_index');
+ pg_partition_root 
+-------------------
+ ptif_test_index
+(1 row)
+
+SELECT pg_partition_root('ptif_test3_index');
+ pg_partition_root 
+-------------------
+ ptif_test_index
+(1 row)
+
 -- List all tables members of the tree
 SELECT relid, parentrelid, level, isleaf
   FROM pg_partition_tree('ptif_test');
@@ -65,9 +119,10 @@ SELECT relid, parentrelid, level, isleaf
  ptif_test0  | ptif_test   |     1 | f
  ptif_test1  | ptif_test   |     1 | f
  ptif_test2  | ptif_test   |     1 | t
+ ptif_test3  | ptif_test   |     1 | f
  ptif_test01 | ptif_test0  |     2 | t
  ptif_test11 | ptif_test1  |     2 | t
-(6 rows)
+(7 rows)
 
 -- List tables from an intermediate level
 SELECT relid, parentrelid, level, isleaf
@@ -88,6 +143,15 @@ SELECT relid, parentrelid, level, isleaf
  ptif_test01 | ptif_test0  |     0 | t
 (1 row)
 
+-- List from partitioned table with no partitions
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree('ptif_test3') p
+  JOIN pg_class c ON (p.relid = c.oid);
+   relid    | parentrelid | level | isleaf 
+------------+-------------+-------+--------
+ ptif_test3 | ptif_test   |     0 | f
+(1 row)
+
 -- List all members using pg_partition_root with leaf table reference
 SELECT relid, parentrelid, level, isleaf
   FROM pg_partition_tree(pg_partition_root('ptif_test01')) p
@@ -98,9 +162,10 @@ SELECT relid, parentrelid, level, isleaf
  ptif_test0  | ptif_test   |     1 | f
  ptif_test1  | ptif_test   |     1 | f
  ptif_test2  | ptif_test   |     1 | t
+ ptif_test3  | ptif_test   |     1 | f
  ptif_test01 | ptif_test0  |     2 | t
  ptif_test11 | ptif_test1  |     2 | t
-(6 rows)
+(7 rows)
 
 -- List all ancestors of root and leaf tables
 SELECT * FROM pg_partition_ancestors('ptif_test01');
@@ -126,9 +191,10 @@ SELECT relid, parentrelid, level, isleaf
  ptif_test0_index  | ptif_test_index  |     1 | f
  ptif_test1_index  | ptif_test_index  |     1 | f
  ptif_test2_index  | ptif_test_index  |     1 | t
+ ptif_test3_index  | ptif_test_index  |     1 | f
  ptif_test01_index | ptif_test0_index |     2 | t
  ptif_test11_index | ptif_test1_index |     2 | t
-(6 rows)
+(7 rows)
 
 -- List indexes from an intermediate level
 SELECT relid, parentrelid, level, isleaf
@@ -149,6 +215,15 @@ SELECT relid, parentrelid, level, isleaf
  ptif_test01_index | ptif_test0_index |     0 | t
 (1 row)
 
+-- List from partitioned index with no partitions
+SELECT relid, parentrelid, level, isleaf
+  FROM pg_partition_tree('ptif_test3_index') p
+  JOIN pg_class c ON (p.relid = c.oid);
+      relid       |   parentrelid   | level | isleaf 
+------------------+-----------------+-------+--------
+ ptif_test3_index | ptif_test_index |     0 | f
+(1 row)
+
 -- List all members using pg_partition_root with leaf index reference
 SELECT relid, parentrelid, level, isleaf
   FROM pg_partition_tree(pg_partition_root('ptif_test01_index')) p
@@ -159,9 +234,10 @@ SELECT relid, parentrelid, level, isleaf
  ptif_test0_index  | ptif_test_index  |     1 | f
  ptif_test1_index  | ptif_test_index  |     1 | f
  ptif_test2_index  | ptif_test_index  |     1 | t
+ ptif_test3_index  | ptif_test_index  |     1 | f
  ptif_test01_index | ptif_test0_index |     2 | t
  ptif_test11_index | ptif_test1_index |     2 | t
-(6 rows)
+(7 rows)
 
 -- List all ancestors of root and leaf indexes
 SELECT * FROM pg_partition_ancestors('ptif_test01_index');
@@ -179,19 +255,18 @@ SELECT * FROM pg_partition_ancestors('ptif_test_index');
 (1 row)
 
 DROP TABLE ptif_test;
--- A table not part of a partition tree works is the only member listed.
+-- A table not part of a partition tree works is not listed.
 CREATE TABLE ptif_normal_table(a int);
 SELECT relid, parentrelid, level, isleaf
   FROM pg_partition_tree('ptif_normal_table');
-       relid       | parentrelid | level | isleaf 
--------------------+-------------+-------+--------
- ptif_normal_table |             |     0 | t
-(1 row)
+ relid | parentrelid | level | isleaf 
+-------+-------------+-------+--------
+(0 rows)
 
 SELECT pg_partition_root('ptif_normal_table');
  pg_partition_root 
 -------------------
- ptif_normal_table
+
 (1 row)
 
 SELECT * FROM pg_partition_ancestors('ptif_normal_table');
@@ -205,15 +280,13 @@ CREATE VIEW ptif_test_view AS SELECT 1;
 CREATE MATERIALIZED VIEW ptif_test_matview AS SELECT 1;
 SELECT * FROM pg_partition_tree('ptif_test_view');
  relid | parentrelid | isleaf | level 
--------+-------------+--------+-------
-       |             |        |      
-(1 row)
+-------+-------------+--------+------- 
+(0 row)
 
 SELECT * FROM pg_partition_tree('ptif_test_matview');
  relid | parentrelid | isleaf | level 
--------+-------------+--------+-------
-       |             |        |      
-(1 row)
+-------+-------------+--------+------- 
+(0 row)
 
 SELECT pg_partition_root('ptif_test_view');
  pg_partition_root 
