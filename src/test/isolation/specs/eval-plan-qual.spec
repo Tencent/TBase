@@ -47,10 +47,17 @@ setup
  INSERT INTO table_a VALUES (1, 'tableAValue');
  INSERT INTO table_b VALUES (1, 'tableBValue');
 }
+setup
+{ 
+ CREATE TABLE parttbl (a int) PARTITION BY LIST (a);
+ CREATE TABLE parttbl1 PARTITION OF parttbl FOR VALUES IN (1);
+ INSERT INTO parttbl VALUES (1);
+}
 
 teardown
 {
  DROP TABLE accounts, p, table_a, table_b CASCADE;
+ DROP TABLE parttbl;
 }
 
 session "s1"
@@ -101,6 +108,11 @@ step "updateforss"	{
 	UPDATE table_b SET value = 'newTableBValue' WHERE id = 1;
 }
 
+# test for EPQ on a partitioned result table
+
+step "simplepartupdate"    {
+   update parttbl set a = a;
+}
 
 session "s2"
 setup		{ BEGIN ISOLATION LEVEL READ COMMITTED; }
@@ -127,6 +139,10 @@ step "readforss"	{
 	WHERE ta.id = 1 FOR UPDATE OF ta;
 }
 step "wrtwcte"	{ UPDATE table_a SET value = 'tableAValue2' WHERE id = 1; }
+step "complexpartupdate"   {
+   with u as (update parttbl set a = a returning parttbl.*)
+   update parttbl set a = u.a from u;
+}
 step "c2"	{ COMMIT; }
 
 session "s3"
@@ -158,3 +174,5 @@ permutation "wx2" "partiallock" "c2" "c1" "read"
 permutation "wx2" "lockwithvalues" "c2" "c1" "read"
 permutation "updateforss" "readforss" "c1" "c2"
 permutation "wrtwcte" "readwcte" "c1" "c2"
+
+permutation "simplepartupdate" "complexpartupdate" "c1" "c2"
