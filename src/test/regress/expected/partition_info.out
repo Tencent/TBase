@@ -12,6 +12,16 @@ SELECT * FROM pg_partition_tree(0);
        |             |        |      
 (1 row)
 
+SELECT * FROM pg_partition_ancestors(NULL);
+ relid 
+-------
+(0 rows)
+
+SELECT * FROM pg_partition_ancestors(0);
+ relid 
+-------
+(0 rows)
+
 -- Test table partition trees
 CREATE TABLE ptif_test (a int, b int) PARTITION BY range (a);
 CREATE TABLE ptif_test0 PARTITION OF ptif_test
@@ -66,6 +76,21 @@ SELECT relid, parentrelid, level, isleaf
  ptif_test01 | ptif_test0  |     0 | t
 (1 row)
 
+-- List all ancestors of root and leaf tables
+SELECT * FROM pg_partition_ancestors('ptif_test01');
+    relid    
+-------------
+ ptif_test01
+ ptif_test0
+ ptif_test
+(3 rows)
+
+SELECT * FROM pg_partition_ancestors('ptif_test');
+   relid   
+-----------
+ ptif_test
+(1 row)
+
 -- List all indexes members of the tree
 SELECT relid, parentrelid, level, isleaf
   FROM pg_partition_tree('ptif_test_index');
@@ -98,6 +123,21 @@ SELECT relid, parentrelid, level, isleaf
  ptif_test01_index | ptif_test0_index |     0 | t
 (1 row)
 
+-- List all ancestors of root and leaf indexes
+SELECT * FROM pg_partition_ancestors('ptif_test01_index');
+       relid       
+-------------------
+ ptif_test01_index
+ ptif_test0_index
+ ptif_test_index
+(3 rows)
+
+SELECT * FROM pg_partition_ancestors('ptif_test_index');
+      relid      
+-----------------
+ ptif_test_index
+(1 row)
+
 DROP TABLE ptif_test;
 -- A table not part of a partition tree works is the only member listed.
 CREATE TABLE ptif_normal_table(a int);
@@ -107,6 +147,11 @@ SELECT relid, parentrelid, level, isleaf
 -------------------+-------------+-------+--------
  ptif_normal_table |             |     0 | t
 (1 row)
+
+SELECT * FROM pg_partition_ancestors('ptif_normal_table');
+ relid 
+-------
+(0 rows)
 
 DROP TABLE ptif_normal_table;
 -- Views and materialized viewS cannot be part of a partition tree.
@@ -123,6 +168,16 @@ SELECT * FROM pg_partition_tree('ptif_test_matview');
 -------+-------------+--------+-------
        |             |        |      
 (1 row)
+
+SELECT * FROM pg_partition_ancestors('ptif_test_view');
+ relid 
+-------
+(0 rows)
+
+SELECT * FROM pg_partition_ancestors('ptif_test_matview');
+ relid 
+-------
+(0 rows)
 
 DROP VIEW ptif_test_view;
 DROP MATERIALIZED VIEW ptif_test_matview;

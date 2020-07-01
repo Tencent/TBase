@@ -3,6 +3,8 @@
 --
 SELECT * FROM pg_partition_tree(NULL);
 SELECT * FROM pg_partition_tree(0);
+SELECT * FROM pg_partition_ancestors(NULL);
+SELECT * FROM pg_partition_ancestors(0);
 
 -- Test table partition trees
 CREATE TABLE ptif_test (a int, b int) PARTITION BY range (a);
@@ -39,6 +41,9 @@ SELECT relid, parentrelid, level, isleaf
 SELECT relid, parentrelid, level, isleaf
   FROM pg_partition_tree('ptif_test01') p
   JOIN pg_class c ON (p.relid = c.oid);
+-- List all ancestors of root and leaf tables
+SELECT * FROM pg_partition_ancestors('ptif_test01');
+SELECT * FROM pg_partition_ancestors('ptif_test');
 
 -- List all indexes members of the tree
 SELECT relid, parentrelid, level, isleaf
@@ -51,6 +56,9 @@ SELECT relid, parentrelid, level, isleaf
 SELECT relid, parentrelid, level, isleaf
   FROM pg_partition_tree('ptif_test01_index') p
   JOIN pg_class c ON (p.relid = c.oid);
+-- List all ancestors of root and leaf indexes
+SELECT * FROM pg_partition_ancestors('ptif_test01_index');
+SELECT * FROM pg_partition_ancestors('ptif_test_index');
 
 DROP TABLE ptif_test;
 
@@ -58,6 +66,7 @@ DROP TABLE ptif_test;
 CREATE TABLE ptif_normal_table(a int);
 SELECT relid, parentrelid, level, isleaf
   FROM pg_partition_tree('ptif_normal_table');
+SELECT * FROM pg_partition_ancestors('ptif_normal_table');
 DROP TABLE ptif_normal_table;
 
 -- Views and materialized viewS cannot be part of a partition tree.
@@ -65,5 +74,7 @@ CREATE VIEW ptif_test_view AS SELECT 1;
 CREATE MATERIALIZED VIEW ptif_test_matview AS SELECT 1;
 SELECT * FROM pg_partition_tree('ptif_test_view');
 SELECT * FROM pg_partition_tree('ptif_test_matview');
+SELECT * FROM pg_partition_ancestors('ptif_test_view');
+SELECT * FROM pg_partition_ancestors('ptif_test_matview');
 DROP VIEW ptif_test_view;
 DROP MATERIALIZED VIEW ptif_test_matview;
