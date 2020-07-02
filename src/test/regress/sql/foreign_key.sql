@@ -1071,3 +1071,15 @@ INSERT INTO fk_partitioned_fk VALUES (1);
 ALTER TABLE fk_notpartitioned_pk ALTER COLUMN a TYPE bigint;
 DELETE FROM fk_notpartitioned_pk WHERE a = 1;
 DROP TABLE fk_notpartitioned_pk, fk_partitioned_fk;
+
+-- ensure we check partitions are "not used" when dropping constraints
+CREATE SCHEMA fkpart8
+  CREATE TABLE tbl1(f1 int PRIMARY KEY)
+  CREATE TABLE tbl2(f1 int REFERENCES tbl1 DEFERRABLE INITIALLY DEFERRED) PARTITION BY RANGE(f1)
+  CREATE TABLE tbl2_p1 PARTITION OF tbl2 FOR VALUES FROM (minvalue) TO (maxvalue);
+INSERT INTO fkpart8.tbl1 VALUES(1);
+BEGIN;
+INSERT INTO fkpart8.tbl2 VALUES(1);
+ALTER TABLE fkpart8.tbl2 DROP CONSTRAINT tbl2_f1_fkey;
+COMMIT;
+DROP SCHEMA fkpart8 CASCADE;
