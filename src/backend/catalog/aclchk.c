@@ -1789,7 +1789,8 @@ ExecGrant_Relation(InternalGrant *istmt)
         pg_class_tuple = (Form_pg_class) GETSTRUCT(tuple);
 
         /* Not sensible to grant on an index */
-        if (pg_class_tuple->relkind == RELKIND_INDEX)
+		if (pg_class_tuple->relkind == RELKIND_INDEX ||
+			pg_class_tuple->relkind == RELKIND_PARTITIONED_INDEX)
             ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                      errmsg("\"%s\" is an index",
@@ -5384,7 +5385,8 @@ recordExtObjInitPriv(Oid objoid, Oid classoid)
         pg_class_tuple = (Form_pg_class) GETSTRUCT(tuple);
 
         /* Indexes don't have permissions */
-        if (pg_class_tuple->relkind == RELKIND_INDEX)
+		if (pg_class_tuple->relkind == RELKIND_INDEX ||
+			pg_class_tuple->relkind == RELKIND_PARTITIONED_INDEX)
             return;
 
         /* Composite types don't have permissions either */
@@ -5669,7 +5671,8 @@ removeExtObjInitPriv(Oid objoid, Oid classoid)
         pg_class_tuple = (Form_pg_class) GETSTRUCT(tuple);
 
         /* Indexes don't have permissions */
-        if (pg_class_tuple->relkind == RELKIND_INDEX)
+		if (pg_class_tuple->relkind == RELKIND_INDEX ||
+			pg_class_tuple->relkind == RELKIND_PARTITIONED_INDEX)
             return;
 
         /* Composite types don't have permissions either */

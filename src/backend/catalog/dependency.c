@@ -728,6 +728,7 @@ findDependentObjects(const ObjectAddress *object,
                 /* FALL THRU */
 
             case DEPENDENCY_INTERNAL:
+			case DEPENDENCY_INTERNAL_AUTO:
 
                 /*
                  * This object is part of the internal implementation of
@@ -779,6 +780,14 @@ findDependentObjects(const ObjectAddress *object,
                  * transform this deletion request into a delete of this
                  * owning object.
                  *
+				 * For INTERNAL_AUTO dependencies, we don't enforce this;
+				 * in other words, we don't follow the links back to the
+				 * owning object.
+				 */
+				if (foundDep->deptype == DEPENDENCY_INTERNAL_AUTO)
+					break;
+
+				/*
                  * First, release caller's lock on this object and get
                  * deletion lock on the owning object.  (We must release
                  * caller's lock to avoid deadlock against a concurrent
@@ -821,6 +830,7 @@ findDependentObjects(const ObjectAddress *object,
                 /* And we're done here. */
                 systable_endscan(scan);
                 return;
+
             case DEPENDENCY_PIN:
 
                 /*
@@ -918,6 +928,7 @@ findDependentObjects(const ObjectAddress *object,
             case DEPENDENCY_AUTO_EXTENSION:
                 subflags = DEPFLAG_AUTO;
                 break;
+			case DEPENDENCY_INTERNAL_AUTO:
             case DEPENDENCY_INTERNAL:
                 subflags = DEPFLAG_INTERNAL;
                 break;
@@ -1267,7 +1278,8 @@ doDeletion(const ObjectAddress *object, int flags)
             {
                 char        relKind = get_rel_relkind(object->objectId);
 
-                if (relKind == RELKIND_INDEX)
+				if (relKind == RELKIND_INDEX ||
+					relKind == RELKIND_PARTITIONED_INDEX)
                 {
                     bool        concurrent = ((flags & PERFORM_DELETION_CONCURRENTLY) != 0);
 

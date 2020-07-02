@@ -1622,7 +1622,8 @@ describeOneTableDetails(const char *schemaname,
         appendPQExpBufferStr(&buf, ",\n  a.attidentity");
     else
         appendPQExpBufferStr(&buf, ",\n  ''::pg_catalog.char AS attidentity");
-    if (tableinfo.relkind == RELKIND_INDEX)
+	if (tableinfo.relkind == RELKIND_INDEX ||
+		tableinfo.relkind == RELKIND_PARTITIONED_INDEX)
         appendPQExpBufferStr(&buf, ",\n  pg_catalog.pg_get_indexdef(a.attrelid, a.attnum, TRUE) AS indexdef");
     else
         appendPQExpBufferStr(&buf, ",\n  NULL AS indexdef");
@@ -1687,6 +1688,7 @@ describeOneTableDetails(const char *schemaname,
                               schemaname, relationname);
             break;
         case RELKIND_INDEX:
+		case RELKIND_PARTITIONED_INDEX:
             if (tableinfo.relpersistence == 'u')
                 printfPQExpBuffer(&title, _("Unlogged index \"%s.%s\""),
                                   schemaname, relationname);
@@ -1747,7 +1749,8 @@ describeOneTableDetails(const char *schemaname,
     if (tableinfo.relkind == RELKIND_SEQUENCE)
         headers[cols++] = gettext_noop("Value");
 
-    if (tableinfo.relkind == RELKIND_INDEX)
+	if (tableinfo.relkind == RELKIND_INDEX ||
+        tableinfo.relkind == RELKIND_PARTITIONED_INDEX)
         headers[cols++] = gettext_noop("Definition");
 
     if (tableinfo.relkind == RELKIND_FOREIGN_TABLE && pset.sversion >= 90200)
@@ -1757,6 +1760,7 @@ describeOneTableDetails(const char *schemaname,
     {
         headers[cols++] = gettext_noop("Storage");
         if (tableinfo.relkind == RELKIND_RELATION ||
+			tableinfo.relkind == RELKIND_PARTITIONED_INDEX ||
             tableinfo.relkind == RELKIND_MATVIEW ||
             tableinfo.relkind == RELKIND_FOREIGN_TABLE ||
             tableinfo.relkind == RELKIND_PARTITIONED_TABLE)
@@ -1833,7 +1837,8 @@ describeOneTableDetails(const char *schemaname,
             printTableAddCell(&cont, seq_values[i], false, false);
 
         /* Expression for index column */
-        if (tableinfo.relkind == RELKIND_INDEX)
+		if (tableinfo.relkind == RELKIND_INDEX ||
+			tableinfo.relkind == RELKIND_PARTITIONED_INDEX)
             printTableAddCell(&cont, PQgetvalue(res, i, 7), false, false);
 
         /* FDW options for foreign table column, only for 9.2 or later */
@@ -1856,6 +1861,7 @@ describeOneTableDetails(const char *schemaname,
 
             /* Statistics target, if the relkind supports this feature */
             if (tableinfo.relkind == RELKIND_RELATION ||
+				tableinfo.relkind == RELKIND_PARTITIONED_INDEX ||
                 tableinfo.relkind == RELKIND_MATVIEW ||
                 tableinfo.relkind == RELKIND_FOREIGN_TABLE ||
                 tableinfo.relkind == RELKIND_PARTITIONED_TABLE)
@@ -1945,7 +1951,8 @@ describeOneTableDetails(const char *schemaname,
         PQclear(result);
     }
 
-    if (tableinfo.relkind == RELKIND_INDEX)
+	if (tableinfo.relkind == RELKIND_INDEX ||
+		tableinfo.relkind == RELKIND_PARTITIONED_INDEX)
     {
         /* Footer information about an index */
         PGresult   *result;
@@ -3631,6 +3638,7 @@ listTables(const char *tabtypes, const char *pattern, bool verbose, bool showSys
                       " WHEN 's' THEN '%s'"
                       " WHEN " CppAsString2(RELKIND_FOREIGN_TABLE) " THEN '%s'"
                       " WHEN " CppAsString2(RELKIND_PARTITIONED_TABLE) " THEN '%s'"
+					  " WHEN " CppAsString2(RELKIND_PARTITIONED_INDEX) " THEN '%s'"
                       " END as \"%s\",\n"
                       "  pg_catalog.pg_get_userbyid(c.relowner) as \"%s\"",
                       gettext_noop("Schema"),
@@ -3643,6 +3651,7 @@ listTables(const char *tabtypes, const char *pattern, bool verbose, bool showSys
                       gettext_noop("special"),
                       gettext_noop("foreign table"),
                       gettext_noop("table"),    /* partitioned table */
+					  gettext_noop("index"),	/* partitioned index */
                       gettext_noop("Type"),
                       gettext_noop("Owner"));
 
@@ -3699,7 +3708,8 @@ listTables(const char *tabtypes, const char *pattern, bool verbose, bool showSys
     if (showMatViews)
         appendPQExpBufferStr(&buf, CppAsString2(RELKIND_MATVIEW) ",");
     if (showIndexes)
-        appendPQExpBufferStr(&buf, CppAsString2(RELKIND_INDEX) ",");
+		appendPQExpBufferStr(&buf, CppAsString2(RELKIND_INDEX) ","
+							 CppAsString2(RELKIND_PARTITIONED_INDEX) ",");
     if (showSeq)
         appendPQExpBufferStr(&buf, CppAsString2(RELKIND_SEQUENCE) ",");
     if (showSystem || pattern)

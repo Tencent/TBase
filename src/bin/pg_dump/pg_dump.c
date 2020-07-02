@@ -200,6 +200,7 @@ static void dumpAttrDef(Archive *fout, AttrDefInfo *adinfo);
 static void dumpSequence(Archive *fout, TableInfo *tbinfo);
 static void dumpSequenceData(Archive *fout, TableDataInfo *tdinfo);
 static void dumpIndex(Archive *fout, IndxInfo *indxinfo);
+static void dumpIndexAttach(Archive *fout, IndexAttachInfo *attachinfo);
 static void dumpStatisticsExt(Archive *fout, StatsExtInfo *statsextinfo);
 static void dumpConstraint(Archive *fout, ConstraintInfo *coninfo);
 static void dumpTableConstraintComment(Archive *fout, ConstraintInfo *coninfo);
@@ -6770,6 +6771,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
     int            i_tableoid,
                 i_oid,
                 i_indexname,
+				i_parentidx,
                 i_indexdef,
                 i_indnkeys,
                 i_indkey,
@@ -6791,15 +6793,17 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
     {
         TableInfo  *tbinfo = &tblinfo[i];
 
-        /* Only plain tables and materialized views have indexes. */
-        if (tbinfo->relkind != RELKIND_RELATION &&
-            tbinfo->relkind != RELKIND_MATVIEW)
-            continue;
         if (!tbinfo->hasindex)
             continue;
 
-        /* Ignore indexes of tables whose definitions are not to be dumped */
-        if (!(tbinfo->dobj.dump & DUMP_COMPONENT_DEFINITION))
+		/*
+		 * Ignore indexes of tables whose definitions are not to be dumped.
+		 *
+		 * We also need indexes on partitioned tables which have partitions to
+		 * be dumped, in order to dump the indexes on the partitions.
+		 */
+		if (!(tbinfo->dobj.dump & DUMP_COMPONENT_DEFINITION) &&
+			!tbinfo->interesting)
             continue;
 
         if (g_verbose)
@@ -6822,7 +6826,39 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
          * is not.
          */
         resetPQExpBuffer(query);
-        if (fout->remoteVersion >= 90400)
+		if (fout->remoteVersion >= 11000)
+		{
+			appendPQExpBuffer(query,
+							  "SELECT t.tableoid, t.oid, "
+							  "t.relname AS indexname, "
+							  "inh.inhparent AS parentidx, "
+							  "pg_catalog.pg_get_indexdef(i.indexrelid) AS indexdef, "
+							  "t.relnatts AS indnkeys, "
+							  "i.indkey, i.indisclustered, "
+							  "i.indisreplident, t.relpages, "
+							  "c.contype, c.conname, "
+							  "c.condeferrable, c.condeferred, "
+							  "c.tableoid AS contableoid, "
+							  "c.oid AS conoid, "
+							  "pg_catalog.pg_get_constraintdef(c.oid, false) AS condef, "
+							  "(SELECT spcname FROM pg_catalog.pg_tablespace s WHERE s.oid = t.reltablespace) AS tablespace, "
+							  "t.reloptions AS indreloptions "
+							  "FROM pg_catalog.pg_index i "
+							  "JOIN pg_catalog.pg_class t ON (t.oid = i.indexrelid) "
+							  "JOIN pg_catalog.pg_class t2 ON (t2.oid = i.indrelid) "
+							  "LEFT JOIN pg_catalog.pg_constraint c "
+							  "ON (i.indrelid = c.conrelid AND "
+							  "i.indexrelid = c.conindid AND "
+							  "c.contype IN ('p','u','x')) "
+							  "LEFT JOIN pg_catalog.pg_inherits inh "
+							  "ON (inh.inhrelid = indexrelid) "
+							  "WHERE i.indrelid = '%u'::pg_catalog.oid "
+							  "AND (i.indisvalid OR t2.relkind = 'p') "
+							  "AND i.indisready "
+							  "ORDER BY indexname",
+							  tbinfo->dobj.catId.oid);
+		}
+		else if (fout->remoteVersion >= 90400)
         {
             /*
              * the test on indisready is necessary in 9.2, and harmless in
@@ -6831,6 +6867,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
             appendPQExpBuffer(query,
                               "SELECT t.tableoid, t.oid, "
                               "t.relname AS indexname, "
+							  "0 AS parentidx, "
                               "pg_catalog.pg_get_indexdef(i.indexrelid) AS indexdef, "
                               "t.relnatts AS indnkeys, "
                               "i.indkey, i.indisclustered, "
@@ -6862,6 +6899,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
             appendPQExpBuffer(query,
                               "SELECT t.tableoid, t.oid, "
                               "t.relname AS indexname, "
+							  "0 AS parentidx, "
                               "pg_catalog.pg_get_indexdef(i.indexrelid) AS indexdef, "
                               "t.relnatts AS indnkeys, "
                               "i.indkey, i.indisclustered, "
@@ -6889,6 +6927,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
             appendPQExpBuffer(query,
                               "SELECT t.tableoid, t.oid, "
                               "t.relname AS indexname, "
+							  "0 AS parentidx, "
                               "pg_catalog.pg_get_indexdef(i.indexrelid) AS indexdef, "
                               "t.relnatts AS indnkeys, "
                               "i.indkey, i.indisclustered, "
@@ -6919,6 +6958,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
             appendPQExpBuffer(query,
                               "SELECT t.tableoid, t.oid, "
                               "t.relname AS indexname, "
+							  "0 AS parentidx, "
                               "pg_catalog.pg_get_indexdef(i.indexrelid) AS indexdef, "
                               "t.relnatts AS indnkeys, "
                               "i.indkey, i.indisclustered, "
@@ -6951,6 +6991,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
         i_tableoid = PQfnumber(res, "tableoid");
         i_oid = PQfnumber(res, "oid");
         i_indexname = PQfnumber(res, "indexname");
+		i_parentidx = PQfnumber(res, "parentidx");
         i_indexdef = PQfnumber(res, "indexdef");
         i_indnkeys = PQfnumber(res, "indnkeys");
         i_indkey = PQfnumber(res, "indkey");
@@ -6967,8 +7008,10 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
         i_tablespace = PQfnumber(res, "tablespace");
         i_indreloptions = PQfnumber(res, "indreloptions");
 
-        indxinfo = (IndxInfo *) pg_malloc(ntups * sizeof(IndxInfo));
+		tbinfo->indexes = indxinfo =
+			(IndxInfo *) pg_malloc(ntups * sizeof(IndxInfo));
         constrinfo = (ConstraintInfo *) pg_malloc(ntups * sizeof(ConstraintInfo));
+		tbinfo->numIndexes = ntups;
 
         for (j = 0; j < ntups; j++)
         {
@@ -6978,6 +7021,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
             indxinfo[j].dobj.catId.tableoid = atooid(PQgetvalue(res, j, i_tableoid));
             indxinfo[j].dobj.catId.oid = atooid(PQgetvalue(res, j, i_oid));
             AssignDumpId(&indxinfo[j].dobj);
+			indxinfo[j].dobj.dump = tbinfo->dobj.dump;
             indxinfo[j].dobj.name = pg_strdup(PQgetvalue(res, j, i_indexname));
             indxinfo[j].dobj.namespace = tbinfo->dobj.namespace;
             indxinfo[j].indextable = tbinfo;
@@ -6990,6 +7034,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
                           indxinfo[j].indkeys, indxinfo[j].indnkeys);
             indxinfo[j].indisclustered = (PQgetvalue(res, j, i_indisclustered)[0] == 't');
             indxinfo[j].indisreplident = (PQgetvalue(res, j, i_indisreplident)[0] == 't');
+			indxinfo[j].parentidx = atooid(PQgetvalue(res, j, i_parentidx));
             indxinfo[j].relpages = atoi(PQgetvalue(res, j, i_relpages));
             contype = *(PQgetvalue(res, j, i_contype));
 
@@ -7003,6 +7048,7 @@ getIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
                 constrinfo[j].dobj.catId.tableoid = atooid(PQgetvalue(res, j, i_contableoid));
                 constrinfo[j].dobj.catId.oid = atooid(PQgetvalue(res, j, i_conoid));
                 AssignDumpId(&constrinfo[j].dobj);
+				constrinfo[j].dobj.dump = tbinfo->dobj.dump;
                 constrinfo[j].dobj.name = pg_strdup(PQgetvalue(res, j, i_conname));
                 constrinfo[j].dobj.namespace = tbinfo->dobj.namespace;
                 constrinfo[j].contable = tbinfo;
@@ -9773,6 +9819,9 @@ dumpDumpableObject(Archive *fout, DumpableObject *dobj)
         case DO_INDEX:
             dumpIndex(fout, (IndxInfo *) dobj);
             break;
+		case DO_INDEX_ATTACH:
+			dumpIndexAttach(fout, (IndexAttachInfo *) dobj);
+			break;
         case DO_STATSEXT:
             dumpStatisticsExt(fout, (StatsExtInfo *) dobj);
             break;
@@ -16529,6 +16578,42 @@ dumpIndex(Archive *fout, IndxInfo *indxinfo)
 }
 
 /*
+ * dumpIndexAttach
+ *	  write out to fout a partitioned-index attachment clause
+ */
+void
+dumpIndexAttach(Archive *fout, IndexAttachInfo *attachinfo)
+{
+	if (fout->dopt->dataOnly)
+		return;
+
+	if (attachinfo->partitionIdx->dobj.dump & DUMP_COMPONENT_DEFINITION)
+	{
+		PQExpBuffer	q = createPQExpBuffer();
+
+		appendPQExpBuffer(q, "\nALTER INDEX %s ",
+						  fmtQualifiedId(fout->remoteVersion,
+										 attachinfo->parentIdx->dobj.namespace->dobj.name,
+										 attachinfo->parentIdx->dobj.name));
+		appendPQExpBuffer(q, "ATTACH PARTITION %s;\n",
+						  fmtQualifiedId(fout->remoteVersion,
+										 attachinfo->partitionIdx->dobj.namespace->dobj.name,
+										 attachinfo->partitionIdx->dobj.name));
+
+		ArchiveEntry(fout, attachinfo->dobj.catId, attachinfo->dobj.dumpId,
+					 attachinfo->dobj.name,
+					 NULL, NULL,
+					 "",
+					 false, "INDEX ATTACH", SECTION_POST_DATA,
+					 q->data, "", NULL,
+					 NULL, 0,
+					 NULL, NULL);
+
+		destroyPQExpBuffer(q);
+	}
+}
+
+/*
  * dumpStatisticsExt
  *      write out to fout an extended statistics object
  */
@@ -18188,6 +18273,7 @@ addBoundaryDependencies(DumpableObject **dobjs, int numObjs,
                 addObjectDependency(postDataBound, dobj->dumpId);
                 break;
             case DO_INDEX:
+			case DO_INDEX_ATTACH:
             case DO_STATSEXT:
             case DO_REFRESH_MATVIEW:
             case DO_TRIGGER:

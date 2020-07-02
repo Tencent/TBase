@@ -23,6 +23,7 @@ PostgreSQL documentation
 <synopsis>
 ALTER INDEX [ IF EXISTS ] <replaceable class="PARAMETER">name</replaceable> RENAME TO <replaceable class="PARAMETER">new_name</replaceable>
 ALTER INDEX [ IF EXISTS ] <replaceable class="PARAMETER">name</replaceable> SET TABLESPACE <replaceable class="PARAMETER">tablespace_name</replaceable>
+ALTER INDEX <replaceable class="parameter">name</replaceable> ATTACH PARTITION <replaceable class="parameter">index_name</replaceable>
 ALTER INDEX <replaceable class="PARAMETER">name</replaceable> DEPENDS ON EXTENSION <replaceable class="PARAMETER">extension_name</replaceable>
 ALTER INDEX [ IF EXISTS ] <replaceable class="PARAMETER">name</replaceable> SET ( <replaceable class="PARAMETER">storage_parameter</replaceable> = <replaceable class="PARAMETER">value</replaceable> [, ... ] )
 ALTER INDEX [ IF EXISTS ] <replaceable class="PARAMETER">name</replaceable> RESET ( <replaceable class="PARAMETER">storage_parameter</replaceable> [, ... ] )
@@ -69,6 +70,19 @@ ALTER INDEX ALL IN TABLESPACE <replaceable class="PARAMETER">name</replaceable> 
       <command>ALTER INDEX</command> invocations instead if desired.
       See also
       <xref linkend="SQL-CREATETABLESPACE">.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
+    <term><literal>ATTACH PARTITION</literal></term>
+    <listitem>
+     <para>
+      Causes the named index to become attached to the altered index.
+      The named index must be on a partition of the table containing the
+      index being altered, and have an equivalent definition.  An attached
+      index cannot be dropped by itself, and will automatically be dropped
+      if its parent index is dropped.
      </para>
     </listitem>
    </varlistentry>

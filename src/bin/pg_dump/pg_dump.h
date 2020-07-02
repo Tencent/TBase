@@ -116,6 +116,7 @@ typedef enum
     DO_TABLE,
     DO_ATTRDEF,
     DO_INDEX,
+	DO_INDEX_ATTACH,
     DO_STATSEXT,
     DO_RULE,
     DO_TRIGGER,
@@ -418,6 +419,8 @@ typedef struct _tableInfo
      */
     int            numParents;        /* number of (immediate) parent tables */
     struct _tableInfo **parents;    /* TableInfos of immediate parents */
+	int			numIndexes;		/* number of indexes */
+	struct _indxInfo *indexes;	/* indexes */
     struct _tableDataInfo *dataObj; /* TableDataInfo, if dumping its data */
     int            numTriggers;    /* number of triggers for table */
     struct _triggerInfo *triggers;    /* array of TriggerInfo structs */
@@ -451,10 +454,18 @@ typedef struct _indxInfo
     Oid           *indkeys;
     bool        indisclustered;
     bool        indisreplident;
+	Oid			parentidx;		/* if partitioned, parent index OID */
     /* if there is an associated constraint object, its dumpId: */
     DumpId        indexconstraint;
     int            relpages;        /* relpages of the underlying table */
 } IndxInfo;
+
+typedef struct _indexAttachInfo
+{
+	DumpableObject dobj;
+	IndxInfo   *parentIdx;		/* link to index on partitioned table */
+	IndxInfo   *partitionIdx;	/* link to index on partition */
+} IndexAttachInfo;
 
 typedef struct _statsExtInfo
 {

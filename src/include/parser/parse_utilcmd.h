@@ -101,5 +101,8 @@ extern bool CheckLocalIndexColumn (char loctype, char *partcolname, char *indexc
 #endif
 extern PartitionBoundSpec *transformPartitionBound(ParseState *pstate, Relation parent,
                         PartitionBoundSpec *spec);
+extern IndexStmt *generateClonedIndexStmt(RangeVar *heapRel, Oid heapOid,
+                                                 Relation source_idx,
+                                                 const AttrNumber *attmap, int attmap_length);
 
 #endif                            /* PARSE_UTILCMD_H */
