@@ -55,6 +55,9 @@ extern void expand_inherited_tables(PlannerInfo *root);
 extern Node *adjust_appendrel_attrs(PlannerInfo *root, Node *node,
 					   AppendRelInfo *appinfo);
 
+extern Node *adjust_appendrel_attrs_nappinfos(PlannerInfo *root, Node *node, int nappinfos,
+                                           AppendRelInfo **appinfos);
+
 extern Node *adjust_appendrel_attrs_multilevel(PlannerInfo *root, Node *node,
 								  RelOptInfo *child_rel);
 

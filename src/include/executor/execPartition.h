@@ -93,7 +93,7 @@ extern ResultRelInfo *ExecInitPartitionInfo(ModifyTableState *mtstate,
 extern void ExecSetupChildParentMapForLeaf(PartitionTupleRouting *proute);
 extern TupleConversionMap *TupConvMapForLeaf(PartitionTupleRouting *proute,
 				  ResultRelInfo *rootRelInfo, int leaf_index);
-extern HeapTuple ConvertPartitionTupleSlot(TupleConversionMap *map,
+extern HeapTuple ConvertPartitionTupleSlot(Relation partrel, TupleConversionMap *map,
 						  HeapTuple tuple,
 						  TupleTableSlot *new_slot,
 						  TupleTableSlot **p_my_slot);

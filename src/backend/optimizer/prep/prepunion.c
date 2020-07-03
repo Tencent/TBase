@@ -2037,6 +2037,69 @@ adjust_appendrel_attrs(PlannerInfo *root, Node *node, AppendRelInfo *appinfo)
     return result;
 }
 
+/*
+ * adjust_appendrel_attrs
+ *        Copy the specified query or expression and translate Vars referring to a
+ *        parent rel to refer to the corresponding child rel instead.  We also
+ *        update rtindexes appearing outside Vars, such as resultRelation and
+ *        jointree relids.
+ *
+ * Note: this is only applied after conversion of sublinks to subplans,
+ * so we don't need to cope with recursion into sub-queries.
+ *
+ * Note: this is not hugely different from what pullup_replace_vars() does;
+ * maybe we should try to fold the two routines together.
+ */
+Node *
+adjust_appendrel_attrs_nappinfos(PlannerInfo *root, Node *node, int nappinfos,
+                                           AppendRelInfo **appinfos)
+{
+        Node       *result;
+        adjust_appendrel_attrs_context context;
+
+        context.root = root;
+        context.nappinfos = nappinfos;
+        context.appinfos = appinfos;
+
+        /* If there's nothing to adjust, don't call this function. */
+        Assert(nappinfos >= 1 && appinfos != NULL);
+
+        /*
+         * Must be prepared to start with a Query or a bare expression tree.
+         */
+        if (node && IsA(node, Query))
+        {
+                Query      *newnode;
+                int                     cnt;
+
+                newnode = query_tree_mutator((Query *) node,
+                                                                         adjust_appendrel_attrs_mutator,
+                                                                         (void *) &context,
+                                                                         QTW_IGNORE_RC_SUBQUERIES);
+                for (cnt = 0; cnt < nappinfos; cnt++)
+                {
+                        AppendRelInfo *appinfo = appinfos[cnt];
+
+                        if (newnode->resultRelation == appinfo->parent_relid)
+                        {
+                                newnode->resultRelation = appinfo->child_relid;
+                                /* Fix tlist resnos too, if it's inherited UPDATE */
+                                if (newnode->commandType == CMD_UPDATE)
+                                        newnode->targetList =
+                                                adjust_inherited_tlist(newnode->targetList,
+                                                                                           appinfo);
+                                break;
+                        }
+                }
+
+                result = (Node *) newnode;
+        }
+        else
+                result = adjust_appendrel_attrs_mutator(node, &context);
+
+        return result;
+}
+
 static Node *
 adjust_appendrel_attrs_mutator(Node *node,
                                adjust_appendrel_attrs_context *context)
@@ -2467,7 +2530,7 @@ build_child_join_sjinfo(PlannerInfo *root, SpecialJoinInfo *parent_sjinfo,
    sjinfo->syn_righthand = adjust_child_relids(sjinfo->syn_righthand,
                                                right_nappinfos,
                                                right_appinfos);
-   sjinfo->semi_rhs_exprs = (List *) adjust_appendrel_attrs(root,
+   sjinfo->semi_rhs_exprs = (List *) adjust_appendrel_attrs_nappinfos(root,
                                                             (Node *) sjinfo->semi_rhs_exprs,
                                                             right_nappinfos,
                                                             right_appinfos);

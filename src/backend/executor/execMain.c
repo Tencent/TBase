@@ -2287,7 +2287,7 @@ ExecPartitionCheckEmitError(ResultRelInfo *resultRelInfo,
                                          gettext_noop("could not convert row type"));
             if (map != NULL)
             {
-            tuple = do_convert_tuple(tuple, map);
+            tuple = do_convert_tuple(tuple, map, rel);
                 ExecSetSlotDescriptor(slot, tupdesc);
                 ExecStoreTuple(tuple, slot, InvalidBuffer, false);
             }

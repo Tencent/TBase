@@ -3541,7 +3541,7 @@ readnextline:
              * We might need to convert from the parent rowtype to the
              * partition rowtype.
              */
-            tuple = ConvertPartitionTupleSlot(proute->parent_child_tupconv_maps[leaf_part_index],
+            tuple = ConvertPartitionTupleSlot(resultRelInfo->ri_RelationDesc, proute->parent_child_tupconv_maps[leaf_part_index],
                                               tuple,
                                               proute->partition_tuple_slot,
                                               &slot);

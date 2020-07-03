@@ -1031,7 +1031,7 @@ set_append_rel_size(PlannerInfo *root, RelOptInfo *rel,
 		childrel->reltarget->exprs = (List *)
 			adjust_appendrel_attrs(root,
 								   (Node *) rel->reltarget->exprs,
-								   1, &appinfo);
+								   &appinfo);
 
         /*
 		 * We have to make child entries in the EquivalenceClass data
@@ -2169,10 +2169,41 @@ set_subquery_pathlist(PlannerInfo *root, RelOptInfo *rel,
 	                                        subpath->pathkeys,
 	                                        make_tlist_from_pathtarget(subpath->pathtarget));
 
+	    if (subpath->distribution && subpath->distribution->distributionExpr)
+	    {
+	   			ListCell *lc;
+
+	   			/* FIXME Could we use pathtarget directly? */
+	   			List *targetlist = make_tlist_from_pathtarget(subpath->pathtarget);
+
+	   			/*
+	   			 * The distribution expression from the subplan's tlist, but it should
+	   			 * be from the rel, need conversion.
+	   			 */
+	   			distribution = makeNode(Distribution);
+	   			distribution->distributionType = subpath->distribution->distributionType;
+	   			distribution->nodes = bms_copy(subpath->distribution->nodes);
+	   			distribution->restrictNodes = bms_copy(subpath->distribution->restrictNodes);
+
+	   			foreach(lc, targetlist)
+	   			{
+	   				TargetEntry *tle = (TargetEntry *) lfirst(lc);
+	   				if (equal(tle->expr, subpath->distribution->distributionExpr))
+	   				{
+	   					distribution->distributionExpr = (Node *)
+	   							makeVarFromTargetEntry(rel->relid, tle);
+	   					break;
+	   				}
+	   			}
+	    }
+	    else
+	   			distribution = subpath->distribution;
+
 	   /* Generate outer path using this subpath */
 	   add_partial_path(rel, (Path *)
 	                    create_subqueryscan_path(root, rel, subpath,
-	                                             pathkeys, required_outer));
+	                                             pathkeys, required_outer,
+												 distribution));
 	}
 }
 

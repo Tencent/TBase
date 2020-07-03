@@ -286,6 +286,7 @@ ExecInsert(ModifyTableState *mtstate,
 {// #lizard forgives
     HeapTuple    tuple;
     ResultRelInfo *resultRelInfo;
+	ResultRelInfo *saved_resultRelInfo = NULL;
     Relation    resultRelationDesc;
     Oid            newId;
     List       *recheckIndexes = NIL;
@@ -329,7 +330,7 @@ ExecInsert(ModifyTableState *mtstate,
 
 #ifdef __TBASE__
     /* Determine the interval partition to heap_insert the tuple into */
-    else if (resultRelInfo->ispartparent)
+	if (resultRelInfo->ispartparent)
     {
         AttrNumber partkey;
         Datum        partvalue;
@@ -1386,7 +1387,7 @@ lreplace:;
 	        * Row movement, part 1.  Delete the tuple, but skip RETURNING
 	        * processing. We want to return rows from INSERT.
 	        */
-	       ExecDelete(mtstate, tupleid, oldtuple, planSlot, epqstate, estate,
+	       ExecDelete(mtstate, tupleid, oldtuple, slot, planSlot, epqstate, estate,
 	                  &tuple_deleted, false, false);
 
 	       /*
@@ -1433,7 +1434,7 @@ lreplace:;
 	       map_index = resultRelInfo - mtstate->resultRelInfo;
 	       Assert(map_index >= 0 && map_index < mtstate->mt_nplans);
 	       tupconv_map = tupconv_map_for_subplan(mtstate, map_index);
-	       tuple = ConvertPartitionTupleSlot(tupconv_map,
+	       tuple = ConvertPartitionTupleSlot(resultRelInfo->ri_RelationDesc, tupconv_map,
 	                                         tuple,
 	                                         proute->root_tuple_slot,
 	                                         &slot);
@@ -2040,7 +2041,7 @@ ExecPrepareTupleRouting(ModifyTableState *mtstate,
 	/*
 	 * Convert the tuple, if necessary.
 	 */
-	ConvertPartitionTupleSlot(proute->parent_child_tupconv_maps[partidx],
+	ConvertPartitionTupleSlot(partrel->ri_RelationDesc, proute->parent_child_tupconv_maps[partidx],
 							  tuple,
 							  proute->partition_tuple_slot,
 							  &slot);

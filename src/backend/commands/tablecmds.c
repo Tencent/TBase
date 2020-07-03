@@ -6647,9 +6647,9 @@ ATCheckPartitionsNotInUse(Relation rel, LOCKMODE lockmode)
 			Relation	childrel;
 
 			/* find_all_inheritors already got lock */
-			childrel = table_open(lfirst_oid(cell), NoLock);
+			childrel = heap_open(lfirst_oid(cell), NoLock);
 			CheckTableNotInUse(childrel, "ALTER TABLE");
-			table_close(childrel, NoLock);
+			heap_close(childrel, NoLock);
 		}
 		list_free(inh);
 	}
@@ -8489,7 +8489,7 @@ ATExecDropColumn(List **wqueue, Relation rel, const char *colName,
                     /* Time to delete this child column, too */
                     ATExecDropColumn(wqueue, childrel, colName,
                                      behavior, true, true,
-                                     false, lockmode);
+									 false, lockmode, addrs);
                 }
                 else
                 {
@@ -8658,6 +8658,7 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
                 addr = DefineIndex(partOid,    /* OID of heap relation */
                                    partidxstmt,
                                    InvalidOid, /* no predefined OID */
+								   InvalidOid,	/* no parent index */
                                    true,    /* is_alter_table */
                                    check_rights,    /* check_rights */
                                    false,    /* check_not_in_use */

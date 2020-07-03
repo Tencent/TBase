@@ -189,7 +189,7 @@ ExecSetupPartitionTupleRouting(ModifyTableState *mtstate, Relation rel)
              * UPDATE of a partition-key becomes a DELETE+INSERT operation, so
              * this check is required even when the operation is CMD_UPDATE.
              */
-            CheckValidResultRel(leaf_part_rri, CMD_INSERT);
+            CheckValidResultRel(leaf_part_rri->ri_RelationDesc, CMD_INSERT);
          }
 
 		proute->partitions[i] = leaf_part_rri;
@@ -257,7 +257,7 @@ ExecFindPartition(ResultRelInfo *resultRelInfo, PartitionDispatch *pd,
 			HeapTuple	tuple = ExecFetchSlotTuple(slot);
 
 			ExecClearTuple(myslot);
-			tuple = do_convert_tuple(tuple, map);
+			tuple = do_convert_tuple(tuple, map, NULL);
 			ExecStoreTuple(tuple, myslot, InvalidBuffer, true);
 			slot = myslot;
 		}
@@ -343,7 +343,7 @@ ExecInitPartitionInfo(ModifyTableState *mtstate,
 	ModifyTable *node = mtstate ? (ModifyTable *) mtstate->ps.plan : NULL;
 	MemoryContext oldContext;
 
-	partrel = table_open(dispatch->partdesc->oids[partidx], RowExclusiveLock);
+	partrel = heap_open(proute->partition_oids[partidx], RowExclusiveLock);
 
 	/*
 	 * Keep ResultRelInfo and other information for this partition in the
@@ -363,19 +363,7 @@ ExecInitPartitionInfo(ModifyTableState *mtstate,
 	 * partition-key becomes a DELETE+INSERT operation, so this check is still
 	 * required when the operation is CMD_UPDATE.
 	 */
-	CheckValidResultRel(leaf_part_rri, CMD_INSERT);
-
-	/*
-	 * Since we've just initialized this ResultRelInfo, it's not in any list
-	 * attached to the estate as yet.  Add it, so that it can be found later.
-	 *
-	 * Note that the entries in this list appear in no predetermined order,
-	 * because partition result rels are initialized as and when they're
-	 * needed.
-	 */
-	estate->es_tuple_routing_result_relations =
-		lappend(estate->es_tuple_routing_result_relations,
-				leaf_part_rri);
+	CheckValidResultRel(leaf_part_rri->ri_RelationDesc, CMD_INSERT);
 
 	/*
 	 * Open partition indices.  The user may have asked to check for conflicts
@@ -589,7 +577,7 @@ TupConvMapForLeaf(PartitionTupleRouting *proute,
  * tuple is returned unmodified.
  */
 HeapTuple
-ConvertPartitionTupleSlot(TupleConversionMap *map,
+ConvertPartitionTupleSlot(Relation partrel, TupleConversionMap *map,
 						  HeapTuple tuple,
 						  TupleTableSlot *new_slot,
 						  TupleTableSlot **p_my_slot)
@@ -597,7 +585,7 @@ ConvertPartitionTupleSlot(TupleConversionMap *map,
 	if (!map)
 		return tuple;
 
-	tuple = do_convert_tuple(tuple, map);
+	tuple = do_convert_tuple(tuple, map, partrel);
 
 	/*
 	 * Change the partition tuple slot descriptor, as per converted tuple.
