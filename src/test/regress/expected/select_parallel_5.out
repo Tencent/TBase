@@ -95,6 +95,30 @@ explain (costs off)
                            ->  Parallel Seq Scan on tenk1
 (10 rows)
 
+explain (costs off)
+	select count(stringu1) as num, (CASE WHEN length(stringu1) > 5 THEN 'LONG' ELSE 'SHORT' END) as islong
+		from tenk1 group by islong order by num;
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: (count(stringu1))
+   ->  Finalize HashAggregate
+         Group Key: CASE WHEN (length((stringu1)::text) > 5) THEN 'LONG'::text ELSE 'SHORT'::text END
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               ->  Gather
+                     Workers Planned: 4
+                     ->  Partial HashAggregate
+                           Group Key: CASE WHEN (length((stringu1)::text) > 5) THEN 'LONG'::text ELSE 'SHORT'::text END
+                           ->  Parallel Seq Scan on tenk1
+(10 rows)
+
+select count(stringu1) as num, (CASE WHEN length(stringu1) > 5 THEN 'LONG' ELSE 'SHORT' END) as islong
+	from tenk1 group by islong order by num;
+  num  | islong 
+-------+--------
+ 10000 | LONG
+(1 row)
+
 -- test that parallel plan for aggregates is not selected when
 -- target list contains parallel restricted clause.
 explain (costs off)
