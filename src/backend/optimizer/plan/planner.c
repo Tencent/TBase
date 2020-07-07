@@ -223,7 +223,7 @@ static void add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
                          const AggClauseCosts *agg_costs,
                          const AggClauseCosts *agg_final_costs,
                          grouping_sets_data *gd, bool can_sort, bool can_hash,
-                         double dNumGroups, List *havingQual);
+                         double dNumGroups, List *havingQual, bool *try_distributed_aggregation);
 static void add_partial_paths_to_grouping_rel(PlannerInfo *root,
                                  RelOptInfo *input_rel,
                                  RelOptInfo *grouped_rel,
@@ -4118,12 +4118,9 @@ create_degenerate_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
             path = (Path *)
                 create_append_path(grouped_rel,
                                    paths,
-	                           NIL,
                                    NULL,
                                    0,
-	                           false,
-	                           NIL,
-	                           -1);
+	                           NIL);
             path->pathtarget = target;
         }
         else
@@ -4157,12 +4154,16 @@ create_ordinary_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
    Path       *cheapest_path = input_rel->cheapest_total_path;
    AggClauseCosts agg_partial_costs;   /* parallel only */
    AggClauseCosts agg_final_costs; /* parallel only */
+    Size		hashaggtablesize;
    double      dNumGroups;
+    double		dNumPartialGroups = 0;
    bool        can_hash;
    bool        can_sort;
    bool        try_parallel_aggregation;
     bool		try_distributed_aggregation;
 	PathTarget *partial_grouping_target = NULL;
+
+	ListCell   *lc;
 
 	/*
      * Estimate number of groups.
@@ -4347,7 +4348,7 @@ create_ordinary_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
 	add_paths_to_grouping_rel(root, input_rel, grouped_rel, target,
 	                          partial_grouping_target, agg_costs,
 	                          &agg_final_costs, gd, can_sort, can_hash,
-	                          dNumGroups, (List *) parse->havingQual);
+	                          dNumGroups, (List *) parse->havingQual, &try_distributed_aggregation);
 
 	/* Generate XL aggregate paths, with distributed 2-phase aggregation. */
 
@@ -4381,7 +4382,8 @@ create_ordinary_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
 		/* Estimate number of partial groups. */
 		dNumPartialGroups = get_number_of_groups(root,
 												 cheapest_path->rows,
-												 gd);
+												 gd,
+												 parse->targetList);
 
 		/*
 		 * Collect statistics about aggregates for estimating costs of
@@ -6840,7 +6842,7 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
                           const AggClauseCosts *agg_costs,
                           const AggClauseCosts *agg_final_costs,
                           grouping_sets_data *gd, bool can_sort, bool can_hash,
-                          double dNumGroups, List *havingQual)
+                          double dNumGroups, List *havingQual, bool *try_distributed_aggregation)
 {
     Query      *parse = root->parse;
     Path       *cheapest_path = input_rel->cheapest_total_path;
@@ -6872,12 +6874,13 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
             {
 #ifdef __TBASE__
 				bool try_redistribute_grouping = false;
-				PathTarget * local_grouping_target = make_partial_grouping_target(root, target);
+				PathTarget * local_grouping_target = make_partial_grouping_target(root, target, (Node *) parse->havingQual);
 
 				/* Estimate number of partial groups. */
 				double dNumLocalGroups = get_number_of_groups(root,
 														 cheapest_path->rows,
-														 gd);
+														 gd,
+														 parse->targetList);
 #endif
 
 #ifdef __TBASE__
@@ -6971,7 +6974,7 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 															AGGSPLIT_INITIAL_SERIAL,
 															parse->groupClause,
 															NIL,
-															&agg_partial_costs,
+															agg_costs,
 															dNumLocalGroups);
                         }
 						else if (parse->groupClause)
@@ -7003,7 +7006,7 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 #endif
 
 				else
-					try_distributed_aggregation = false;
+					*try_distributed_aggregation = false;
 
 #ifdef __TBASE__
 				if(try_redistribute_grouping)
@@ -7335,7 +7338,7 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 #endif
 
 			else
-				try_distributed_aggregation = false;
+				*try_distributed_aggregation = false;
 
 #ifdef __TBASE__
                 /*
@@ -7624,12 +7627,13 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 						  * 	final grouping
 										*/
 						AggClauseCosts hashagg_partial_costs;
-						PathTarget * local_grouping_target = make_partial_grouping_target(root, target);
+						PathTarget * local_grouping_target = make_partial_grouping_target(root, target, (Node *) parse->havingQual);
 
 						/* Estimate number of partial groups. */
 						double dNumLocalGroups = get_number_of_groups(root,
 																 cheapest_path->rows,
-																 gd);
+																 gd,
+																 parse->targetList);
 						try_redistribute_grouping = true;
 
 						MemSet(&hashagg_partial_costs, 0, sizeof(AggClauseCosts));
@@ -7667,7 +7671,7 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 				path = create_remotesubplan_path(root, path, NULL);
 #endif
 				else
-					try_distributed_aggregation = false;
+					*try_distributed_aggregation = false;
 
 /*
 				 * We just need an Agg over the cheapest-total input path,
@@ -7825,7 +7829,7 @@ add_paths_to_grouping_rel(PlannerInfo *root, RelOptInfo *input_rel,
 					path = create_remotesubplan_path(root, path, NULL);
 #endif
 				else
-					try_distributed_aggregation = false;
+					*try_distributed_aggregation = false;
 
 #ifdef __TBASE__
 				if (!redistribute_group)

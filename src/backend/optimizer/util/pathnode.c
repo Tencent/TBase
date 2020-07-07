@@ -6967,8 +6967,7 @@ reparameterize_path_by_child(PlannerInfo *root, Path *path,
 #define ADJUST_CHILD_ATTRS(node) \
 	((node) = \
 	 (List *) adjust_appendrel_attrs_multilevel(root, (Node *) (node), \
-												child_rel->relids, \
-												child_rel->top_parent_relids))
+												child_rel))
 
 #define REPARAMETERIZE_CHILD_PATH(path) \
 do { \

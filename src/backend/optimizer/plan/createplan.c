@@ -6728,7 +6728,7 @@ make_remotesubplan(PlannerInfo *root,
                 /* need sort */
                 if (distributionType == LOCATOR_TYPE_NONE && pathkeys && need_sort)
                 {
-                    subplan = (Plan *)make_sort_from_pathkeys(subplan, pathkeys);
+					subplan = (Plan *)make_sort_from_pathkeys(subplan, pathkeys, NULL);
 
                     subplan->startup_cost = gather_plan->plan.startup_cost;
                     subplan->total_cost = gather_plan->plan.total_cost;

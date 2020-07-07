@@ -59,6 +59,8 @@ typedef struct
 {
     PlannerInfo *root;
     AppendRelInfo *appinfo;
+	AppendRelInfo **appinfos;
+	int nappinfos;
 } adjust_appendrel_attrs_context;
 
 static Path *recurse_set_operations(Node *setOp, PlannerInfo *root,
@@ -121,6 +123,8 @@ static Bitmapset *translate_col_privs(const Bitmapset *parent_privs,
                     List *translated_vars);
 static Node *adjust_appendrel_attrs_mutator(Node *node,
                                adjust_appendrel_attrs_context *context);
+static Relids adjust_child_relids(Relids relids, int nappinfos,
+                    AppendRelInfo **appinfos);
 static Relids adjust_relid_set(Relids relids, Index oldrelid, Index newrelid);
 static List *adjust_inherited_tlist(List *tlist,
                        AppendRelInfo *context);
@@ -2310,6 +2314,40 @@ adjust_appendrel_attrs_mutator(Node *node,
 }
 
 /*
+ * Substitute child relids for parent relids in a Relid set.  The array of
+ * appinfos specifies the substitutions to be performed.
+ */
+static Relids
+adjust_child_relids(Relids relids, int nappinfos, AppendRelInfo **appinfos)
+{
+        Bitmapset  *result = NULL;
+        int                     cnt;
+
+        for (cnt = 0; cnt < nappinfos; cnt++)
+        {
+                AppendRelInfo *appinfo = appinfos[cnt];
+
+                /* Remove parent, add child */
+                if (bms_is_member(appinfo->parent_relid, relids))
+                {
+                        /* Make a copy if we are changing the set. */
+                        if (!result)
+                                result = bms_copy(relids);
+
+                        result = bms_del_member(result, appinfo->parent_relid);
+                        result = bms_add_member(result, appinfo->child_relid);
+                }
+        }
+
+        /* If we made any changes, return the modified copy. */
+        if (result)
+                return result;
+
+        /* Otherwise, return the original set without modification. */
+        return relids;
+}
+
+/*
  * Substitute newrelid for oldrelid in a Relid set
  */
 static Relids
@@ -2541,3 +2579,39 @@ build_child_join_sjinfo(PlannerInfo *root, SpecialJoinInfo *parent_sjinfo,
    return sjinfo;
 }
 
+/*
+ * find_appinfos_by_relids
+ *      Find AppendRelInfo structures for all relations specified by relids.
+ *
+ * The AppendRelInfos are returned in an array, which can be pfree'd by the
+ * caller. *nappinfos is set to the number of entries in the array.
+ */
+AppendRelInfo **
+find_appinfos_by_relids(PlannerInfo *root, Relids relids, int *nappinfos)
+{
+    ListCell   *lc;
+    AppendRelInfo **appinfos;
+    int         cnt = 0;
+
+    *nappinfos = bms_num_members(relids);
+    appinfos = (AppendRelInfo **) palloc(sizeof(AppendRelInfo *) * *nappinfos);
+
+    foreach(lc, root->append_rel_list)
+    {
+        AppendRelInfo *appinfo = lfirst(lc);
+
+        if (bms_is_member(appinfo->child_relid, relids))
+        {
+            appinfos[cnt] = appinfo;
+            cnt++;
+
+            /* Stop when we have gathered all the AppendRelInfos. */
+            if (cnt == *nappinfos)
+                return appinfos;
+        }
+    }
+
+    /* Should have found the entries ... */
+    elog(ERROR, "did not find all requested child rels in append_rel_list");
+    return NULL;                /* not reached */
+}

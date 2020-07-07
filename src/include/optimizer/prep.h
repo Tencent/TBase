@@ -61,6 +61,9 @@ extern Node *adjust_appendrel_attrs_nappinfos(PlannerInfo *root, Node *node, int
 extern Node *adjust_appendrel_attrs_multilevel(PlannerInfo *root, Node *node,
 								  RelOptInfo *child_rel);
 
+extern AppendRelInfo **find_appinfos_by_relids(PlannerInfo *root,
+                       Relids relids, int *nappinfos);
+
 extern SpecialJoinInfo *build_child_join_sjinfo(PlannerInfo *root,
                                                SpecialJoinInfo *parent_sjinfo,
                                                Relids left_relids, Relids right_relids);

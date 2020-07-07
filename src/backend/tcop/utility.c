@@ -3817,6 +3817,7 @@ ProcessUtilitySlow(ParseState *pstate,
                                 addr = DefineIndex(partOid,    /* OID of heap relation */
                                                    partidxstmt,
                                                    InvalidOid, /* no predefined OID */
+												   InvalidOid,
                                                    false,    /* is_alter_table */
                                                    true,    /* check_rights */
                                                    true,    /* check_not_in_use */

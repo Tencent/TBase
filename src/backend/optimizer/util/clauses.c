@@ -2510,6 +2510,13 @@ estimate_expression_value(PlannerInfo *root, Node *node)
     return eval_const_expressions_mutator(node, &context);
 }
 
+/* Generic macro for applying evaluate_expr */
+#define ece_evaluate_expr(node) \
+        ((Node *) evaluate_expr((Expr *) (node), \
+                                                        exprType((Node *) (node)), \
+                                                        exprTypmod((Node *) (node)), \
+                                                        exprCollation((Node *) (node))))
+
 static Node *
 eval_const_expressions_mutator(Node *node,
                                eval_const_expressions_context *context)
