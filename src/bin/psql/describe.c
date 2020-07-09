@@ -1400,6 +1400,7 @@ describeOneTableDetails(const char *schemaname,
         bool        rowsecurity;
         bool        forcerowsecurity;
         bool        hasoids;
+		bool        ispartition;
         Oid            tablespace;
         char       *reloptions;
         char       *reloftype;
@@ -1428,7 +1429,7 @@ describeOneTableDetails(const char *schemaname,
         printfPQExpBuffer(&buf,
                           "SELECT c.relchecks, c.relkind, c.relhasindex, c.relhasrules, "
                           "c.relhastriggers, c.relrowsecurity, c.relforcerowsecurity, "
-                          "c.relhasoids, %s, c.reltablespace, "
+						  "c.relhasoids, c.relispartition, %s, c.reltablespace, "
                           "CASE WHEN c.reloftype = 0 THEN '' ELSE c.reloftype::pg_catalog.regtype::pg_catalog.text END, "
 #ifdef __TBASE__
                           "c.relpersistence, c.relreplident, c.relpartkind\n"
@@ -1559,20 +1560,21 @@ describeOneTableDetails(const char *schemaname,
     tableinfo.rowsecurity = strcmp(PQgetvalue(res, 0, 5), "t") == 0;
     tableinfo.forcerowsecurity = strcmp(PQgetvalue(res, 0, 6), "t") == 0;
     tableinfo.hasoids = strcmp(PQgetvalue(res, 0, 7), "t") == 0;
+	tableinfo.ispartition = strcmp(PQgetvalue(res, 0, 8), "t") == 0;
     tableinfo.reloptions = (pset.sversion >= 80200) ?
-        pg_strdup(PQgetvalue(res, 0, 8)) : NULL;
+		pg_strdup(PQgetvalue(res, 0, 9)) : NULL;
     tableinfo.tablespace = (pset.sversion >= 80000) ?
-        atooid(PQgetvalue(res, 0, 9)) : 0;
+		atooid(PQgetvalue(res, 0, 10)) : 0;
     tableinfo.reloftype = (pset.sversion >= 90000 &&
-                           strcmp(PQgetvalue(res, 0, 10), "") != 0) ?
-        pg_strdup(PQgetvalue(res, 0, 10)) : NULL;
+						   strcmp(PQgetvalue(res, 0, 11), "") != 0) ?
+		pg_strdup(PQgetvalue(res, 0, 11)) : NULL;
     tableinfo.relpersistence = (pset.sversion >= 90100) ?
-        *(PQgetvalue(res, 0, 11)) : 0;
+		*(PQgetvalue(res, 0, 12)) : 0;
     tableinfo.relreplident = (pset.sversion >= 90400) ?
-        *(PQgetvalue(res, 0, 12)) : 'd';
+		*(PQgetvalue(res, 0, 13)) : 'd';
 #ifdef __TBASE__
     tableinfo.relpartkind = (pset.sversion >= 90500)?
-        *PQgetvalue(res, 0, 13) : 'n';
+		*PQgetvalue(res, 0, 14) : 'n';
 #endif
     PQclear(res);
     res = NULL;
@@ -2257,11 +2259,15 @@ describeOneTableDetails(const char *schemaname,
 			tableinfo.relkind == RELKIND_PARTITIONED_TABLE)
         {
             printfPQExpBuffer(&buf,
-                              "SELECT conname,\n"
-                              "  pg_catalog.pg_get_constraintdef(r.oid, true) as condef\n"
-                              "FROM pg_catalog.pg_constraint r\n"
-                              "WHERE r.conrelid = '%s' AND r.contype = 'f' ORDER BY 1;",
-                              oid);
+							  "SELECT conrelid = '%s'::pg_catalog.regclass AS sametable,\n"
+							  "  conname,\n"
+							  "  pg_catalog.pg_get_constraintdef(oid, true) as condef,\n"
+							  "  conrelid::pg_catalog.regclass AS ontable\n"
+							  " FROM pg_catalog.pg_constraint,\n"
+					          "      pg_catalog.pg_partition_ancestors('%s')\n"
+							  " WHERE conrelid = relid AND contype = 'f'\n"
+							  " ORDER BY sametable DESC, conname;",
+							  oid, oid);
             result = PSQLexec(buf.data);
             if (!result)
                 goto error_return;
@@ -2273,10 +2279,15 @@ describeOneTableDetails(const char *schemaname,
                 printTableAddFooter(&cont, _("Foreign-key constraints:"));
                 for (i = 0; i < tuples; i++)
                 {
-                    /* untranslated constraint name and def */
-                    printfPQExpBuffer(&buf, "    \"%s\" %s",
-                                      PQgetvalue(result, i, 0),
-                                      PQgetvalue(result, i, 1));
+					/*
+					 * Print untranslated constraint name and definition. Use
+					 * a "TABLE tab" prefix when the constraint is defined in
+					 * a parent partitioned table.
+					 */
+					 printfPQExpBuffer(&buf, "    TABLE \"%s\" CONSTRAINT \"%s\" %s",
+					                                          PQgetvalue(result, i, 1),
+					                                          PQgetvalue(result, i, 2),
+					                                          PQgetvalue(result, i, 3));
 
                     printTableAddFooter(&cont, buf.data);
                 }
@@ -3819,7 +3830,7 @@ listPartitionedTables(const char *reltypes, const char *pattern, bool verbose)
 	{
 		char		sverbuf[32];
 
-		pg_log_error("The server (version %s) does not support declarative table partitioning.",
+		psql_error("The server (version %s) does not support declarative table partitioning.",
 					 formatPGVersionNumber(pset.sversion, false,
 										   sverbuf, sizeof(sverbuf)));
 		return true;

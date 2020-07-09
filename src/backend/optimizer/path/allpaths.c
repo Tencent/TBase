@@ -1031,7 +1031,7 @@ set_append_rel_size(PlannerInfo *root, RelOptInfo *rel,
 		childrel->reltarget->exprs = (List *)
 			adjust_appendrel_attrs(root,
 								   (Node *) rel->reltarget->exprs,
-								   &appinfo);
+								   appinfo);
 
         /*
 		 * We have to make child entries in the EquivalenceClass data

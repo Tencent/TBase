@@ -5141,7 +5141,7 @@ finalize_plan(PlannerInfo *root, Plan *plan, int gather_param, Bitmapset *valid_
             context.paramids = bms_add_members(context.paramids, scan_params);
             break;
 
-
+		case T_SubqueryScan:
             {
                 SubqueryScan *sscan = (SubqueryScan *) plan;
                 RelOptInfo *rel;

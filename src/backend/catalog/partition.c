@@ -331,21 +331,18 @@ RelationBuildPartitionDesc(Relation rel)
         }
         else if (key->strategy == PARTITION_STRATEGY_RANGE)
         {
-            int            j,
-                        k;
+		    int         k;
             PartitionRangeBound **all_bounds,
                        *prev;
-            bool       *distinct_indexes;
 
             all_bounds = (PartitionRangeBound **) palloc0(2 * nparts *
                                                           sizeof(PartitionRangeBound *));
-            distinct_indexes = (bool *) palloc(2 * nparts * sizeof(bool));
 
             /*
              * Create a unified list of range bounds across all the
              * partitions.
              */
-            i = j = 0;
+		    i = ndatums = 0;
             foreach(cell, boundspecs)
             {
                 PartitionBoundSpec *spec = castNode(PartitionBoundSpec,
@@ -371,28 +368,26 @@ RelationBuildPartitionDesc(Relation rel)
                                              true);
                 upper = make_one_range_bound(key, i, spec->upperdatums,
                                              false);
-                all_bounds[j] = lower;
-                all_bounds[j + 1] = upper;
-                j += 2;
+		        all_bounds[ndatums++] = lower;
+		        all_bounds[ndatums++] = upper;
                 i++;
             }
 
-			Assert(j == nparts * 2 ||
-                  (default_index != -1 && j == (nparts - 1) * 2));
+		    Assert(ndatums == nparts * 2 ||
+		           (default_index != -1 && ndatums == (nparts - 1) * 2));
 
             /* Sort all the bounds in ascending order */
-			qsort_arg(all_bounds, j,
+		    qsort_arg(all_bounds, ndatums,
                       sizeof(PartitionRangeBound *),
                       qsort_partition_rbound_cmp,
                       (void *) key);
 
-            /*
-             * Count the number of distinct bounds to allocate an array of
-             * that size.
-             */
-            ndatums = 0;
+		    /* Save distinct bounds from all_bounds into rbounds. */
+		    rbounds = (PartitionRangeBound **)
+		        palloc(ndatums * sizeof(PartitionRangeBound *));
+		    k = 0;
             prev = NULL;
-            for (i = 0; i < 2 * nparts; i++)
+		    for (i = 0; i < ndatums; i++)
             {
                 PartitionRangeBound *cur = all_bounds[i];
                 bool        is_distinct = false;
@@ -429,34 +424,18 @@ RelationBuildPartitionDesc(Relation rel)
                 }
 
                 /*
-                 * Count the current bound if it is distinct from the previous
-                 * one.  Also, store if the index i contains a distinct bound
-                 * that we'd like put in the relcache array.
+		         * Only if the bound is distinct save it into a temporary
+		         * array i.e. rbounds which is later copied into boundinfo
+		         * datums array.
                  */
                 if (is_distinct)
-                {
-                    distinct_indexes[i] = true;
-                    ndatums++;
-                }
-                else
-                    distinct_indexes[i] = false;
+		            rbounds[k++] = all_bounds[i];
 
                 prev = cur;
             }
 
-            /*
-             * Finally save them in an array from where they will be copied
-             * into the relcache.
-             */
-            rbounds = (PartitionRangeBound **) palloc(ndatums *
-                                                      sizeof(PartitionRangeBound *));
-            k = 0;
-            for (i = 0; i < 2 * nparts; i++)
-            {
-                if (distinct_indexes[i])
-                    rbounds[k++] = all_bounds[i];
-            }
-            Assert(k == ndatums);
+		    /* Update ndatums to hold the count of distinct datums. */
+		    ndatums = k;
         }
         else
             elog(ERROR, "unexpected partition strategy: %d",
