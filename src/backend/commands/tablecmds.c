@@ -17155,7 +17155,7 @@ AttachPartitionEnsureIndexes(Relation rel, Relation attachrel)
 										   RelationGetDescr(rel)->natts);
 			DefineIndex(RelationGetRelid(attachrel), stmt, InvalidOid,
 						RelationGetRelid(idxRel),
-						false, false, false, false, false);
+						true, false, false, false, false);
 		}
 
 		index_close(idxRel, AccessShareLock);

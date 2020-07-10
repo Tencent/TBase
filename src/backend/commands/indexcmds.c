@@ -964,8 +964,8 @@ DefineIndex(Oid relationId,
 					DefineIndex(childRelid, childStmt,
 								InvalidOid,			/* no predefined OID */
 								indexRelationId,	/* this is our child */
-								false, check_rights, check_not_in_use,
-								false, quiet);
+								is_alter_table, check_rights, check_not_in_use,
+								skip_build, quiet);
 				}
 
 				pfree(attmap);
