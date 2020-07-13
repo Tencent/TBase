@@ -180,6 +180,10 @@ static void fix_append_rel_relids(List *append_rel_list, int varno,
                       Relids subrelids);
 static Node *find_jointree_node_for_rel(Node *jtnode, int relid);
 
+#ifdef __TBASE__
+static Node * pull_up_or_sublinks_qual_recurse(PlannerInfo *root, Node *node, Node **jtlink,Node **orclauses);
+static bool check_pull_up_sublinks_qual_or_recurse(PlannerInfo *root, Node *node);
+#endif
 
 /*
  * pull_up_sublinks
@@ -255,6 +259,7 @@ pull_up_sublinks_jointree_recurse(PlannerInfo *root, Node *jtnode,
     {
         FromExpr   *f = (FromExpr *) jtnode;
         List       *newfromlist = NIL;
+		Node	   *orquals = NULL;
         Relids        frelids = NULL;
         FromExpr   *newf;
         Node       *jtlink;
@@ -280,6 +285,16 @@ pull_up_sublinks_jointree_recurse(PlannerInfo *root, Node *jtnode,
         newf->quals = pull_up_sublinks_qual_recurse(root, f->quals,
                                                     &jtlink, frelids,
                                                     NULL, NULL);
+#ifdef __TBASE__
+		if (enable_pullup_subquery)
+		{
+			newf->quals = pull_up_or_sublinks_qual_recurse(root, newf->quals, &jtlink, &orquals);
+			if (orquals)
+			{
+				jtlink = (Node *)makeFromExpr(list_make1(jtlink), orquals);
+			}
+		}
+#endif
 
         /*
          * Note that the result will be either newf, or a stack of JoinExprs
@@ -374,6 +389,125 @@ pull_up_sublinks_jointree_recurse(PlannerInfo *root, Node *jtnode,
              (int) nodeTag(jtnode));
     return jtnode;
 }
+#ifdef __TBASE__
+
+static bool
+check_pull_up_sublinks_qual_or_recurse(PlannerInfo *root, Node *node)
+{
+	if (node == NULL)
+		return true;
+
+	if (IsA(node, SubLink))
+	{
+		SubLink *sublink = (SubLink *)node;
+		Query   *subselect = (Query *)sublink->subselect;
+
+		if (sublink->subLinkType == EXISTS_SUBLINK)
+		{
+			if (!check_or_exist_sublink_pullupable(root, node))
+				return false;
+
+			if(subselect && subselect->jointree && subselect->jointree->quals)
+				return check_or_exist_qual_pullupable(root, subselect->jointree->quals);
+
+			return false;
+		}
+
+		return false;
+	}
+	else if (or_clause(node))
+	{
+		ListCell *l;
+
+		foreach (l, ((BoolExpr *)node)->args)
+		{
+			if (!check_pull_up_sublinks_qual_or_recurse(root, (Node *)lfirst(l)))
+				return false;
+		}
+
+		return true;
+	}
+	return false;
+}
+
+static Node *
+pull_up_or_sublinks_qual_recurse(PlannerInfo *root, Node *node, Node **jtlink, Node **orquals)
+{
+	if (node == NULL)
+		return NULL;
+
+	if (and_clause(node))
+	{
+		List *newclauses = NIL;
+		ListCell *l;
+
+		foreach (l, ((BoolExpr *)node)->args)
+		{
+			Node *oldclause = (Node *)lfirst(l);
+			Node *newclause;
+			newclause = pull_up_or_sublinks_qual_recurse(root,
+														 oldclause,
+														 jtlink,
+														 orquals);
+			if (newclause)
+				newclauses = lappend(newclauses, newclause);
+		}
+
+		if (newclauses == NIL)
+			return NULL;
+		else if (list_length(newclauses) == 1)
+			return (Node *)linitial(newclauses);
+		else
+			return (Node *)make_andclause(newclauses);
+	}
+	else if (or_clause(node))
+	{
+		Node *new_qual = NULL;
+		List *newclauses = NIL;
+		ListCell *l;
+
+		foreach (l, ((BoolExpr *)node)->args)
+		{
+			if (!check_pull_up_sublinks_qual_or_recurse(root, (Node *)lfirst(l)))
+				return node;
+		}
+
+		foreach (l, ((BoolExpr *)node)->args)
+		{
+			Node *oldclause = (Node *)lfirst(l);
+			List *resclauses;
+			resclauses = convert_OR_EXIST_sublink_to_join_recurse(root,
+																  oldclause,
+																  jtlink);
+			if (resclauses)
+				newclauses = list_concat(newclauses, resclauses);
+		}
+
+		new_qual = (Node *)make_orclause(newclauses);
+
+		if (*orquals == NULL)
+		{
+			*orquals = new_qual;
+		}
+		else
+		{
+			BoolExpr *expr = (BoolExpr *)(*or_clause);
+			if (expr->boolop == OR_EXPR)
+			{
+				*orquals = (Node *)make_andclause(list_make2(*orquals,
+															 new_qual));
+			}
+			else
+			{
+				expr->args = lappend(expr->args, new_qual);
+			}
+		}
+		return NULL;
+	}
+	return node;
+}
+
+#endif
 
 /*
  * Recurse through top-level qual nodes for pull_up_sublinks()
@@ -745,14 +879,22 @@ pull_up_sublinks_qual_recurse(PlannerInfo *root, Node *node,
     if (OpExpr_clause(node))
     {
         JoinExpr   *j;
+		FromExpr   *from;
+		Node       *filter;
         Relids        child_rels;
         
         if ((j = convert_EXPR_sublink_to_join(root, (OpExpr *)node,
-                                                available_rels1)) != NULL)
+												available_rels1, &filter)) != NULL)
         {
             /* Yes; insert the new join node into the join tree */
             j->larg = *jtlink1;
-            *jtlink1 = (Node *) j;
+
+			from = makeNode(FromExpr);
+			from->quals = filter;
+			from->fromlist = list_make1(j);
+
+			*jtlink1 = (Node *)from;
+
             /* Recursively process pulled-up jointree nodes */
             j->rarg = pull_up_sublinks_jointree_recurse(root,
                                                         j->rarg,
@@ -775,11 +917,17 @@ pull_up_sublinks_qual_recurse(PlannerInfo *root, Node *node,
 
         if (available_rels2 != NULL &&
                     (j = convert_EXPR_sublink_to_join(root, (OpExpr *)node,
-                                                 available_rels2)) != NULL)
+												 available_rels2, &filter)) != NULL)
         {
             /* Yes; insert the new join node into the join tree */
             j->larg = *jtlink2;
-            *jtlink2 = (Node *) j;
+
+			from = makeNode(FromExpr);
+			from->quals = filter;
+			from->fromlist = list_make1(j);
+
+			*jtlink2 = (Node *)from;
+
             /* Recursively process pulled-up jointree nodes */
             j->rarg = pull_up_sublinks_jointree_recurse(root,
                                                         j->rarg,

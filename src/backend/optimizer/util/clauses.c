@@ -99,6 +99,13 @@ typedef struct
     List       *safe_param_ids; /* PARAM_EXEC Param IDs to treat as safe */
 } max_parallel_hazard_context;
 
+#ifdef __TBASE__
+typedef struct
+{
+	SubLink   *sublink;
+	Node      *node;
+} substitute_sublink_with_node_context;
+#endif
 static bool contain_agg_clause_walker(Node *node, void *context);
 static bool get_agg_clause_costs_walker(Node *node,
                             get_agg_clause_costs_context *context);
@@ -160,6 +167,11 @@ static Node *substitute_actual_srf_parameters_mutator(Node *node,
                                          substitute_actual_srf_parameters_context *context);
 static bool tlist_matches_coltypelist(List *tlist, List *coltypelist);
 
+#ifdef __TBASE__
+static Node *
+substitute_sublink_with_node_mutator(Node *node,
+									substitute_sublink_with_node_context *context);
+#endif
 
 /*****************************************************************************
  *        OPERATOR clause functions
@@ -5202,3 +5214,46 @@ tlist_matches_coltypelist(List *tlist, List *coltypelist)
 
     return true;
 }
+#ifdef __TBASE__
+/*
+ * Replace Param nodes by appropriate actual parameters
+ */
+Node *
+substitute_sublink_with_node(Node *expr, SubLink *sublink, Node *node)
+{
+	substitute_sublink_with_node_context context;
+
+	context.node = node;
+	context.sublink = sublink;
+
+	return substitute_sublink_with_node_mutator(expr, &context);
+}
+
+static Node *
+substitute_sublink_with_node_mutator(Node *node,
+									substitute_sublink_with_node_context *context)
+{
+	if (node == NULL)
+		return NULL;
+
+	if ((void *)node == (void *)context->sublink)
+		return (Node *)context->node;
+
+	return expression_tree_mutator(node, substitute_sublink_with_node_mutator,
+								   (void *)context);
+}
+
+bool find_sublink_walker(Node *node, List **list)
+{
+	if(node == NULL)
+		return false;
+
+	if (IsA(node, SubLink))
+	{
+		*list = lappend(*list, node);
+		return true;
+	}
+
+	return expression_tree_walker(node, find_sublink_walker, list);
+}
+#endif
