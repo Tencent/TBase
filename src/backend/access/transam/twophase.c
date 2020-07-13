@@ -406,7 +406,8 @@ PostPrepare_Twophase(void)
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
 
-static void RecoverEndGlobalPrepare(GlobalTransaction gxact)
+static void
+RecoverEndGlobalPrepare(GlobalTransaction gxact)
 {
     volatile PGXACT    *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
     
@@ -416,17 +417,17 @@ static void RecoverEndGlobalPrepare(GlobalTransaction gxact)
 
 }
 
-
-void EndGlobalPrepare(GlobalTransaction gxact, bool isImplicit)
-{    
-    volatile PGXACT    *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
-    
-    pg_atomic_write_u64(&pgxact->prepare_timestamp, GetGlobalPrepareTimestamp());
-    if(enable_distri_print)
-    {
-        elog(LOG, "proc no %d prepare timestamp " INT64_FORMAT " xid %d.", gxact->pgprocno, 
-                            GetGlobalPrepareTimestamp(), pgxact->xid);
-    }
+void
+EndGlobalPrepare(GlobalTransaction gxact, bool isImplicit)
+{	
+	volatile PGXACT	*pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
+	
+	pg_atomic_write_u64(&pgxact->prepare_timestamp, GetGlobalPrepareTimestamp());
+	if(enable_distri_print)
+	{
+		elog(LOG, "proc no %d prepare timestamp " INT64_FORMAT " xid %d.", gxact->pgprocno, 
+							GetGlobalPrepareTimestamp(), pgxact->xid);
+	}
 
     if(isImplicit && !GlobalTimestampIsValid(pg_atomic_read_u64(&pgxact->prepare_timestamp)))
     {

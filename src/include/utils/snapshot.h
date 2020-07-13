@@ -146,19 +146,20 @@ typedef struct SnapshotData
 #endif
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-    GlobalTimestamp start_ts;        /* global timestamp at which the statement/transaction starts */
+	/*
+	 * global timestamp at which the statement/transaction starts
+	 */
+	GlobalTimestamp start_ts;
 
-    bool            local;            /* local snapshot */
+	bool			local;		/* local snapshot */
 
-    TransactionId *prepare_xip;
-
-    GlobalTimestamp *prepare_xip_ts;
+	TransactionId *prepare_xip;
+	GlobalTimestamp *prepare_xip_ts;
 
     uint32        prepare_xcnt;
 
-    TransactionId *prepare_subxip;
-
-    GlobalTimestamp *prepare_subxip_ts;
+	TransactionId *prepare_subxip;
+	GlobalTimestamp *prepare_subxip_ts;
 
     uint32        prepare_subxcnt;
 

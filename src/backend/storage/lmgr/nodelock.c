@@ -905,10 +905,10 @@ bool NodeLock(char *lockActions, char objectType, char *param1, char *param2, in
     }
 
     /* check to see whether running transactions exist or not.
-         * if checkTimes is given, we will wait for checkTimes seconds at most.
-         * before time's up, if no running transactions, keep going; else fail to
-         * lock node
-         */
+	 * if checkTimes is given, we will wait for checkTimes seconds at most.
+	 * before time's up, if no running transactions, keep going; else fail to
+	 * lock node
+	 */
     if (ret)
     {
         RunningTransactions running = NULL;

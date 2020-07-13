@@ -708,10 +708,15 @@ pgxc_node_init(PGXCNodeHandle *handle, int sock, bool global_session, int pid)
 #endif    
 }
 
-
 /*
  * Wait while at least one of specified connections has data available and read
  * the data into the buffer
+ *
+ * Returning state code
+ * 		DNStatus_OK      = 0,
+ *		DNStatus_ERR     = 1,
+ *		DNStatus_EXPIRED = 2,
+ *		DNStatus_BUTTY
  */
 #ifdef __TBASE__
 int

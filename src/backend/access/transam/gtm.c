@@ -200,7 +200,9 @@ void RegisterRenameSequence(char *new, char *old)
         rename_info = (RenameInfo *) lfirst(cell);            
         if (0 == strncmp(rename_info->new, old, GTM_NAME_LEN))
         {            
-            elog(LOG, "Combine requence seq:%s ->:%s, %s->%s to old:%s latest new:%s", rename_info->new, rename_info->old, new, old, rename_info->old, new);
+             elog(LOG, "Combine requence seq:%s ->:%s, %s->%s to old:%s latest "
+                                       "new:%s", rename_info->new, rename_info->old, new, old,
+                                       rename_info->old, new);
             snprintf(rename_info->new, GTM_NAME_LEN, "%s", new);
             return;
         }        

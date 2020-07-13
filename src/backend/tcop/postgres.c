@@ -5743,56 +5743,56 @@ PostgresMain(int argc, char *argv[],
                 SetGlobalTimestamp(gts, SNAPSHOT_COORDINATOR);
                 break;
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-            case 'Z':            /* global prepare timestamp */
-                timestamp = (GlobalTimestamp) pq_getmsgint64(&input_message);
-                pq_getmsgend(&input_message);
-            
-                /*
-                 * Set Xact global prepare timestamp 
-                 */
-                if(enable_distri_print)
-                {
-                    elog(LOG, "set global prepare gts " INT64_FORMAT, timestamp);
-                }
-                SetGlobalPrepareTimestamp(timestamp);
-                
-                break;
-            
-            
-            case 'T':            /* global timestamp */
-                timestamp = (GlobalTimestamp) pq_getmsgint64(&input_message);
-                pq_getmsgend(&input_message);
-            
-                /*
-                 * Set Xact global commit timestamp 
-                 */
-                if(enable_distri_print)
-                {
-                    elog(LOG, "set global commit gts " INT64_FORMAT, timestamp);
-                }
-                SetGlobalCommitTimestamp(timestamp);
-                break;
+			case 'Z':			/* global prepare timestamp */
+				timestamp = (GlobalTimestamp) pq_getmsgint64(&input_message);
+				pq_getmsgend(&input_message);
+			
+				/*
+				 * Set Xact global prepare timestamp 
+				 */
+				if(enable_distri_print)
+				{
+					elog(LOG, "set global prepare gts " INT64_FORMAT, timestamp);
+				}
+				SetGlobalPrepareTimestamp(timestamp);
+				
+				break;
 
-            case 'G':   /* Explicit prepared gid */
-                {
-                    const char *gid;
-                    gid = pq_getmsgstring(&input_message);
-                    pq_getmsgend(&input_message);
-                    remotePrepareGID = MemoryContextStrdup(TopMemoryContext, gid);
-                    elog(DEBUG8, "receive remote prepare gid %s", remotePrepareGID);
-                }
-                break;
-            case 'W':    /* Prefinish phase */
-                timestamp = (GlobalTimestamp) pq_getmsgint64(&input_message);
-                pq_getmsgend(&input_message);
-                elog(DEBUG8, "get prefinish timestamp " INT64_FORMAT "for gid %s", timestamp, remotePrepareGID);
-                SetGlobalPrepareTimestamp(timestamp);
-                EndExplicitGlobalPrepare(remotePrepareGID);
-                pfree(remotePrepareGID);
-                remotePrepareGID = NULL;
-                ReadyForCommit(whereToSendOutput);
-                
-                break;
+			case 'T':			/* global timestamp */
+				timestamp = (GlobalTimestamp) pq_getmsgint64(&input_message);
+				pq_getmsgend(&input_message);
+			
+				/*
+				 * Set Xact global commit timestamp 
+				 */
+				if(enable_distri_print)
+				{
+					elog(LOG, "set global commit gts " INT64_FORMAT, timestamp);
+				}
+				SetGlobalCommitTimestamp(timestamp);
+				break;
+
+			case 'G':   /* Explicit prepared gid */
+				{
+					const char *gid;
+					gid = pq_getmsgstring(&input_message);
+					pq_getmsgend(&input_message);
+					remotePrepareGID = MemoryContextStrdup(TopMemoryContext, gid);
+					elog(DEBUG8, "receive remote prepare gid %s", remotePrepareGID);
+				}
+				break;
+
+			case 'W':	/* Prefinish phase */
+				timestamp = (GlobalTimestamp) pq_getmsgint64(&input_message);
+				pq_getmsgend(&input_message);
+				elog(DEBUG8, "get prefinish timestamp " INT64_FORMAT "for gid %s", timestamp, remotePrepareGID);
+				SetGlobalPrepareTimestamp(timestamp);
+				EndExplicitGlobalPrepare(remotePrepareGID);
+				pfree(remotePrepareGID);
+				remotePrepareGID = NULL;
+				ReadyForCommit(whereToSendOutput);
+
+				break;
 
 #endif
             case 't':            /* timestamp */

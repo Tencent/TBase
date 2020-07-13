@@ -86,18 +86,70 @@ SnapshotData SnapshotSelfData = {HeapTupleSatisfiesSelf};
 SnapshotData SnapshotAnyData = {HeapTupleSatisfiesAny};
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-static bool XidInMVCCSnapshotDistri(HeapTupleHeader tuple, TransactionId xid, Snapshot snapshot, Buffer buffer, bool *need_retry, uint16 infomask);
-static bool
-XidInMVCCSnapshot(TransactionId xid, Snapshot snapshot);
+static bool XidInMVCCSnapshotDistri(HeapTupleHeader tuple, TransactionId xid,
+									Snapshot snapshot, Buffer buffer,
+									bool *need_retry, uint16 infomask);
+static bool XidInMVCCSnapshot(TransactionId xid, Snapshot snapshot);
+
+/* Debugging.... */
+
+#ifdef DIST_TXN_DEBUG
+#define DEBUG_MVCC_XMIN(state, msg) \
+	if(enable_distri_visibility_print && \
+	   TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple))) \
+	{ \
+		elog(LOG, "MVCC ts " INT64_FORMAT " %s xmin %d %s.", \
+				state? "true":"false", snapshot->start_ts, \
+				HeapTupleHeaderGetRawXmin(tuple), msg); \
+	}
+#else
+#define DEBUG_MVCC_XMIN(state, msg) \
+	((void) 0)
+#endif
+
+#ifdef DIST_TXN_DEBUG
+#define DEBUG_MVCC_XMINXMAX(state, xmax, msg) \
+	if(enable_distri_visibility_print && \
+	   TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple))) \
+	{ \
+		elog(LOG, "MVCC ts " INT64_FORMAT " %s xmin %d xmax %d %s.", \
+				state? "true":"false", snapshot->start_ts, \
+				HeapTupleHeaderGetRawXmin(tuple), xmax, msg); \
+	}
+#else
+#define DEBUG_MVCC_XMINXMAX(state, xmax, msg) \
+	((void) 0)
+#endif
+
+#ifdef DIST_TXN_DEBUG
+#define DEBUG_SNAPSHOT(A) \
+	do { \
+		int	_debug_snapshot_save_errno = errno; \
+		if (enable_distri_visibility_print) \
+		{ \
+		    A; \
+		} \
+		errno = _debug_snapshot_save_errno; \
+	} while (0)
+#else
+#define DEBUG_SNAPSHOT(A) \
+	((void) 0)
+#endif
+
+#define DEBUG_INCREASE_VISIBLE_TUPLE \
+	if(enable_distri_debug) \
+	{ \
+		snapshot->number_visible_tuples++; \
+	}
+
 #ifdef __SNAPSHOT_CHECK__
 static bool SnapshotCheck(TransactionId xid, Snapshot snapshot, int target_res, GlobalTimestamp target_committs);
 #else
-
 #define SnapshotCheck(xid, snapshot, target_res, target_committs)
-
 #endif
 
-#endif
+#endif //  __SUPPORT_DISTRIBUTED_TRANSACTION__
+
 /*
 #ifdef _MIGRATE_
 SnapshotData SnapshotNowData = {HeapTupleSatisfiesNow};
@@ -1089,195 +1141,185 @@ HeapTupleSatisfiesDirty(HeapTuple htup, Snapshot snapshot,
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
 static bool
-XminInMVCCSnapshotByTimestamp(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer, 
-                                            bool *need_retry)
-{// #lizard forgives
+XminInMVCCSnapshotByTimestamp(HeapTupleHeader tuple, Snapshot snapshot,
+							  Buffer buffer, bool *need_retry)
+{
+	GlobalTimestamp global_committs;
+	TransactionId 	xid = HeapTupleHeaderGetRawXmin(tuple);
+	bool			res;
+	
+	global_committs = HeapTupleHderGetXminTimestapAtomic(tuple);
+	
+	if(!GlobalTimestampIsValid(global_committs))
+	{
+		DEBUG_SNAPSHOT(elog(LOG, "invalid time xmin snapshot ts " INT64_FORMAT
+								" xid %d.", snapshot->start_ts, xid));
+		return XidInMVCCSnapshotDistri(tuple, xid, snapshot, buffer,
+					need_retry, HEAP_XMIN_COMMITTED);
+	}
+	else if (snapshot->local || CommitTimestampIsLocal(global_committs))
+	{
+		res =  XidInMVCCSnapshot(xid, snapshot);
+		SnapshotCheck(xid, snapshot, res, 0);
 
+		DEBUG_SNAPSHOT(elog(LOG, "xmin local snapshot ts " INT64_FORMAT
+				" res %d xid %d committs " INT64_FORMAT, snapshot->start_ts,
+				res, xid, global_committs));
+		return res;
+	}
+	else
+	{
+		if(enable_distri_debug)
+		{
+			snapshot->scanned_tuples_after_committed++;
+		}
+		
+		*need_retry = false;
+		if(!GlobalTimestampIsValid(snapshot->start_ts))
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("transaction %d does not have valid timestamp. "
+							"snapshot start ts " INT64_FORMAT ", autovacuum %d"
+							" in recovery %d",
+					 xid, snapshot->start_ts,
+					 IsAutoVacuumWorkerProcess(),
+					 snapshot->takenDuringRecovery)));
+		}
 
-    GlobalTimestamp global_committs;
-    TransactionId xid = HeapTupleHeaderGetRawXmin(tuple);
-    bool     res;
-    
-    global_committs = HeapTupleHderGetXminTimestapAtomic(tuple);
-    
-    if(!GlobalTimestampIsValid(global_committs))
-    {
-        elog(DEBUG12, "invalid time xmin snapshot ts " INT64_FORMAT " xid %d.", snapshot->start_ts, xid);
-        return XidInMVCCSnapshotDistri(tuple, xid, snapshot, buffer, need_retry, HEAP_XMIN_COMMITTED);
-    }
-    else if (snapshot->local || CommitTimestampIsLocal(global_committs))
-    {
-        res =  XidInMVCCSnapshot(xid, snapshot);
-        SnapshotCheck(xid, snapshot, res, 0);
-        if(enable_distri_visibility_print)
-        {
-            elog(DEBUG12, "xmin local snapshot ts " INT64_FORMAT " res %d xid %d committs " INT64_FORMAT,
-                                snapshot->start_ts, res, xid, global_committs);
-        }
-        return res;
-    }
-    else
-    {
-        if(enable_distri_debug)
-        {
-            snapshot->scanned_tuples_after_committed++;
-        }
-        
-        *need_retry = false;
-        if(!GlobalTimestampIsValid(snapshot->start_ts))
-        {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("transaction %d does not have valid timestamp. snapshot start ts " 
-                             INT64_FORMAT ", autovacuum %d in recovery %d", 
-                     xid, snapshot->start_ts, IsAutoVacuumWorkerProcess(), snapshot->takenDuringRecovery)));
-        }
-        elog(DEBUG12, "outer xmin snapshot ts " INT64_FORMAT " global committs " INT64_FORMAT " xid %d.", 
-            snapshot->start_ts, global_committs, xid);
+		DEBUG_SNAPSHOT(elog(LOG, "outer xmin snapshot ts " INT64_FORMAT " global"
+				" committs " INT64_FORMAT " xid %d.", snapshot->start_ts,
+				global_committs, xid));
+		DEBUG_SNAPSHOT(
+			if(!TransactionIdDidCommit(xid))
+			{
+				ereport(ERROR,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						errmsg("xmin transaction %d should commit but not. "
+							   "snapshot start ts " INT64_FORMAT " commit %d "
+							   "abort %d in-progress %d active %d recentxmin %d "
+							   "start ts " INT64_FORMAT " committs " INT64_FORMAT,
+						xid, 
+						snapshot->start_ts, 
+						TransactionIdDidCommit(xid), 
+						TransactionIdDidAbort(xid), 
+						TransactionIdIsInProgress(xid),
+						TransactionIdIsActive(xid),
+						RecentXmin,
+						snapshot->start_ts, 
+						global_committs)));
+			});
 
-        if(enable_distri_visibility_print)
-        {
-            if(!TransactionIdDidCommit(xid))
-            {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INTERNAL_ERROR),
-                        errmsg("xmin transaction %d should commit but not. snapshot start ts " INT64_FORMAT 
-                        " commit %d abort %d in-progress %d active %d recentxmin %d"
-                        " start ts " INT64_FORMAT " committs " INT64_FORMAT, 
-                        xid, 
-                        snapshot->start_ts, 
-                        TransactionIdDidCommit(xid), 
-                        TransactionIdDidAbort(xid), 
-                        TransactionIdIsInProgress(xid),
-                        TransactionIdIsActive(xid),
-                        RecentXmin,
-                        snapshot->start_ts, 
-                        global_committs)));
-            }
-        }
+		if(snapshot->start_ts > global_committs)
+		{
+			SnapshotCheck(xid, snapshot, false, global_committs);
 
+			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT " false xid %d "
+					"committs " INT64_FORMAT " 21.", snapshot->start_ts, xid,
+					global_committs));
+			return false;
+		}
+		else
+		{	
+			SnapshotCheck(xid, snapshot, true, global_committs);
 
-        if(snapshot->start_ts > global_committs)
-        {
-            if(enable_distri_visibility_print)
-            {
-                elog(LOG, "snapshot ts " INT64_FORMAT " false xid %d committs "INT64_FORMAT" 21.", 
-                                snapshot->start_ts, xid, global_committs);
-            }
-            SnapshotCheck(xid, snapshot, false, global_committs);
-            return false;
-        }
-        else
-        {    
-            if(enable_distri_visibility_print)
-            {
-                elog(LOG, "snapshot ts " INT64_FORMAT " true xid %d committs "INT64_FORMAT" 22.", 
-                            snapshot->start_ts, xid, global_committs);
-            }
-            SnapshotCheck(xid, snapshot, true, global_committs);
-            return true;
-        }
-    }
-    
-
+			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT " true xid %d"
+					" committs " INT64_FORMAT " 22.", snapshot->start_ts, xid,
+					global_committs));
+			return true;
+		}
+	}
 }
-
 
 static bool
-XmaxInMVCCSnapshotByTimestamp(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer, 
-                                            bool *need_retry)
-{// #lizard forgives
+XmaxInMVCCSnapshotByTimestamp(HeapTupleHeader tuple, Snapshot snapshot,
+							  Buffer buffer, bool *need_retry)
+{
+	GlobalTimestamp global_committs;
+	TransactionId xid = HeapTupleHeaderGetRawXmax(tuple);
+	bool res;
 
+	global_committs = HeapTupleHderGetXmaxTimestapAtomic(tuple);
+	
+	if(!GlobalTimestampIsValid(global_committs))
+	{
+		DEBUG_SNAPSHOT(elog(LOG, "invalid time xmax snapshot ts " INT64_FORMAT
+				" xid %d.", snapshot->start_ts, xid));
+		return XidInMVCCSnapshotDistri(tuple, xid, snapshot, buffer,
+					need_retry, HEAP_XMAX_COMMITTED);
+	}
+	else if (snapshot->local || CommitTimestampIsLocal(global_committs))
+	{
+		res = XidInMVCCSnapshot(xid, snapshot);
+		SnapshotCheck(xid, snapshot, res, 0);
 
-    GlobalTimestamp global_committs;
-    TransactionId xid = HeapTupleHeaderGetRawXmax(tuple);
-    bool res;
+		DEBUG_SNAPSHOT(elog(LOG, "xmax local snapshot ts " INT64_FORMAT " res "
+				"%d xid %d.", snapshot->start_ts, res, xid));
+		return res;
+	}
+	else
+	{
+		if(enable_distri_debug)
+		{
+			snapshot->scanned_tuples_after_committed++;
+		}
+			
+		*need_retry = false;
+		if(!GlobalTimestampIsValid(snapshot->start_ts))
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("transaction %d does not have valid timestamp. "
+							"snapshot start ts " INT64_FORMAT ", autovacuum %d "
+							"in recovery %d",
+					 xid, snapshot->start_ts, IsAutoVacuumWorkerProcess(),
+					 snapshot->takenDuringRecovery)));
+		}
 
-    global_committs = HeapTupleHderGetXmaxTimestapAtomic(tuple);
-    
-    if(!GlobalTimestampIsValid(global_committs))
-    {
-        elog(DEBUG12, "invalid time xmax snapshot ts " INT64_FORMAT " xid %d.", snapshot->start_ts, xid);
-        return XidInMVCCSnapshotDistri(tuple, xid, snapshot, buffer, need_retry, HEAP_XMAX_COMMITTED);
-    }
-    else if (snapshot->local || CommitTimestampIsLocal(global_committs))
-    {
-        res = XidInMVCCSnapshot(xid, snapshot);
-        SnapshotCheck(xid, snapshot, res, 0);
-        if(enable_distri_visibility_print)
-        {
-            elog(DEBUG12, "xmax local snapshot ts " INT64_FORMAT " res %d xid %d.", snapshot->start_ts, res, xid);
-        }
-        return res;
-    }
-    else
-    {
-        if(enable_distri_debug)
-        {
-            snapshot->scanned_tuples_after_committed++;
-        }
-            
-        *need_retry = false;
-        if(!GlobalTimestampIsValid(snapshot->start_ts))
-        {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("transaction %d does not have valid timestamp. snapshot start ts " 
-                                 INT64_FORMAT ", autovacuum %d in recovery %d", 
-                     xid, snapshot->start_ts, IsAutoVacuumWorkerProcess(), snapshot->takenDuringRecovery)));
-        }
-        elog(DEBUG12, "outer xmax snapshot ts " INT64_FORMAT " global committs " INT64_FORMAT " xid %d.", 
-                            snapshot->start_ts, global_committs, xid);
+		DEBUG_SNAPSHOT(elog(LOG, "outer xmax snapshot ts " INT64_FORMAT "global"
+				" committs " INT64_FORMAT "xid %d.", snapshot->start_ts,
+				global_committs, xid));
+		DEBUG_SNAPSHOT(
+			if(!TransactionIdDidCommit(xid))
+			{
+				ereport(ERROR,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("xmax transaction %d should commit but not. "
+								"snapshot start ts " INT64_FORMAT " commit %d "
+								"abort %d in-progress %d active %d recentxmin %d "
+								"start ts " INT64_FORMAT " committs " INT64_FORMAT,
+						 xid,
+						 snapshot->start_ts,
+						 TransactionIdDidCommit(xid),
+						 TransactionIdDidAbort(xid),
+						 TransactionIdIsInProgress(xid),
+						 TransactionIdIsActive(xid),
+						 RecentXmin,
+						 snapshot->start_ts,
+						 global_committs)));
+			}
+		);
 
-                
-        if(enable_distri_visibility_print)
-        {
-            if(!TransactionIdDidCommit(xid))
-            {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INTERNAL_ERROR),
-                    errmsg("xmax transaction %d should commit but not. snapshot start ts " INT64_FORMAT 
-                    " commit %d abort %d in-progress %d active %d recentxmin %d"
-                    " start ts " INT64_FORMAT " committs " INT64_FORMAT, 
-                     xid, 
-                     snapshot->start_ts,
-                     TransactionIdDidCommit(xid), 
-                     TransactionIdDidAbort(xid), 
-                     TransactionIdIsInProgress(xid),
-                     TransactionIdIsActive(xid),
-                     RecentXmin,
-                     snapshot->start_ts, 
-                     global_committs)));
-            }
-        }
+		if(snapshot->start_ts > global_committs)
+		{
+			SnapshotCheck(xid, snapshot, false, global_committs);
 
+			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT "false xid %d"
+					" committs" INT64_FORMAT "11.", snapshot->start_ts, xid,
+					global_committs));
+			return false;
+		}
+		else
+		{
+			SnapshotCheck(xid, snapshot, true, global_committs);
 
-
-        if(snapshot->start_ts > global_committs)
-        {
-            if(enable_distri_visibility_print)
-            {
-                elog(LOG, "snapshot ts " INT64_FORMAT " false xid %d committs "INT64_FORMAT" 11.", 
-                                snapshot->start_ts, xid, global_committs);
-            }
-            SnapshotCheck(xid, snapshot, false, global_committs);
-            return false;
-        }
-        else
-        {
-            if(enable_distri_visibility_print)
-            {
-                elog(LOG, "snapshot ts " INT64_FORMAT " true xid %d committs "INT64_FORMAT" 12.",
-                            snapshot->start_ts, xid, global_committs);
-            }
-            SnapshotCheck(xid, snapshot, true, global_committs);
-            return true;
-        }
-    }
-    
-
+			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT "true xid %d "
+					"committs " INT64_FORMAT "12.", snapshot->start_ts, xid,
+					global_committs));
+			return true;
+		}
+	}
 }
-
 
 /*
  * HeapTupleSatisfiesMVCC
@@ -1342,460 +1384,299 @@ retry:
         }
     }
 #endif
-    if (!HeapTupleHeaderXminCommitted(tuple))
-    {
-        if (HeapTupleHeaderXminInvalid(tuple))
-        {
-            //elog(DEBUG11, "heap invalid xmin");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d xmin invalid.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            return false;
-        }
+	if (!HeapTupleHeaderXminCommitted(tuple))
+	{
+		if (HeapTupleHeaderXminInvalid(tuple))
+		{
+			DEBUG_MVCC_XMIN(false, "xmin invalid");
+			return false;
+		}
 
-        /* Used by pre-9.0 binary upgrades */
-        if (tuple->t_infomask & HEAP_MOVED_OFF)
-        {
-            TransactionId xvac = HeapTupleHeaderGetXvac(tuple);
+		/* Used by pre-9.0 binary upgrades */
+		if (tuple->t_infomask & HEAP_MOVED_OFF)
+		{
+			TransactionId xvac = HeapTupleHeaderGetXvac(tuple);
 
-            if (TransactionIdIsCurrentTransactionId(xvac))
-            {
-                //elog(DEBUG11, "heap moved off current transaction");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d move off.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                return false;
-            }
-            if (!XidInMVCCSnapshotDistri(tuple, xvac, snapshot, buffer, &need_retry, HEAP_XMIN_INVALID))
-            {
-                if (TransactionIdDidCommit(xvac))
-                {
-                    SetHintBits(tuple, buffer, HEAP_XMIN_INVALID,
-                                InvalidTransactionId);
-                    //elog(DEBUG11, "heap moved off");
-                    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                    {
-                        elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d move off 1.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                    }
-                    return false;
-                }
-                SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED,
-                            InvalidTransactionId);
-            }
-            if(need_retry)
-            {
-                goto retry;
-            }
-            
-        }
-        /* Used by pre-9.0 binary upgrades */
-        else if (tuple->t_infomask & HEAP_MOVED_IN)
-        {
-            TransactionId xvac = HeapTupleHeaderGetXvac(tuple);
+			if (TransactionIdIsCurrentTransactionId(xvac))
+			{
+				DEBUG_MVCC_XMIN(false, "move off");
+				return false;
+			}
+			if (!XidInMVCCSnapshotDistri(tuple, xvac, snapshot, buffer, &need_retry, HEAP_XMIN_INVALID))
+			{
+				if (TransactionIdDidCommit(xvac))
+				{
+					SetHintBits(tuple, buffer, HEAP_XMIN_INVALID,
+								InvalidTransactionId);
+					DEBUG_MVCC_XMIN(false, "move off 1");
+					return false;
+				}
+				SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED,
+							InvalidTransactionId);
+			}
+			if(need_retry)
+			{
+				goto retry;
+			}
+			
+		}
+		/* Used by pre-9.0 binary upgrades */
+		else if (tuple->t_infomask & HEAP_MOVED_IN)
+		{
+			TransactionId xvac = HeapTupleHeaderGetXvac(tuple);
 
-            if (!TransactionIdIsCurrentTransactionId(xvac))
-            {
-                if (XidInMVCCSnapshotDistri(tuple, xvac, snapshot, buffer, &need_retry, HEAP_XMIN_INVALID))
-                {
-                    //elog(DEBUG11, "heap moved in in snapshot");
-                    if(need_retry)
-                    {
-                        goto retry;
-                    }
-                    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                    {
-                        elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d move in.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                    }
-                    return false;
-                }
-                if (TransactionIdDidCommit(xvac))
-                    SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED,
-                                InvalidTransactionId);
-                else
-                {
-                    SetHintBits(tuple, buffer, HEAP_XMIN_INVALID,
-                                InvalidTransactionId);
-                    //elog(DEBUG11, "heap moved in");
-                    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                    {
-                        elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d move in.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                    }
-                    return false;
-                }
-            }
-        }
-        else if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmin(tuple)))
-        {
-            
-            if (HeapTupleHeaderGetCmin(tuple) >= snapshot->curcid)
-            {
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d current 1.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                return false;    /* inserted after scan started */
-            }
-            if (tuple->t_infomask & HEAP_XMAX_INVALID)    /* xid invalid */
-            {
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d current 2.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                if(enable_distri_debug)
-                {
-                    snapshot->number_visible_tuples++;
-                }
-                return true;
-            }
-            if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask))    /* not deleter */
-            {
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d current 3.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                if(enable_distri_debug)
-                {
-                    snapshot->number_visible_tuples++;
-                }
-                return true;
-            }
-            if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
-            {
-                TransactionId xmax;
+			if (!TransactionIdIsCurrentTransactionId(xvac))
+			{
+				if (XidInMVCCSnapshotDistri(tuple, xvac, snapshot, buffer, &need_retry, HEAP_XMIN_INVALID))
+				{
+					if(need_retry)
+					{
+						goto retry;
+					}
+					DEBUG_MVCC_XMIN(false, " move in");
+					return false;
+				}
+				if (TransactionIdDidCommit(xvac))
+					SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED,
+								InvalidTransactionId);
+				else
+				{
+					SetHintBits(tuple, buffer, HEAP_XMIN_INVALID,
+								InvalidTransactionId);
+					DEBUG_MVCC_XMIN(false, "move in");
+					return false;
+				}
+			}
+		}
+		else if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmin(tuple)))
+		{
+			
+			if (HeapTupleHeaderGetCmin(tuple) >= snapshot->curcid)
+			{
+				DEBUG_MVCC_XMIN(false, "current 1");
+				return false;	/* inserted after scan started */
+			}
+			if (tuple->t_infomask & HEAP_XMAX_INVALID)	/* xid invalid */
+			{
+				DEBUG_MVCC_XMIN(true, "current 2");
+				DEBUG_INCREASE_VISIBLE_TUPLE;
+				return true;
+			}
+			if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask))	/* not deleter */
+			{
+				DEBUG_MVCC_XMIN(true, "current 3");
+				DEBUG_INCREASE_VISIBLE_TUPLE;
+				return true;
+			}
+			if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
+			{
+				TransactionId xmax;
 
-                xmax = HeapTupleGetUpdateXid(tuple);
+				xmax = HeapTupleGetUpdateXid(tuple);
 
-                /* not LOCKED_ONLY, so it has to have an xmax */
-                Assert(TransactionIdIsValid(xmax));
+				/* not LOCKED_ONLY, so it has to have an xmax */
+				Assert(TransactionIdIsValid(xmax));
 
-                /* updating subtransaction must have aborted */
-                if (!TransactionIdIsCurrentTransactionId(xmax))
-                {
-                    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                    {
-                        elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d current 3.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                    }
-                    if(enable_distri_debug)
-                    {
-                        snapshot->number_visible_tuples++;
-                    }
-                    return true;
-                }
-                else if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
-                {
-                    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                    {
-                        elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d current 4.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                    }
-                    if(enable_distri_debug)
-                    {
-                        snapshot->number_visible_tuples++;
-                    }
-                    return true;    /* updated after scan started */
-                }
-                else
-                {
-                    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                    {
-                        elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d current 5.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                    }
-                    return false;    /* updated before scan started */
-                }
-            }
+				/* updating subtransaction must have aborted */
+				if (!TransactionIdIsCurrentTransactionId(xmax))
+				{
+					DEBUG_MVCC_XMIN(true, "current 3");
+					DEBUG_INCREASE_VISIBLE_TUPLE;
+					return true;
+				}
+				else if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
+				{
+					DEBUG_MVCC_XMIN(true, "current 4");
+					DEBUG_INCREASE_VISIBLE_TUPLE;
+					return true;	/* updated after scan started */
+				}
+				else
+				{
+					DEBUG_MVCC_XMIN(false, "current 5");
+					return false;	/* updated before scan started */
+				}
+			}
 
-            if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(tuple)))
-            {
-                /* deleting subtransaction must have aborted */
-                SetHintBits(tuple, buffer, HEAP_XMAX_INVALID,
-                            InvalidTransactionId);
-                //elog(DEBUG11, "heap deleting subtransaction");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d current 6.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                if(enable_distri_debug)
-                {
-                    snapshot->number_visible_tuples++;
-                }
-                return true;
-            }
+			if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(tuple)))
+			{
+				/* deleting subtransaction must have aborted */
+				SetHintBits(tuple, buffer, HEAP_XMAX_INVALID,
+							InvalidTransactionId);
+				DEBUG_MVCC_XMIN(true, "current 6");
+				DEBUG_INCREASE_VISIBLE_TUPLE;
+				return true;
+			}
 
-            if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
-            {
-                //elog(DEBUG11, "heap xmin deleted after scan");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d current 7.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                if(enable_distri_debug)
-                {
-                    snapshot->number_visible_tuples++;
-                }
-                return true;    /* deleted after scan started */
-            }
-            else
-            {
-                //elog(DEBUG11, "heap xmin deleted before scan");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d current 8.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                return false;    /* deleted before scan started */
-            }
-        }
-        else if (XminInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
-        {
-            //elog(DEBUG11, "heap xmin in snapshot");
-            if(need_retry)
-            {
-                goto retry;
-            }
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            return false;
-        }
-        else if (TransactionIdDidCommit(HeapTupleHeaderGetRawXmin(tuple)))
-            SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED,
-                        HeapTupleHeaderGetRawXmin(tuple));
-        else
-        {
-            /* it must have aborted or crashed */
-            SetHintBits(tuple, buffer, HEAP_XMIN_INVALID,
-                        InvalidTransactionId);
-            //elog(DEBUG11, "heap xmin aborted");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d xmin abort.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            return false;
-        }
-    }
-    else
-    {
-        /* xmin is committed, but maybe not according to our snapshot */
-        if (!HeapTupleHeaderXminFrozen(tuple) &&
-            XminInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
-        {
-            if(need_retry)
-            {
-                goto retry;
-            }
-            //elog(DEBUG11, "heap xmin not committed according to snapshot");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d according to snapshot.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            return false;        /* treat as still in progress */
-        }        
-    }
+			if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
+			{
+				DEBUG_MVCC_XMIN(true, "current 7");
+				DEBUG_INCREASE_VISIBLE_TUPLE;
+				return true;	/* deleted after scan started */
+			}
+			else
+			{
+				DEBUG_MVCC_XMIN(false, "current 8");
+				return false;	/* deleted before scan started */
+			}
+		}
+		else if (XminInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
+		{
+			//elog(DEBUG11, "heap xmin in snapshot");
+			if(need_retry)
+			{
+				goto retry;
+			}
+			DEBUG_MVCC_XMIN(false, "");
+			return false;
+		}
+		else if (TransactionIdDidCommit(HeapTupleHeaderGetRawXmin(tuple)))
+			SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED,
+						HeapTupleHeaderGetRawXmin(tuple));
+		else
+		{
+			/* it must have aborted or crashed */
+			SetHintBits(tuple, buffer, HEAP_XMIN_INVALID,
+						InvalidTransactionId);
+			DEBUG_MVCC_XMIN(false, "xmin abort");
+			return false;
+		}
+	}
+	else
+	{
+		/* xmin is committed, but maybe not according to our snapshot */
+		if (!HeapTupleHeaderXminFrozen(tuple) &&
+			XminInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
+		{
+			if(need_retry)
+			{
+				goto retry;
+			}
+			DEBUG_MVCC_XMIN(false, "according to snapshot");
+			return false;		/* treat as still in progress */
+		}		
+	}
 
-    /* by here, the inserting transaction has committed */
+	/* by here, the inserting transaction has committed */
 
-    if (tuple->t_infomask & HEAP_XMAX_INVALID)    /* xid invalid or aborted */
-    {
-        //elog(DEBUG11, "heap invalid xmax");
-        if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-        {
-            elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-        }
-        if(enable_distri_debug)
-        {
-            snapshot->number_visible_tuples++;
-        }
-        return true;
-    }
-    if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask)){
-        //elog(DEBUG11, "heap xmax locked");
-        if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-        {
-            elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-        }
-        if(enable_distri_debug)
-        {
-            snapshot->number_visible_tuples++;
-        }
-        return true;
-    }
+	if (tuple->t_infomask & HEAP_XMAX_INVALID)	/* xid invalid or aborted */
+	{
+		DEBUG_MVCC_XMIN(true, "");
+		DEBUG_INCREASE_VISIBLE_TUPLE;
+		return true;
+	}
+	if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask)){
+		DEBUG_MVCC_XMIN(true, "xmax locked");
+		DEBUG_INCREASE_VISIBLE_TUPLE;
+		return true;
+	}
 
-    if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
-    {
-        TransactionId xmax;
+	if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
+	{
+		TransactionId xmax;
 
-        /* already checked above */
-        Assert(!HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask));
+		/* already checked above */
+		Assert(!HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask));
 
-        xmax = HeapTupleGetUpdateXid(tuple);
+		xmax = HeapTupleGetUpdateXid(tuple);
 
-        /* not LOCKED_ONLY, so it has to have an xmax */
-        Assert(TransactionIdIsValid(xmax));
+		/* not LOCKED_ONLY, so it has to have an xmax */
+		Assert(TransactionIdIsValid(xmax));
 
-        if (TransactionIdIsCurrentTransactionId(xmax))
-        {
-            if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
-            {
-                //elog(DEBUG11, "heap multi xmax deleted after scan");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                if(enable_distri_debug)
-                {
-                    snapshot->number_visible_tuples++;
-                }
-                return true;    /* deleted after scan started */
-            }
-            else
-            {
-                //elog(DEBUG11, "heap multi xmax deleted before scan");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d xmax %d deleted after scan.", 
-                                                snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple), xmax);
-                }
-                return false;    /* deleted before scan started */
-            }
-        }
-        if (XidInMVCCSnapshotDistri(tuple, xmax, snapshot, buffer, &need_retry, HEAP_XMAX_INVALID))
-        {
-            if(need_retry)
-            {
-                goto retry;
-            }
-            //elog(DEBUG11, "heap multi xmax in snapshot");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            if(enable_distri_debug)
-            {
-                snapshot->number_visible_tuples++;
-            }
-            return true;
-        }
-        if (TransactionIdDidCommit(xmax))
-        {
-            //elog(DEBUG11, "heap multi xmax committed");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d xmax %d committed .", 
-                        snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple), xmax);
-            }
-            return false;        /* updating transaction committed */
-        }
-        /* it must have aborted or crashed */
-        //elog(DEBUG11, "heap multi xmax aborted");
-        if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-        {
-            elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-        }
-        if(enable_distri_debug)
-        {
-            snapshot->number_visible_tuples++;
-        }
-        return true;
-    }
+		if (TransactionIdIsCurrentTransactionId(xmax))
+		{
+			if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
+			{
+				DEBUG_MVCC_XMIN(true, "heap multi xmax deleted after scan");
+				DEBUG_INCREASE_VISIBLE_TUPLE
+				return true;	/* deleted after scan started */
+			}
+			else
+			{
+				DEBUG_MVCC_XMINXMAX(true, xmax, "deleted after scan");
+				return false;	/* deleted before scan started */
+			}
+		}
+		if (XidInMVCCSnapshotDistri(tuple, xmax, snapshot, buffer, &need_retry, HEAP_XMAX_INVALID))
+		{
+			if(need_retry)
+			{
+				goto retry;
+			}
+			DEBUG_MVCC_XMIN(true, "");
+			DEBUG_INCREASE_VISIBLE_TUPLE
+			return true;
+		}
+		if (TransactionIdDidCommit(xmax))
+		{
+			DEBUG_MVCC_XMINXMAX(false, xmax, "committed");
+			return false;		/* updating transaction committed */
+		}
+		/* it must have aborted or crashed */
+		DEBUG_MVCC_XMIN(true, "");
+		DEBUG_INCREASE_VISIBLE_TUPLE;
+		return true;
+	}
 
-    if (!(tuple->t_infomask & HEAP_XMAX_COMMITTED))
-    {
-        if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(tuple)))
-        {
-            if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
-            {
-                //elog(DEBUG11, "heap xmax deleted after scan");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                if(enable_distri_debug)
-                {
-                    snapshot->number_visible_tuples++;
-                }
-                return true;    /* deleted after scan started */
-            }
-            else
-            {
-                //elog(DEBUG11, "heap xmax deleted before scan");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d xmax deleted before scan.", 
-                                snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                return false;    /* deleted before scan started */
-            }
-        }
+	if (!(tuple->t_infomask & HEAP_XMAX_COMMITTED))
+	{
+		if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(tuple)))
+		{
+			if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
+			{
+				DEBUG_MVCC_XMIN(true, "");
+				DEBUG_INCREASE_VISIBLE_TUPLE;
+				return true;	/* deleted after scan started */
+			}
+			else
+			{
+				DEBUG_MVCC_XMIN(false, "xmax deleted before scan");
+				return false;	/* deleted before scan started */
+			}
+		}
 
-        if (XmaxInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
-        {
-            if(need_retry)
-            {
-                goto retry;
-            }
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            if(enable_distri_debug)
-            {
-                snapshot->number_visible_tuples++;
-            }
-            return true;
-        }
-        if (!TransactionIdDidCommit(HeapTupleHeaderGetRawXmax(tuple)))
-        {
-            /* it must have aborted or crashed */
-            
-            SetHintBits(tuple, buffer, HEAP_XMAX_INVALID,
-                        InvalidTransactionId);
-            //elog(DEBUG11, "heap xmax aborted");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            if(enable_distri_debug)
-            {
-                snapshot->number_visible_tuples++;
-            }
-            return true;
-        }
+		if (XmaxInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
+		{
+			if(need_retry)
+			{
+				goto retry;
+			}
+			DEBUG_MVCC_XMIN(true, "");
+			DEBUG_INCREASE_VISIBLE_TUPLE;
+			return true;
+		}
+		if (!TransactionIdDidCommit(HeapTupleHeaderGetRawXmax(tuple)))
+		{
+			/* it must have aborted or crashed */
+			
+			SetHintBits(tuple, buffer, HEAP_XMAX_INVALID,
+						InvalidTransactionId);
+			DEBUG_MVCC_XMIN(true, "heap xmax aborted");
+			DEBUG_INCREASE_VISIBLE_TUPLE;
+			return true;
+		}
 
-        /* xmax transaction committed */
-        SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
-                    HeapTupleHeaderGetRawXmax(tuple));
-    }
-    else
-    {    
-        /* xmax is committed, but maybe not according to our snapshot */
-        if (XmaxInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
-        {    
-            if(need_retry)
-            {
-                goto retry;
-            }
-            //elog(DEBUG11, "heap xmax not committed");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            if(enable_distri_debug)
-            {
-                snapshot->number_visible_tuples++;
-            }
-            return true;        /* treat as still in progress */
-        }
-    }
+		/* xmax transaction committed */
+		SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
+					HeapTupleHeaderGetRawXmax(tuple));
+	}
+	else
+	{	
+		/* xmax is committed, but maybe not according to our snapshot */
+		if (XmaxInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
+		{	
+			if(need_retry)
+			{
+				goto retry;
+			}
+			DEBUG_MVCC_XMIN(true, "heap xmax not committed");
+			DEBUG_INCREASE_VISIBLE_TUPLE;
+			return true;		/* treat as still in progress */
+		}
+	}
 
-    /* xmax transaction committed */
-    //elog(DEBUG11, "heap xmax committed");
-    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-    {
-        elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d xmax %d committed last.", 
-                snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple), HeapTupleHeaderGetRawXmax(tuple));
-    }
-    return false;
+	/* xmax transaction committed */
+	DEBUG_MVCC_XMINXMAX(true, HeapTupleHeaderGetRawXmax(tuple), "committed last");
+	return false;
 }
 
 #ifdef __STORAGE_SCALABLE__
@@ -1826,462 +1707,298 @@ retry:
             return false;
         }
 		LWLockRelease(ShardMapLock);
-    }
+	}
 
-    if (!HeapTupleHeaderXminCommitted(tuple))
-    {
-        if (HeapTupleHeaderXminInvalid(tuple))
-        {
-            //elog(DEBUG11, "heap invalid xmin");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d xmin invalid.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            return false;
-        }
+	if (!HeapTupleHeaderXminCommitted(tuple))
+	{
+		if (HeapTupleHeaderXminInvalid(tuple))
+		{
+			DEBUG_MVCC_XMIN(false, "xmin invalid");
+			return false;
+		}
 
-        /* Used by pre-9.0 binary upgrades */
-        if (tuple->t_infomask & HEAP_MOVED_OFF)
-        {
-            TransactionId xvac = HeapTupleHeaderGetXvac(tuple);
+		/* Used by pre-9.0 binary upgrades */
+		if (tuple->t_infomask & HEAP_MOVED_OFF)
+		{
+			TransactionId xvac = HeapTupleHeaderGetXvac(tuple);
 
-            if (TransactionIdIsCurrentTransactionId(xvac))
-            {
-                //elog(DEBUG11, "heap moved off current transaction");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d move off.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                return false;
-            }
-            if (!XidInMVCCSnapshotDistri(tuple, xvac, snapshot, buffer, &need_retry, HEAP_XMIN_INVALID))
-            {
-                if (TransactionIdDidCommit(xvac))
-                {
-                    SetHintBits(tuple, buffer, HEAP_XMIN_INVALID,
-                                InvalidTransactionId);
-                    //elog(DEBUG11, "heap moved off");
-                    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                    {
-                        elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d move off 1.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                    }
-                    return false;
-                }
-                SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED,
-                            InvalidTransactionId);
-            }
-            if(need_retry)
-            {
-                goto retry;
-            }
-            
-        }
-        /* Used by pre-9.0 binary upgrades */
-        else if (tuple->t_infomask & HEAP_MOVED_IN)
-        {
-            TransactionId xvac = HeapTupleHeaderGetXvac(tuple);
+			if (TransactionIdIsCurrentTransactionId(xvac))
+			{
+				DEBUG_MVCC_XMIN(false, "move off");
+				return false;
+			}
+			if (!XidInMVCCSnapshotDistri(tuple, xvac, snapshot, buffer, &need_retry, HEAP_XMIN_INVALID))
+			{
+				if (TransactionIdDidCommit(xvac))
+				{
+					SetHintBits(tuple, buffer, HEAP_XMIN_INVALID,
+								InvalidTransactionId);
+					DEBUG_MVCC_XMIN(false, "move off 1");
+					return false;
+				}
+				SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED,
+							InvalidTransactionId);
+			}
+			if(need_retry)
+			{
+				goto retry;
+			}
+			
+		}
+		/* Used by pre-9.0 binary upgrades */
+		else if (tuple->t_infomask & HEAP_MOVED_IN)
+		{
+			TransactionId xvac = HeapTupleHeaderGetXvac(tuple);
 
-            if (!TransactionIdIsCurrentTransactionId(xvac))
-            {
-                if (XidInMVCCSnapshotDistri(tuple, xvac, snapshot, buffer, &need_retry, HEAP_XMIN_INVALID))
-                {
-                    //elog(DEBUG11, "heap moved in in snapshot");
-                    if(need_retry)
-                    {
-                        goto retry;
-                    }
-                    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                    {
-                        elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d move in.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                    }
-                    return false;
-                }
-                if (TransactionIdDidCommit(xvac))
-                    SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED,
-                                InvalidTransactionId);
-                else
-                {
-                    SetHintBits(tuple, buffer, HEAP_XMIN_INVALID,
-                                InvalidTransactionId);
-                    //elog(DEBUG11, "heap moved in");
-                    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                    {
-                        elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d move in.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                    }
-                    return false;
-                }
-            }
-        }
-        else if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmin(tuple)))
-        {
-            
-            if (HeapTupleHeaderGetCmin(tuple) >= snapshot->curcid)
-            {
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d current 1.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                return false;    /* inserted after scan started */
-            }
-            if (tuple->t_infomask & HEAP_XMAX_INVALID)    /* xid invalid */
-            {
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d current 2.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                if(enable_distri_debug)
-                {
-                    snapshot->number_visible_tuples++;
-                }
-                return true;
-            }
-            if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask))    /* not deleter */
-            {
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d current 3.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                if(enable_distri_debug)
-                {
-                    snapshot->number_visible_tuples++;
-                }
-                return true;
-            }
-            if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
-            {
-                TransactionId xmax;
+			if (!TransactionIdIsCurrentTransactionId(xvac))
+			{
+				if (XidInMVCCSnapshotDistri(tuple, xvac, snapshot, buffer, &need_retry, HEAP_XMIN_INVALID))
+				{
+					if(need_retry)
+					{
+						goto retry;
+					}
+					DEBUG_MVCC_XMIN(false, "move in");
+					return false;
+				}
+				if (TransactionIdDidCommit(xvac))
+					SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED,
+								InvalidTransactionId);
+				else
+				{
+					SetHintBits(tuple, buffer, HEAP_XMIN_INVALID,
+								InvalidTransactionId);
+					DEBUG_MVCC_XMIN(false, "move in");
+					return false;
+				}
+			}
+		}
+		else if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmin(tuple)))
+		{
+			if (HeapTupleHeaderGetCmin(tuple) >= snapshot->curcid)
+			{
+				DEBUG_MVCC_XMIN(false, "current 1");
+				return false;	/* inserted after scan started */
+			}
+			if (tuple->t_infomask & HEAP_XMAX_INVALID)	/* xid invalid */
+			{
+				DEBUG_MVCC_XMIN(true, "current 2");
+				DEBUG_INCREASE_VISIBLE_TUPLE;
+				return true;
+			}
+			if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask))	/* not deleter */
+			{
+				DEBUG_MVCC_XMIN(true, "current 3");
+				DEBUG_INCREASE_VISIBLE_TUPLE;
+				return true;
+			}
+			if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
+			{
+				TransactionId xmax;
 
-                xmax = HeapTupleGetUpdateXid(tuple);
+				xmax = HeapTupleGetUpdateXid(tuple);
 
-                /* not LOCKED_ONLY, so it has to have an xmax */
-                Assert(TransactionIdIsValid(xmax));
+				/* not LOCKED_ONLY, so it has to have an xmax */
+				Assert(TransactionIdIsValid(xmax));
 
-                /* updating subtransaction must have aborted */
-                if (!TransactionIdIsCurrentTransactionId(xmax))
-                {
-                    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                    {
-                        elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d current 3.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                    }
-                    if(enable_distri_debug)
-                    {
-                        snapshot->number_visible_tuples++;
-                    }
-                    return true;
-                }
-                else if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
-                {
-                    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                    {
-                        elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d current 4.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                    }
-                    if(enable_distri_debug)
-                    {
-                        snapshot->number_visible_tuples++;
-                    }
-                    return true;    /* updated after scan started */
-                }
-                else
-                {
-                    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                    {
-                        elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d current 5.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                    }
-                    return false;    /* updated before scan started */
-                }
-            }
+				/* updating subtransaction must have aborted */
+				if (!TransactionIdIsCurrentTransactionId(xmax))
+				{
+					DEBUG_MVCC_XMIN(true, "current 3");
+					DEBUG_INCREASE_VISIBLE_TUPLE;
+					return true;
+				}
+				else if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
+				{
+					DEBUG_MVCC_XMIN(true, "current 4");
+					DEBUG_INCREASE_VISIBLE_TUPLE;
+					return true;	/* updated after scan started */
+				}
+				else
+				{
+					DEBUG_MVCC_XMIN(false, "current 5");
+					return false;	/* updated before scan started */
+				}
+			}
 
-            if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(tuple)))
-            {
-                /* deleting subtransaction must have aborted */
-                SetHintBits(tuple, buffer, HEAP_XMAX_INVALID,
-                            InvalidTransactionId);
-                //elog(DEBUG11, "heap deleting subtransaction");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d current 6.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                if(enable_distri_debug)
-                {
-                    snapshot->number_visible_tuples++;
-                }
-                return true;
-            }
+			if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(tuple)))
+			{
+				/* deleting subtransaction must have aborted */
+				SetHintBits(tuple, buffer, HEAP_XMAX_INVALID,
+							InvalidTransactionId);
+				DEBUG_MVCC_XMIN(true, "current 6");
+				DEBUG_INCREASE_VISIBLE_TUPLE;
+				return true;
+			}
 
-            if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
-            {
-                //elog(DEBUG11, "heap xmin deleted after scan");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d current 7.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                if(enable_distri_debug)
-                {
-                    snapshot->number_visible_tuples++;
-                }
-                return true;    /* deleted after scan started */
-            }
-            else
-            {
-                //elog(DEBUG11, "heap xmin deleted before scan");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d current 8.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                return false;    /* deleted before scan started */
-            }
-        }
-        else if (XminInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
-        {
-            //elog(DEBUG11, "heap xmin in snapshot");
-            if(need_retry)
-            {
-                goto retry;
-            }
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            return false;
-        }
-        else if (TransactionIdDidCommit(HeapTupleHeaderGetRawXmin(tuple)))
-            SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED,
-                        HeapTupleHeaderGetRawXmin(tuple));
-        else
-        {
-            /* it must have aborted or crashed */
-            SetHintBits(tuple, buffer, HEAP_XMIN_INVALID,
-                        InvalidTransactionId);
-            //elog(DEBUG11, "heap xmin aborted");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d xmin abort.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            return false;
-        }
-    }
-    else
-    {
-        /* xmin is committed, but maybe not according to our snapshot */
-        if (!HeapTupleHeaderXminFrozen(tuple) &&
-            XminInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
-        {
-            if(need_retry)
-            {
-                goto retry;
-            }
-            //elog(DEBUG11, "heap xmin not committed according to snapshot");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d according to snapshot.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            return false;        /* treat as still in progress */
-        }        
-    }
+			if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
+			{
+				DEBUG_MVCC_XMIN(true, "current 7");
+				DEBUG_INCREASE_VISIBLE_TUPLE;
+				return true;	/* deleted after scan started */
+			}
+			else
+			{
+				DEBUG_MVCC_XMIN(false, "current 8");
+				return false;	/* deleted before scan started */
+			}
+		}
+		else if (XminInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
+		{
+			if(need_retry)
+			{
+				goto retry;
+			}
+			DEBUG_MVCC_XMIN(false, "xmin in snapshot");
+			return false;
+		}
+		else if (TransactionIdDidCommit(HeapTupleHeaderGetRawXmin(tuple)))
+			SetHintBits(tuple, buffer, HEAP_XMIN_COMMITTED,
+						HeapTupleHeaderGetRawXmin(tuple));
+		else
+		{
+			/* it must have aborted or crashed */
+			SetHintBits(tuple, buffer, HEAP_XMIN_INVALID,
+						InvalidTransactionId);
+			DEBUG_MVCC_XMIN(false, "xmin aborted");
+			return false;
+		}
+	}
+	else
+	{
+		/* xmin is committed, but maybe not according to our snapshot */
+		if (!HeapTupleHeaderXminFrozen(tuple) &&
+			XminInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
+		{
+			if(need_retry)
+			{
+				goto retry;
+			}
+			DEBUG_MVCC_XMIN(false, " xmin not committed according to snapshot");
+			return false;		/* treat as still in progress */
+		}		
+	}
 
-    /* by here, the inserting transaction has committed */
+	/* by here, the inserting transaction has committed */
 
-    if (tuple->t_infomask & HEAP_XMAX_INVALID)    /* xid invalid or aborted */
-    {
-        //elog(DEBUG11, "heap invalid xmax");
-        if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-        {
-            elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-        }
-        if(enable_distri_debug)
-        {
-            snapshot->number_visible_tuples++;
-        }
-        return true;
-    }
-    if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask)){
-        //elog(DEBUG11, "heap xmax locked");
-        if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-        {
-            elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-        }
-        if(enable_distri_debug)
-        {
-            snapshot->number_visible_tuples++;
-        }
-        return true;
-    }
+	if (tuple->t_infomask & HEAP_XMAX_INVALID)	/* xid invalid or aborted */
+	{
+		DEBUG_MVCC_XMIN(true, "invalid xmax");
+		DEBUG_INCREASE_VISIBLE_TUPLE;
+		return true;
+	}
+	if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask)){
+		DEBUG_MVCC_XMIN(true, "xmax locked");
+		DEBUG_INCREASE_VISIBLE_TUPLE;
+		return true;
+	}
 
-    if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
-    {
-        TransactionId xmax;
+	if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
+	{
+		TransactionId xmax;
 
-        /* already checked above */
-        Assert(!HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask));
+		/* already checked above */
+		Assert(!HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask));
 
-        xmax = HeapTupleGetUpdateXid(tuple);
+		xmax = HeapTupleGetUpdateXid(tuple);
 
-        /* not LOCKED_ONLY, so it has to have an xmax */
-        Assert(TransactionIdIsValid(xmax));
+		/* not LOCKED_ONLY, so it has to have an xmax */
+		Assert(TransactionIdIsValid(xmax));
 
-        if (TransactionIdIsCurrentTransactionId(xmax))
-        {
-            if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
-            {
-                //elog(DEBUG11, "heap multi xmax deleted after scan");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                if(enable_distri_debug)
-                {
-                    snapshot->number_visible_tuples++;
-                }
-                return true;    /* deleted after scan started */
-            }
-            else
-            {
-                //elog(DEBUG11, "heap multi xmax deleted before scan");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d xmax %d deleted after scan.", 
-                                                snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple), xmax);
-                }
-                return false;    /* deleted before scan started */
-            }
-        }
-        if (XidInMVCCSnapshotDistri(tuple, xmax, snapshot, buffer, &need_retry, HEAP_XMAX_INVALID))
-        {
-            if(need_retry)
-            {
-                goto retry;
-            }
-            //elog(DEBUG11, "heap multi xmax in snapshot");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            if(enable_distri_debug)
-            {
-                snapshot->number_visible_tuples++;
-            }
-            return true;
-        }
-        if (TransactionIdDidCommit(xmax))
-        {
-            //elog(DEBUG11, "heap multi xmax committed");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d xmax %d committed .", 
-                        snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple), xmax);
-            }
-            return false;        /* updating transaction committed */
-        }
-        /* it must have aborted or crashed */
-        //elog(DEBUG11, "heap multi xmax aborted");
-        if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-        {
-            elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-        }
-        if(enable_distri_debug)
-        {
-            snapshot->number_visible_tuples++;
-        }
-        return true;
-    }
+		if (TransactionIdIsCurrentTransactionId(xmax))
+		{
+			if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
+			{
+				DEBUG_MVCC_XMIN(true, "multi xmax deleted after scan");
+				DEBUG_INCREASE_VISIBLE_TUPLE;
+				return true;	/* deleted after scan started */
+			}
+			else
+			{
+				DEBUG_MVCC_XMINXMAX(false, xmax, "deleted before scan");
+				return false;	/* deleted before scan started */
+			}
+		}
+		if (XidInMVCCSnapshotDistri(tuple, xmax, snapshot, buffer, &need_retry, HEAP_XMAX_INVALID))
+		{
+			if(need_retry)
+			{
+				goto retry;
+			}
+			DEBUG_MVCC_XMIN(true, "multi xmax in snapshot");
+			DEBUG_INCREASE_VISIBLE_TUPLE;
+			return true;
+		}
+		if (TransactionIdDidCommit(xmax))
+		{
+			DEBUG_MVCC_XMINXMAX(false, xmax, "committed");
+			return false;		/* updating transaction committed */
+		}
+		/* it must have aborted or crashed */
+		DEBUG_MVCC_XMIN(true, "xmax aborted");
+		DEBUG_INCREASE_VISIBLE_TUPLE;
+		return true;
+	}
 
-    if (!(tuple->t_infomask & HEAP_XMAX_COMMITTED))
-    {
-        if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(tuple)))
-        {
-            if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
-            {
-                //elog(DEBUG11, "heap xmax deleted after scan");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                if(enable_distri_debug)
-                {
-                    snapshot->number_visible_tuples++;
-                }
-                return true;    /* deleted after scan started */
-            }
-            else
-            {
-                //elog(DEBUG11, "heap xmax deleted before scan");
-                if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-                {
-                    elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d xmax deleted before scan.", 
-                                snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-                }
-                return false;    /* deleted before scan started */
-            }
-        }
+	if (!(tuple->t_infomask & HEAP_XMAX_COMMITTED))
+	{
+		if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(tuple)))
+		{
+			if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
+			{
+				DEBUG_MVCC_XMIN(true, "xmax deleted after scan started");
+				DEBUG_INCREASE_VISIBLE_TUPLE;
+				return true;	/* deleted after scan started */
+			}
+			else
+			{
+				DEBUG_MVCC_XMIN(false, "xmax deleted before scan started");
+				return false;	/* deleted before scan started */
+			}
+		}
 
-        if (XmaxInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
-        {
-            if(need_retry)
-            {
-                goto retry;
-            }
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            if(enable_distri_debug)
-            {
-                snapshot->number_visible_tuples++;
-            }
-            return true;
-        }
-        if (!TransactionIdDidCommit(HeapTupleHeaderGetRawXmax(tuple)))
-        {
-            /* it must have aborted or crashed */
-            
-            SetHintBits(tuple, buffer, HEAP_XMAX_INVALID,
-                        InvalidTransactionId);
-            //elog(DEBUG11, "heap xmax aborted");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            if(enable_distri_debug)
-            {
-                snapshot->number_visible_tuples++;
-            }
-            return true;
-        }
+		if (XmaxInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
+		{
+			if(need_retry)
+			{
+				goto retry;
+			}
+			DEBUG_MVCC_XMIN(true, "xmax in mvcc snapshot");
+			DEBUG_INCREASE_VISIBLE_TUPLE;
+			return true;
+		}
+		if (!TransactionIdDidCommit(HeapTupleHeaderGetRawXmax(tuple)))
+		{
+			/* it must have aborted or crashed */
+			SetHintBits(tuple, buffer, HEAP_XMAX_INVALID,
+						InvalidTransactionId);
+			DEBUG_MVCC_XMIN(true, "xmax aborted");
+			DEBUG_INCREASE_VISIBLE_TUPLE;
+			return true;
+		}
 
-        /* xmax transaction committed */
-        SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
-                    HeapTupleHeaderGetRawXmax(tuple));
-    }
-    else
-    {    
-        /* xmax is committed, but maybe not according to our snapshot */
-        if (XmaxInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
-        {    
-            if(need_retry)
-            {
-                goto retry;
-            }
-            //elog(DEBUG11, "heap xmax not committed");
-            if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-            {
-                elog(LOG, "MVCC ts " INT64_FORMAT " true xmin %d.", snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple));
-            }
-            if(enable_distri_debug)
-            {
-                snapshot->number_visible_tuples++;
-            }
-            return true;        /* treat as still in progress */
-        }
-    }
+		/* xmax transaction committed */
+		SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
+					HeapTupleHeaderGetRawXmax(tuple));
+	}
+	else
+	{	
+		/* xmax is committed, but maybe not according to our snapshot */
+		if (XmaxInMVCCSnapshotByTimestamp(tuple, snapshot, buffer, &need_retry))
+		{	
+			if(need_retry)
+			{
+				goto retry;
+			}
+			DEBUG_MVCC_XMIN(true, "xmax not committed");
+			DEBUG_INCREASE_VISIBLE_TUPLE;
+			return true;		/* treat as still in progress */
+		}
+	}
 
-    /* xmax transaction committed */
-    //elog(DEBUG11, "heap xmax committed");
-    if(enable_distri_visibility_print && TransactionIdIsNormal(HeapTupleHeaderGetRawXmin(tuple)))
-    {
-        elog(LOG, "MVCC ts " INT64_FORMAT " false xmin %d xmax %d committed last.", 
-                snapshot->start_ts, HeapTupleHeaderGetRawXmin(tuple), HeapTupleHeaderGetRawXmax(tuple));
-    }
-    return false;
+	/* xmax transaction committed */
+	DEBUG_MVCC_XMINXMAX(true, HeapTupleHeaderGetRawXmax(tuple), "xmax committed");
+	return false;
 }
 
 #endif
@@ -3685,243 +3402,229 @@ XidInMVCCSnapshot(TransactionId xid, Snapshot snapshot)
     return false;
 }
 
-
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
 static bool
-XidInMVCCSnapshotDistri(HeapTupleHeader tuple, TransactionId xid, Snapshot snapshot, Buffer buffer, bool *need_retry,
-                            uint16 infomask)
-{// #lizard forgives
-    int res = false;
-    GlobalTimestamp prepare_ts;
-    GlobalTimestamp global_committs = 0;
+XidInMVCCSnapshotDistri(HeapTupleHeader tuple, TransactionId xid,
+						Snapshot snapshot, Buffer buffer,
+						bool *need_retry, uint16 infomask)
+{
+	int res = false;
+	GlobalTimestamp prepare_ts;
+	GlobalTimestamp global_committs = 0;
 
-    *need_retry = false;
-    /* 
-     * For Tbase, we propose a concurrency control mechanism
-     * based on global timestamp to maintain distributed transaction consistency.
-     * 
-     * Rule: T2 can see T1's modification only if T2.start > T1.commit.
-     * For read-committed isolation, T2.start is the executing statement's start timestmap.
-     * 
-     */
-    
-    
-    if (snapshot->local || !TransactionIdIsNormal(xid))
-    {
-        
-        res = XidInMVCCSnapshot(xid, snapshot);
-        SnapshotCheck(xid, snapshot, res, 0);
-        if(enable_distri_visibility_print && snapshot->local)
-        {
-            elog(DEBUG12, "local: snapshot ts " INT64_FORMAT " xid %d res %d.", snapshot->start_ts, xid, res);
-        }
-        return res;
-    }
-    
-    if(TransactionIdGetCommitTsData(xid, &global_committs, NULL))
-    {
-        if(!GlobalTimestampIsValid(snapshot->start_ts))
-        {
-            ereport(ERROR,
-                        (errcode(ERRCODE_INTERNAL_ERROR),
-                         errmsg("transaction %d does not have valid timestamp. snapshot start ts " INT64_FORMAT 
-                                     ", autovacuum %d in recovery %d", 
-                         xid, snapshot->start_ts, IsAutoVacuumWorkerProcess(), snapshot->takenDuringRecovery)));
-        }
-        Assert(GlobalTimestampIsValid(snapshot->start_ts));
-        
-        if(enable_distri_debug)
-        {
-            snapshot->scanned_tuples_after_committed++;
-        }
-        
-        if(CommitTimestampIsLocal(global_committs))
-        {
-            res = XidInMVCCSnapshot(xid, snapshot);
-            SnapshotCheck(xid, snapshot, res, 0);
-            elog(DEBUG12, "local snapshot ts " INT64_FORMAT " res %d xid %d after wait.", snapshot->start_ts, res, xid);
-            return res;
-        }
+	*need_retry = false;
+	/* 
+	 * For Tbase, we propose a concurrency control mechanism based on global
+	 * timestamp to maintain distributed transaction consistency.
+	 * 
+	 * Rule: T2 can see T1's modification only if T2.start > T1.commit.
+	 * For read-committed isolation, T2.start is the executing statement's
+	 * start timestmap.
+	 */
+	if (snapshot->local || !TransactionIdIsNormal(xid))
+	{
+		res = XidInMVCCSnapshot(xid, snapshot);
+		SnapshotCheck(xid, snapshot, res, 0);
 
+		DEBUG_SNAPSHOT(elog(DEBUG12, "local: snapshot ts " INT64_FORMAT "xid %d"
+				" res %d.", snapshot->start_ts, xid, res));
+		return res;
+	}
+	
+	if(TransactionIdGetCommitTsData(xid, &global_committs, NULL))
+	{
+		if(!GlobalTimestampIsValid(snapshot->start_ts))
+		{
+			ereport(ERROR,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("transaction %d does not have valid timestamp."
+								"snapshot start ts " INT64_FORMAT ", autovacuum"
+								" %d in recovery %d",
+						 xid, snapshot->start_ts,
+						 IsAutoVacuumWorkerProcess(),
+						 snapshot->takenDuringRecovery)));
+		}
+		Assert(GlobalTimestampIsValid(snapshot->start_ts));
+		
+		if(enable_distri_debug)
+		{
+			snapshot->scanned_tuples_after_committed++;
+		}
+		
+		if(CommitTimestampIsLocal(global_committs))
+		{
+			res = XidInMVCCSnapshot(xid, snapshot);
+			SnapshotCheck(xid, snapshot, res, 0);
 
-        if(snapshot->start_ts > global_committs)
-        {
-            SnapshotCheck(xid, snapshot, false, global_committs);
-            if(enable_distri_visibility_print)
-            {
-                elog(LOG, "snapshot ts " INT64_FORMAT " false xid %d committs "INT64_FORMAT" 1.", 
-                                                            snapshot->start_ts, xid, global_committs);
-            }
-            return false;
-        }
-        else
-        {
-            SnapshotCheck(xid, snapshot, true, global_committs);
-            if(enable_distri_visibility_print)
-            {
-                elog(LOG, "snapshot ts " INT64_FORMAT " true xid %d committs "INT64_FORMAT" 2.", 
-                                                            snapshot->start_ts, xid, global_committs);
-            }
-            SetTimestamp(tuple, xid, buffer, infomask);
-            return true;
-        }
-    }
+			DEBUG_SNAPSHOT(elog(DEBUG12, "local snapshot ts " INT64_FORMAT "res"
+					" %d xid %d after wait.", snapshot->start_ts, res, xid));
+			return res;
+		}
 
-    prepare_ts = InvalidGlobalTimestamp;
-    /* 
-     * If xid has passed the prepare phase, 
-     * we should wait for it to complete.
-     */
-    if(XidIsPrepared(xid, snapshot, &prepare_ts))
-    {
+		if(snapshot->start_ts > global_committs)
+		{
+			SnapshotCheck(xid, snapshot, false, global_committs);
 
-        if(enable_distri_debug)
-        {
-            snapshot->scanned_tuples_after_prepare++;
-        }
-        
-        if(!GlobalTimestampIsValid(snapshot->start_ts))
-        {
-            ereport(ERROR,
-                        (errcode(ERRCODE_INTERNAL_ERROR),
-                         errmsg("transaction %d does not have valid timestamp. snapshot start ts " INT64_FORMAT ", autovacuum %d in recovery %d", 
-                         xid, snapshot->start_ts, IsAutoVacuumWorkerProcess(), snapshot->takenDuringRecovery)));
-        }
+			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT "false xid %d"
+					" committs " INT64_FORMAT "1.", snapshot->start_ts, xid,
+					global_committs));
+			return false;
+		}
+		else
+		{
+			SnapshotCheck(xid, snapshot, true, global_committs);
+			SetTimestamp(tuple, xid, buffer, infomask);
 
-        if(GlobalTimestampIsValid(prepare_ts) && !GlobalTimestampIsFrozen(prepare_ts) &&
-            (snapshot->start_ts < prepare_ts))
-        {
-            SnapshotCheck(xid, snapshot, true, 0);
-            if(enable_distri_visibility_print)
-            {
-                elog(LOG, "snapshot ts " INT64_FORMAT " true xid %d prep "INT64_FORMAT".", snapshot->start_ts, xid, prepare_ts);
-            }
-            elog(DEBUG12, "xid %d, start_ts " INT64_FORMAT ", prepare " INT64_FORMAT " after wait true.", xid,  snapshot->start_ts, prepare_ts);
-            return true;
-        }
-        
-        if(GlobalTimestampIsValid(prepare_ts))
-        {
-            BufferDesc *buf;
-            int lock_type = -1;
-            
-            buf = GetBufferDescriptor(buffer - 1);
-            
-            if(LWLockHeldByMeInMode(BufferDescriptorGetContentLock(buf),
-                                        LW_EXCLUSIVE))
-            {
-                lock_type = BUFFER_LOCK_EXCLUSIVE;
-            }
-            else if(LWLockHeldByMeInMode(BufferDescriptorGetContentLock(buf),
-                                        LW_SHARED))
-            {
-                lock_type = BUFFER_LOCK_SHARE;
-            }
+			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT "true xid %d "
+					"committs " INT64_FORMAT "2.",
+					snapshot->start_ts, xid, global_committs));
+			return true;
+		}
+	}
 
-            XactLockTableWait(xid, NULL, NULL, XLTW_None);
-            if(lock_type != -1)
-            {
-                /* Avoid deadlock */
-                if(TransactionIdDidAbort(xid))
-                {
-                    if(enable_distri_visibility_print)
-                    {
-                        elog(LOG, "abort snapshot ts " INT64_FORMAT " false xid %d .", snapshot->start_ts, xid);
-                    }
-                    if(enable_distri_debug)
-                    {
-                        snapshot->scanned_tuples_after_abort++;
-                    }
-                    
-                    *need_retry = false;
-                    return false;
-                }
-                else
-                {
-                    *need_retry = true;
-                    return true;
-                }
-            }
-        }
+	prepare_ts = InvalidGlobalTimestamp;
+	/* 
+	 * If xid has passed the prepare phase, we should wait for it to complete.
+	 */
+	if(XidIsPrepared(xid, snapshot, &prepare_ts))
+	{
+		if(enable_distri_debug)
+		{
+			snapshot->scanned_tuples_after_prepare++;
+		}
+		
+		if(!GlobalTimestampIsValid(snapshot->start_ts))
+		{
+			ereport(ERROR,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("transaction %d does not have valid timestamp. "
+								"snapshot start ts " INT64_FORMAT ", autovacuum"
+								" %d in recovery %d",
+								xid, snapshot->start_ts,
+								IsAutoVacuumWorkerProcess(),
+								snapshot->takenDuringRecovery)));
+		}
 
-        
-        
-        if(TransactionIdGetCommitTsData(xid, &global_committs, NULL))
-        {
+		if(GlobalTimestampIsValid(prepare_ts) && !GlobalTimestampIsFrozen(prepare_ts) &&
+			(snapshot->start_ts < prepare_ts))
+		{
+			SnapshotCheck(xid, snapshot, true, 0);
 
-            if(enable_distri_debug)
-            {
-                snapshot->scanned_tuples_after_committed++;
-            }
-            
-            if(CommitTimestampIsLocal(global_committs))
-            {
-                res =  XidInMVCCSnapshot(xid, snapshot);
-                SnapshotCheck(xid, snapshot, res, 0);
-                elog(DEBUG12, "local snapshot ts " INT64_FORMAT " res %d xid %d after wait.", snapshot->start_ts, res, xid);
-                return res;
-            }
-            elog(DEBUG12, "snapshot ts " INT64_FORMAT " global committs " INT64_FORMAT " xid %d after wait.", snapshot->start_ts, global_committs, xid);
+			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT " true xid %d"
+					" prep " INT64_FORMAT, snapshot->start_ts, xid, prepare_ts));
+			return true;
+		}
+		
+		if(GlobalTimestampIsValid(prepare_ts))
+		{
+			BufferDesc *buf;
+			int lock_type = -1;
+			
+			buf = GetBufferDescriptor(buffer - 1);
+			
+			if(LWLockHeldByMeInMode(BufferDescriptorGetContentLock(buf),
+										LW_EXCLUSIVE))
+			{
+				lock_type = BUFFER_LOCK_EXCLUSIVE;
+			}
+			else if(LWLockHeldByMeInMode(BufferDescriptorGetContentLock(buf),
+										LW_SHARED))
+			{
+				lock_type = BUFFER_LOCK_SHARE;
+			}
 
+			XactLockTableWait(xid, NULL, NULL, XLTW_None);
+			if(lock_type != -1)
+			{
+				/* Avoid deadlock */
+				if(TransactionIdDidAbort(xid))
+				{
+					DEBUG_SNAPSHOT(elog(LOG, "abort snapshot ts " INT64_FORMAT
+							"false xid %d .", snapshot->start_ts, xid));
+					if(enable_distri_debug)
+					{
+						snapshot->scanned_tuples_after_abort++;
+					}
+					
+					*need_retry = false;
+					return false;
+				}
+				else
+				{
+					*need_retry = true;
+					return true;
+				}
+			}
+		}
 
-            if(snapshot->start_ts > global_committs)
-            {
-                if(enable_distri_visibility_print)
-                {
-                    elog(LOG, "snapshot ts " INT64_FORMAT " false xid %d committs "INT64_FORMAT" 3.", 
-                                                                snapshot->start_ts, xid, global_committs);
-                }
-                SnapshotCheck(xid, snapshot, false, global_committs);
-                return false;
-            }
-            else
-            {
-                if(enable_distri_visibility_print)
-                {
-                    elog(LOG, "snapshot ts " INT64_FORMAT " true xid %d committs "INT64_FORMAT" 4.", 
-                                                                snapshot->start_ts, xid, global_committs);
-                }
-                SnapshotCheck(xid, snapshot, true, global_committs);
-                SetTimestamp(tuple, xid, buffer, infomask);
-                return true;
+		if(TransactionIdGetCommitTsData(xid, &global_committs, NULL))
+		{
+			if(enable_distri_debug)
+			{
+				snapshot->scanned_tuples_after_committed++;
+			}
+			
+			if(CommitTimestampIsLocal(global_committs))
+			{
+				res =  XidInMVCCSnapshot(xid, snapshot);
+				SnapshotCheck(xid, snapshot, res, 0);
 
-            }
-        }
-        else 
-        {/* Abort or crashed */
+				DEBUG_SNAPSHOT(elog(DEBUG12, "local snapshot ts " INT64_FORMAT
+						"res %d xid %d after wait.",
+						snapshot->start_ts, res,xid));
+				return res;
+			}
 
-            if(enable_distri_debug)
-            {
-                snapshot->scanned_tuples_after_abort++;
-            }
-            elog(DEBUG12, "abort: snapshot ts " INT64_FORMAT "  xid %d.", snapshot->start_ts, xid);
+			if(snapshot->start_ts > global_committs)
+			{
+				SnapshotCheck(xid, snapshot, false, global_committs);
 
-            SnapshotCheck(xid, snapshot, false, 0);
-            if(enable_distri_visibility_print)
-            {
-                elog(LOG, "abort snapshot ts " INT64_FORMAT " false xid %d .", snapshot->start_ts, xid);
-            }
-            return false;
-        }
-    }
+				DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT " false "
+						"xid %d commit_ts " INT64_FORMAT " 3.",
+						snapshot->start_ts, xid, global_committs));
+				return false;
+			}
+			else
+			{
+				SnapshotCheck(xid, snapshot, true, global_committs);
+				SetTimestamp(tuple, xid, buffer, infomask);
 
-    if(enable_distri_debug)
-    {
-        snapshot->scanned_tuples_before_prepare++;
-    }
-    /*
-     * For non-prepared transaction, its commit timestamp must be larger than
-     * the current running transaction/statement's start timestamp.
-     * This is because that as T1's commit timestamp has not yet been aquired on CN, 
-     * T2.start < T1.commit is always being held.
-     */
-    SnapshotCheck(xid, snapshot, true, 0);
-    if(enable_distri_visibility_print)
-    {
-        elog(LOG, "snapshot ts " INT64_FORMAT " true xid %d 5.", snapshot->start_ts, xid);
-    }
-    return true;
+				DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT " true xid"
+						" %d committs" INT64_FORMAT " 4.", snapshot->start_ts,
+						xid, global_committs));
+				return true;
+			}
+		}
+		else 
+		{/* Abort or crashed */
+			if(enable_distri_debug)
+			{
+				snapshot->scanned_tuples_after_abort++;
+			}
+			SnapshotCheck(xid, snapshot, false, 0);
 
+			DEBUG_SNAPSHOT(elog(LOG, "abort snapshot ts " INT64_FORMAT " false"
+					" xid %d .", snapshot->start_ts, xid));
+			return false;
+		}
+	}
+
+	if(enable_distri_debug)
+	{
+		snapshot->scanned_tuples_before_prepare++;
+	}
+
+	/*
+	 * For non-prepared transaction, its commit timestamp must be larger than
+	 * the current running transaction/statement's start timestamp. This is
+	 * because that as T1's commit timestamp has not yet been aquired on CN,
+	 * T2.start < T1.commit is always being held.
+	 */
+	SnapshotCheck(xid, snapshot, true, 0);
+
+	DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT " true xid %d 5.",
+			snapshot->start_ts, xid));
+	return true;
 }
 
 #endif

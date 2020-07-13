@@ -353,6 +353,14 @@ static TimestampTz xactStartTimestamp;
 static TimestampTz stmtStartTimestamp;
 static TimestampTz xactStopTimestamp;
 
+
+#ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
+static GlobalTimestamp XactGlobalCommitTimestamp = 0;
+static GlobalTimestamp XactGlobalPrepareTimestamp = 0;
+static GlobalTimestamp XactLocalCommitTimestamp = 0;
+static GlobalTimestamp XactLocalPrepareTimestamp = 0;
+#endif
+
 /*
  * PGXC receives from GTM a timestamp value at the same time as a GXID
  * This one is set as GTMxactStartTimestamp and is a return value of now(), current_transaction().
@@ -361,14 +369,6 @@ static TimestampTz xactStopTimestamp;
  * during a transaction. Delta can have a different value through the nodes of the cluster
  * but its uniqueness in the cluster is maintained thanks to the global value GTMxactStartTimestamp.
  */
-#ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-static GlobalTimestamp XactGlobalCommitTimestamp = 0;
-static GlobalTimestamp XactGlobalPrepareTimestamp = 0;
-static GlobalTimestamp XactLocalCommitTimestamp = 0;
-static GlobalTimestamp XactLocalPrepareTimestamp = 0;
-
-#endif
-
 #ifdef PGXC
 static TimestampTz GTMxactStartTimestamp = 0;
 static TimestampTz GTMdeltaTimestamp = 0;
@@ -7969,7 +7969,6 @@ NeedBeginTxn(void)
     return ret;
 }
 
-
 bool
 NeedBeginSubTxn(void)
 {
@@ -7987,19 +7986,21 @@ NeedBeginSubTxn(void)
 void 
 SetNodeBeginTxn(Oid nodeoid)    
 {
-    TransactionState s = &TopTransactionStateData;
-    MemoryContext oldcontext = NULL;
-    
-    if (!InPlpgsqlFunc() || s->nestingLevel != 1)
-    {
-        elog(PANIC,"SetNodeBeginTxn should only called in plpgsql exec env and TopmostTxn");
-    }
+	TransactionState s = &TopTransactionStateData;
+	MemoryContext oldcontext = NULL;
+	
+	if (!InPlpgsqlFunc() || s->nestingLevel != 1)
+	{
+		elog(PANIC,"SetNodeBeginTxn should only called in plpgsql exec env and "
+				"TopmostTxn");
+	}
 
-    oldcontext = MemoryContextSwitchTo(TopTransactionContext);
-    
-    s->node_has_begin_txn_list = list_append_unique_oid(s->node_has_begin_txn_list, nodeoid);
-      
-    MemoryContextSwitchTo(oldcontext);
+	oldcontext = MemoryContextSwitchTo(TopTransactionContext);
+	
+	s->node_has_begin_txn_list =
+			list_append_unique_oid(s->node_has_begin_txn_list, nodeoid);
+	  
+	MemoryContextSwitchTo(oldcontext);
 }
 
 void 
