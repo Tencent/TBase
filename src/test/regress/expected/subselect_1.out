@@ -747,11 +747,9 @@ insert into inner_7597 values(0, null);
 select * from outer_7597 where (f1, f2) not in (select * from inner_7597) order by 1;
  f1 | f2 
 ----+----
-  0 |  0
-  0 |   
   1 |  0
   1 |   
-(4 rows)
+(2 rows)
 
 --
 -- Test case for premature memory release during hashing of subplan output
