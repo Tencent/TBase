@@ -1160,11 +1160,11 @@ XminInMVCCSnapshotByTimestamp(HeapTupleHeader tuple, Snapshot snapshot,
 	else if (snapshot->local || CommitTimestampIsLocal(global_committs))
 	{
 		res =  XidInMVCCSnapshot(xid, snapshot);
-		SnapshotCheck(xid, snapshot, res, 0);
 
 		DEBUG_SNAPSHOT(elog(LOG, "xmin local snapshot ts " INT64_FORMAT
 				" res %d xid %d committs " INT64_FORMAT, snapshot->start_ts,
 				res, xid, global_committs));
+        SnapshotCheck(xid, snapshot, res, 0);
 		return res;
 	}
 	else
@@ -1212,20 +1212,19 @@ XminInMVCCSnapshotByTimestamp(HeapTupleHeader tuple, Snapshot snapshot,
 
 		if(snapshot->start_ts > global_committs)
 		{
-			SnapshotCheck(xid, snapshot, false, global_committs);
-
 			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT " false xid %d "
 					"committs " INT64_FORMAT " 21.", snapshot->start_ts, xid,
 					global_committs));
+            SnapshotCheck(xid, snapshot, false, global_committs);
 			return false;
 		}
 		else
-		{	
-			SnapshotCheck(xid, snapshot, true, global_committs);
-
+        {
 			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT " true xid %d"
 					" committs " INT64_FORMAT " 22.", snapshot->start_ts, xid,
 					global_committs));
+
+			SnapshotCheck(xid, snapshot, true, global_committs);
 			return true;
 		}
 	}
@@ -1251,10 +1250,11 @@ XmaxInMVCCSnapshotByTimestamp(HeapTupleHeader tuple, Snapshot snapshot,
 	else if (snapshot->local || CommitTimestampIsLocal(global_committs))
 	{
 		res = XidInMVCCSnapshot(xid, snapshot);
-		SnapshotCheck(xid, snapshot, res, 0);
 
 		DEBUG_SNAPSHOT(elog(LOG, "xmax local snapshot ts " INT64_FORMAT " res "
 				"%d xid %d.", snapshot->start_ts, res, xid));
+
+		SnapshotCheck(xid, snapshot, res, 0);
 		return res;
 	}
 	else
@@ -1302,20 +1302,20 @@ XmaxInMVCCSnapshotByTimestamp(HeapTupleHeader tuple, Snapshot snapshot,
 
 		if(snapshot->start_ts > global_committs)
 		{
-			SnapshotCheck(xid, snapshot, false, global_committs);
-
 			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT "false xid %d"
 					" committs" INT64_FORMAT "11.", snapshot->start_ts, xid,
 					global_committs));
+
+			SnapshotCheck(xid, snapshot, false, global_committs);
 			return false;
 		}
 		else
 		{
-			SnapshotCheck(xid, snapshot, true, global_committs);
-
 			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT "true xid %d "
 					"committs " INT64_FORMAT "12.", snapshot->start_ts, xid,
 					global_committs));
+
+			SnapshotCheck(xid, snapshot, true, global_committs);
 			return true;
 		}
 	}
@@ -3424,10 +3424,10 @@ XidInMVCCSnapshotDistri(HeapTupleHeader tuple, TransactionId xid,
 	if (snapshot->local || !TransactionIdIsNormal(xid))
 	{
 		res = XidInMVCCSnapshot(xid, snapshot);
-		SnapshotCheck(xid, snapshot, res, 0);
 
 		DEBUG_SNAPSHOT(elog(DEBUG12, "local: snapshot ts " INT64_FORMAT "xid %d"
 				" res %d.", snapshot->start_ts, xid, res));
+		SnapshotCheck(xid, snapshot, res, 0);
 		return res;
 	}
 	
@@ -3454,30 +3454,28 @@ XidInMVCCSnapshotDistri(HeapTupleHeader tuple, TransactionId xid,
 		if(CommitTimestampIsLocal(global_committs))
 		{
 			res = XidInMVCCSnapshot(xid, snapshot);
-			SnapshotCheck(xid, snapshot, res, 0);
 
 			DEBUG_SNAPSHOT(elog(DEBUG12, "local snapshot ts " INT64_FORMAT "res"
 					" %d xid %d after wait.", snapshot->start_ts, res, xid));
+			SnapshotCheck(xid, snapshot, res, 0);
 			return res;
 		}
 
 		if(snapshot->start_ts > global_committs)
 		{
-			SnapshotCheck(xid, snapshot, false, global_committs);
-
 			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT "false xid %d"
 					" committs " INT64_FORMAT "1.", snapshot->start_ts, xid,
 					global_committs));
+			SnapshotCheck(xid, snapshot, false, global_committs);
 			return false;
 		}
 		else
 		{
-			SnapshotCheck(xid, snapshot, true, global_committs);
-			SetTimestamp(tuple, xid, buffer, infomask);
-
 			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT "true xid %d "
 					"committs " INT64_FORMAT "2.",
 					snapshot->start_ts, xid, global_committs));
+			SnapshotCheck(xid, snapshot, true, global_committs);
+			SetTimestamp(tuple, xid, buffer, infomask);
 			return true;
 		}
 	}
@@ -3508,10 +3506,9 @@ XidInMVCCSnapshotDistri(HeapTupleHeader tuple, TransactionId xid,
 		if(GlobalTimestampIsValid(prepare_ts) && !GlobalTimestampIsFrozen(prepare_ts) &&
 			(snapshot->start_ts < prepare_ts))
 		{
-			SnapshotCheck(xid, snapshot, true, 0);
-
 			DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT " true xid %d"
 					" prep " INT64_FORMAT, snapshot->start_ts, xid, prepare_ts));
+			SnapshotCheck(xid, snapshot, true, 0);
 			return true;
 		}
 		
@@ -3567,31 +3564,30 @@ XidInMVCCSnapshotDistri(HeapTupleHeader tuple, TransactionId xid,
 			if(CommitTimestampIsLocal(global_committs))
 			{
 				res =  XidInMVCCSnapshot(xid, snapshot);
-				SnapshotCheck(xid, snapshot, res, 0);
 
 				DEBUG_SNAPSHOT(elog(DEBUG12, "local snapshot ts " INT64_FORMAT
 						"res %d xid %d after wait.",
 						snapshot->start_ts, res,xid));
+				SnapshotCheck(xid, snapshot, res, 0);
 				return res;
 			}
 
 			if(snapshot->start_ts > global_committs)
 			{
-				SnapshotCheck(xid, snapshot, false, global_committs);
-
 				DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT " false "
 						"xid %d commit_ts " INT64_FORMAT " 3.",
 						snapshot->start_ts, xid, global_committs));
+				SnapshotCheck(xid, snapshot, false, global_committs);
 				return false;
 			}
 			else
 			{
-				SnapshotCheck(xid, snapshot, true, global_committs);
-				SetTimestamp(tuple, xid, buffer, infomask);
-
 				DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT " true xid"
 						" %d committs" INT64_FORMAT " 4.", snapshot->start_ts,
 						xid, global_committs));
+				SnapshotCheck(xid, snapshot, true, global_committs);
+
+				SetTimestamp(tuple, xid, buffer, infomask);
 				return true;
 			}
 		}
@@ -3601,10 +3597,10 @@ XidInMVCCSnapshotDistri(HeapTupleHeader tuple, TransactionId xid,
 			{
 				snapshot->scanned_tuples_after_abort++;
 			}
-			SnapshotCheck(xid, snapshot, false, 0);
 
 			DEBUG_SNAPSHOT(elog(LOG, "abort snapshot ts " INT64_FORMAT " false"
 					" xid %d .", snapshot->start_ts, xid));
+			SnapshotCheck(xid, snapshot, false, 0);
 			return false;
 		}
 	}
@@ -3620,10 +3616,10 @@ XidInMVCCSnapshotDistri(HeapTupleHeader tuple, TransactionId xid,
 	 * because that as T1's commit timestamp has not yet been aquired on CN,
 	 * T2.start < T1.commit is always being held.
 	 */
-	SnapshotCheck(xid, snapshot, true, 0);
-
 	DEBUG_SNAPSHOT(elog(LOG, "snapshot ts " INT64_FORMAT " true xid %d 5.",
 			snapshot->start_ts, xid));
+	SnapshotCheck(xid, snapshot, true, 0);
+
 	return true;
 }
 
