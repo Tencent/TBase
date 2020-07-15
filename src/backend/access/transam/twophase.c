@@ -1858,6 +1858,7 @@ FinishPreparedTransaction(const char *gid, bool isCommit)
                 gid, (g_twophase_state.is_readonly) ? "true" : "false", (g_twophase_state.is_after_prepare) ? "true" : "false");
         }
     }
+
     
     if (!g_twophase_state.is_start_node && 
         !g_twophase_state.is_readonly && 
@@ -1866,6 +1867,10 @@ FinishPreparedTransaction(const char *gid, bool isCommit)
             (g_twophase_state.in_pg_clean && 
             g_twophase_state.is_after_prepare)))
     {
+        if (g_twophase_state.in_pg_clean)
+        {
+            record_2pc_involved_nodes_xid(gid, g_twophase_state.start_node_name, g_twophase_state.start_xid, g_twophase_state.participants, xid);
+        }
         record_2pc_commit_timestamp(gid, GetGlobalCommitTimestamp());
     }
 
@@ -2907,7 +2912,7 @@ RecordTransactionAbortPrepared(TransactionId xid,
 {
     XLogRecPtr    recptr;
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-    GlobalTimestamp global_time;
+	GlobalTimestamp global_time = InvalidGlobalTimestamp;
 #endif
 
     /*
@@ -2921,8 +2926,13 @@ RecordTransactionAbortPrepared(TransactionId xid,
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
     global_time = GetGlobalTimestampGTM();
     
-    if(!GlobalTimestampIsValid(global_time)){
-        elog(ERROR, "failed to get global timestamp for abort command");
+	if(!GlobalTimestampIsValid(global_time))
+	{
+		/* During the transaction rollback phase, 
+		 * it is not mandatory to obtain a global timestamp from the GTM.
+		 * it is sufficient to simply print a log when falied to get GTS from GTM
+		 */
+		elog(LOG, "failed to get global timestamp for abort command");
     }
     MyProc->commitTs = global_time;
 #endif

@@ -26,6 +26,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/prctl.h>
 #ifdef HAVE_SYS_SELECT_H
 #include <sys/select.h>
 #endif
@@ -119,6 +120,7 @@
 
 #ifdef __SUBSCRIPTION__
 #include "replication/logicalrelation.h"
+#include "replication/worker_internal.h"
 #endif
 
 extern int    optind;
@@ -651,6 +653,7 @@ SocketBackend(StringInfo inBuf)
 #ifdef PGXC /* PGXC_DATANODE */
 #ifdef __TBASE__
         case 'N':
+		case 'U':				/* coord info: coord_pid and top_xid */
 #endif
         case 'M':                /* Command ID */
         case 'g':                /* GXID */
@@ -2207,6 +2210,10 @@ exec_bind_message(StringInfo input_message)
         debug_query_string = mls_query_string_prune(debug_query_string);
     }
     pgstat_report_activity(STATE_RUNNING, debug_query_string);
+#endif
+
+#ifdef __TBASE__
+	HeavyLockCheck(psrc->commandTag, CMD_UNKNOWN, NULL, NULL);
 #endif
 
     set_ps_display("BIND", false);
@@ -4791,6 +4798,8 @@ PostgresMain(int argc, char *argv[],
                                      * platforms */
     }
 
+	prctl(PR_SET_PDEATHSIG, SIGKILL);
+
     pqinitmask();
 
     if (IsUnderPostmaster)
@@ -5647,6 +5656,19 @@ PostgresMain(int argc, char *argv[],
                     }
                 }
                 break;
+			case 'U':			/* coord info: coord_pid and coord_vxid */
+				{
+					int coord_pid = 0;
+					TransactionId coord_vxid = InvalidTransactionId;
+
+					coord_pid = (int) pq_getmsgint(&input_message, 4);
+					coord_vxid = (TransactionId) pq_getmsgint(&input_message, 4);
+
+					pgxc_set_coordinator_proc_pid(coord_pid);
+					pgxc_set_coordinator_proc_vxid(coord_vxid);
+					elog(DEBUG5, "Received coord_pid: %d, coord_vxid: %u", coord_pid, coord_vxid);
+				}
+				break;
 #endif
                 /*
                  * 'X' means that the frontend is closing down the socket. EOF

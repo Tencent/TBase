@@ -1266,7 +1266,7 @@ insert into upsert values(6, 'white') on conflict (key) do update set color = 'u
 insert into upsert values(7, 'pink') on conflict (key) do update set color = 'updated ' || upsert.color;
 insert into upsert values(8, 'yellow') on conflict (key) do update set color = 'updated ' || upsert.color;
 
-select * from upsert;
+select * from upsert order by 1,2;
 
 drop table upsert;
 drop function upsert_before_func();

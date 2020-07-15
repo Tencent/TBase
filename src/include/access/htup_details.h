@@ -930,6 +930,8 @@ extern MinimalTuple minimal_tuple_from_heap_tuple(HeapTuple htup);
 extern HeapTuple heap_expand_tuple(HeapTuple sourceTuple, TupleDesc tupleDesc);
 extern MinimalTuple minimal_expand_tuple(HeapTuple sourceTuple, TupleDesc tupleDesc);
 extern void slot_deform_tuple_extern(void *slot, int natts);
+extern void heap_tuple_set_shardid(HeapTuple tup, void *slot, AttrNumber diskey, AttrNumber secdiskey,
+				             Oid relid);
 #endif
 
 #endif                            /* HTUP_DETAILS_H */

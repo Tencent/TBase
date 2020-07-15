@@ -143,6 +143,7 @@
 #endif
 #ifdef __COLD_HOT__
 #include "utils/ruleutils.h"
+#include "executor/nodeAgg.h"
 #include "catalog/pg_partition_interval.h"
 #endif
 
@@ -2191,6 +2192,16 @@ static struct config_bool ConfigureNamesBool[] =
         NULL, NULL, NULL
     },
 
+	{
+		{"enable_distributed_unique_plan", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("enable distributed unique plan."),
+			NULL
+		},
+		&enable_distributed_unique_plan,
+		true,
+		NULL, NULL, NULL
+	},
+
     {
         {"enable_null_string", PGC_USERSET, CUSTOM_OPTIONS,
             gettext_noop("enable nulls in string."),
@@ -2258,6 +2269,26 @@ static struct config_bool ConfigureNamesBool[] =
         true,
         NULL, NULL, NULL
     },
+
+	{
+		{"hybrid_hash_agg", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("enable hybrid-hash agg."),
+			NULL
+		},
+		&g_hybrid_hash_agg,
+		false,
+		NULL, NULL, NULL
+	},	
+
+	{
+		{"hybrid_hash_agg_debug", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("enable hybrid-hash agg debug."),
+			NULL
+		},
+		&g_hybrid_hash_agg_debug,
+		false,
+		NULL, NULL, NULL
+	},
 #endif
 
 #ifdef _MIGRATE_
@@ -2312,6 +2343,15 @@ static struct config_bool ConfigureNamesBool[] =
         false,
         NULL, NULL, NULL
     },
+	{
+		{"allow_force_ddl", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("allow forced ddl of inconsistent metadata"),
+			NULL
+		},
+		&g_allow_force_ddl,
+		false,
+		NULL, NULL, NULL
+	},
     {
         {"trace_extent", PGC_SUSET, DEVELOPER_OPTIONS,
             gettext_noop("Emits information about extent changing."),
@@ -3609,7 +3649,7 @@ static struct config_int ConfigureNamesInt[] =
             NULL
         },
         &g_ShardInfoFlushInterval,
-        300, 300, INT_MAX,
+		300, 3, INT_MAX,
         NULL, NULL, NULL
     },
 
@@ -4387,6 +4427,16 @@ static struct config_int ConfigureNamesInt[] =
         1, 0, INT_MAX,
         NULL, NULL, NULL
     },
+	
+	{
+		{"default_hashagg_nbatches", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("number of batch files in hybrid-hash agg."),
+			NULL
+		},
+		&g_default_hashagg_nbatches,
+		32, 1, INT_MAX,
+		NULL, NULL, NULL
+	},
 #endif
 #ifdef __TWO_PHASE_TESTS__
     {
@@ -4523,7 +4573,7 @@ static struct config_uint ConfigureNamesUInt[] =
             GUC_IS_NAME | GUC_REPORT | GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE | GUC_NOT_WHILE_SEC_REST
         },
         &MyCoordLxid,
-        0, 0, INT_MAX,
+		0, 0, UINT_MAX,
         NULL, NULL, NULL
     },
 
@@ -5275,7 +5325,7 @@ static struct config_string ConfigureNamesString[] =
     },
 
     {
-        {"pgxc_cluster_name", PGC_POSTMASTER, GTM,
+		{"pgxc_cluster_name", PGC_SIGHUP, GTM,
             gettext_noop("The Cluster name."),
             NULL,
             GUC_NO_RESET_ALL | GUC_IS_NAME
@@ -7663,7 +7713,7 @@ parse_uint(const char *value, uint *result, int flags, const char **hintmsg)
     if (endptr == value)
         return false;            /* no HINT for integer syntax error */
 
-    if (errno == ERANGE || val != (int64) ((int32) val))
+	if (errno == ERANGE || val != (uint64) ((uint32) val))
     {
         if (hintmsg)
             *hintmsg = gettext_noop("Value exceeds integer range.");
@@ -7711,7 +7761,7 @@ parse_uint(const char *value, uint *result, int flags, const char **hintmsg)
         }
 
         /* Check for overflow due to units conversion */
-        if (val != (int64) ((int32) val))
+		if (val != (uint64) ((uint32) val))
         {
             if (hintmsg)
                 *hintmsg = gettext_noop("Value exceeds integer range.");
@@ -7945,12 +7995,12 @@ parse_and_validate_value(struct config_generic *record,
                     return false;
                 }
 
-                if (newval->intval < conf->min || newval->intval > conf->max)
+				if (newval->uintval < conf->min || newval->uintval > conf->max)
                 {
                     ereport(elevel,
                             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                              errmsg("%d is outside the valid range for parameter \"%s\" (%d .. %d)",
-                                    newval->intval, name,
+									newval->uintval, name,
                                     conf->min, conf->max)));
                     return false;
                 }
@@ -8102,8 +8152,13 @@ set_config_option(const char *name, const char *value,
 #ifdef XCP
     bool        send_to_nodes = false;
 
-    /* Determine now, because source may be changed below in the function */
-    if (source == PGC_S_SESSION && (IS_PGXC_DATANODE || !IsConnFromCoord()))
+	/*
+	 * Determine now, because source may be changed below in the function.
+	 * remotetype and parentnode are only used in internal connections.
+	 */
+    if ((source == PGC_S_SESSION || source == PGC_S_CLIENT)
+        && (IS_PGXC_DATANODE || !IsConnFromCoord())
+        && (strcmp(name,"remotetype") != 0 && strcmp(name,"parentnode") != 0))
         send_to_nodes = true;
 #endif
 
@@ -8928,7 +8983,7 @@ set_config_option(const char *name, const char *value,
          * Save new parameter value with the node manager.
          * XXX here we may check: if value equals to configuration default
          * just reset parameter instead. Minus one table entry, shorter SET
-         * command sent downn... Sounds like optimization.
+		 * command sent down... Sounds like optimization.
          */
 
         if (action == GUC_ACTION_LOCAL)

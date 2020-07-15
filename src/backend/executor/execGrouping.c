@@ -316,6 +316,11 @@ BuildTupleHashTable(int numCols, AttrNumber *keyColIdx,
     hashtable->inputslot = NULL;
     hashtable->in_hash_funcs = NULL;
     hashtable->cur_eq_funcs = NULL;
+#ifdef __TBASE__
+	hashtable->spilled = false;
+	hashtable->spill_set = NULL;
+	hashtable->hybrid = false;
+#endif
 
     /*
      * If parallelism is in use, even if the master backend is performing the
@@ -393,11 +398,42 @@ LookupTupleHashEntry(TupleHashTable hashtable, TupleTableSlot *slot,
         }
         else
         {
+#ifdef __TBASE__
+			if (hashtable->hybrid)
+			{
+				if (!entry)
+				{
+					/* hashtable is full, need to dump it */
+					MemoryContextSwitchTo(oldContext);
+
+					return NULL;
+				}
+			}
+			else
+			{
+				if (!entry)
+				{
+					elog(ERROR, "could not find entry in hashtable");
+				}
+			}
+#endif
             /* created new entry */
             *isnew = true;
             /* zero caller data */
             entry->additional = NULL;
+#ifdef __TBASE__
+			if (hashtable->hybrid)
+			{
+				/* use our own memorycontext */
+				MemoryContextSwitchTo(hashtable->hybridcxt);
+			}
+			else
+			{
+				MemoryContextSwitchTo(hashtable->tablecxt);
+			}
+#else
             MemoryContextSwitchTo(hashtable->tablecxt);
+#endif
             /* Copy the first tuple into the table context */
             entry->firstTuple = ExecCopySlotMinimalTuple(slot);
         }

@@ -76,6 +76,7 @@
 #include "audit/audit_fga.h"
 #endif
 
+#include "executor/nodeAgg.h"
 /*
  * Flag bits that can appear in the flags argument of create_plan_recurse().
  * These can be OR-ed together.
@@ -104,6 +105,7 @@ int remote_subplan_depth = 0;
 List *groupOids = NULL;
 bool mergejoin = false;
 bool enable_group_across_query = false;
+bool enable_distributed_unique_plan = false;
 #endif
 #ifdef __COLD_HOT__
 bool has_distribute_remote_plan = false;
@@ -585,17 +587,17 @@ create_scan_plan(PlannerInfo *root, Path *best_path, int flags)
 #ifdef __TBASE__
     bool    isindexscan = false;                /* result is sorted? */
     bool    need_merge_append = false;            /* need MergeAppend */
-    bool    need_pullup_filter = false;         /* need pull up filter */
+//    bool    need_pullup_filter = false;         /* need pull up filter */
     bool    isbackward = false;                 /* indexscan is backward ?*/
     AttrNumber partkey;
-    List        *outtlist = NULL;
-    List        *qual = NULL;
+//    List        *outtlist = NULL;
+//    List        *qual = NULL;
 
     Relation relation = NULL;
     RangeTblEntry *rte;
 
-    bool    does_use_physical_tlist = false;
-    bool    need_projection = false;
+//    bool    does_use_physical_tlist = false;
+//    bool    need_projection = false;
 #endif
 
     /*
@@ -664,7 +666,7 @@ create_scan_plan(PlannerInfo *root, Path *best_path, int flags)
         {
             tlist = build_physical_tlist(root, rel);
 #ifdef __TBASE__
-            does_use_physical_tlist = true;
+//            does_use_physical_tlist = true;
 #endif
             if (tlist == NIL)
             {
@@ -749,7 +751,7 @@ create_scan_plan(PlannerInfo *root, Path *best_path, int flags)
             {
                 need_merge_append = true;
             }
-            need_pullup_filter = false;
+//            need_pullup_filter = false;
 /*
             if(need_pullup_filter)
             {
@@ -1635,7 +1637,20 @@ create_unique_plan(PlannerInfo *root, UniquePath *best_path, int flags)
     AttrNumber *groupColIdx;
     int            groupColPos;
     ListCell   *l;
+#ifdef __TBASE__
+	TargetEntry *distributed_expr = NULL;
+	Path	    *subpath = best_path->subpath;
+	Node	    *sub_disExpr = NULL;
+	bool        match_distributed_column = false;
 
+	if (enable_distributed_unique_plan)
+	{
+		if (subpath && subpath->distribution && subpath->distribution->distributionExpr)
+		{
+			sub_disExpr = subpath->distribution->distributionExpr;
+		}
+	}
+#endif
     /* Unique doesn't project, so tlist requirements pass through */
     subplan = create_plan_recurse(root, best_path->subpath, flags);
 
@@ -1728,6 +1743,15 @@ create_unique_plan(PlannerInfo *root, UniquePath *best_path, int flags)
         if (!tle)                /* shouldn't happen */
             elog(ERROR, "failed to find unique expression in subplan tlist");
         groupColIdx[groupColPos++] = tle->resno;
+#ifdef __TBASE__
+		if (enable_distributed_unique_plan)
+		{
+			if (equal(tle->expr, sub_disExpr))
+			{
+				match_distributed_column = true;
+			}
+		}
+#endif
     }
 
     if (best_path->umethod == UNIQUE_PATH_HASH)
@@ -1751,8 +1775,77 @@ create_unique_plan(PlannerInfo *root, UniquePath *best_path, int flags)
                 elog(ERROR, "could not find compatible hash operator for operator %u",
                      in_oper);
             groupOperators[groupColPos++] = eq_oper;
+#ifdef __TBASE__
+			if (enable_distributed_unique_plan)
+			{
+				if (!distributed_expr)
+				{
+					int groupColIndex = groupColPos - 1;
+					distributed_expr = get_tle_by_resno(subplan->targetlist,
+										   groupColIdx[groupColIndex]);
+				}
+			}
+#endif
         }
+#ifdef __TBASE__
+		if (enable_distributed_unique_plan)
+		{
+			if (!match_distributed_column)
+			{
+				bool is_distributable = false;
+				Oid  hashType = InvalidOid;
+				if (distributed_expr)
+				{
+					hashType = exprType((Node *)distributed_expr->expr);
+					is_distributable = IsTypeHashDistributable(hashType);
+				}
+				if (!is_distributable)
+				{
+					elog(LOG, "create_unique_plan using hash: redistribution is impossible because of"
+						" undistributable hash type %u", hashType);
+				}
+				if (subpath && subpath->distribution && 
+					subpath->distribution->distributionExpr && is_distributable)
+				{
+					Plan *remote_subplan = NULL;
+					Distribution *distribution = NULL;
+					/* remove duplicated tuples on each node */
+					Plan *first_agg = (Plan *) make_agg(subplan->targetlist,
+														 NIL,
+														 AGG_HASHED,
+														 AGGSPLIT_SIMPLE,
+														 numGroupCols,
+														 groupColIdx,
+														 groupOperators,
+														 NIL,
+														 NIL,
+														 best_path->path.rows,
+														 subplan);
+					/* redistributed group by results between nodes */
+					distribution = copyObject(subpath->distribution);
+					distribution->distributionExpr = (Node *)distributed_expr->expr;
+					remote_subplan = (Plan *)make_remotesubplan(root, first_agg, distribution, subpath->distribution, NULL);
 
+					/* remove duplicated tuples on each node again */
+					plan = (Plan *) make_agg(build_path_tlist(root, &best_path->path),
+														 NIL,
+														 AGG_HASHED,
+														 AGGSPLIT_SIMPLE,
+														 numGroupCols,
+														 groupColIdx,
+														 groupOperators,
+														 NIL,
+														 NIL,
+														 best_path->path.rows,
+														 remote_subplan);
+					/* Copy cost data from Path to Plan */
+					copy_generic_path_info(plan, &best_path->path);
+
+					return plan;
+				}
+			}
+		}
+#endif
         /*
          * Since the Agg node is going to project anyway, we can give it the
          * minimum output tlist, without any stuff we might have added to the
@@ -1805,7 +1898,16 @@ create_unique_plan(PlannerInfo *root, UniquePath *best_path, int flags)
             tle = get_tle_by_resno(subplan->targetlist,
                                    groupColIdx[groupColPos]);
             Assert(tle != NULL);
-
+#ifdef __TBASE__
+            /* get distributed column for remote_subplan */
+            if (enable_distributed_unique_plan)
+            {
+                if (!distributed_expr)
+                {
+                    distributed_expr = tle;
+                }
+            }
+#endif
             sortcl = makeNode(SortGroupClause);
             if(tle)
             {
@@ -1819,6 +1921,33 @@ create_unique_plan(PlannerInfo *root, UniquePath *best_path, int flags)
             sortList = lappend(sortList, sortcl);
             groupColPos++;
         }
+#ifdef __TBASE__
+		if (enable_distributed_unique_plan)
+		{
+			if (!match_distributed_column)
+			{
+				bool is_distributable = false;
+				Oid  hashType = InvalidOid;
+				if (distributed_expr)
+				{
+					hashType = exprType((Node *)distributed_expr->expr);
+					is_distributable = IsTypeHashDistributable(hashType);
+				}
+				if (!is_distributable)
+				{
+					elog(LOG, "create_unique_plan using sort: redistribution is impossible because of"
+						" undistributable hash type %u", hashType);
+				}
+				if (subpath && subpath->distribution && 
+					subpath->distribution->distributionExpr && is_distributable)
+				{
+					Distribution *distribution = copyObject(subpath->distribution);
+					distribution->distributionExpr = (Node *)distributed_expr->expr;
+					subplan = (Plan *)make_remotesubplan(root, subplan, distribution, subpath->distribution, NULL);
+				}
+			}
+		}
+#endif
         sort = make_sort_from_sortclauses(sortList, subplan);
         label_sort_with_costsize(root, sort, -1.0);
         plan = (Plan *) make_unique_from_sortclauses((Plan *) sort, sortList);
@@ -2187,6 +2316,22 @@ create_agg_plan(PlannerInfo *root, AggPath *best_path)
                     subplan);
 
     copy_generic_path_info(&plan->plan, (Path *) best_path);
+#ifdef __TBASE__
+	/* set entry size of hashtable using by hashagg */
+	if (g_hybrid_hash_agg)
+	{
+		if (best_path->aggstrategy == AGG_HASHED)
+		{
+			plan->entrySize = best_path->entrySize;
+			plan->hybrid = best_path->hybrid;
+
+			if (plan->entrySize == 0)
+			{
+				elog(ERROR, "Invalid hashtable entry size %u", plan->entrySize);
+			}
+		}
+	}
+#endif
 
     return plan;
 }
@@ -4638,7 +4783,11 @@ create_nestloop_plan(PlannerInfo *root,
      * rescan RemoteSubplan and do not support it.
      * So if inner_plan is a RemoteSubplan, materialize it.
      */
+#ifdef __TBASE__
+	if (!IsA(inner_plan, Material) && contain_remote_subplan_walker((Node*)inner_plan, NULL, true))
+#else
     if (IsA(inner_plan, RemoteSubplan))
+#endif
     {
         Plan       *matplan = (Plan *) make_material(inner_plan);
 
@@ -6543,7 +6692,7 @@ make_remotesubplan(PlannerInfo *root,
 
                 parallel_workers = Min(parallel_workers, max_parallel_workers_per_gather);
                 
-                gather_plan = make_gather(gather_left->targetlist,
+				gather_plan = make_gather(copyObject(gather_left->targetlist),
                                           NIL,
                                           parallel_workers,
                                           false,
@@ -6621,6 +6770,30 @@ make_remotesubplan(PlannerInfo *root,
                 {
                     /* Ok to modify subplan's target list */
                     lefttree->targetlist = lappend(lefttree->targetlist, newtle);
+#ifdef __TBASE__
+					if (IsA(lefttree, Gather)&& g_UseDataPump && olap_optimizer &&
+						(distributionType == LOCATOR_TYPE_HASH || distributionType == LOCATOR_TYPE_SHARD))
+					{
+						Plan *leftchild = lefttree->lefttree;
+
+						newtle = makeTargetEntry(expr,
+										 list_length(leftchild->targetlist) + 1,
+									     NULL,
+										 true);
+					
+						if (is_projection_capable_plan(leftchild))
+						{
+							leftchild->targetlist = lappend(leftchild->targetlist, newtle);
+						}
+						else
+						{
+							List *newtlist = list_copy(leftchild->targetlist);
+							newtlist = lappend(newtlist, newtle);
+							leftchild = (Plan *) make_result(newtlist, NULL, leftchild);
+							lefttree->lefttree = leftchild;
+						}
+					}
+#endif
                 }
                 else
                 {
@@ -6912,7 +7085,7 @@ make_remotesubplan(PlannerInfo *root,
       * without gather motion to speed up the data transfering.
       */
     if ((distributionType == LOCATOR_TYPE_HASH || distributionType == LOCATOR_TYPE_SHARD) 
-        && IsA(lefttree, Gather) && g_UseDataPump && olap_optimizer)
+		&& IsA(lefttree, Gather) && g_UseDataPump && olap_optimizer && list_length(node->distributionRestrict) > 1)
     {
         Gather *gather_plan = (Gather *)lefttree;
         
@@ -7805,7 +7978,10 @@ make_agg(List *tlist, List *qual,
     node->aggParams = NULL;        /* SS_finalize_plan() will fill this */
     node->groupingSets = groupingSets;
     node->chain = chain;
-
+#ifdef __TBASE__
+	node->hybrid = false;
+	node->entrySize = 0;
+#endif
     plan->qual = qual;
     plan->targetlist = tlist;
     plan->lefttree = lefttree;
@@ -8737,6 +8913,8 @@ create_remotequery_for_rel(PlannerInfo *root, ModifyTable *mt, RangeTblEntry *re
     RelationLocInfo    *rel_loc_info;
     Plan            *sourceDataPlan;
     RangeTblEntry    *dummy_rte;
+	char            *child_relname;
+	Oid             child_reloid;
 
     relname = get_rel_name(res_rel->relid);
 
@@ -8744,6 +8922,20 @@ create_remotequery_for_rel(PlannerInfo *root, ModifyTable *mt, RangeTblEntry *re
     rel_loc_info = GetRelationLocInfo(res_rel->relid);
     if (rel_loc_info == NULL)
         return;
+
+	if (partindex >= 0)
+	{
+		child_relname = GetPartitionName(res_rel->relid, partindex, false);
+		child_reloid = get_relname_relid(child_relname, RelationGetNamespace(relation));
+		if (InvalidOid == child_reloid)
+		{
+			if(child_relname)
+			{
+			    pfree(child_relname);
+			}
+			return;
+		}
+	}
 
     fstep = makeNode(RemoteQuery);
     fstep->scan.scanrelid = resultRelationIndex;
@@ -8770,8 +8962,8 @@ create_remotequery_for_rel(PlannerInfo *root, ModifyTable *mt, RangeTblEntry *re
 
         child_rte = copyObject(res_rel);
         child_rte->intervalparent = false;
-        child_rte->relname = GetPartitionName(res_rel->relid, partindex, false);
-        child_rte->relid = get_relname_relid(child_rte->relname, RelationGetNamespace(relation));
+		child_rte->relname = child_relname;
+		child_rte->relid = child_reloid;
 
         root->parse->rtable = lappend(root->parse->rtable, child_rte);
 
@@ -9342,6 +9534,24 @@ build_physical_tlist_with_sysattr(List *relation_tlist, List *physical_tlist)
 
     return list_concat(result, physical_tlist);
 }
+static void
+bitmap_subplan_set_shared(Plan *plan, bool shared)
+{
+       if (!plan)
+       {
+               return;
+       }
+       if (IsA(plan, BitmapAnd))
+               bitmap_subplan_set_shared(
+                                 linitial(((BitmapAnd *) plan)->bitmapplans), shared);
+       else if (IsA(plan, BitmapOr))
+               ((BitmapOr *) plan)->isshared = shared;
+       else if (IsA(plan, BitmapIndexScan))
+               ((BitmapIndexScan *) plan)->isshared = shared;
+       else
+               elog(ERROR, "unrecognized node type: %d", nodeTag(plan));
+}
+
 static bool
 set_plan_parallel(Plan *plan)
 {// #lizard forgives
@@ -9355,13 +9565,19 @@ set_plan_parallel(Plan *plan)
         case T_SeqScan:
         case T_IndexScan:
         case T_IndexOnlyScan:
-        case T_BitmapHeapScan:
         case T_RemoteSubplan:
             {
                 plan->parallel_aware = true;
                 result = true;
             }
             break;
+		case T_BitmapHeapScan:
+			{
+				bitmap_subplan_set_shared(plan->lefttree, true);
+				plan->parallel_aware = true;
+				result = true;
+				break;
+			}
         case T_NestLoop:
             {
                 if (set_plan_parallel(plan->lefttree))
@@ -9525,6 +9741,12 @@ set_plan_nonparallel(Plan *plan)
 
         return;
     }
+	else if (IsA(plan, BitmapHeapScan))
+	{
+		bitmap_subplan_set_shared(plan->lefttree, false);
+		plan->parallel_aware = false;
+		return;
+	}
 
     set_plan_nonparallel(subplan->lefttree);
     set_plan_nonparallel(subplan->righttree);

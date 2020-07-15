@@ -20,7 +20,7 @@ select exec_util_on_node('CREATE TABLESPACE xc_testspace1 LOCATION $LOC$@testtab
 -- This should fail because we have one tablespace created on data node 1.
 CREATE TABLESPACE xc_testspace1 LOCATION '@testtablespace@';
 ERROR:  tablespace "xc_testspace1" already exists
-CONTEXT:  Error message received from nodes: datanode#1
+CONTEXT:  Error message received from nodes:
 -- Drop tablespace on data node 1.
 select exec_util_on_node('drop TABLESPACE xc_testspace1 ', 1);
  exec_util_on_node 
@@ -47,7 +47,7 @@ select exec_util_on_node('drop TABLESPACE xc_testspace1 ', 1);
 -- This should not work because there is no tablespace on datanode1
 CREATE DATABASE xc_db tablespace xc_testspace1;
 ERROR:  tablespace "xc_testspace1" does not exist
-CONTEXT:  Error message received from nodes: datanode#1
+CONTEXT:  Error message received from nodes:
 select exec_util_on_node('CREATE TABLESPACE xc_testspace1 LOCATION $LOC$@testtablespace@$LOC$', 1);
  exec_util_on_node 
 -------------------
@@ -84,7 +84,7 @@ clean connection to all for database xc_db;
 -- This should error out, since we don't have tablespace on data node 1
 alter database xc_db set tablespace xc_testspace1;
 ERROR:  tablespace "xc_testspace1" does not exist
-CONTEXT:  Error message received from nodes: datanode#1
+CONTEXT:  Error message received from nodes:
 select exec_util_on_node('CREATE TABLESPACE xc_testspace1 LOCATION $LOC$@testtablespace@$LOC$', 1);
  exec_util_on_node 
 -------------------
@@ -153,4 +153,6 @@ select * from xc_tab1 order by id;
 \c regression
 clean connection to all for database xc_db;
 drop database xc_db;
+ERROR:  database "xc_db" is being accessed by other users
 drop tablespace xc_testspace1;
+ERROR:  tablespace "xc_testspace1" is not empty

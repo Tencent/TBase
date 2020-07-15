@@ -124,6 +124,7 @@ struct pgxc_node_handle
     bool        in_extended_query;
     bool        needSync; /* set when error and extend query. */
 #ifdef __TBASE__
+	bool		sock_fatal_occurred;	/*Network failure occurred, and sock descriptor was closed */
     char        last_command; /*last command we processed. */
     long        recv_datarows;
     bool         plpgsql_need_begin_sub_txn;
@@ -173,6 +174,9 @@ extern Oid PGXCNodeGetNodeOid(int nodeid, char node_type);
 extern PGXCNodeAllHandles *get_handles(List *datanodelist, List *coordlist, bool is_query_coord_only, bool is_global_session);
 
 extern PGXCNodeAllHandles *get_current_handles(void);
+#ifdef __TBASE__
+extern PGXCNodeAllHandles * get_sock_fatal_handles(void);
+#endif
 extern void pfree_pgxc_all_handles(PGXCNodeAllHandles *handles);
 
 extern void release_handles(bool force);
@@ -237,6 +241,7 @@ extern int
 pgxc_node_send_global_timestamp(PGXCNodeHandle *handle, GlobalTimestamp timestamp);
 
 #ifdef __TBASE__
+extern int	pgxc_node_send_coord_info(PGXCNodeHandle * handle, int coord_pid, TransactionId coord_vxid);
 extern int    pgxc_node_receive(const int conn_count,
                   PGXCNodeHandle ** connections, struct timeval * timeout);
 extern bool node_ready_for_query(PGXCNodeHandle *conn);
@@ -277,6 +282,10 @@ extern void pgxc_print_pending_data(PGXCNodeHandle *handle, bool reset);
 
 #ifdef __TBASE__
 void add_error_message_from_combiner(PGXCNodeHandle *handle, void *combiner_input);
+inline void pgxc_set_coordinator_proc_pid(int proc_pid);
+inline int pgxc_get_coordinator_proc_pid(void);
+inline void pgxc_set_coordinator_proc_vxid(TransactionId proc_vxid);
+inline TransactionId pgxc_get_coordinator_proc_vxid(void);
 #endif
 
 #ifdef __AUDIT__

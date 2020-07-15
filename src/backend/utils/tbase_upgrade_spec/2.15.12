@@ -1,0 +1,25 @@
+# -----------------------------
+# Tbase upgrade spec file
+# -----------------------------
+#
+# This file will be installed to ${install_path}/share/postgresql/tbase_upgrade_spec/${version}
+# When are about to release a version,you have to mannualy comfirm the following settings
+
+# This section indicates protocol changes with its previous version
+# if two nodes are not compatible,then they will be upgrade togeter
+[Downward Compatibility]
+CN_with_GTM=true
+DN_with_GTM=true
+DN_with_DN=true
+CN_with_DN=true
+CN_with_CN=true
+CN_XLOG=true
+DN_XLOG=true
+GTM_XLOG=true
+
+# These commands will be executed by oss when upgraded to this version
+# %d will be replaced by datadir , %b will be replaced with bindir, %v will be replaced with node version
+[Upgrade Script]
+Before_Stop="export PATH=/usr/sbin/:$PATH && chmod +x %b/share/postgresql/tbase_upgrade_spec/2.15.12_before_stop.sh && bash -c '%b/share/postgresql/tbase_upgrade_spec/2.15.12_before_stop.sh %d %b %v &> /tmp/before_stop'"
+During_Stop="echo %d %b %v &> /tmp/during_stop"
+After_Start="export PATH=/usr/sbin/:$PATH && chmod +x %b/share/postgresql/tbase_upgrade_spec/2.15.12_before_stop.sh && bash -c '%b/share/postgresql/tbase_upgrade_spec/2.15.12_after_start.sh %d %b %v &> /tmp/after_start'"

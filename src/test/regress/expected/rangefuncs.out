@@ -1989,14 +1989,14 @@ select x from int8_tbl, extractq2(int8_tbl) f(x);
          Function Call: int8_tbl.q2
 (9 rows)
 
-select x from int8_tbl, extractq2(int8_tbl) f(x);
+select x from int8_tbl, extractq2(int8_tbl) f(x) order by 1;
          x         
 -------------------
+ -4567890123456789
+               123
                456
   4567890123456789
-               123
   4567890123456789
- -4567890123456789
 (5 rows)
 
 create function extractq2_2(t int8_tbl) returns table(ret1 int8) as $$
@@ -2016,14 +2016,14 @@ select x from int8_tbl, extractq2_2(int8_tbl) f(x);
          Output: (int8_tbl.*).q2
 (8 rows)
 
-select x from int8_tbl, extractq2_2(int8_tbl) f(x);
+select x from int8_tbl, extractq2_2(int8_tbl) f(x) order by 1;
          x         
 -------------------
+ -4567890123456789
+               123
                456
   4567890123456789
-               123
   4567890123456789
- -4567890123456789
 (5 rows)
 
 -- without the "offset 0", this function gets optimized quite differently
@@ -2040,14 +2040,14 @@ select x from int8_tbl, extractq2_2_opt(int8_tbl) f(x);
          Output: int8_tbl.q2
 (4 rows)
 
-select x from int8_tbl, extractq2_2_opt(int8_tbl) f(x);
+select x from int8_tbl, extractq2_2_opt(int8_tbl) f(x) order by 1;
          x         
 -------------------
+ -4567890123456789
+               123
                456
   4567890123456789
-               123
   4567890123456789
- -4567890123456789
 (5 rows)
 
 -- check handling of nulls in SRF results (bug #7808)

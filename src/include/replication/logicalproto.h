@@ -136,6 +136,7 @@ extern int32 logicalrep_dml_get_hashmod(void);
 extern int32 logicalrep_dml_get_hashvalue(void);
 extern bool  logicalrep_dml_get_send_all(void);
 extern int32 logicalrep_dml_calc_hash(Relation rel, HeapTuple tuple);
+extern void	logicalrep_relation_free(LogicalRepRelation * rel);
 #endif
 
 #endif                            /* LOGICALREP_PROTO_H */

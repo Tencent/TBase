@@ -2458,6 +2458,11 @@ get_typename(Oid typid)
     return result;
 }
 
+char * get_typenamespace_typename(Oid typid) 
+{
+	return TypidGetTypename(typid);
+}
+
 /*
  * get_pgxc_nodeoid
  *        Obtain PGXC Node Oid for given node name

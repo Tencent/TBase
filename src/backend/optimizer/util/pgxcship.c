@@ -219,8 +219,15 @@ pgxc_FQS_datanodes_for_rtr(Index varno, Query *query)
         case RTE_RELATION:
         {
             /* For anything, other than a table, we can't find the datanodes */
+#ifdef __TBASE__
+			if (rte->relkind != RELKIND_RELATION && rte->relkind != RELKIND_PARTITIONED_TABLE)
+			{
+				return NULL;
+			}
+#else
             if (rte->relkind != RELKIND_RELATION)
                 return NULL;
+#endif
             /*
              * In case of inheritance, child tables can have completely different
              * Datanode distribution than parent. To handle inheritance we need
@@ -233,8 +240,19 @@ pgxc_FQS_datanodes_for_rtr(Index varno, Query *query)
              * because has_subclass can return true even if there aren't any
              * subclasses, but it's ok.
              */
+#ifdef __TBASE__
+			/* 
+			 * all partitioned tables should have the same distribution, try to 
+			 * get execution datanodes
+			 */
+			if (rte->inh && has_subclass(rte->relid) && rte->relkind != RELKIND_PARTITIONED_TABLE)
+			{
+				return NULL;
+			}
+#else
             if (rte->inh && has_subclass(rte->relid))
                 return NULL;
+#endif
 
             return pgxc_FQS_get_relation_nodes(rte, varno, query);
         }
@@ -780,7 +798,7 @@ pgxc_query_has_distcolgrouping(Query *query)
         if (!IsA(sgc, SortGroupClause))
             continue;
         sgc_expr = get_sortgroupclause_expr(sgc, query->targetList);
-        if (IsA(sgc_expr, Var) &&
+		if (IsA(sgc_expr, Var) && (((Var *)sgc_expr)->varlevelsup == 0) &&
             pgxc_is_var_distrib_column((Var *)sgc_expr, query->rtable))
             return true;
     }
@@ -798,7 +816,7 @@ pgxc_distinct_has_distcol(Query *query)
         if (!IsA(sgc, SortGroupClause))
             continue;
         sgc_expr = get_sortgroupclause_expr(sgc, query->targetList);
-        if (IsA(sgc_expr, Var) &&
+		if (IsA(sgc_expr, Var) && (((Var *)sgc_expr)->varlevelsup == 0) &&
             pgxc_is_var_distrib_column((Var *)sgc_expr, query->rtable))
             return true;
     }
@@ -2817,6 +2835,11 @@ pgxc_is_group_subquery_shippable(Query *query, Shippability_context *sc_context)
             Var             *var       = NULL;
             RangeTblEntry   *rte       = NULL;            
             var             = (Var *)sgc_expr;
+
+			if (var->varlevelsup != 0)
+			{
+				continue;
+			}
             rte = rt_fetch(var->varno, query->rtable);    
             if (RTE_SUBQUERY == rte->rtekind)
             {

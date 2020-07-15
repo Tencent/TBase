@@ -322,8 +322,8 @@ cmd_t *prepare_initCoordinatorSlave(char *nodeName)
      */
     appendCmdEl(cmdBuildDir, (cmdBaseBkup = initCmd(aval(VAR_coordSlaveServers)[idx])));
     snprintf(newCommand(cmdBaseBkup), MAXLINE,
-             "pg_basebackup -p %s -h %s -D %s --wal-method=stream",
-             aval(VAR_coordPorts)[idx], aval(VAR_coordMasterServers)[idx], aval(VAR_coordSlaveDirs)[idx]);
+			 "pg_basebackup -U %s -p %s -h %s -D %s --wal-method=stream",
+			 aval(VAR_pgxcOwner)[0],aval(VAR_coordPorts)[idx], aval(VAR_coordMasterServers)[idx], aval(VAR_coordSlaveDirs)[idx]);
 
     /* Configure recovery.conf file at the slave */
     appendCmdEl(cmdBuildDir, (cmdRecoveryConf = initCmd(aval(VAR_coordSlaveServers)[idx])));
@@ -1652,6 +1652,7 @@ int add_coordinatorSlave(char *name, char *host, int port, int pooler_port, char
     char pooler_s[MAXTOKEN+1];
     int kk;
     int size;
+    char *__p__ = NULL;
 
     /* Check if the name is valid coordinator */
     if ((idx = coordIdx(name)) < 0)
@@ -1736,7 +1737,7 @@ int add_coordinatorSlave(char *name, char *host, int port, int pooler_port, char
                 sval(VAR_pgxcOwner), aval(VAR_coordPgHbaEntries)[kk]);
     }
 
-    char *__p__=getIpAddress(host);
+    __p__=getIpAddress(host);
     fprintf(f,
             "host replication %s %s/32 trust\n"
             "# End of addition ===============================\n",
@@ -1801,8 +1802,8 @@ int add_coordinatorSlave(char *name, char *host, int port, int pooler_port, char
     doImmediate(aval(VAR_coordMasterServers)[idx], NULL, 
                 "pg_ctl start -w -Z coordinator -D %s", aval(VAR_coordMasterDirs)[idx]);
     /* pg_basebackup */
-    doImmediate(host, NULL, "pg_basebackup -p %s -h %s -D %s --wal-method=stream",
-                aval(VAR_coordPorts)[idx], aval(VAR_coordMasterServers)[idx], dir);
+	doImmediate(host, NULL, "pg_basebackup -U %s -p %s -h %s -D %s --wal-method=stream",
+				aval(VAR_pgxcOwner)[0],aval(VAR_coordPorts)[idx], aval(VAR_coordMasterServers)[idx], dir);
     /* Update the slave configuration with hot standby and port */
     if ((f = pgxc_popen_w(host, "cat >> %s/postgresql.conf", dir)) == NULL)
     {

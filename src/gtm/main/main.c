@@ -124,6 +124,7 @@ bool        enable_gtm_sequence_debug = false;
 bool        enalbe_gtm_xlog_debug = false;
 bool        enable_gtm_debug   = false;
 bool        enable_sync_commit = false;
+int         warnning_time_cost = 0;
 
 
 GTM_TimerEntry *g_timer_entry;
@@ -241,6 +242,7 @@ GTMInitConnection(GTM_ConnectionInfo *conninfo);
 static void thread_replication_clean(GTM_StandbyReplication *replication);
 void SendXLogSyncStatus(GTM_Conn *conn);
 static void WaitRedoertoExit(void);
+static void GTMSigHupHandler(void);
 #endif
 
 /*
@@ -390,6 +392,22 @@ BaseInit(char *data_dir)
     GTM_InitNodeManager();
 }
 
+/*
+ * SIGHUP: set flag to re-read config file at next convenient time.
+ *
+ * Sets the ConfigReloadPending flag, which should be checked at convenient
+ * places
+ */
+void
+GTMSigHupHandler(void)
+{
+       int                     save_errno = errno;
+
+       ConfigReloadPending = true;
+
+       errno = save_errno;
+}
+
 static void
 GTM_SigleHandler(int signal)
 {// #lizard forgives
@@ -401,8 +419,11 @@ GTM_SigleHandler(int signal)
         case SIGTERM:
         case SIGQUIT:
         case SIGINT:
-        case SIGHUP:
             break;
+		
+		case SIGHUP:
+			GTMSigHupHandler();
+			return ;
 
         case SIGUSR1:
             if (Recovery_IsStandby())
@@ -527,12 +548,11 @@ static int CheckTscFeatures(char *cmd)
 {
     FILE *file = popen(cmd, "r");
     int count;
-    int ret = 0;
     
     if (file == NULL)
         return false;
 
-    ret = fscanf(file, "%d", &count);
+    fscanf(file, "%d", &count);
     pclose(file);
     
     return count;
@@ -884,7 +904,7 @@ main(int argc, char *argv[])
         exit(1);
     }
 
-    if(synchronous_standby_names != NULL && enable_sync_commit == false)
+	if( (synchronous_standby_names != NULL && strlen(synchronous_standby_names) > 0) && enable_sync_commit == false)
     {
         write_stderr("synchronous_standby_names is not allow to set in async commit mode");
         write_stderr("Try \"%s --help\" for more information.\n",
@@ -957,7 +977,6 @@ main(int argc, char *argv[])
 
     if(access(RECOVERY_CONF_NAME,F_OK) == 0)
     {
-        int ret = 0;
         recovery_pitr_mode = true;
 
         ValidXLogRecoveryCondition();
@@ -967,7 +986,7 @@ main(int argc, char *argv[])
         ControlData->state = DB_SHUTDOWNED;
         ControlDataSync(false);
 
-        ret = rename(RECOVERY_CONF_NAME,RECOVERY_CONF_NAME_DONE);
+        rename(RECOVERY_CONF_NAME,RECOVERY_CONF_NAME_DONE);
         exit(1);
     }
     else
@@ -1627,6 +1646,14 @@ ServerLoop(void)
             exit(1);
         }
 
+		if(ConfigReloadPending)
+		{
+			ConfigReloadPending = false;
+			ProcessConfigFile(GTMC_SIGHUP);
+			load_sync_structures();
+		}
+
+
         {
             /* must set timeout each time; some OSes change it! */
             struct timeval timeout;        
@@ -1657,6 +1684,7 @@ ServerLoop(void)
          * signal handlers to do nontrivial work.)
          */
         PG_SETMASK(&BlockSig);
+
 
         /* Now check the select() result */
         if (selres < 0)
@@ -2211,7 +2239,10 @@ static void thread_replication_clean(GTM_StandbyReplication *replication)
 
     if(replication->is_sync)
     {
+    	GTM_MutexLockAcquire(&XLogSync->check_mutex);
         RemoveSyncStandby(replication);
+		GTM_MutexLockRelease(&XLogSync->check_mutex);
+		 
         elog(LOG,"sync standby disconnected");
     }
 
@@ -2619,12 +2650,6 @@ GTM_ThreadArchiver(void *argp)
         GTMXLogFileNameWithoutGtmDir(file_name_no_dirname,timeLine,segment_no);
         GTMXLogFileStatusReadyName(file_xlog_status,timeLine,segment_no);
 
-        if(IsXLogFileExist(file_name) == false)
-        {
-            timeLine++;
-            continue;
-        }
-
         if(IsXLogFileExist(file_xlog_status) == false)
         {
             segment_no++;
@@ -2885,17 +2910,9 @@ reconnect:
             CopyXLogRecordToBuff(res->gr_resdata.grd_xlog_data.xlog_data,start_pos,end_pos,(uint64)size);
             NotifyReplication(end_pos);
             UpdateStandbyWriteBuffPos(end_pos);
+			XLogFlush(end_pos);
         }
 
-        if(res->gr_resdata.grd_xlog_data.flush != InvalidXLogRecPtr)
-        {
-            flush_pos = res->gr_resdata.grd_xlog_data.flush;
-            if(end_pos < flush_pos)
-               flush_pos = end_pos;
-
-            XLogFlush(flush_pos);
-        }
-            
         if(res->gr_resdata.grd_xlog_data.reply)
         {
             WaitSyncComplete(flush_pos);
@@ -3408,6 +3425,7 @@ ProcessCommand(Port *myport, StringInfo input_message)
 #ifdef __TBASE__
     GTM_ThreadInfo *my_threadinfo = NULL;
     long long  start_time;
+    long long  end_time;
     my_threadinfo = GetMyThreadInfo;
 #ifndef __XLOG__
     GTM_ConnectionInfo *conn;
@@ -3636,8 +3654,10 @@ ProcessCommand(Port *myport, StringInfo input_message)
 
     BeforeReplyToClientXLogTrigger();
 
-    if(enable_gtm_debug)
-        elog(LOG, "cost mtype = %s (%d) %lld ms.", gtm_util_message_name(mtype), (int)mtype,getSystemTime() - start_time);
+    end_time = getSystemTime();
+
+    if(enable_gtm_debug || end_time - start_time > warnning_time_cost)
+	    elog(LOG, "cost mtype = %s (%d) %lld ms.", gtm_util_message_name(mtype), (int)mtype,end_time - start_time);
 
 #ifdef __TBASE__
     if (my_threadinfo->handle_standby)

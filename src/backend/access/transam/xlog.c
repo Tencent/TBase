@@ -5892,8 +5892,14 @@ recoveryStopsBefore(XLogReaderState *record)
         }
         else if (current_track_seg > last_track_seg)
         {
-            max_gts_in_seg = FlushXlogTrack(last_track_seg);
-            XLogArchiveNotifySegGTS(last_track_seg, max_gts_in_seg);
+			XLogSegNo track_seg;
+			
+			for(track_seg = last_track_seg;track_seg < current_track_seg;track_seg++)
+			{
+				max_gts_in_seg = FlushXlogTrack(track_seg);
+				XLogArchiveNotifySegGTS(track_seg, max_gts_in_seg);
+			}
+			
             last_track_seg = current_track_seg;
         }        
     }
@@ -9313,6 +9319,23 @@ CreateCheckPoint(int flags)
                         XLOG_CHECKPOINT_ONLINE);
 
     XLogFlush(recptr);
+
+#ifdef __TBASE__
+	if (shutdown)
+	{
+		uint32		id,
+					off;
+
+		/* Decode ID and offset */
+		id = (uint32) (recptr >> 32);
+		off = (uint32) recptr;
+
+		elog(DEBUG5, "wal write XLOG_CHECKPOINT_SHUTDOWN, lsn=%X/%X, %s, %s",
+				id, off,
+				(flags & (CHECKPOINT_IS_SHUTDOWN)) ? "CHECKPOINT_IS_SHUTDOWN" : "none",
+				(flags & (CHECKPOINT_END_OF_RECOVERY)) ? "CHECKPOINT_END_OF_RECOVERY" : "none");
+	}
+#endif
 
     /*
      * We mustn't write any new WAL after a shutdown checkpoint, or it will be
@@ -12885,7 +12908,7 @@ void TrackGTS(XlogSegGTSTrack *track_info, XLogSegNo seg, GlobalTimestamp gts)
         if (offset >= track_info->segment_num)
         {
             SpinLockRelease(&track_info->track_lock);
-            elog(PANIC, "TrackGTS too many concurent xlog segments running!");
+			elog(PANIC, "TrackGTS too many concurent xlog segments running! segment_num:%d",track_info->segment_num);
         }
         
         pos = track_info->base_seg_index + offset;

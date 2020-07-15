@@ -429,8 +429,7 @@ SELECT * FROM document WHERE did = 8; -- and confirm we can't see it
 INSERT INTO document VALUES (8, 44, 1, 'regress_rls_carol', 'my third manga'); -- Should fail with RLS check violation, not duplicate key violation
 ERROR:  new row violates row-level security policy for table "document"
 UPDATE document SET did = 8, dauthor = 'regress_rls_carol' WHERE did = 5; -- Should fail with RLS check violation, not duplicate key violation
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
+ERROR:  Distributed column or partition column "did" can't be updated in current version
 -- database superuser does bypass RLS policy when enabled
 RESET SESSION AUTHORIZATION;
 SET row_security TO ON;
@@ -1271,8 +1270,8 @@ ERROR:  infinite recursion detected in policy for relation "rec1"
 -- Mutual recursion via views
 --
 SET SESSION AUTHORIZATION regress_rls_bob;
-CREATE VIEW rec1v AS SELECT * FROM rec1;
-CREATE VIEW rec2v AS SELECT * FROM rec2;
+CREATE VIEW rec1v AS SELECT * FROM rec1 order by 1;
+CREATE VIEW rec2v AS SELECT * FROM rec2 order by 1;
 SET SESSION AUTHORIZATION regress_rls_alice;
 ALTER POLICY r1 ON rec1 USING (x = (SELECT a FROM rec2v WHERE b = y));
 ALTER POLICY r2 ON rec2 USING (a = (SELECT x FROM rec1v WHERE y = b));
@@ -1310,7 +1309,7 @@ CREATE POLICY p3 ON s1 FOR INSERT WITH CHECK (a = (SELECT a FROM s1));
 ALTER TABLE s1 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE s2 ENABLE ROW LEVEL SECURITY;
 SET SESSION AUTHORIZATION regress_rls_bob;
-CREATE VIEW v2 AS SELECT * FROM s2 WHERE y like '%af%';
+CREATE VIEW v2 AS SELECT * FROM s2 WHERE y like '%af%' order by 1;
 SELECT * FROM s1 WHERE f_leak(b); -- fail (infinite recursion)
 ERROR:  infinite recursion detected in policy for relation "s1"
 INSERT INTO s1 VALUES (1, 'foo'); -- fail (infinite recursion)
@@ -1319,7 +1318,7 @@ SET SESSION AUTHORIZATION regress_rls_alice;
 DROP POLICY p3 on s1;
 ALTER POLICY p2 ON s2 USING (x % 2 = 0);
 SET SESSION AUTHORIZATION regress_rls_bob;
-SELECT * FROM s1 WHERE f_leak(b);	-- OK
+SELECT * FROM s1 WHERE f_leak(b) order by 1;	-- OK
  a |                b                 
 ---+----------------------------------
  2 | c81e728d9d4c2f636f067f89cc14862c
@@ -1341,7 +1340,7 @@ EXPLAIN (COSTS OFF) SELECT * FROM only s1 WHERE f_leak(b);
 SET SESSION AUTHORIZATION regress_rls_alice;
 ALTER POLICY p1 ON s1 USING (a in (select x from v2)); -- using VIEW in RLS policy
 SET SESSION AUTHORIZATION regress_rls_bob;
-SELECT * FROM s1 WHERE f_leak(b);	-- OK
+SELECT * FROM s1 WHERE f_leak(b) order by 1;	-- OK
  a  |                b                 
 ----+----------------------------------
  -4 | 0267aaf632e87a63288a08331f22c7c3
@@ -1349,28 +1348,31 @@ SELECT * FROM s1 WHERE f_leak(b);	-- OK
 (2 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM s1 WHERE f_leak(b);
-                              QUERY PLAN                               
------------------------------------------------------------------------
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Seq Scan on s1
          Filter: ((hashed SubPlan 1) AND f_leak(b))
          SubPlan 1
            ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                 ->  Seq Scan on s2
-                       Filter: (((x % 2) = 0) AND (y ~~ '%af%'::text))
-(7 rows)
+                 ->  Subquery Scan on v2
+                       ->  Sort
+                             Sort Key: s2.x
+                             ->  Seq Scan on s2
+                                   Filter: (((x % 2) = 0) AND (y ~~ '%af%'::text))
+(10 rows)
 
-SELECT (SELECT x FROM s1 LIMIT 1) xx, * FROM s2 WHERE y like '%28%';
+SELECT (SELECT x FROM s1 LIMIT 1) xx, * FROM s2 WHERE y like '%28%' order by 1;
  xx | x  |                y                 
 ----+----+----------------------------------
+ -6 | -6 | 596a3d04481816330f07e4f97510c28f
  -4 | -4 | 0267aaf632e87a63288a08331f22c7c3
   2 |  2 | c81e728d9d4c2f636f067f89cc14862c
- -6 | -6 | 596a3d04481816330f07e4f97510c28f
 (3 rows)
 
 EXPLAIN (COSTS OFF) SELECT (SELECT x FROM s1 LIMIT 1) xx, * FROM s2 WHERE y like '%28%';
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Seq Scan on s2
          Filter: (((x % 2) = 0) AND (y ~~ '%28%'::text))
@@ -1382,9 +1384,12 @@ EXPLAIN (COSTS OFF) SELECT (SELECT x FROM s1 LIMIT 1) xx, * FROM s2 WHERE y like
                                    Filter: (hashed SubPlan 1)
                                    SubPlan 1
                                      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                           ->  Seq Scan on s2 s2_1
-                                                 Filter: (((x % 2) = 0) AND (y ~~ '%af%'::text))
-(13 rows)
+                                           ->  Subquery Scan on v2
+                                                 ->  Sort
+                                                       Sort Key: s2_1.x
+                                                       ->  Seq Scan on s2 s2_1
+                                                             Filter: (((x % 2) = 0) AND (y ~~ '%af%'::text))
+(16 rows)
 
 SET SESSION AUTHORIZATION regress_rls_alice;
 ALTER POLICY p2 ON s2 USING (x in (select a from s1 where b like '%d2%'));
@@ -1392,7 +1397,7 @@ SET SESSION AUTHORIZATION regress_rls_bob;
 SELECT * FROM s1 WHERE f_leak(b);	-- fail (infinite recursion via view)
 ERROR:  infinite recursion detected in policy for relation "s1"
 -- prepared statement with regress_rls_alice privilege
-PREPARE p1(int) AS SELECT * FROM t1 WHERE a <= $1;
+PREPARE p1(int) AS SELECT * FROM t1 WHERE a <= $1 order by 1;
 EXECUTE p1(2);
  a |  b  
 ---+-----
@@ -1402,17 +1407,19 @@ EXECUTE p1(2);
 (3 rows)
 
 EXPLAIN (COSTS OFF) EXECUTE p1(2);
-                     QUERY PLAN                      
------------------------------------------------------
+                        QUERY PLAN                        
+----------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Append
-         ->  Seq Scan on t1
-               Filter: ((a <= 2) AND ((a % 2) = 0))
-         ->  Seq Scan on t2
-               Filter: ((a <= 2) AND ((a % 2) = 0))
-         ->  Seq Scan on t3
-               Filter: ((a <= 2) AND ((a % 2) = 0))
-(8 rows)
+   ->  Sort
+         Sort Key: t1.a
+         ->  Append
+               ->  Seq Scan on t1
+                     Filter: ((a <= 2) AND ((a % 2) = 0))
+               ->  Seq Scan on t2
+                     Filter: ((a <= 2) AND ((a % 2) = 0))
+               ->  Seq Scan on t3
+                     Filter: ((a <= 2) AND ((a % 2) = 0))
+(10 rows)
 
 -- superuser is allowed to bypass RLS checks
 RESET SESSION AUTHORIZATION;
@@ -1451,10 +1458,10 @@ EXECUTE p1(2);
  a |  b  
 ---+-----
  1 | aba
- 2 | bbb
  1 | abc
- 2 | bcd
  1 | xxx
+ 2 | bbb
+ 2 | bcd
  2 | yyy
 (6 rows)
 
@@ -1462,16 +1469,18 @@ EXPLAIN (COSTS OFF) EXECUTE p1(2);
                      QUERY PLAN                      
 -----------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Append
-         ->  Seq Scan on t1
-               Filter: (a <= 2)
-         ->  Seq Scan on t2
-               Filter: (a <= 2)
-         ->  Seq Scan on t3
-               Filter: (a <= 2)
-(8 rows)
+   ->  Sort
+         Sort Key: t1.a
+         ->  Append
+               ->  Seq Scan on t1
+                     Filter: (a <= 2)
+               ->  Seq Scan on t2
+                     Filter: (a <= 2)
+               ->  Seq Scan on t3
+                     Filter: (a <= 2)
+(10 rows)
 
-PREPARE p2(int) AS SELECT * FROM t1 WHERE a = $1;
+PREPARE p2(int) AS SELECT * FROM t1 WHERE a = $1 order by 1;
 EXECUTE p2(2);
  a |  b  
 ---+-----
@@ -1556,26 +1565,10 @@ UPDATE only t1 SET b = b WHERE f_leak(b) RETURNING oid, *, t1;
  104 | 4 | daddad_updt | (4,daddad_updt)
 (2 rows)
 
-UPDATE t1 SET b = b WHERE f_leak(b) RETURNING *;
- a |      b      
----+-------------
- 2 | bbbbbb_updt
- 2 | bcdbcd
- 2 | yyyyyy
- 4 | daddad_updt
- 4 | defdef
-(5 rows)
-
-UPDATE t1 SET b = b WHERE f_leak(b) RETURNING oid, *, t1;
- oid | a |      b      |       t1        
------+---+-------------+-----------------
- 102 | 2 | bbbbbb_updt | (2,bbbbbb_updt)
- 202 | 2 | bcdbcd      | (2,bcdbcd)
- 302 | 2 | yyyyyy      | (2,yyyyyy)
- 104 | 4 | daddad_updt | (4,daddad_updt)
- 204 | 4 | defdef      | (4,defdef)
-(5 rows)
-
+-- UPDATE t1 SET b = b WHERE f_leak(b) RETURNING *;
+UPDATE t1 SET b = b WHERE f_leak(b);
+-- UPDATE t1 SET b = b WHERE f_leak(b) RETURNING oid, *, t1;
+UPDATE t1 SET b = b WHERE f_leak(b);
 -- updates with from clause
 EXPLAIN (COSTS OFF) UPDATE t2 SET b=t2.b FROM t3
 WHERE t2.a = 3 and t3.a = 2 AND f_leak(t2.b) AND f_leak(t3.b);
@@ -1678,8 +1671,8 @@ DELETE FROM t1 WHERE f_leak(b) RETURNING oid, *, t1;
  oid | a |   b    |     t1     
 -----+---+--------+------------
  202 | 2 | bcdbcd | (2,bcdbcd)
- 302 | 2 | yyyyyy | (2,yyyyyy)
  204 | 4 | defdef | (4,defdef)
+ 302 | 2 | yyyyyy | (2,yyyyyy)
 (3 rows)
 
 --
@@ -1705,13 +1698,13 @@ EXPLAIN (COSTS OFF) SELECT * FROM bv1 WHERE f_leak(b);
                Filter: ((a > 0) AND ((a % 2) = 0))
 (5 rows)
 
-SELECT * FROM bv1 WHERE f_leak(b);
+SELECT * FROM bv1 WHERE f_leak(b) order by 1;
  a  |                b                 
 ----+----------------------------------
   2 | c81e728d9d4c2f636f067f89cc14862c
+  4 | a87ff679a2f3e71d9181a67b7542122c
   6 | 1679091c5a880faf6fb5e6087eb1b2dc
   8 | c9f0f895fb98ab9159f51fd0297e236d
-  4 | a87ff679a2f3e71d9181a67b7542122c
  10 | d3d9446802a44259755d38e6d163e820
 (5 rows)
 
@@ -1741,30 +1734,30 @@ EXPLAIN (COSTS OFF) DELETE FROM bv1 WHERE a = 6 AND f_leak(b);
 
 DELETE FROM bv1 WHERE a = 6 AND f_leak(b);
 SET SESSION AUTHORIZATION regress_rls_alice;
-SELECT * FROM b1;
+SELECT * FROM b1 order by 1;
   a  |                b                 
 -----+----------------------------------
-  -8 | a8d2ec85eaf98407310b72eb73dda247
-  -5 | 47c1b025fa18ea96c33fbb6718688c0f
-  -4 | 0267aaf632e87a63288a08331f22c7c3
-  -1 | 6bb61e3b7bce0931da574d19d1d82c88
-   1 | c4ca4238a0b923820dcc509a6f75849b
-   2 | c81e728d9d4c2f636f067f89cc14862c
-   5 | e4da3b7fbbce2345d7772b0674a318d5
-   8 | c9f0f895fb98ab9159f51fd0297e236d
-   9 | 45c48cce2e2d7fbdea1afc51c7c6ad26
-  12 | xxx
  -10 | 1b0fd9efa5279c4203b7c70233f86dbf
   -9 | 252e691406782824eec43d7eadc3d256
+  -8 | a8d2ec85eaf98407310b72eb73dda247
   -7 | 74687a12d3915d3c4d83f1af7b3683d5
   -6 | 596a3d04481816330f07e4f97510c28f
+  -5 | 47c1b025fa18ea96c33fbb6718688c0f
+  -4 | 0267aaf632e87a63288a08331f22c7c3
   -3 | b3149ecea4628efd23d2f86e5a723472
   -2 | 5d7b9adcbe1c629ec722529dd12e5129
+  -1 | 6bb61e3b7bce0931da574d19d1d82c88
    0 | cfcd208495d565ef66e7dff9f98764da
+   1 | c4ca4238a0b923820dcc509a6f75849b
+   2 | c81e728d9d4c2f636f067f89cc14862c
    3 | eccbc87e4b5ce2fe28308fd9f2a7baf3
-   7 | 8f14e45fceea167a5a36dedd4bea2543
-  10 | d3d9446802a44259755d38e6d163e820
    4 | yyy
+   5 | e4da3b7fbbce2345d7772b0674a318d5
+   7 | 8f14e45fceea167a5a36dedd4bea2543
+   8 | c9f0f895fb98ab9159f51fd0297e236d
+   9 | 45c48cce2e2d7fbdea1afc51c7c6ad26
+  10 | d3d9446802a44259755d38e6d163e820
+  12 | xxx
 (21 rows)
 
 --
@@ -1780,7 +1773,7 @@ CREATE POLICY p3 ON document FOR UPDATE
   WITH CHECK (dauthor = current_user);
 SET SESSION AUTHORIZATION regress_rls_bob;
 -- Exists...
-SELECT * FROM document WHERE did = 2;
+SELECT * FROM document WHERE did = 2 order by 1;
  did | cid | dlevel |     dauthor     |     dtitle      
 -----+-----+--------+-----------------+-----------------
    2 |  11 |      2 | regress_rls_bob | my second novel
@@ -1972,7 +1965,7 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
 (9 rows)
 
 SET ROLE regress_rls_group1;
-SELECT * FROM z1 WHERE f_leak(b);
+SELECT * FROM z1 WHERE f_leak(b) order by 1;
  a |  b  
 ---+-----
  2 | bbb
@@ -2024,7 +2017,7 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
 (9 rows)
 
 SET SESSION AUTHORIZATION regress_rls_carol;
-SELECT * FROM z1 WHERE f_leak(b);
+SELECT * FROM z1 WHERE f_leak(b) order by 1;
  a |  b  
 ---+-----
  1 | aba
@@ -2076,7 +2069,7 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
 (9 rows)
 
 SET ROLE regress_rls_group2;
-SELECT * FROM z1 WHERE f_leak(b);
+SELECT * FROM z1 WHERE f_leak(b) order by 1;
  a |  b  
 ---+-----
  1 | aba
@@ -2132,7 +2125,7 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
 --
 -- View and Table owner are the same.
 SET SESSION AUTHORIZATION regress_rls_alice;
-CREATE VIEW rls_view AS SELECT * FROM z1 WHERE f_leak(b);
+CREATE VIEW rls_view AS SELECT * FROM z1 WHERE f_leak(b) order by 1;
 GRANT SELECT ON rls_view TO regress_rls_bob;
 -- Query as role that is not owner of view or table.  Should return all records.
 SET SESSION AUTHORIZATION regress_rls_bob;
@@ -2149,9 +2142,11 @@ EXPLAIN (COSTS OFF) SELECT * FROM rls_view;
                      QUERY PLAN                      
 -----------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Seq Scan on z1
-         Filter: f_leak(b)
-(3 rows)
+   ->  Sort
+         Sort Key: z1.a
+         ->  Seq Scan on z1
+               Filter: f_leak(b)
+(5 rows)
 
 -- Query as view/table owner.  Should return all records.
 SET SESSION AUTHORIZATION regress_rls_alice;
@@ -2168,14 +2163,16 @@ EXPLAIN (COSTS OFF) SELECT * FROM rls_view;
                      QUERY PLAN                      
 -----------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Seq Scan on z1
-         Filter: f_leak(b)
-(3 rows)
+   ->  Sort
+         Sort Key: z1.a
+         ->  Seq Scan on z1
+               Filter: f_leak(b)
+(5 rows)
 
 DROP VIEW rls_view;
 -- View and Table owners are different.
 SET SESSION AUTHORIZATION regress_rls_bob;
-CREATE VIEW rls_view AS SELECT * FROM z1 WHERE f_leak(b);
+CREATE VIEW rls_view AS SELECT * FROM z1 WHERE f_leak(b) order by 1;
 GRANT SELECT ON rls_view TO regress_rls_alice;
 -- Query as role that is not owner of view but is owner of table.
 -- Should return records based on view owner policies.
@@ -2191,9 +2188,11 @@ EXPLAIN (COSTS OFF) SELECT * FROM rls_view;
                      QUERY PLAN                      
 -----------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Seq Scan on z1
-         Filter: (((a % 2) = 0) AND f_leak(b))
-(3 rows)
+   ->  Sort
+         Sort Key: z1.a
+         ->  Seq Scan on z1
+               Filter: (((a % 2) = 0) AND f_leak(b))
+(5 rows)
 
 -- Query as role that is not owner of table but is owner of view.
 -- Should return records based on view owner policies.
@@ -2209,9 +2208,11 @@ EXPLAIN (COSTS OFF) SELECT * FROM rls_view;
                      QUERY PLAN                      
 -----------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Seq Scan on z1
-         Filter: (((a % 2) = 0) AND f_leak(b))
-(3 rows)
+   ->  Sort
+         Sort Key: z1.a
+         ->  Seq Scan on z1
+               Filter: (((a % 2) = 0) AND f_leak(b))
+(5 rows)
 
 -- Query as role that is not the owner of the table or view without permissions.
 SET SESSION AUTHORIZATION regress_rls_carol;
@@ -2233,9 +2234,11 @@ EXPLAIN (COSTS OFF) SELECT * FROM rls_view;
                      QUERY PLAN                      
 -----------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Seq Scan on z1
-         Filter: (((a % 2) = 0) AND f_leak(b))
-(3 rows)
+   ->  Sort
+         Sort Key: z1.a
+         ->  Seq Scan on z1
+               Filter: (((a % 2) = 0) AND f_leak(b))
+(5 rows)
 
 SET SESSION AUTHORIZATION regress_rls_bob;
 DROP VIEW rls_view;
@@ -2368,20 +2371,20 @@ INSERT INTO y2 (SELECT x, md5(x::text) FROM generate_series(0,20) x);
 CREATE POLICY p2 ON y2 USING (a % 3 = 0);
 CREATE POLICY p3 ON y2 USING (a % 4 = 0);
 SET SESSION AUTHORIZATION regress_rls_bob;
-SELECT * FROM y2 WHERE f_leak(b);
+SELECT * FROM y2 WHERE f_leak(b) order by 1;
  a  |                b                 
 ----+----------------------------------
+  0 | cfcd208495d565ef66e7dff9f98764da
   2 | c81e728d9d4c2f636f067f89cc14862c
+  3 | eccbc87e4b5ce2fe28308fd9f2a7baf3
+  4 | a87ff679a2f3e71d9181a67b7542122c
   6 | 1679091c5a880faf6fb5e6087eb1b2dc
   8 | c9f0f895fb98ab9159f51fd0297e236d
   9 | 45c48cce2e2d7fbdea1afc51c7c6ad26
- 12 | c20ad4d76fe97759aa27a0c99bff6710
- 15 | 9bf31c7ff062936a96d3c8bd1f8f2ff3
-  0 | cfcd208495d565ef66e7dff9f98764da
-  3 | eccbc87e4b5ce2fe28308fd9f2a7baf3
-  4 | a87ff679a2f3e71d9181a67b7542122c
  10 | d3d9446802a44259755d38e6d163e820
+ 12 | c20ad4d76fe97759aa27a0c99bff6710
  14 | aab3238922bcc25a6f606eb525ffdc56
+ 15 | 9bf31c7ff062936a96d3c8bd1f8f2ff3
  16 | c74d97b01eae257e44aa9d5bade97baf
  18 | 6f4922f45568161a8cdf4ad2299f6d23
  20 | 98f13708210194c475687be6106a3b84
@@ -2398,20 +2401,20 @@ EXPLAIN (COSTS OFF) SELECT * FROM y2 WHERE f_leak(b);
 --
 -- Qual push-down of leaky functions, when not referring to table
 --
-SELECT * FROM y2 WHERE f_leak('abc');
+SELECT * FROM y2 WHERE f_leak('abc') order by 1;
  a  |                b                 
 ----+----------------------------------
+  0 | cfcd208495d565ef66e7dff9f98764da
   2 | c81e728d9d4c2f636f067f89cc14862c
+  3 | eccbc87e4b5ce2fe28308fd9f2a7baf3
+  4 | a87ff679a2f3e71d9181a67b7542122c
   6 | 1679091c5a880faf6fb5e6087eb1b2dc
   8 | c9f0f895fb98ab9159f51fd0297e236d
   9 | 45c48cce2e2d7fbdea1afc51c7c6ad26
- 12 | c20ad4d76fe97759aa27a0c99bff6710
- 15 | 9bf31c7ff062936a96d3c8bd1f8f2ff3
-  0 | cfcd208495d565ef66e7dff9f98764da
-  3 | eccbc87e4b5ce2fe28308fd9f2a7baf3
-  4 | a87ff679a2f3e71d9181a67b7542122c
  10 | d3d9446802a44259755d38e6d163e820
+ 12 | c20ad4d76fe97759aa27a0c99bff6710
  14 | aab3238922bcc25a6f606eb525ffdc56
+ 15 | 9bf31c7ff062936a96d3c8bd1f8f2ff3
  16 | c74d97b01eae257e44aa9d5bade97baf
  18 | 6f4922f45568161a8cdf4ad2299f6d23
  20 | 98f13708210194c475687be6106a3b84
@@ -2429,7 +2432,7 @@ CREATE TABLE test_qual_pushdown (
     abc text
 );
 INSERT INTO test_qual_pushdown VALUES ('abc'),('def');
-SELECT * FROM y2 JOIN test_qual_pushdown ON (b = abc) WHERE f_leak(abc);
+SELECT * FROM y2 JOIN test_qual_pushdown ON (b = abc) WHERE f_leak(abc) order by 1;
  a | b | abc 
 ---+---+-----
 (0 rows)
@@ -2449,7 +2452,7 @@ EXPLAIN (COSTS OFF) SELECT * FROM y2 JOIN test_qual_pushdown ON (b = abc) WHERE 
                            Filter: (((a % 4) = 0) OR ((a % 3) = 0) OR ((a % 2) = 0))
 (10 rows)
 
-SELECT * FROM y2 JOIN test_qual_pushdown ON (b = abc) WHERE f_leak(b);
+SELECT * FROM y2 JOIN test_qual_pushdown ON (b = abc) WHERE f_leak(b) order by 1;
  a | b | abc 
 ---+---+-----
 (0 rows)
@@ -2530,16 +2533,16 @@ ALTER TABLE t1 ENABLE ROW LEVEL SECURITY;
 GRANT ALL ON t1 TO regress_rls_bob;
 INSERT INTO t1 (SELECT x, md5(x::text) FROM generate_series(0,20) x);
 SET SESSION AUTHORIZATION regress_rls_bob;
-WITH cte1 AS (SELECT * FROM t1 WHERE f_leak(b)) SELECT * FROM cte1;
+WITH cte1 AS (SELECT * FROM t1 WHERE f_leak(b) order by 1) SELECT * FROM cte1;
  a  |                b                 
 ----+----------------------------------
+  0 | cfcd208495d565ef66e7dff9f98764da
   2 | c81e728d9d4c2f636f067f89cc14862c
+  4 | a87ff679a2f3e71d9181a67b7542122c
   6 | 1679091c5a880faf6fb5e6087eb1b2dc
   8 | c9f0f895fb98ab9159f51fd0297e236d
- 12 | c20ad4d76fe97759aa27a0c99bff6710
-  0 | cfcd208495d565ef66e7dff9f98764da
-  4 | a87ff679a2f3e71d9181a67b7542122c
  10 | d3d9446802a44259755d38e6d163e820
+ 12 | c20ad4d76fe97759aa27a0c99bff6710
  14 | aab3238922bcc25a6f606eb525ffdc56
  16 | c74d97b01eae257e44aa9d5bade97baf
  18 | 6f4922f45568161a8cdf4ad2299f6d23
@@ -2557,7 +2560,7 @@ EXPLAIN (COSTS OFF) WITH cte1 AS (SELECT * FROM t1 WHERE f_leak(b)) SELECT * FRO
 (5 rows)
 
 WITH cte1 AS (UPDATE t1 SET a = a + 1 RETURNING *) SELECT * FROM cte1; --fail
-ERROR:  INSERT/UPDATE/DELETE is not supported in subquery
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 WITH cte1 AS (UPDATE t1 SET a = a RETURNING *) SELECT * FROM cte1; --ok
 ERROR:  INSERT/UPDATE/DELETE is not supported in subquery
 WITH cte1 AS (INSERT INTO t1 VALUES (21, 'Fail') RETURNING *) SELECT * FROM cte1; --fail
@@ -2604,16 +2607,16 @@ EXPLAIN (COSTS OFF) INSERT INTO t2 (SELECT * FROM t1);
                Filter: ((a % 2) = 0)
 (4 rows)
 
-SELECT * FROM t2;
+SELECT * FROM t2 order by 1;
  a  |                b                 
 ----+----------------------------------
+  0 | cfcd208495d565ef66e7dff9f98764da
   2 | c81e728d9d4c2f636f067f89cc14862c
+  4 | a87ff679a2f3e71d9181a67b7542122c
   6 | 1679091c5a880faf6fb5e6087eb1b2dc
   8 | c9f0f895fb98ab9159f51fd0297e236d
- 12 | c20ad4d76fe97759aa27a0c99bff6710
-  0 | cfcd208495d565ef66e7dff9f98764da
-  4 | a87ff679a2f3e71d9181a67b7542122c
  10 | d3d9446802a44259755d38e6d163e820
+ 12 | c20ad4d76fe97759aa27a0c99bff6710
  14 | aab3238922bcc25a6f606eb525ffdc56
  16 | c74d97b01eae257e44aa9d5bade97baf
  18 | 6f4922f45568161a8cdf4ad2299f6d23
@@ -2629,16 +2632,16 @@ EXPLAIN (COSTS OFF) SELECT * FROM t2;
 (3 rows)
 
 CREATE TABLE t3 AS SELECT * FROM t1;
-SELECT * FROM t3;
+SELECT * FROM t3 order by 1;
  a  |                b                 
 ----+----------------------------------
+  0 | cfcd208495d565ef66e7dff9f98764da
   2 | c81e728d9d4c2f636f067f89cc14862c
+  4 | a87ff679a2f3e71d9181a67b7542122c
   6 | 1679091c5a880faf6fb5e6087eb1b2dc
   8 | c9f0f895fb98ab9159f51fd0297e236d
- 12 | c20ad4d76fe97759aa27a0c99bff6710
-  0 | cfcd208495d565ef66e7dff9f98764da
-  4 | a87ff679a2f3e71d9181a67b7542122c
  10 | d3d9446802a44259755d38e6d163e820
+ 12 | c20ad4d76fe97759aa27a0c99bff6710
  14 | aab3238922bcc25a6f606eb525ffdc56
  16 | c74d97b01eae257e44aa9d5bade97baf
  18 | 6f4922f45568161a8cdf4ad2299f6d23
@@ -2646,16 +2649,16 @@ SELECT * FROM t3;
 (11 rows)
 
 SELECT * INTO t4 FROM t1;
-SELECT * FROM t4;
+SELECT * FROM t4 order by 1;
  a  |                b                 
 ----+----------------------------------
+  0 | cfcd208495d565ef66e7dff9f98764da
   2 | c81e728d9d4c2f636f067f89cc14862c
+  4 | a87ff679a2f3e71d9181a67b7542122c
   6 | 1679091c5a880faf6fb5e6087eb1b2dc
   8 | c9f0f895fb98ab9159f51fd0297e236d
- 12 | c20ad4d76fe97759aa27a0c99bff6710
-  0 | cfcd208495d565ef66e7dff9f98764da
-  4 | a87ff679a2f3e71d9181a67b7542122c
  10 | d3d9446802a44259755d38e6d163e820
+ 12 | c20ad4d76fe97759aa27a0c99bff6710
  14 | aab3238922bcc25a6f606eb525ffdc56
  16 | c74d97b01eae257e44aa9d5bade97baf
  18 | 6f4922f45568161a8cdf4ad2299f6d23
@@ -2728,29 +2731,29 @@ DROP POLICY p2 ON t1;
 ALTER TABLE t1 OWNER TO regress_rls_alice;
 -- Check that default deny does not apply to superuser.
 RESET SESSION AUTHORIZATION;
-SELECT * FROM t1;
+SELECT * FROM t1 order by 1;
  a  |                b                 
 ----+----------------------------------
+  0 | cfcd208495d565ef66e7dff9f98764da
   1 | c4ca4238a0b923820dcc509a6f75849b
   2 | c81e728d9d4c2f636f067f89cc14862c
-  5 | e4da3b7fbbce2345d7772b0674a318d5
-  6 | 1679091c5a880faf6fb5e6087eb1b2dc
-  8 | c9f0f895fb98ab9159f51fd0297e236d
-  9 | 45c48cce2e2d7fbdea1afc51c7c6ad26
- 12 | c20ad4d76fe97759aa27a0c99bff6710
- 13 | c51ce410c124a10e0db5e4b97fc2af39
- 15 | 9bf31c7ff062936a96d3c8bd1f8f2ff3
- 17 | 70efdf2ec9b086079795c442636b55fb
- 19 | 1f0e3dad99908345f7439f8ffabdffc4
-  0 | cfcd208495d565ef66e7dff9f98764da
   3 | eccbc87e4b5ce2fe28308fd9f2a7baf3
   4 | a87ff679a2f3e71d9181a67b7542122c
+  5 | e4da3b7fbbce2345d7772b0674a318d5
+  6 | 1679091c5a880faf6fb5e6087eb1b2dc
   7 | 8f14e45fceea167a5a36dedd4bea2543
+  8 | c9f0f895fb98ab9159f51fd0297e236d
+  9 | 45c48cce2e2d7fbdea1afc51c7c6ad26
  10 | d3d9446802a44259755d38e6d163e820
  11 | 6512bd43d9caa6e02c990b0a82652dca
+ 12 | c20ad4d76fe97759aa27a0c99bff6710
+ 13 | c51ce410c124a10e0db5e4b97fc2af39
  14 | aab3238922bcc25a6f606eb525ffdc56
+ 15 | 9bf31c7ff062936a96d3c8bd1f8f2ff3
  16 | c74d97b01eae257e44aa9d5bade97baf
+ 17 | 70efdf2ec9b086079795c442636b55fb
  18 | 6f4922f45568161a8cdf4ad2299f6d23
+ 19 | 1f0e3dad99908345f7439f8ffabdffc4
  20 | 98f13708210194c475687be6106a3b84
 (21 rows)
 
@@ -2764,29 +2767,29 @@ EXPLAIN (COSTS OFF) SELECT * FROM t1;
 
 -- Check that default deny does not apply to table owner.
 SET SESSION AUTHORIZATION regress_rls_alice;
-SELECT * FROM t1;
+SELECT * FROM t1 order by 1;
  a  |                b                 
 ----+----------------------------------
+  0 | cfcd208495d565ef66e7dff9f98764da
   1 | c4ca4238a0b923820dcc509a6f75849b
   2 | c81e728d9d4c2f636f067f89cc14862c
-  5 | e4da3b7fbbce2345d7772b0674a318d5
-  6 | 1679091c5a880faf6fb5e6087eb1b2dc
-  8 | c9f0f895fb98ab9159f51fd0297e236d
-  9 | 45c48cce2e2d7fbdea1afc51c7c6ad26
- 12 | c20ad4d76fe97759aa27a0c99bff6710
- 13 | c51ce410c124a10e0db5e4b97fc2af39
- 15 | 9bf31c7ff062936a96d3c8bd1f8f2ff3
- 17 | 70efdf2ec9b086079795c442636b55fb
- 19 | 1f0e3dad99908345f7439f8ffabdffc4
-  0 | cfcd208495d565ef66e7dff9f98764da
   3 | eccbc87e4b5ce2fe28308fd9f2a7baf3
   4 | a87ff679a2f3e71d9181a67b7542122c
+  5 | e4da3b7fbbce2345d7772b0674a318d5
+  6 | 1679091c5a880faf6fb5e6087eb1b2dc
   7 | 8f14e45fceea167a5a36dedd4bea2543
+  8 | c9f0f895fb98ab9159f51fd0297e236d
+  9 | 45c48cce2e2d7fbdea1afc51c7c6ad26
  10 | d3d9446802a44259755d38e6d163e820
  11 | 6512bd43d9caa6e02c990b0a82652dca
+ 12 | c20ad4d76fe97759aa27a0c99bff6710
+ 13 | c51ce410c124a10e0db5e4b97fc2af39
  14 | aab3238922bcc25a6f606eb525ffdc56
+ 15 | 9bf31c7ff062936a96d3c8bd1f8f2ff3
  16 | c74d97b01eae257e44aa9d5bade97baf
+ 17 | 70efdf2ec9b086079795c442636b55fb
  18 | 6f4922f45568161a8cdf4ad2299f6d23
+ 19 | 1f0e3dad99908345f7439f8ffabdffc4
  20 | 98f13708210194c475687be6106a3b84
 (21 rows)
 
@@ -2801,7 +2804,7 @@ EXPLAIN (COSTS OFF) SELECT * FROM t1;
 -- Check that default deny applies to non-owner/non-superuser when RLS on.
 SET SESSION AUTHORIZATION regress_rls_bob;
 SET row_security TO ON;
-SELECT * FROM t1;
+SELECT * FROM t1 order by 1;
  a | b 
 ---+---
 (0 rows)
@@ -2816,7 +2819,7 @@ EXPLAIN (COSTS OFF) SELECT * FROM t1;
 (4 rows)
 
 SET SESSION AUTHORIZATION regress_rls_bob;
-SELECT * FROM t1;
+SELECT * FROM t1 order by 1;
  a | b 
 ---+---
 (0 rows)
@@ -3318,14 +3321,14 @@ CREATE POLICY p3 ON r2 FOR UPDATE USING (false);
 CREATE POLICY p4 ON r2 FOR DELETE USING (false);
 ALTER TABLE r2 ENABLE ROW LEVEL SECURITY;
 SET SESSION AUTHORIZATION regress_rls_bob;
-SELECT * FROM r1;
+SELECT * FROM r1 order by 1;
  a  
 ----
  10
  20
 (2 rows)
 
-SELECT * FROM r2;
+SELECT * FROM r2 order by 1;
  a  
 ----
  10
@@ -3367,14 +3370,14 @@ DELETE FROM r1 USING r2 WHERE r1.a = r2.a + 2 RETURNING *; -- OK
  22 | 20
 (2 rows)
 
-SELECT * FROM r1;
+SELECT * FROM r1 order by 1;
  a  
 ----
  11
  21
 (2 rows)
 
-SELECT * FROM r2;
+SELECT * FROM r2 order by 1;
  a  
 ----
  10

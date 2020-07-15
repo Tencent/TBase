@@ -136,7 +136,7 @@ struct config_bool ConfigureNamesBool[] =
 {
     /* End-of-list marker */
     {
-        {NULL, 0, NULL, NULL, 0}, NULL, false, false, NULL
+		{NULL, 0, NULL, NULL, 0}, NULL, false, NULL, NULL, false, NULL
     }
 };
 
@@ -151,7 +151,7 @@ struct config_int ConfigureNamesInt[] =
             0
         },
         &GTMProxyPortNumber,
-        0, 0, INT_MAX,
+		0, 0, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
@@ -162,7 +162,7 @@ struct config_int ConfigureNamesInt[] =
             0
         },
         &GTMServerPortNumber,
-        0, 0, INT_MAX,
+		0, 0, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
@@ -173,7 +173,7 @@ struct config_int ConfigureNamesInt[] =
             GTMOPT_UNIT_TIME
         },
         &GTMConnectRetryInterval,
-        60, 0, INT_MAX,
+		60, 0, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
@@ -184,7 +184,7 @@ struct config_int ConfigureNamesInt[] =
             GTMOPT_UNIT_TIME
         },
         &tcp_keepalives_idle,
-        0, 0, INT_MAX,
+		0, 0, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
@@ -195,7 +195,7 @@ struct config_int ConfigureNamesInt[] =
             GTMOPT_UNIT_TIME
         },
         &tcp_keepalives_interval,
-        0, 0, INT_MAX,
+		0, 0, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
@@ -206,7 +206,7 @@ struct config_int ConfigureNamesInt[] =
             0
         },
         &tcp_keepalives_count,
-        0, 0, INT_MAX,
+		0, 0, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
@@ -217,12 +217,12 @@ struct config_int ConfigureNamesInt[] =
             0
         },
         &GTMProxyWorkerThreads,
-        GTM_PROXY_DEFAULT_WORKERS, 1, INT_MAX,
+		GTM_PROXY_DEFAULT_WORKERS, 1, INT_MAX, NULL, NULL,
         0, NULL
     },
     /* End-of-list marker */
     {
-        {NULL, 0, NULL, NULL, 0}, NULL, 0, 0, 0, 0, NULL
+		{NULL, 0, NULL, NULL, 0}, NULL, 0, 0, 0, NULL, NULL, 0, NULL
     }
 };
 
@@ -231,7 +231,7 @@ struct config_real ConfigureNamesReal[] =
 {
     /* End-of-list marker */
     {
-        {NULL, 0, NULL, NULL, 0}, NULL, 0.0, 0.0, 0.0, 0.0, NULL
+		{NULL, 0, NULL, NULL, 0}, NULL, 0.0, 0.0, 0.0, NULL, NULL, 0.0, NULL
     }
 };
 
@@ -246,6 +246,7 @@ struct config_string ConfigureNamesString[] =
         },
         &GTMProxyDataDir,
         NULL,
+		NULL, NULL,
         NULL,
         NULL
     },
@@ -259,6 +260,7 @@ struct config_string ConfigureNamesString[] =
         },
         &GTMConfigFileName,
         CONFIG_FILENAME,
+		NULL, NULL,
         NULL,
         NULL
     },
@@ -272,6 +274,7 @@ struct config_string ConfigureNamesString[] =
         },
         &ListenAddresses,
         "*",
+		NULL, NULL,
         NULL, NULL
     },
 
@@ -284,6 +287,7 @@ struct config_string ConfigureNamesString[] =
         },
         &GTMProxyNodeName,
         NULL,
+		NULL, NULL,
         NULL, NULL
     },
 
@@ -296,6 +300,7 @@ struct config_string ConfigureNamesString[] =
         },
         &GTMServerHost,
         NULL,
+		NULL, NULL,
         NULL, NULL
     },
 
@@ -308,6 +313,7 @@ struct config_string ConfigureNamesString[] =
         },
         &GTMLogFile,
         "gtm_proxy.log",
+		NULL, NULL,
         NULL, NULL
     },
 
@@ -320,6 +326,7 @@ struct config_string ConfigureNamesString[] =
         },
         &error_reporter,
         NULL,
+		NULL, NULL,
         NULL, NULL
     },
 
@@ -332,12 +339,13 @@ struct config_string ConfigureNamesString[] =
         },
         &status_reader,
         NULL,
+		NULL, NULL,
         NULL, NULL
     },
 
     /* End-of-list marker */
     {
-        {NULL, 0, NULL, NULL}, NULL, NULL, NULL, NULL
+		{NULL, 0, NULL, NULL}, NULL, NULL,NULL, NULL, NULL, NULL
     }
 };
 
@@ -354,12 +362,13 @@ struct config_enum ConfigureNamesEnum[] =
         &log_min_messages,
         WARNING,
         server_message_level_options,
+		NULL,NULL,
         WARNING, NULL
     },
 
     /* End-of-list marker */
     {
-        {NULL, 0, NULL, NULL, 0}, NULL, 0, NULL, 0, NULL
+		{NULL, 0, NULL, NULL, 0}, NULL, 0, NULL, NULL, NULL, 0, NULL
     }
 };
 

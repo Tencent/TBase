@@ -601,6 +601,9 @@ HeapTuple
 ExecCopySlotTuple_shard(TupleTableSlot *slot, bool hasshard, AttrNumber diskey,
                                  AttrNumber secdiskey, Oid relid)
 {
+#ifdef __TBASE__
+	HeapTuple tuple;
+#endif
     /*
      * sanity checks
      */
@@ -611,9 +614,31 @@ ExecCopySlotTuple_shard(TupleTableSlot *slot, bool hasshard, AttrNumber diskey,
      * If we have a physical tuple (either format) then just copy it.
      */
     if (TTS_HAS_PHYSICAL_TUPLE(slot))
+#ifdef __TBASE__
+	{
+		tuple = heap_copytuple(slot->tts_tuple);
+		if (hasshard)
+		{
+			HeapTupleHeaderSetShardId(tuple->t_data, InvalidShardID);
+		}
+		return tuple;
+	}
+#else
         return heap_copytuple(slot->tts_tuple);
+#endif
     if (slot->tts_mintuple)
+#ifdef __TBASE__
+	{
+		tuple = heap_tuple_from_minimal_tuple(slot->tts_mintuple);
+		if (hasshard)
+		{
+			HeapTupleHeaderSetShardId(tuple->t_data, InvalidShardID);
+		}
+		return tuple;
+	}
+#else
         return heap_tuple_from_minimal_tuple(slot->tts_mintuple);
+#endif
 #ifdef PGXC
     /*
      * Ensure values are extracted from data row to the Datum array
@@ -983,8 +1008,20 @@ ExecMaterializeSlot_shard(TupleTableSlot *slot,
      * nothing to do.
      */
     if (slot->tts_tuple && slot->tts_shouldFree)
+#ifdef __TBASE__
+	{
+		if (hasshard)
+		{
+			oldContext = MemoryContextSwitchTo(slot->tts_mcxt);
+			slot_getallattrs(slot);
+			heap_tuple_set_shardid(slot->tts_tuple, (void *)slot, diskey, secdiskey, relid);
+			MemoryContextSwitchTo(oldContext);
+		}
+#endif
         return slot->tts_tuple;
-
+#ifdef __TBASE__
+	}
+#endif
     /*
      * Otherwise, copy or build a physical tuple, and store it into the slot.
      *
@@ -995,6 +1032,13 @@ ExecMaterializeSlot_shard(TupleTableSlot *slot,
     oldContext = MemoryContextSwitchTo(slot->tts_mcxt);
     slot->tts_tuple = ExecCopySlotTuple_shard(slot, hasshard, diskey, secdiskey, relid);
     slot->tts_shouldFree = true;
+#ifdef __TBASE__
+	if (hasshard && HeapTupleHeaderGetShardId(slot->tts_tuple->t_data) == InvalidShardID)
+	{
+		slot_getallattrs(slot);
+		heap_tuple_set_shardid(slot->tts_tuple, (void *)slot, diskey, secdiskey, relid);
+	}
+#endif
     MemoryContextSwitchTo(oldContext);
 
     /*

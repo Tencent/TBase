@@ -51,7 +51,7 @@ CREATE PUBLICATION addr_pub FOR TABLE addr_nsp.gentable;
 ERROR:  COORDINATOR does not support CREATE PUBLICATION
 DETAIL:  The feature is not currently supported
 CREATE SUBSCRIPTION addr_sub CONNECTION '' PUBLICATION bar WITH (connect = false, slot_name = NONE);
-ERROR:  COORDINATOR does not support CREATE SUBSCRIPTION
+ERROR:  COORDINATOR only supports CREATE TBASE SUBSCRIPTION
 DETAIL:  The feature is not currently supported
 CREATE STATISTICS addr_nsp.gentable_stat ON a, b FROM addr_nsp.gentable;
 -- test some error cases
@@ -476,7 +476,7 @@ ERROR:  foreign-data wrapper "addr_fdw" does not exist
 DROP PUBLICATION addr_pub;
 ERROR:  publication "addr_pub" does not exist
 DROP SUBSCRIPTION addr_sub;
-ERROR:  COORDINATOR does not support DROP SUBSCRIPTION
+ERROR:  COORDINATOR only supports DROP TBASE SUBSCRIPTION
 DROP SCHEMA addr_nsp CASCADE;
 NOTICE:  drop cascades to 12 other objects
 DROP OWNED BY regress_addr_user;

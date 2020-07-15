@@ -444,28 +444,6 @@ transformStmt(ParseState *pstate, Node *parseTree)
             break;
     }
 
-#ifdef _MLS_
-    if (g_enable_data_mask)
-    {
-        if (CMD_UPDATE == result->commandType || CMD_DELETE == result->commandType )
-        {
-            (void) query_tree_walker(result, datamask_check_column_in_expr, (void*)pstate, 
-                                (QTW_IGNORE_RANGE_TABLE|QTW_IGNORE_RETURNING_LIST));
-        }
-        else if (CMD_INSERT == result->commandType)
-        {
-            (void) query_tree_walker(result, datamask_check_column_in_expr, (void*)pstate, 
-                                (QTW_IGNORE_RANGE_TABLE|QTW_IGNORE_RETURNING_LIST|QTW_IGNORE_TARGET_LIST));
-        }
-        else
-        {
-            (void) query_tree_walker(result, datamask_check_column_in_expr, (void*)pstate, 
-                                (QTW_IGNORE_RANGE_TABLE|QTW_IGNORE_TARGET_LIST));
-        }
-    }
-#endif
-
-
     /* Mark as original query until we learn differently */
     result->querySource = QSRC_ORIGINAL;
     result->canSetTag = true;

@@ -87,4 +87,8 @@ extern Node *estimate_expression_value(PlannerInfo *root, Node *node);
 extern Query *inline_set_returning_function(PlannerInfo *root,
                               RangeTblEntry *rte);
 
+extern Node *substitute_sublink_with_node(Node *expr, SubLink *sublink,
+		                                                               Node *node);
+extern bool find_sublink_walker(Node *node, List **list);
+
 #endif                            /* CLAUSES_H */

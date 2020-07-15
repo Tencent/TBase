@@ -1906,9 +1906,12 @@ GetRelationDistributionNodes(PGXCSubCluster *subcluster, int *numnodes)
         return 1;
 #endif
     }
-
-    /* Return a sorted array of node OIDs */
-    return SortRelationDistributionNodes(nodes, *numnodes);
+#ifdef __COLD_HOT__
+	return -1;
+#else
+	/* Return a sorted array of node OIDs */
+	return SortRelationDistributionNodes(nodes, *numnodes);
+#endif
 }
 
 /*
@@ -2870,6 +2873,10 @@ heap_drop_with_catalog(Oid relid)
      */
     RemoveSubscriptionRel(InvalidOid, relid);
 
+#ifdef __STORAGE_SCALABLE__
+    /* remove subscription / table mapping with publication */
+    RemoveSubscriptionTable(InvalidOid, relid);
+#endif
     /*
      * Forget any ON COMMIT action for the rel
      */

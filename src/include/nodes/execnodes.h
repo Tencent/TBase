@@ -634,6 +634,32 @@ typedef struct TupleHashEntryData
 #define SH_DECLARE
 #include "lib/simplehash.h"
 
+#ifdef __TBASE__
+/*
+ * used for hybrid-hash agg
+ * when hashtable exceeds the max-mem, write the tuples of hashtable into SpillSet,
+ * then reuse the hashtable.
+ */
+typedef struct SpillFile
+{
+	bool   spilled;
+	uint32 ntups_write;
+	uint32 ntups_read;
+	BufFile *file;
+	void   *child_spill_set;
+}	SpillFile;
+
+typedef struct SpillSet
+{
+	int level;
+	int current_file;
+	int num_files;
+	SpillFile **spill_file;
+	int parent_index;
+	void *parent_spill_set;
+}	SpillSet;
+#endif
+
 typedef struct TupleHashTableData
 {
     tuplehash_hash *hashtab;    /* underlying hash table */
@@ -650,6 +676,16 @@ typedef struct TupleHashTableData
     FmgrInfo   *in_hash_funcs;    /* hash functions for input datatype(s) */
     FmgrInfo   *cur_eq_funcs;    /* equality functions for input vs. table */
     uint32        hash_iv;        /* hash-function IV */
+#ifdef __TBASE__
+	/* used for hybrid-hash agg */
+	bool        hybrid;           /* hybrid hash agg? */
+	bool        spilled;          /* does hashtable spilled? */
+	SpillSet    *spill_set;       /* write-out files */
+	int         nbatches;         /* number of batch files */
+	uint32      nentries;         /* max number of entries fit in memory */
+	uint32      actual_entrysize; /* actual entry size including minimaltup and transvalue */
+	MemoryContext hybridcxt;      /* memory context containing tuples in hashtable */
+#endif
 }            TupleHashTableData;
 
 typedef tuplehash_iterator TupleHashIterator;
@@ -1130,6 +1166,23 @@ typedef struct BitmapOrState
     int            nplans;            /* number of input plans */
 } BitmapOrState;
 
+/* ----------------
+ *	 DataMaskState information
+ * ----------------
+ */
+typedef struct datamask_att_scan {
+	bool     enable;
+	int32    option;        /* see DATAMASK_KIND_VALUE, DATAMASK_KIND_STR_PREFIX, DATAMASK_KIND_STR_POSTFIX */
+	char     *defaultval;    /* keep default val */
+	int64    datamask;
+	FmgrInfo flinfo;
+} DataMaskAttScan;
+
+typedef struct datamask_state
+{
+	DataMaskAttScan *maskinfo;
+} DataMaskState ;
+
 /* ----------------------------------------------------------------
  *                 Scan State Information
  * ----------------------------------------------------------------
@@ -1155,6 +1208,7 @@ typedef struct ScanState
     Relation    ss_currentRelation;
     HeapScanDesc ss_currentScanDesc;
     TupleTableSlot *ss_ScanTupleSlot;
+    DataMaskState   *ss_currentMaskDesc;
 #ifdef __COLD_HOT__
     bool        inited;
 #endif

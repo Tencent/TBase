@@ -1827,6 +1827,12 @@ SharedQueueRead(SharedQueue squeue, int consumerIdx,
                     LWLockRelease(sqsync->sqs_consumer_sync[consumerIdx].cs_lwlock);
                 }
 
+				if (squeue->sender_destroy)
+				{
+					elog(ERROR, "squeue %s Pid %d: Producer failed(destroy) while we were waiting for sending fd - status was %d, err_msg %s",
+						   squeue->sq_key, MyProcPid, cstate->cs_status, squeue->err_msg);
+				}
+
                 pg_usleep(1000L);
             }
 
@@ -1902,6 +1908,7 @@ SharedQueueRead(SharedQueue squeue, int consumerIdx,
              * the queue so we should hold it for now. We should prevent queue
              * unbound in between.
              */
+#ifdef __PG_REGRESS__
             ereport(ERROR,
                     (errcode(ERRCODE_PRODUCER_ERROR),
                      errmsg("Failed to read from SQueue %s, "
@@ -1909,8 +1916,22 @@ SharedQueueRead(SharedQueue squeue, int consumerIdx,
                          "CONSUMER_ERROR set, err_msg %s",
                          squeue->sq_key,
                          cstate->cs_node, cstate->cs_pid, cstate->cs_status, squeue->err_msg)));
+#else
+			ereport(ERROR,
+					(errcode(ERRCODE_PRODUCER_ERROR),
+					 errmsg("Failed to read from SQueue, "
+						 "CONSUMER_ERROR set, err_msg %s",
+						 squeue->err_msg)));
+#endif
         }
 #ifdef __TBASE__
+		if (squeue->sender_destroy)
+		{
+			LWLockRelease(sqsync->sqs_consumer_sync[consumerIdx].cs_lwlock);
+			LWLockRelease(sqsync->sqs_producer_lwlock);
+			elog(ERROR, "squeue %s Pid %d: Producer failed while we were reading data from squeue - status was %d, err_msg %s",
+				   squeue->sq_key, MyProcPid, cstate->cs_status, squeue->err_msg);
+		}
         /* got end query request */
         if (end_query_requested)
         {
@@ -4057,8 +4078,8 @@ DataPumpSender BuildDataPumpSenderControl(SharedQueue sq)
         }
         InitDataPumpThreadControl(&sender_control->thread_control[i], sender_control->nodes, base, end, sender_control->node_num);
         
-        /* Set running status for the thread. */
-        sender_control->thread_control[i].thread_running = true;        
+		/* Set running status for the thread. not running now */
+		sender_control->thread_control[i].thread_running = false;		
     }
 
     /* set sqname and max connection */
@@ -4802,8 +4823,11 @@ void DataPumpCleanThread(DataPumpSenderControl *sender)
     for (threadid = 0; threadid < sender->thread_num; threadid ++)
     {
         thread = &sender->thread_control[threadid];
-        /* Wait for sender to quit. */        
-        ThreadSemaDown(&thread->quit_sem);
+		/* Wait for sender to quit. */	
+		if (thread->thread_need_quit)
+		{
+			ThreadSemaDown(&thread->quit_sem);
+		}
     }
 
     ConvertDone(&sender->convert_control);    

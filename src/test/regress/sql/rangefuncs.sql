@@ -612,7 +612,7 @@ $$ language sql immutable;
 explain (verbose, costs off)
 select x from int8_tbl, extractq2(int8_tbl) f(x);
 
-select x from int8_tbl, extractq2(int8_tbl) f(x);
+select x from int8_tbl, extractq2(int8_tbl) f(x) order by 1;
 
 create function extractq2_2(t int8_tbl) returns table(ret1 int8) as $$
   select extractq2(t) offset 0
@@ -621,7 +621,7 @@ $$ language sql immutable;
 explain (verbose, costs off, nodes off)
 select x from int8_tbl, extractq2_2(int8_tbl) f(x);
 
-select x from int8_tbl, extractq2_2(int8_tbl) f(x);
+select x from int8_tbl, extractq2_2(int8_tbl) f(x) order by 1;
 
 -- without the "offset 0", this function gets optimized quite differently
 
@@ -632,7 +632,7 @@ $$ language sql immutable;
 explain (verbose, costs off)
 select x from int8_tbl, extractq2_2_opt(int8_tbl) f(x);
 
-select x from int8_tbl, extractq2_2_opt(int8_tbl) f(x);
+select x from int8_tbl, extractq2_2_opt(int8_tbl) f(x) order by 1;
 
 -- check handling of nulls in SRF results (bug #7808)
 

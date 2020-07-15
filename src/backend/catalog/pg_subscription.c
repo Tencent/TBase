@@ -1364,4 +1364,134 @@ void ActiveAllParallelTbaseSubscriptions(XLogRecPtr active_lsn)
         CommandCounterIncrement();
     } while (0);
 }
+
+
+/*
+ * Get all parallel sub_child_ids with the same parent ID as the specified subid.
+ *
+ * Returned list is palloc'ed in current memory context.
+ */
+List *
+GetTbaseSubscriptnParallelChild(Oid subid)
+{
+	List	   *res = NIL;
+	int				nkeys = 0;
+	ScanKeyData 	skey[1];
+	Relation 		tbase_sub_parallel_rel = NULL;
+	HeapScanDesc	scan = NULL;
+	HeapTuple   	tuple = NULL;
+	TupleDesc		desc = NULL;
+
+	bool			found = false;
+	bool		    isnull = false;
+
+	Oid 	sub_parent_oid = InvalidOid;
+	int32	sub_index = -1;
+
+	PushActiveSnapshot(GetLocalTransactionSnapshot());
+
+	/* get sub_parent_oid in tbase_subscription_parallel */
+	ScanKeyInit(&skey[nkeys++],
+				Anum_tbase_subscription_parallel_sub_child,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(subid));
+
+	tbase_sub_parallel_rel = relation_openrv(makeRangeVar("public",
+											(char *)g_tbase_subscription_parallel_relname, -1),
+											AccessShareLock);
+	desc = RelationGetDescr(tbase_sub_parallel_rel);
+	scan = heap_beginscan(tbase_sub_parallel_rel, GetActiveSnapshot(), nkeys, skey);
+
+	while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
+	{
+		Oid		sub_child = InvalidOid;
+
+		sub_child = DatumGetObjectId(fastgetattr(tuple, Anum_tbase_subscription_parallel_sub_child, desc, &isnull));
+		if (false == isnull && subid == sub_child)
+		{
+			found = true;
+			sub_parent_oid = DatumGetObjectId(fastgetattr(tuple, Anum_tbase_subscription_parallel_sub_parent, desc, &isnull));
+			sub_index = DatumGetInt32(fastgetattr(tuple, Anum_tbase_subscription_parallel_sub_index, desc, &isnull));
+			break;
+		}
+	}
+	heap_endscan(scan);
+
+	Assert(found == true && sub_parent_oid != InvalidOid && sub_index >= 0);
+	if (!(found == true && sub_parent_oid != InvalidOid && sub_index >= 0))
+	{
+		abort();
+	}
+
+	/* get sub_child_oid in tbase_subscription_parallel with sub_parent_oid */
+	nkeys = 0;
+	ScanKeyInit(&skey[nkeys++],
+				Anum_tbase_subscription_parallel_sub_parent,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(sub_parent_oid));
+
+	scan = heap_beginscan(tbase_sub_parallel_rel, GetActiveSnapshot(), nkeys, skey);
+
+	while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
+	{
+		Oid		parent_oid = InvalidOid;
+
+		parent_oid = DatumGetObjectId(fastgetattr(tuple, Anum_tbase_subscription_parallel_sub_parent, desc, &isnull));
+		if (false == isnull && sub_parent_oid == parent_oid)
+		{
+			Oid sub_child_oid;
+
+			sub_child_oid = DatumGetObjectId(fastgetattr(tuple, Anum_tbase_subscription_parallel_sub_child, desc, &isnull));
+
+			res = lappend_oid(res, sub_child_oid);
+		}
+	}
+	/* Cleanup */
+	heap_endscan(scan);
+	relation_close(tbase_sub_parallel_rel, AccessShareLock);
+
+	PopActiveSnapshot();
+
+	return res;
+}
+
+/*
+ * Get all parallel LogicalRepWorker with the same parent ID as the specified subid.
+ *
+ */
+List *
+GetTbaseSubscriptnParallelWorker(Oid subid)
+{
+	List *res = NIL;
+	ListCell   *lc_simple;
+	LogicalRepWorker *syncworker;
+
+	List *parallel_childids_list = GetTbaseSubscriptnParallelChild(subid);
+
+	/*
+	 * Look for a sync worker for this relation.
+	 */
+	LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
+
+	foreach (lc_simple, parallel_childids_list)
+	{
+		Oid sub_oid = lfirst_oid(lc_simple);
+		if (sub_oid != subid)
+		{
+			syncworker = logicalrep_worker_find(sub_oid, InvalidOid, false);
+
+			if (syncworker)
+			{
+				res = lappend(res, syncworker);
+			}
+		}
+
+	}
+	LWLockRelease(LogicalRepWorkerLock);
+
+	list_free(parallel_childids_list);
+
+	return res;
+}
+
 #endif

@@ -56,6 +56,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/tqual.h"
+#include "utils/lsyscache.h"
 #ifdef __TBASE__
 #include "optimizer/pgxcship.h"
 #include "pgxc/execRemote.h"
@@ -413,6 +414,8 @@ ExecInsert(ModifyTableState *mtstate,
         bool        isnull;
         int         partidx;
         ResultRelInfo    *partRel;
+		char *partname = NULL;
+		Oid partoid = InvalidOid;
     
         /* router for tuple */
         partkey = RelationGetPartitionColumnIndex(resultRelationDesc);
@@ -430,6 +433,14 @@ ExecInsert(ModifyTableState *mtstate,
             elog(ERROR, "inserted value is not in range of partitioned table, please check the value of paritition key");
         }
         
+		partname = GetPartitionName(RelationGetRelid(resultRelInfo->ri_RelationDesc), partidx, false);
+		partoid = get_relname_relid(partname, RelationGetNamespace(resultRelInfo->ri_RelationDesc));
+		if(InvalidOid == partoid)
+		{
+			/* the partition have dropped */
+			elog(ERROR, "inserted value is not in range of partitioned table, please check the value of paritition key");
+		}
+
         switch(resultRelInfo->arraymode)
         { 
             case RESULT_RELINFO_MODE_EXPAND:

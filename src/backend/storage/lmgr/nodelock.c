@@ -137,7 +137,7 @@ static char *event_message[] = {"storage extension source",
 
 #define MAX_HEAVY_LOCK 5
 
-#define NUM_LIGHT_LOCK 3                    
+#define NUM_LIGHT_LOCK 4                    
 #define OFFSET CMD_UPDATE
 
 #define LOCK_TABLE 'T'
@@ -163,7 +163,8 @@ typedef struct NodeLockData
 
 static char *LockMessages[NUM_LIGHT_LOCK] =    {"UPDATE",
                                                 "INSERT",
-                                                "DELETE"};
+                                                "DELETE",
+                                                "SELECT"};
 
 
 /* hash search type */
@@ -259,14 +260,14 @@ SetHeavyLock(char *lockActions, bool lock)
                     if (lock)
                     {
                         nodelock->flags |= ALL;
-                        nodelock->nHeavyLocks[CMD_NOTHING -1]++;
+						//nodelock->nHeavyLocks[CMD_NOTHING -1]++;
                     }
                     else
                     {
                         if (nodelock->flags & ALL)
                         {
-                            nodelock->nHeavyLocks[CMD_NOTHING -1]--;
-                            if (nodelock->nHeavyLocks[CMD_NOTHING -1] == 0)
+							//nodelock->nHeavyLocks[CMD_NOTHING -1]--;
+							//if (nodelock->nHeavyLocks[CMD_NOTHING -1] == 0)
                             {
                                 nodelock->flags &= ~ALL;
                             }
@@ -280,14 +281,14 @@ SetHeavyLock(char *lockActions, bool lock)
                     if (lock)
                     {
                         nodelock->flags |= SELECT;
-                        nodelock->nHeavyLocks[CMD_SELECT - 1]++;
+						//nodelock->nHeavyLocks[CMD_SELECT - 1]++;
                     }
                     else
                     {
                         if (nodelock->flags & SELECT)
                         {
-                            nodelock->nHeavyLocks[CMD_SELECT - 1]--;
-                            if (nodelock->nHeavyLocks[CMD_SELECT - 1] == 0)
+							//nodelock->nHeavyLocks[CMD_SELECT - 1]--;
+							//if (nodelock->nHeavyLocks[CMD_SELECT - 1] == 0)
                             {
                                 nodelock->flags &= ~SELECT;
                             }
@@ -301,14 +302,14 @@ SetHeavyLock(char *lockActions, bool lock)
                     if (lock)
                     {
                         nodelock->flags |= UPDATE;
-                        nodelock->nHeavyLocks[CMD_UPDATE - 1]++;
+						//nodelock->nHeavyLocks[CMD_UPDATE - 1]++;
                     }
                     else
                     {
                         if (nodelock->flags & UPDATE)
                         {
-                            nodelock->nHeavyLocks[CMD_UPDATE - 1]--;
-                            if (nodelock->nHeavyLocks[CMD_UPDATE - 1] == 0)
+							//nodelock->nHeavyLocks[CMD_UPDATE - 1]--;
+							//if (nodelock->nHeavyLocks[CMD_UPDATE - 1] == 0)
                             {
                                 nodelock->flags &= ~UPDATE;
                             }
@@ -322,14 +323,14 @@ SetHeavyLock(char *lockActions, bool lock)
                     if (lock)
                     {
                         nodelock->flags |= INSERT;
-                        nodelock->nHeavyLocks[CMD_INSERT - 1]++;
+						//nodelock->nHeavyLocks[CMD_INSERT - 1]++;
                     }
                     else
                     {
                         if (nodelock->flags & INSERT)
                         {
-                            nodelock->nHeavyLocks[CMD_INSERT - 1]--;
-                            if (nodelock->nHeavyLocks[CMD_INSERT - 1] == 0)
+							//nodelock->nHeavyLocks[CMD_INSERT - 1]--;
+							//if (nodelock->nHeavyLocks[CMD_INSERT - 1] == 0)
                             {
                                 nodelock->flags &= ~INSERT;
                             }
@@ -343,14 +344,14 @@ SetHeavyLock(char *lockActions, bool lock)
                     if (lock)
                     {
                         nodelock->flags |= DELETE;
-                        nodelock->nHeavyLocks[CMD_DELETE - 1]++;
+						//nodelock->nHeavyLocks[CMD_DELETE - 1]++;
                     }
                     else
                     {
                         if (nodelock->flags & DELETE)
                         {
-                            nodelock->nHeavyLocks[CMD_DELETE - 1]--;
-                            if (nodelock->nHeavyLocks[CMD_DELETE - 1] == 0)
+							//nodelock->nHeavyLocks[CMD_DELETE - 1]--;
+							//if (nodelock->nHeavyLocks[CMD_DELETE - 1] == 0)
                             {
                                 nodelock->flags &= ~DELETE;
                             }
@@ -364,14 +365,14 @@ SetHeavyLock(char *lockActions, bool lock)
                     if (lock)
                     {
                         nodelock->flags |= DDL;
-                        nodelock->nHeavyLocks[CMD_UTILITY - 1]++;
+						//nodelock->nHeavyLocks[CMD_UTILITY - 1]++;
                     }
                     else
                     {
                         if (nodelock->flags & DDL)
                         {
-                            nodelock->nHeavyLocks[CMD_UTILITY - 1]--;
-                            if (nodelock->nHeavyLocks[CMD_UTILITY - 1] == 0)
+							//nodelock->nHeavyLocks[CMD_UTILITY - 1]--;
+							//if (nodelock->nHeavyLocks[CMD_UTILITY - 1] == 0)
                             {
                                 nodelock->flags &= ~DDL;
                             }
@@ -520,11 +521,14 @@ SetLightLock(char *lockActions, char objectType, char *param1, char *param2, boo
         {
             case 'A':
             case 'a':
-            case 'S':
-            case 's':
             case 'C':
             case 'c':
                 break;
+			case 'S':
+			case 's':
+				setlock = true;
+				cmd = CMD_SELECT + 4;
+				break;
             case 'U':
             case 'u':
                 setlock = true;
@@ -557,7 +561,7 @@ SetLightLock(char *lockActions, char objectType, char *param1, char *param2, boo
 
                     if (idx > 0)
                     {
-                        nodelock->lock[cmd - OFFSET].table_locks[idx]++;
+						//nodelock->lock[cmd - OFFSET].table_locks[idx]++;
                     }
                     else
                     {
@@ -577,13 +581,13 @@ SetLightLock(char *lockActions, char objectType, char *param1, char *param2, boo
                         /* set lock */
                         if (idx > 0)
                         {
-                            if (nodelock->lock[cmd - OFFSET].table_locks[idx] == 0)
+							//if (nodelock->lock[cmd - OFFSET].table_locks[idx] == 0)
                             {
                                 nodelock->lock[cmd - OFFSET].table[idx] = table;
                                 nodelock->lock[cmd - OFFSET].nTables++;
                             }
 
-                            nodelock->lock[cmd - OFFSET].table_locks[idx]++;
+							//nodelock->lock[cmd - OFFSET].table_locks[idx]++;
                         }
                     }
                 }
@@ -598,8 +602,8 @@ SetLightLock(char *lockActions, char objectType, char *param1, char *param2, boo
 
                     if (idx > 0)
                     {
-                        nodelock->lock[cmd - OFFSET].table_locks[idx]--;
-                        if (nodelock->lock[cmd - OFFSET].table_locks[idx] == 0)
+						//nodelock->lock[cmd - OFFSET].table_locks[idx]--;
+						//if (nodelock->lock[cmd - OFFSET].table_locks[idx] == 0)
                         {
                             nodelock->lock[cmd - OFFSET].table[idx] = InvalidOid;
                             nodelock->lock[cmd - OFFSET].nTables--;
@@ -658,16 +662,17 @@ SetLightLock(char *lockActions, char objectType, char *param1, char *param2, boo
                         }
                         if (bms_is_member(shard, shardbitmap))
                         {
-                            nodelock->lock[cmd - OFFSET].nShards[shard]--;
+							//nodelock->lock[cmd - OFFSET].nShards[shard]--;
 
-                            if (nodelock->lock[cmd - OFFSET].nShards[shard] == 0)
+							//if (nodelock->lock[cmd - OFFSET].nShards[shard] == 0)
                             {
+								nodelock->lock[cmd - OFFSET].nShards[shard] = 0;
                                 bms_del_member(shardbitmap, shard);
                             }
                         }
                         else
                         {
-                            elog(NOTICE, "shard %d is not locked before, no need to unlock.", shard);
+							elog(DEBUG1, "shard %d is not locked before, no need to unlock.", shard);
                         }
                     }
                 
@@ -717,7 +722,7 @@ SetEventLock(int event, bool lock)
                     }
                     else
                     {
-                        nodelock->nEventLocks++;
+						//nodelock->nEventLocks++;
 
                         nodelock->eventLocks |= event;
 
@@ -730,7 +735,7 @@ SetEventLock(int event, bool lock)
                 {
                     if (nodelock->eventLocks && (nodelock->eventLocks & event))
                     {
-                        if (--nodelock->nEventLocks == 0)
+						//if (--nodelock->nEventLocks == 0)
                         {
                             nodelock->eventLocks &= ~event;
                         }
@@ -1179,9 +1184,20 @@ isDDL(void *parsetree)
 void
 LightLockCheck(CmdType cmd, Oid table, int shard)
 {
-    DMLLockContent *lock = &nodelock->lock[cmd - OFFSET];
+	DMLLockContent *lock = NULL;
 
-    LWLockAcquire(NodeLockMgrLock, LW_SHARED);
+	if (cmd < CMD_SELECT || cmd > CMD_DELETE)
+	{
+		return;
+	}
+	
+	if (cmd == CMD_SELECT)
+	{
+		cmd = CMD_SELECT + 4;
+	}
+	lock = &nodelock->lock[cmd - OFFSET];
+
+	//LWLockAcquire(NodeLockMgrLock, LW_SHARED);
 
     if (lock->nTables > 0 && OidIsValid(table))
     {
@@ -1191,7 +1207,7 @@ LightLockCheck(CmdType cmd, Oid table, int shard)
 
         if (idx > 0)
         {
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
 
             elog(ERROR, "%s on table %s is not permitted.", LockMessages[cmd - OFFSET], get_rel_name(table));
         }
@@ -1203,13 +1219,13 @@ LightLockCheck(CmdType cmd, Oid table, int shard)
         
         if (bms_is_member(shard, shardbitmap))
         {
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
 
             elog(ERROR, "%s on shard %d is not permitted.", LockMessages[cmd - OFFSET], shard);
         }
     }
     
-    LWLockRelease(NodeLockMgrLock);
+	//LWLockRelease(NodeLockMgrLock);
 }
 
 
@@ -1223,16 +1239,19 @@ HeavyLockCheck(const char* cmdString, CmdType cmd, const char *query_string, voi
     char *lockFuncName = "pg_node_lock";
     char *unlockFuncName = "pg_node_unlock";
     char *statFuncName = "show_node_lock";
+	char *poolReloadFunc = "pgxc_pool_reload";
+	char *terminateFunc = "pg_terminate_backend";
 
 
-    if (((cmdString && strcmp(cmdString, "SELECT") == 0) || cmd == CMD_SELECT))
+	if ((nodelock->flags & SELECT) && ((cmdString && strcmp(cmdString, "SELECT") == 0) || cmd == CMD_SELECT))
     {
         if (query_string)
         {
             char *query = asc_tolower(query_string, strlen(query_string));
             
             if(strstr(query, lockFuncName) != NULL || strstr(query, unlockFuncName) != NULL ||
-                strstr(query, statFuncName) != NULL)
+				strstr(query, statFuncName) != NULL || strstr(query, poolReloadFunc) != NULL ||
+				strstr(query, terminateFunc) != NULL)
             {
                 pfree(query);
                 return;
@@ -1247,17 +1266,17 @@ HeavyLockCheck(const char* cmdString, CmdType cmd, const char *query_string, voi
       * if so, and DDL is permitted, error messages will be shown.
       * current transaction is aborted.
       */
-    if(isDDL(parsetree))
+	if(parsetree && isDDL(parsetree))
     {
-        LWLockAcquire(NodeLockMgrLock, LW_SHARED);
+		//LWLockAcquire(NodeLockMgrLock, LW_SHARED);
         
         if (nodelock->flags & DDL)
         {
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
             elog(ERROR, "%s is not permitted now.", CreateCommandTag((Node *)parsetree));
         }
 
-        LWLockRelease(NodeLockMgrLock);
+		//LWLockRelease(NodeLockMgrLock);
     }
     /*
       * query is DML (update, insert, delete) or select
@@ -1269,51 +1288,51 @@ HeavyLockCheck(const char* cmdString, CmdType cmd, const char *query_string, voi
           */
         if((cmdString && strcmp(cmdString, "SELECT") == 0) || cmd == CMD_SELECT)
         {
-            LWLockAcquire(NodeLockMgrLock, LW_SHARED);
+			//LWLockAcquire(NodeLockMgrLock, LW_SHARED);
         
             if (nodelock->flags & SELECT)
             {
-                LWLockRelease(NodeLockMgrLock);
+				//LWLockRelease(NodeLockMgrLock);
                 elog(ERROR, "SELECT is not permitted now.");
             }
 
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
         }
         else if((cmdString && strcmp(cmdString, "UPDATE") == 0) || cmd == CMD_UPDATE)
         {
-            LWLockAcquire(NodeLockMgrLock, LW_SHARED);
+			//LWLockAcquire(NodeLockMgrLock, LW_SHARED);
         
             if (nodelock->flags & UPDATE)
             {
-                LWLockRelease(NodeLockMgrLock);
+				//LWLockRelease(NodeLockMgrLock);
                 elog(ERROR, "UPDATE is not permitted now.");
             }
 
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
         }
         else if((cmdString && strcmp(cmdString, "DELETE") == 0) || cmd == CMD_DELETE)
         {
-            LWLockAcquire(NodeLockMgrLock, LW_SHARED);
+			//LWLockAcquire(NodeLockMgrLock, LW_SHARED);
         
             if (nodelock->flags & DELETE)
             {
-                LWLockRelease(NodeLockMgrLock);
+				//LWLockRelease(NodeLockMgrLock);
                 elog(ERROR, "DELETE is not permitted now.");
             }
 
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
         }
         else if((cmdString && strcmp(cmdString, "INSERT") == 0) || cmd == CMD_INSERT)
         {
-            LWLockAcquire(NodeLockMgrLock, LW_SHARED);
+			//LWLockAcquire(NodeLockMgrLock, LW_SHARED);
         
             if (nodelock->flags & INSERT)
             {
-                LWLockRelease(NodeLockMgrLock);
+				//LWLockRelease(NodeLockMgrLock);
                 elog(ERROR, "INSERT is not permitted now.");
             }
 
-            LWLockRelease(NodeLockMgrLock);
+			//LWLockRelease(NodeLockMgrLock);
         }
     }
 }
@@ -1613,10 +1632,15 @@ void nodeLockRecovery(void)
                 (errcode_for_file_access(),
                 errmsg("could not open control file \"%s\"", controlFile)));
         }
-        if((ret = read(fd, buf, NODELOCKSIZE)) == NODELOCKSIZE)
+		ret = read(fd, buf, NODELOCKSIZE);
+        if(ret == NODELOCKSIZE)
         {
             memcpy(nodelock, buf, NODELOCKSIZE);
         }
+		else if (ret == NODELOCKSIZE - sizeof(DMLLockContent))
+		{
+			memcpy(nodelock, buf, NODELOCKSIZE - sizeof(DMLLockContent));
+		}
         else
         {
             close(fd);

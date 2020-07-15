@@ -5,12 +5,6 @@
 # this limits the number of connections needed to run the tests.
 # ----------
 
-#run audit fga
-test: audit_fga
-
-#run mls
-test: mls_check
-
 # run oracle compatibility and audit
 test: oracle audit
 
@@ -103,7 +97,7 @@ test: prepared_xacts
 # ----------
 # Another group of parallel tests
 # ----------
-test: brin gin gist spgist privileges init_privs security_label collate matview lock replica_identity rowsecurity object_address tablesample groupingsets drop_operator password
+test: brin gin gist spgist privileges init_privs collate matview lock replica_identity rowsecurity object_address tablesample groupingsets drop_operator password
 
 # ----------
 # Another group of parallel tests

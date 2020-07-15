@@ -615,7 +615,6 @@ StorePreparedStatement(const char *stmt_name,
 
     /* Now it's safe to move the CachedPlanSource to permanent memory */
     SaveCachedPlan(plansource);
-
 #ifdef XCP    
     if (use_resowner)
     {

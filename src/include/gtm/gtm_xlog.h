@@ -152,7 +152,8 @@ typedef struct XLogCtlData
 } XLogCtlData;
 
 typedef struct XLogSyncConfig {
-    int      required_sync_num;
+	GTM_MutexLock    lck;
+    volatile sig_atomic_t  required_sync_num;
     gtm_List *sync_application_targets;
 } XLogSyncConfig;
 
@@ -163,6 +164,7 @@ typedef struct XLogSyncStandby
     GTM_MutexLock check_mutex;
     int           head_xlog_hints;
     XLogRecPtr    head_ptr;   /* temp of the head of wait_queue , not always correct */
+	XLogRecPtr    synced_lsn;
 
     GTM_MutexLock wait_queue_mutex;
     heap wait_queue;
@@ -174,7 +176,7 @@ extern ssize_t          g_GTMControlDataSize;
 extern GTM_RWLock       ControlDataLock;
 extern XLogSyncStandby  *XLogSync;
 extern XLogSyncConfig   *SyncConfig;
-extern bool  SyncReady;
+extern volatile bool  SyncReady;
 
 extern XLogRecPtr GetStandbyWriteBuffPos(void);
 extern XLogRecPtr GetStandbyApplyPos(void);
@@ -286,5 +288,6 @@ extern char* GetFormatedCommandLine(char *buff,int size,const char *data,char *f
 extern bool IsInSyncStandbyList(const char *application_name);
 extern void RegisterNewSyncStandby(GTM_StandbyReplication *replication);
 extern void RemoveSyncStandby(GTM_StandbyReplication *replication);
+extern void load_sync_structures(void);
 #endif /* GTM_XLOG_H */
 

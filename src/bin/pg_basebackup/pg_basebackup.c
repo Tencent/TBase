@@ -1766,6 +1766,10 @@ BaseBackup(void)
                 maxServerMajor;
     int            serverVersion,
                 serverMajor;
+	PGconn      *connDev = NULL;
+    PGresult    *resDev = NULL;
+    char        connInfo[MAXPGPATH];
+    char        *default_dbname = " dbname=postgres";
 
     Assert(conn != NULL);
 
@@ -1863,7 +1867,67 @@ BaseBackup(void)
         disconnect_and_exit(1);
     }
 
-    strlcpy(xlogstart, PQgetvalue(res, 0, 0), sizeof(xlogstart));
+    /*
+     * found connstr is contain 'dbname' in pg_basebackup use -d parmas
+     */
+    memset(connInfo, '\0', sizeof(connInfo));
+    if (NULL != connection_string)
+    {
+        if (NULL != strstr(connection_string,"dbname"))
+        {
+            snprintf(connInfo, sizeof(connInfo), "%s",connection_string);
+
+        }
+        else
+        {
+            snprintf(connInfo, sizeof(connInfo), "%s %s",connection_string, default_dbname);
+        }
+    }
+        /*
+         * found connstr is contain 'dbname' in pg_basebackup not use -d parmas| use -U -h -p parmas
+         */
+    else if ((NULL != dbname) || (NULL != dbport) || (NULL != dbuser))
+    {
+        if(NULL == dbname)
+        {
+            snprintf(connInfo, sizeof(connInfo), "host=%s port=%s user=%s %s", dbhost, dbport, dbuser, default_dbname);
+        }
+        else
+        {
+            snprintf(connInfo, sizeof(connInfo), "host=%s port=%s user=%s dbname=%s", dbhost, dbport, dbuser, dbname);
+        }
+    }
+    connDev = PQconnectdb(connInfo);
+
+    if (PQstatus(connDev) != CONNECTION_OK)
+    {
+        fprintf(stderr, "Connection to database failed: %s\n",
+                PQerrorMessage(connDev));
+        disconnect_and_exit(1);
+    }
+    resDev = PQexec(connDev, "select restart_lsn from pg_replication_slots order by restart_lsn asc limit 1");
+    memset(xlogstart, '\0', sizeof(xlogstart));
+    if (PQntuples(resDev) == 0)
+    {
+        strlcpy(xlogstart, PQgetvalue(res, 0, 0), sizeof(xlogstart));
+    }
+    else
+    {
+        strlcpy(xlogstart, PQgetvalue(resDev, 0, 0), sizeof(xlogstart));
+        fprintf(stderr, _("%s: In pg_replication_slots restartlsn exchange write-ahead log start point: %s\n"),
+                progname, xlogstart);
+    }
+
+    if (NULL != resDev)
+    {
+        PQclear(resDev);
+    }
+
+    if (NULL != connDev)
+    {
+        PQfinish(connDev);
+    }
+
 
     if (verbose)
         fprintf(stderr, _("%s: checkpoint completed\n"), progname);

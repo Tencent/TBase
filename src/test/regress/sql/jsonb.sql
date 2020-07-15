@@ -155,6 +155,9 @@ SELECT (test_json->>'field3') IS NULL AS expect_true FROM test_jsonb WHERE json_
 SELECT (test_json->3) IS NULL AS expect_false FROM test_jsonb WHERE json_type = 'array';
 SELECT (test_json->>3) IS NULL AS expect_true FROM test_jsonb WHERE json_type = 'array';
 
+-- distribute
+SELECT test_json, count(test_json) from test_jsonb group by test_json order by test_json;
+
 -- corner cases
 select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb -> null::text;
 select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb -> null::int;

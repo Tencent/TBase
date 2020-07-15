@@ -43,6 +43,7 @@
 #include "catalog/pgxc_key_values.h"
 #include "pgxc/pgxcnode.h"
 #include "optimizer/pgxcship.h"
+#include "executor/nodeAgg.h"
 #endif
 
 #ifdef _MIGRATE_
@@ -90,7 +91,6 @@ extern void PoolPingNodes(void);
 #endif
 
 #ifdef __TBASE__
-static void contains_remotesubplan(Path *path, int *number, bool *redistribute);
 static int get_num_connections(int numnodes, int nRemotePlans);
 #endif
 
@@ -2282,7 +2282,7 @@ not_allowed_join:
                     (pathnode->jointype != JOIN_RIGHT && pathnode->jointype != JOIN_FULL) &&
                     outerd->distributionType != LOCATOR_TYPE_REPLICATED && !redistribute_inner &&
                     get_num_connections(outer_nodes, nRemotePlans_inner + 1) < MaxConnections * REPLICATION_FACTOR &&
-                    !dml && nRemotePlans_inner < replication_level)
+					!dml && nRemotePlans_inner < replication_level && !pathnode->inner_unique)
                 {
                     replicate_inner = true;
 
@@ -2294,7 +2294,7 @@ not_allowed_join:
                      pathnode->jointype != JOIN_SEMI && pathnode->jointype != JOIN_ANTI) &&
                      innerd->distributionType != LOCATOR_TYPE_REPLICATED && !redistribute_outer &&
                      get_num_connections(inner_nodes, nRemotePlans_outer + 1) < MaxConnections * REPLICATION_FACTOR &&
-                     !replicate_inner && !dml && nRemotePlans_outer < replication_level)
+					 !replicate_inner && !dml && nRemotePlans_outer < replication_level && !pathnode->inner_unique)
                 {
                     replicate_outer = true;
 
@@ -2319,7 +2319,7 @@ not_allowed_join:
                      pathnode->jointype != JOIN_SEMI && pathnode->jointype != JOIN_ANTI) &&
                      innerd->distributionType != LOCATOR_TYPE_REPLICATED && !redistribute_outer &&
                      get_num_connections(inner_nodes, nRemotePlans_outer + 1) < MaxConnections * REPLICATION_FACTOR &&
-                     !dml && nRemotePlans_outer < replication_level)
+					 !dml && nRemotePlans_outer < replication_level && !pathnode->inner_unique)
                 {
                     replicate_outer = true;
 
@@ -2348,7 +2348,7 @@ not_allowed_join:
                     (pathnode->jointype != JOIN_RIGHT && pathnode->jointype != JOIN_FULL) &&
                     outerd->distributionType != LOCATOR_TYPE_REPLICATED && !redistribute_inner &&
                     get_num_connections(outer_nodes, nRemotePlans_inner + 1) < MaxConnections * REPLICATION_FACTOR &&
-                    !dml && nRemotePlans_inner < replication_level)
+					!dml && nRemotePlans_inner < replication_level && !pathnode->inner_unique)
                 {
                     replicate_inner = true;
 
@@ -2564,7 +2564,7 @@ pull_up:
 
 #ifdef __TBASE__
 /* count remotesubplans in path */
-static void
+void
 contains_remotesubplan(Path *path, int *number, bool *redistribute)
 {// #lizard forgives
     if (!number)    
@@ -2600,6 +2600,13 @@ contains_remotesubplan(Path *path, int *number, bool *redistribute)
                 contains_remotesubplan(pathnode->subpath, number, redistribute);
             }
             break;
+		case T_GatherMerge:
+			{
+				GatherMergePath *pathnode = (GatherMergePath *)path;
+				
+				contains_remotesubplan(pathnode->subpath, number, redistribute);
+			}
+			break;
         case T_Agg:
             {
                 if (IsA(path, AggPath))
@@ -4007,10 +4014,26 @@ create_append_path(RelOptInfo *rel, List *subpaths, Relids required_outer,
                  * Both distribution and subpath->distribution may be NULL at
                  * this point, or they both are not null.
                  */
+#ifdef __TBASE__
+				if (distribution)
+				{
+					if (distribution->restrictNodes && subpath->distribution->restrictNodes)
+					{
+						distribution->restrictNodes = bms_union(
+							distribution->restrictNodes,
+							subpath->distribution->restrictNodes);
+					}
+					else
+					{
+						distribution->restrictNodes = NULL;
+					}
+				}
+#else
                 if (distribution && subpath->distribution->restrictNodes)
                     distribution->restrictNodes = bms_union(
                             distribution->restrictNodes,
                             subpath->distribution->restrictNodes);
+#endif
             }
             else
             {
@@ -5720,6 +5743,10 @@ create_agg_path(PlannerInfo *root,
     pathnode->numGroups = numGroups;
     pathnode->groupClause = groupClause;
     pathnode->qual = qual;
+#ifdef __TBASE__
+	pathnode->hybrid = false;
+	pathnode->entrySize = 0;
+#endif
 
     cost_agg(&pathnode->path, root,
              aggstrategy, aggcosts,
@@ -5731,6 +5758,17 @@ create_agg_path(PlannerInfo *root,
     pathnode->path.startup_cost += target->cost.startup;
     pathnode->path.total_cost += target->cost.startup +
         target->cost.per_tuple * pathnode->path.rows;
+
+#ifdef __TBASE__
+	/* estimate entry size for hashtable used by hashagg */
+	if (g_hybrid_hash_agg)
+	{
+		if (aggstrategy == AGG_HASHED)
+		{
+			pathnode->entrySize = estimate_hashagg_entrysize(subpath, aggcosts, numGroups);
+		}
+	}
+#endif
 
     return pathnode;
 }
@@ -5889,6 +5927,16 @@ create_groupingsets_path(PlannerInfo *root,
             pathnode->path.total_cost += agg_path.total_cost;
             pathnode->path.rows += agg_path.rows;
         }
+
+#ifdef __TBASE__
+		if (g_hybrid_hash_agg)
+		{
+			if (rollup->is_hashed)
+			{
+				rollup->entrySize = estimate_hashagg_entrysize(subpath, agg_costs, numGroups);
+			}
+		}
+#endif
     }
 
     /* add tlist eval cost for each output row */

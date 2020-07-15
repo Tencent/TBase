@@ -183,9 +183,9 @@ UPDATE clustertest SET key = 60 WHERE key = 50;
 UPDATE clustertest SET key = 70 WHERE key = 60;
 UPDATE clustertest SET key = 80 WHERE key = 70;
 
-SELECT * FROM clustertest;
+SELECT * FROM clustertest order by 1;
 CLUSTER clustertest_pkey ON clustertest;
-SELECT * FROM clustertest;
+SELECT * FROM clustertest order by 1;
 
 COMMIT;
 

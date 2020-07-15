@@ -293,6 +293,19 @@ check_xact_readonly(Node *parsetree)
                         }
                     }
                 }
+                if (nodeTag(parsetree) == T_RenameStmt)
+                {
+                    RenameStmt   *stmt = (RenameStmt *) parsetree;
+
+                    /* alter replication_slot rename is allowed on datanode */
+                    if (stmt->renameType == OBJECT_REPLICATION_SLOT)
+                    {
+                        if (XactReadOnly && !IsInParallelMode() && IS_PGXC_DATANODE)
+                        {
+                            break;
+                        }
+                    }
+                }
             }
 #endif
         case T_DropdbStmt:
@@ -785,6 +798,7 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 #endif
 #ifdef __TBASE__
         case T_LockNodeStmt:
+		case T_SampleStmt:
 #endif
         case T_ReindexStmt:
         case T_GrantStmt:
@@ -1072,11 +1086,14 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 
         case T_AlterPublicationStmt:
 #ifdef __STORAGE_SCALABLE__
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                     errmsg("Postgres-XL does not support ALTER PUBLICATION"),
-                     errdetail("The feature is not currently supported")));
-            break;
+			if (((AlterPublicationStmt *) parsetree)->tableAction != DEFELEM_ADD &&
+ 				((AlterPublicationStmt *) parsetree)->tableAction != DEFELEM_DROP)
+ 			{
+ 				ereport(ERROR,
+ 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+ 						 errmsg("Postgres-XL only support ALTER PUBLICATION ... ADD/DROP TABLE "),
+ 						 errdetail("The feature is not currently supported")));
+			}
 #endif
             break;
 
@@ -1283,6 +1300,7 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 #endif
 #ifdef __TBASE__
         case T_LockNodeStmt:
+		case T_SampleStmt:
 #endif
         case T_DropStmt:
         case T_RenameStmt:
@@ -2939,6 +2957,13 @@ standard_ProcessUtility(PlannedStmt *pstmt,
             
             break;
         }
+		case T_SampleStmt:
+		{
+			SampleStmt * stmt = (SampleStmt * )parsetree;
+
+			ExecSample(stmt, dest);
+			break;
+		}
 #endif
         case T_AlterNodeStmt:
         case T_CreateNodeStmt:
@@ -3081,7 +3106,7 @@ ProcessUtilitySlow(ParseState *pstate,
                                             elog(ERROR, "Cannot support distribute type: RoundRobin");
                                             break;
                                         default:
-                                            elog(ERROR,"Unkown distribute type.");
+											elog(ERROR,"Unknown distribute type.");
                                             break;
                                     }
                                 }
@@ -3694,6 +3719,12 @@ ProcessUtilitySlow(ParseState *pstate,
 
                                 partOid = get_relname_relid(partidxstmt->relation->relname, relnamespace);
 
+								if (InvalidOid == partOid)
+								{
+									MemoryContextReset(temp);
+									continue;
+								}
+
                                 addr = DefineIndex(partOid,    /* OID of heap relation */
                                                    partidxstmt,
                                                    InvalidOid, /* no predefined OID */
@@ -4000,6 +4031,7 @@ ProcessUtilitySlow(ParseState *pstate,
                         int child_idx = 0;
                         int nParts = 0;
                         CreateTrigStmt *child_stmt = NULL;
+						Oid child_reloid = InvalidOid;
 
                         nParts = RelationGetNParts(rel);
 
@@ -4008,6 +4040,12 @@ ProcessUtilitySlow(ParseState *pstate,
                         for (child_idx = 0; child_idx < nParts; child_idx++)
                         {
                             child_stmt->relation->relname = GetPartitionName(RelationGetRelid(rel), child_idx, false);
+
+							child_reloid = get_relname_relid(child_stmt->relation->relname, RelationGetNamespace(rel));
+							if (InvalidOid == child_reloid)
+							{
+								continue;
+							}
 
                             child_address = CreateTrigger((CreateTrigStmt *) child_stmt,
                                                           queryString, InvalidOid, InvalidOid,
@@ -4645,6 +4683,9 @@ AlterObjectTypeCommandTag(ObjectType objtype)
         case OBJECT_STATISTIC_EXT:
             tag = "ALTER STATISTICS";
             break;
+	    case OBJECT_REPLICATION_SLOT:
+	        tag = "ALTER SLOT";
+	        break;
         default:
             tag = "???";
             break;
@@ -5581,6 +5622,11 @@ CreateCommandTag(Node *parsetree)
                 tag = "UNLOCK NODE";
             break;
         }
+		case T_SampleStmt:
+		{
+			tag = "SAMPLE";
+			break;
+		}
 #endif
 
 #ifdef __AUDIT__
@@ -6156,6 +6202,9 @@ GetCommandLogLevel(Node *parsetree)
         case T_LockNodeStmt:
             lev = LOGSTMT_DDL;
             break;
+		case T_SampleStmt:
+			lev = LOGSTMT_ALL;
+			break;
 #endif
 #ifdef __AUDIT__
         case T_AuditStmt:

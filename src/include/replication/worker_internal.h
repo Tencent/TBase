@@ -156,6 +156,7 @@ am_tablesync_worker(void)
 extern bool am_tbase_subscript_dispatch_worker(void);
 extern bool IsColdMoveTBaseSubscription(void);
 extern bool IsClusterSyncTBaseSubscription(void);
+extern void logical_apply_dispatch(StringInfo s);
 #endif
 
 #endif                            /* WORKER_INTERNAL_H */

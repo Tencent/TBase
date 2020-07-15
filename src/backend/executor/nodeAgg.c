@@ -207,6 +207,8 @@
 
 #include "postgres.h"
 
+#include <math.h>
+
 #include "access/htup_details.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_aggregate.h"
@@ -235,6 +237,14 @@
 #ifdef __TBASE__
 volatile ReDistributeStatus *workerStatus = NULL;
 #endif
+
+#ifdef __TBASE__
+/* global GUC variables for hybrid hash agg */
+bool g_hybrid_hash_agg = false;
+bool g_hybrid_hash_agg_debug = false;
+int  g_default_hashagg_nbatches = 32;
+#endif
+
 /*
  * AggStatePerTransData - per aggregate state value information
  *
@@ -296,6 +306,11 @@ typedef struct AggStatePerTransData
     /* Oid of state value's datatype */
     Oid            aggtranstype;
 
+#ifdef __TBASE__
+	Oid         serial_func_id;
+	Oid         deserial_func_id;
+#endif
+
     /* ExprStates of the FILTER and argument expressions. */
     ExprState  *aggfilter;        /* state of FILTER expression, if any */
     List       *aggdirectargs;    /* states of direct-argument expressions */
@@ -311,6 +326,12 @@ typedef struct AggStatePerTransData
 
     /* fmgr lookup data for deserialization function */
     FmgrInfo    deserialfn;
+
+#ifdef __TBASE__
+	FmgrInfo	combfn;
+	FmgrInfo	serial_func;
+	FmgrInfo	deserial_func;
+#endif
 
     /* Input collation derived for aggregate */
     Oid            aggCollation;
@@ -397,6 +418,12 @@ typedef struct AggStatePerTransData
     FunctionCallInfoData serialfn_fcinfo;
 
     FunctionCallInfoData deserialfn_fcinfo;
+
+#ifdef __TBASE__
+	FunctionCallInfoData combfn_fcinfo;
+	FunctionCallInfoData serial_func_fcinfo;
+	FunctionCallInfoData deserial_func_fcinfo;
+#endif
 }            AggStatePerTransData;
 
 /*
@@ -1094,7 +1121,17 @@ advance_aggregates(AggState *aggstate, AggStatePerGroup pergroup, AggStatePerGro
                     AggStatePerGroup pergroupstate;
 
                     select_current_set(aggstate, setno, true);
+#ifdef __TBASE__
+					if (g_hybrid_hash_agg)
+					{
+						AggStatePerHash perhash = &aggstate->perhash[aggstate->current_set];
 
+						if (perhash->hashtable->hybrid)
+						{
+							aggstate->curaggcontext->ecxt_per_tuple_memory = perhash->hashtable->hybridcxt;
+						}
+					}
+#endif
                     pergroupstate = &pergroups[setno][transno];
 
                     advance_transition_function(aggstate, pertrans, pergroupstate);
@@ -1120,6 +1157,21 @@ combine_aggregates(AggState *aggstate, AggStatePerGroup pergroup)
 
     /* combine not supported with grouping sets */
     Assert(aggstate->phase->numsets <= 1);
+
+#ifdef __TBASE__
+	if (g_hybrid_hash_agg)
+	{	
+		if (aggstate->perhash)
+		{
+			AggStatePerHash perhash = &aggstate->perhash[0];
+
+			if (perhash->hashtable->hybrid)
+			{
+				aggstate->curaggcontext->ecxt_per_tuple_memory = perhash->hashtable->hybridcxt;
+			}
+		}
+	}
+#endif
 
     /* compute input for all aggregates */
     slot = ExecProject(aggstate->evalproj);
@@ -1889,6 +1941,20 @@ build_hash_table(AggState *aggstate)
                                                  aggstate->hashcontext->ecxt_per_tuple_memory,
                                                  tmpmem,
                                                  DO_AGGSPLIT_SKIPFINAL(aggstate->aggsplit));
+#ifdef __TBASE__
+		if (perhash->aggnode->hybrid)
+		{
+			/* set entry size of each hashtable */
+			perhash->hashtable->actual_entrysize = perhash->aggnode->entrySize;
+
+			/* 
+			 * recalculate the max buckets fit in memory and 
+			 * number of batch files
+			 */
+			OptimizeHybridHashtableSize(perhash->hashtable, perhash->aggnode->entrySize, 
+				                        perhash->aggnode->numGroups);
+		}
+#endif
     }
 }
 
@@ -2061,11 +2127,58 @@ lookup_hash_entry(AggState *aggstate)
     /* find or create the hashtable entry using the filtered tuple */
     entry = LookupTupleHashEntry(perhash->hashtable, hashslot, &isnew);
 
+#ifdef __TBASE__
+	if (perhash->hashtable->hybrid)
+	{
+		/* use our own context */
+		aggstate->curaggcontext->ecxt_per_tuple_memory = perhash->hashtable->hybridcxt;
+		
+		/*
+		 * hashtable is full, dump the hashtable, then reuse
+		 */
+		if (!entry)
+		{
+			/* dump hashtable */
+			DumpHybridHashtable(aggstate, perhash->hashtable);
+
+			/* find or create the hashtable entry using the filtered tuple */
+			entry = LookupTupleHashEntry(perhash->hashtable, hashslot, &isnew);
+
+			if (!entry)
+			{
+				elog(ERROR, "could not find entry in hybrid-hashtable");
+			}
+		}
+	}
+	else
+	{
+		if (!entry)
+		{
+			elog(ERROR, "could not find entry in hashtable");
+		}
+	}
+#endif
+
     if (isnew)
     {
+#ifdef __TBASE__
+		if (perhash->hashtable->hybrid)
+		{
+			entry->additional = (AggStatePerGroup)
+				MemoryContextAlloc(perhash->hashtable->hybridcxt,
+								   sizeof(AggStatePerGroupData) * aggstate->numtrans);
+		}
+		else
+		{
+			entry->additional = (AggStatePerGroup)
+				MemoryContextAlloc(perhash->hashtable->tablecxt,
+								   sizeof(AggStatePerGroupData) * aggstate->numtrans);
+		}
+#else
         entry->additional = (AggStatePerGroup)
             MemoryContextAlloc(perhash->hashtable->tablecxt,
                                sizeof(AggStatePerGroupData) * aggstate->numtrans);
+#endif
         /* initialize aggregates for new tuple group */
         initialize_aggregates(aggstate, (AggStatePerGroup) entry->additional,
                               -1);
@@ -2095,6 +2208,781 @@ lookup_hash_entries(AggState *aggstate)
 
     return pergroup;
 }
+
+#ifdef __TBASE__
+static void
+dump_hashtable_if_spilled(AggState *aggstate)
+{
+	int			setno;
+	int			numHashes = aggstate->num_hashes;
+
+	for (setno = 0; setno < numHashes; setno++)
+	{
+		AggStatePerHash perhash = &aggstate->perhash[setno];
+
+		if (perhash->hashtable->spilled)
+		{
+			DumpHybridHashtable(aggstate, perhash->hashtable);
+
+			LoadHybridHashtable(aggstate, perhash->hashtable, &perhash->hashiter);
+		}
+	}
+}
+
+static bool
+HybridHashtableLoadDone(TupleHashTable hashtable)
+{
+	bool result = true;
+	
+	if (hashtable->spilled)
+	{
+		SpillSet *spill_set = hashtable->spill_set;
+
+		result = false;
+		
+		if (!spill_set || (spill_set->current_file >= spill_set->num_files && !spill_set->parent_spill_set))
+		{
+			result = true;
+		}
+
+		if (!result)
+		{
+			ResetHybridHashtable(hashtable);
+		}
+	}
+
+	return result;
+}
+
+/* 
+ * get max number of buckets of hashtable in memory.
+ * If not all fit in memory, get the batch file's number.
+ */
+void
+OptimizeHybridHashtableSize(TupleHashTable hashtable, uint32 entrySize, double numGroups)
+{
+	double nbatches = 0;
+	double nentries = 0;
+	long max_mem = work_mem * 1024L;
+
+	/* not all tuples fit in memory */
+	if (max_mem <= entrySize * numGroups)
+	{
+		nentries = ceil(max_mem/entrySize);
+		nbatches = ceil(numGroups/nentries);
+	}
+	else
+	{
+		nentries = ceil(max_mem/entrySize);
+	}
+
+	nbatches = g_default_hashagg_nbatches;
+
+	hashtable->nbatches = (int)nbatches;
+	hashtable->spilled = false;
+	hashtable->spill_set = NULL;
+	hashtable->nentries = (uint32)nentries;
+
+	tuplehash_set_hybrid(hashtable->hashtab, nentries, nbatches, true);
+
+	hashtable->hybridcxt = AllocSetContextCreate(hashtable->tablecxt,
+											     "HybridContext",
+												 ALLOCSET_DEFAULT_SIZES);
+
+	hashtable->hybrid = true;
+	
+	if (g_hybrid_hash_agg_debug)
+	{
+		elog(LOG, "Hybrid-hashagg hashtable details: max_entries %u, nbatches %d, entry_size %u, max_mem %ld",
+			      hashtable->nentries, hashtable->nbatches, entrySize, max_mem);
+	}
+}
+
+/*
+ * hashtable is full, write the hashtable into files, then reuse it
+ */
+void
+DumpHybridHashtable(AggState *aggstate, TupleHashTable hashtable)
+{
+	int spill_file_index = 0;
+	TupleHashIterator hashiter;
+	MemoryContext old = NULL;
+	MemoryContext temp = NULL;
+	TupleHashEntryData *entry = NULL;
+	SpillSet *spill_set = NULL;
+
+	/* prepare the spillset for write first time */
+	if (!hashtable->spilled)
+	{
+		hashtable->spilled = true;
+
+		old = MemoryContextSwitchTo(hashtable->tablecxt);
+
+		hashtable->spill_set = (SpillSet *)palloc(sizeof(SpillSet));
+
+		hashtable->spill_set->level = 0;
+		hashtable->spill_set->num_files = hashtable->nbatches;
+		hashtable->spill_set->parent_index = -1;
+		hashtable->spill_set->parent_spill_set = NULL;
+		hashtable->spill_set->current_file = 0;
+		hashtable->spill_set->spill_file = (SpillFile **)palloc0(sizeof(SpillFile *) * hashtable->nbatches);
+
+		MemoryContextSwitchTo(old);
+
+		if (g_hybrid_hash_agg_debug)
+		{
+			elog(LOG, "hybrid hashtable spilled: level %d, num_files %d, parent_index %d",
+				       hashtable->spill_set->level, hashtable->spill_set->num_files,
+				       hashtable->spill_set->parent_index);
+		}
+	}
+	/* write hashtable out */
+	spill_set = hashtable->spill_set;
+
+	temp = MemoryContextSwitchTo(hashtable->hybridcxt);
+	
+	InitTupleHashIterator(hashtable, &hashiter);
+
+	entry = ScanTupleHashTable(hashtable, &hashiter);
+
+	while (entry)
+	{
+		Size total_size = 0;
+		Size write_len = 0;
+		SpillFile *spill_file = NULL;
+		uint32 hash = entry->hash;
+		Datum *trans_values = NULL;
+		/* 
+		 * FIXME: we use mod to get the batch index, any other ways to 
+		 * make tuples balance in batch files
+		 */
+		spill_file_index = hash % hashtable->nbatches;
+
+		if (!spill_set->spill_file[spill_file_index])
+		{
+			old = MemoryContextSwitchTo(hashtable->tablecxt);
+			
+			spill_set->spill_file[spill_file_index] = (SpillFile *)palloc(sizeof(SpillFile));
+
+			spill_set->spill_file[spill_file_index]->ntups_read = 0;
+			spill_set->spill_file[spill_file_index]->ntups_write = 0;
+			spill_set->spill_file[spill_file_index]->spilled = false;
+			spill_set->spill_file[spill_file_index]->child_spill_set = NULL;
+			spill_set->spill_file[spill_file_index]->file = BufFileCreateTemp(false);
+
+			MemoryContextSwitchTo(old);
+		}
+
+		spill_file = spill_set->spill_file[spill_file_index];
+
+		if (BufFileWrite(spill_file->file, (void *)&hash, sizeof(hash)) != sizeof(hash))
+		{
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("DumpHybridHashtable:could not write hash key to bufFile temporary file: %m")));
+		}
+
+		total_size = entry->firstTuple->t_len;
+
+		if (aggstate->numtrans > 0)
+		{
+			int aggno;
+			Size size = sizeof(AggStatePerGroupData) * aggstate->numtrans;
+			AggStatePerGroup groupstate = (AggStatePerGroup)entry->additional;
+			AggStatePerTrans transstates = aggstate->pertrans;
+
+			total_size += size;
+			
+			for (aggno = 0; aggno < aggstate->numtrans; aggno++)
+			{
+				AggStatePerTrans pertrans = &transstates[aggno];
+				AggStatePerGroup pergroupstate = &groupstate[aggno];
+
+				if (!pergroupstate->transValueIsNull)
+				{
+					if (!pertrans->transtypeByVal)
+					{
+						Size datum_size = datumGetSize(pergroupstate->transValue,
+													   pertrans->transtypeByVal,
+													   pertrans->transtypeLen);
+
+						total_size += datum_size;
+					}
+					/* internal type or const */
+					else
+					{
+						if (pertrans->aggtranstype == INTERNALOID)
+						{
+							FunctionCallInfo fcinfo = &pertrans->serial_func_fcinfo;
+							
+							if (!OidIsValid(pertrans->serial_func_id))
+							{
+								elog(ERROR, "could not serialize the transition value");
+							}
+
+							if (!trans_values)
+							{
+								trans_values = (Datum *)palloc0(sizeof(Datum) * aggstate->numtrans);
+							}
+
+							fcinfo->arg[0] = MakeExpandedObjectReadOnly(pergroupstate->transValue,
+																		pergroupstate->transValueIsNull,
+																		pertrans->transtypeLen);
+							fcinfo->argnull[0] = pergroupstate->transValueIsNull;
+
+							trans_values[aggno] = FunctionCallInvoke(fcinfo);
+
+							total_size += VARSIZE_ANY(trans_values[aggno]);
+						}
+					}
+				}
+			}
+		}
+
+		if (BufFileWrite(spill_file->file, (void *)&total_size, sizeof(total_size)) != sizeof(total_size))
+		{
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("DumpHybridHashtable:could not write total size to bufFile temporary file: %m")));
+		}
+		
+		if (BufFileWrite(spill_file->file, (char *)entry->firstTuple, entry->firstTuple->t_len) != entry->firstTuple->t_len)
+		{
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("DumpHybridHashtable:could not write MinimalTuple to bufFile temporary file: %m")));
+		}
+
+		write_len += entry->firstTuple->t_len;
+
+		if (aggstate->numtrans > 0)
+		{
+			int aggno;
+			Size size = sizeof(AggStatePerGroupData) * aggstate->numtrans;
+			AggStatePerGroup groupstate = (AggStatePerGroup)entry->additional;
+			AggStatePerTrans transstates = aggstate->pertrans;
+
+			if (BufFileWrite(spill_file->file, (char *)entry->additional, size) != size)
+			{
+				ereport(ERROR,
+						(errcode_for_file_access(),
+						 errmsg("DumpHybridHashtable:could not write AggStatePerGroupData to bufFile temporary file: %m")));
+			}
+
+			write_len += size;
+
+			for (aggno = 0; aggno < aggstate->numtrans; aggno++)
+			{
+				AggStatePerTrans pertrans = &transstates[aggno];
+				AggStatePerGroup pergroupstate = &groupstate[aggno];
+
+				if (!pergroupstate->transValueIsNull)
+				{
+					if (!pertrans->transtypeByVal)
+					{
+						Size datum_size = datumGetSize(pergroupstate->transValue,
+													   pertrans->transtypeByVal,
+													   pertrans->transtypeLen);
+
+						
+						if (BufFileWrite(spill_file->file, DatumGetPointer(pergroupstate->transValue), datum_size) != datum_size)
+						{
+							ereport(ERROR,
+									(errcode_for_file_access(),
+									 errmsg("DumpHybridHashtable:could not write transValue to bufFile temporary file: %m")));
+						}
+
+						write_len += datum_size;
+					}
+					/* internal type or const */
+					else
+					{
+						if (pertrans->aggtranstype == INTERNALOID)
+						{
+							Size datum_size = VARSIZE_ANY(trans_values[aggno]);
+
+							if (BufFileWrite(spill_file->file, DatumGetPointer(trans_values[aggno]), datum_size) != datum_size)
+							{
+								ereport(ERROR,
+										(errcode_for_file_access(),
+										 errmsg("DumpHybridHashtable:could not write transValue to bufFile temporary file: %m")));
+							}
+
+							write_len += datum_size;
+
+							/* need to free memory allocated for internal type */
+							//pfree(trans_values[aggno]); /* assume that won't occupy much memory, reset will handle it */
+							trans_values[aggno] = PointerGetDatum(NULL);
+						}
+					}
+				}
+			}
+		}
+
+		if (write_len != total_size)
+		{
+			elog(ERROR, "DumpHybridHashtable: write_len %lu does not match total_size %lu",
+				         write_len, total_size);
+		}
+
+		spill_file->ntups_write++;
+		
+		entry = ScanTupleHashTable(hashtable, &hashiter);
+	}
+
+	MemoryContextSwitchTo(temp);
+		
+	/* reset hashtable */
+	tuplehash_reset(hashtable->hashtab);
+
+	/* reset memorycontext for hashtable contents */
+	MemoryContextReset(hashtable->hybridcxt);
+}
+
+static void
+combine_transition(AggState *aggstate,
+						 AggStatePerTrans pertrans,
+						 AggStatePerGroup pergroupstate)
+{
+	FunctionCallInfo fcinfo = &pertrans->combfn_fcinfo;
+	MemoryContext oldContext;
+	Datum		newVal;
+
+	if (pertrans->combfn.fn_strict)
+	{
+		/* if we're asked to merge to a NULL state, then do nothing */
+		if (fcinfo->argnull[1])
+			return;
+		/* we always have value */
+#if 0
+		if (pergroupstate->noTransValue)
+		{
+			/*
+			 * transValue has not yet been initialized.  If pass-by-ref
+			 * datatype we must copy the combining state value into
+			 * aggcontext.
+			 */
+			if (!pertrans->transtypeByVal)
+			{
+				oldContext = MemoryContextSwitchTo(
+												   aggstate->curaggcontext->ecxt_per_tuple_memory);
+				pergroupstate->transValue = datumCopy(fcinfo->arg[1],
+													  pertrans->transtypeByVal,
+													  pertrans->transtypeLen);
+				MemoryContextSwitchTo(oldContext);
+			}
+			else
+				pergroupstate->transValue = fcinfo->arg[1];
+
+			pergroupstate->transValueIsNull = false;
+			pergroupstate->noTransValue = false;
+			return;
+		}
+#endif
+	}
+
+	/* We run the combine functions in per-input-tuple memory context */
+	oldContext = MemoryContextSwitchTo(aggstate->tmpcontext->ecxt_per_tuple_memory);
+
+	/* set up aggstate->curpertrans for AggGetAggref() */
+	aggstate->curpertrans = pertrans;
+
+	/*
+	 * OK to call the combine function
+	 */
+	fcinfo->arg[0] = pergroupstate->transValue;
+	fcinfo->argnull[0] = pergroupstate->transValueIsNull;
+	fcinfo->isnull = false;		/* just in case combine func doesn't set it */
+
+	newVal = FunctionCallInvoke(fcinfo);
+
+	aggstate->curpertrans = NULL;
+
+	/*
+	 * If pass-by-ref datatype, must copy the new value into aggcontext and
+	 * free the prior transValue.  But if the combine function returned a
+	 * pointer to its first input, we don't need to do anything.  Also, if the
+	 * combine function returned a pointer to a R/W expanded object that is
+	 * already a child of the aggcontext, assume we can adopt that value
+	 * without copying it.
+	 */
+	if (!pertrans->transtypeByVal &&
+		DatumGetPointer(newVal) != DatumGetPointer(pergroupstate->transValue))
+	{
+		if (!fcinfo->isnull)
+		{
+			MemoryContextSwitchTo(aggstate->curaggcontext->ecxt_per_tuple_memory);
+			if (DatumIsReadWriteExpandedObject(newVal,
+											   false,
+											   pertrans->transtypeLen) &&
+				MemoryContextGetParent(DatumGetEOHP(newVal)->eoh_context) == CurrentMemoryContext)
+				 /* do nothing */ ;
+			else
+				newVal = datumCopy(newVal,
+								   pertrans->transtypeByVal,
+								   pertrans->transtypeLen);
+		}
+		if (!pergroupstate->transValueIsNull)
+		{
+			if (DatumIsReadWriteExpandedObject(pergroupstate->transValue,
+											   false,
+											   pertrans->transtypeLen))
+				DeleteExpandedObject(pergroupstate->transValue);
+			//else
+				//pfree(DatumGetPointer(pergroupstate->transValue));
+		}
+	}
+
+	pergroupstate->transValue = newVal;
+	pergroupstate->transValueIsNull = fcinfo->isnull;
+
+	MemoryContextSwitchTo(oldContext);
+}
+
+void
+LoadHybridHashtable(AggState *aggstate, TupleHashTable hashtable, TupleHashIterator *hashiter)
+{
+RETRY:
+	if (hashtable->spilled)
+	{
+		SpillSet *spill_set = hashtable->spill_set;
+
+		if (spill_set)
+		{
+			if (spill_set->current_file < spill_set->num_files)
+			{
+				bool found = false;
+				Size total_size = 0;
+				char *buffer = NULL;
+				uint32 hashkey = 0;
+				size_t ret = 0;
+				MemoryContext old = NULL;
+				MinimalTuple tuple = NULL;
+				TupleHashEntryData *entry;
+				SpillFile *spill_file = spill_set->spill_file[spill_set->current_file];
+
+				spill_set->current_file++;
+
+				/* get readable file */
+				while (!spill_file)
+				{
+					if (spill_set->current_file >= spill_set->num_files)
+					{
+						hashtable->spill_set = (SpillSet *)spill_set->parent_spill_set;
+						goto RETRY;
+					}
+						
+					spill_file = spill_set->spill_file[spill_set->current_file];
+
+					spill_set->current_file++;
+				}
+
+				aggstate->curaggcontext->ecxt_per_tuple_memory = hashtable->hybridcxt;
+
+				if (BufFileSeek(spill_file->file, 0, 0L, SEEK_SET))
+				{
+					ereport(ERROR,
+							(errcode_for_file_access(),
+							 errmsg("could not rewind hybrid-hashtable temporary file: %m")));
+				}
+					
+				/* read all */
+				while (true)
+				{
+					ret = BufFileRead(spill_file->file, (void *)&hashkey, sizeof(hashkey));
+					if (ret == 0)
+					{
+						/* read done */
+						BufFileClose(spill_file->file);
+
+						/* sanity check */
+						if (spill_file->ntups_read != spill_file->ntups_write)
+						{
+							elog(ERROR, "data corrupted in spill file, read tups %u, write tups %u",
+								         spill_file->ntups_read, spill_file->ntups_write);
+						}
+
+						if (spill_file->spilled)
+						{
+							hashtable->spill_set = (SpillSet *)spill_file->child_spill_set;
+						}
+
+						InitTupleHashIterator(hashtable, hashiter);
+						break;
+					}
+					if (ret != sizeof(hashkey))
+					{
+						ereport(ERROR,
+							(errcode_for_file_access(),
+							 errmsg("LoadHybridHashtable:could not read hash key from bufFile temporary file: %m")));
+					}
+										
+					if (BufFileRead(spill_file->file, (void *)&total_size, sizeof(total_size)) != sizeof(total_size))
+					{
+						ereport(ERROR,
+							(errcode_for_file_access(),
+							 errmsg("LoadHybridHashtable:could not read total size from bufFile temporary file: %m")));
+					}
+
+					buffer = (char *)MemoryContextAlloc(hashtable->hybridcxt, total_size);
+
+					if (BufFileRead(spill_file->file, buffer, total_size) != total_size)
+					{
+						ereport(ERROR,
+							(errcode_for_file_access(),
+							 errmsg("LoadHybridHashtable:could not read PerGroupData from bufFile temporary file: %m")));
+					}
+
+					spill_file->ntups_read++;
+
+					tuple = (MinimalTuple)buffer;
+
+					buffer = buffer + tuple->t_len;
+
+					MemoryContextReset(hashtable->tempcxt);
+
+					old = MemoryContextSwitchTo(hashtable->tempcxt);
+
+					ExecStoreMinimalTuple(tuple, hashtable->inputslot, false);
+
+					entry = tuplehash_insert_with_key(hashtable->hashtab, tuple, &found, hashkey);
+
+					if (found)
+					{
+						/* merge */
+						if (aggstate->numtrans > 0)
+						{
+							int aggno;
+							Size datum_size = 0;
+
+							AggStatePerGroup pergroup = (AggStatePerGroup)entry->additional;
+							AggStatePerGroup merge_pergroup = (AggStatePerGroup)buffer;
+							buffer = buffer + (sizeof(AggStatePerGroupData) * aggstate->numtrans);
+							
+							for (aggno = 0; aggno < aggstate->numtrans; aggno++)
+							{
+								AggStatePerTrans pertrans = &aggstate->pertrans[aggno];
+								AggStatePerGroup pergroupstate = &pergroup[aggno];
+								AggStatePerGroup merge_pergroupstate = &merge_pergroup[aggno];
+								FunctionCallInfo fcinfo = &pertrans->combfn_fcinfo;
+
+								if (!merge_pergroupstate->transValueIsNull)
+								{
+									if (!pertrans->transtypeByVal)
+									{
+										merge_pergroupstate->transValue = PointerGetDatum(buffer);
+										
+										datum_size = datumGetSize(merge_pergroupstate->transValue,
+																   pertrans->transtypeByVal,
+																   pertrans->transtypeLen);
+										buffer = buffer + datum_size;
+									}
+									else
+									{
+										if (pertrans->aggtranstype == INTERNALOID)
+										{
+											FunctionCallInfo dsinfo = &pertrans->deserial_func_fcinfo;
+											
+											if (!OidIsValid(pertrans->deserial_func_id))
+											{
+												elog(ERROR, "could not deserial transition value");
+											}
+
+											dsinfo->arg[0] = PointerGetDatum(buffer);;
+											dsinfo->argnull[0] = false;
+											/* Dummy second argument for type-safety reasons */
+											dsinfo->arg[1] = PointerGetDatum(NULL);
+											dsinfo->argnull[1] = false;
+
+											datum_size = VARSIZE_ANY(dsinfo->arg[0]);
+
+											merge_pergroupstate->transValue = FunctionCallInvoke(dsinfo);
+
+											buffer = buffer + datum_size;
+										}
+									}
+								}
+
+								fcinfo->arg[1] = merge_pergroupstate->transValue;
+								fcinfo->argnull[1] = merge_pergroupstate->transValueIsNull;
+
+								combine_transition(aggstate, pertrans, pergroupstate);
+							}
+						}
+
+						pfree((void *)tuple);
+					}
+					else
+					{
+						if (!entry)
+						{
+							/* dump hashtable */
+							int file_index = 0;
+							SpillFile *sfile = NULL;
+							SpillSet *spillset = NULL;
+
+							if (!spill_file->spilled)
+							{
+								MemoryContext temp = MemoryContextSwitchTo(hashtable->tablecxt);
+								
+								spillset = (SpillSet *)palloc(sizeof(SpillSet));
+								
+								spill_file->spilled = true;
+								spill_file->child_spill_set = (void *)spillset;
+
+								spillset->current_file = 0;
+								spillset->level = spill_set->level + 1;
+								spillset->num_files = spill_set->num_files + 1;
+								spillset->parent_index = spill_set->current_file;
+								spillset->parent_spill_set = (void *)spill_set;
+								spillset->spill_file = (SpillFile **)palloc0(sizeof(SpillFile *) * spillset->num_files);
+
+								MemoryContextSwitchTo(temp);
+
+								if (g_hybrid_hash_agg_debug)
+								{
+									elog(LOG, "spill file into new set: level %d, num files %d", spillset->level, spillset->num_files);
+								}
+							}
+
+							spillset = (SpillSet *)spill_file->child_spill_set;
+
+							file_index = hashkey % spillset->num_files;
+
+							if (!spillset->spill_file[file_index])
+							{
+								MemoryContext temp = MemoryContextSwitchTo(hashtable->tablecxt);
+								
+								spillset->spill_file[file_index] = (SpillFile *)palloc(sizeof(SpillFile));
+
+								spillset->spill_file[file_index]->ntups_read = 0;
+								spillset->spill_file[file_index]->ntups_write = 0;
+								spillset->spill_file[file_index]->spilled = false;
+								spillset->spill_file[file_index]->child_spill_set = NULL;
+								spillset->spill_file[file_index]->file = BufFileCreateTemp(false);
+
+								MemoryContextSwitchTo(temp);
+							}
+
+							sfile = spillset->spill_file[file_index];
+
+							if (BufFileWrite(sfile->file, (void *)&hashkey, sizeof(hashkey)) != sizeof(hashkey))
+							{
+								ereport(ERROR,
+										(errcode_for_file_access(),
+										 errmsg("LoadHybridHashtable:could not write hash key to bufFile temporary file: %m")));
+							}
+
+							if (BufFileWrite(sfile->file, (void *)&total_size, sizeof(total_size)) != sizeof(total_size))
+							{
+								ereport(ERROR,
+										(errcode_for_file_access(),
+										 errmsg("LoadHybridHashtable:could not write total size to bufFile temporary file: %m")));
+							}
+
+							if (BufFileWrite(sfile->file, (void *)tuple, total_size) != total_size)
+							{
+								ereport(ERROR,
+										(errcode_for_file_access(),
+										 errmsg("LoadHybridHashtable:could not write buffer to bufFile temporary file: %m")));
+							}
+
+							sfile->ntups_write++;
+
+							pfree((void *)tuple);
+						}
+						else
+						{
+							/* new entry */
+							entry->firstTuple = tuple;
+
+							if (aggstate->numtrans > 0)
+							{
+								int aggno;
+								Size datum_size = 0;
+								AggStatePerGroup groupstate = NULL;
+								AggStatePerTrans transstates = aggstate->pertrans;
+
+								entry->additional = (AggStatePerGroup)buffer;
+
+								groupstate = (AggStatePerGroup)entry->additional;
+
+								buffer = buffer + (sizeof(AggStatePerGroupData) * aggstate->numtrans);
+
+								for (aggno = 0; aggno < aggstate->numtrans; aggno++)
+								{
+									AggStatePerTrans pertrans = &transstates[aggno];
+									AggStatePerGroup pergroupstate = &groupstate[aggno];
+
+									if (!pergroupstate->transValueIsNull)
+									{
+										if (!pertrans->transtypeByVal)
+										{
+											pergroupstate->transValue = PointerGetDatum(buffer);
+											
+											datum_size = datumGetSize(pergroupstate->transValue,
+																	   pertrans->transtypeByVal,
+																	   pertrans->transtypeLen);
+											buffer = buffer + datum_size;
+										}
+										else /* internal type or const */
+										{
+											if (pertrans->aggtranstype == INTERNALOID)
+											{
+												MemoryContext oldContext;
+												FunctionCallInfo dsinfo = &pertrans->deserial_func_fcinfo;
+												
+												if (!OidIsValid(pertrans->deserial_func_id))
+												{
+													elog(ERROR, "could not deserial transition value");
+												}
+
+												dsinfo->arg[0] = PointerGetDatum(buffer);;
+												dsinfo->argnull[0] = false;
+												/* Dummy second argument for type-safety reasons */
+												dsinfo->arg[1] = PointerGetDatum(NULL);
+												dsinfo->argnull[1] = false;
+
+												datum_size = VARSIZE_ANY(dsinfo->arg[0]);
+													
+												oldContext = MemoryContextSwitchTo(hashtable->hybridcxt);
+
+												pergroupstate->transValue = FunctionCallInvoke(dsinfo);
+
+												MemoryContextSwitchTo(oldContext);
+
+												buffer = buffer + datum_size;
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+
+					MemoryContextSwitchTo(old);
+				}
+			}
+			else
+			{
+				hashtable->spill_set = (SpillSet *)spill_set->parent_spill_set;
+				goto RETRY;
+			}
+		}
+	}
+}
+
+void
+ResetHybridHashtable(TupleHashTable hashtable)
+{
+	/* reset hashtable */
+	tuplehash_reset(hashtable->hashtab);
+
+	/* reset memorycontext for hashtable contents */
+	MemoryContextReset(hashtable->hybridcxt);
+}
+
+#endif
 
 /*
  * ExecAgg -
@@ -2424,6 +3312,12 @@ agg_retrieve_direct(AggState *aggstate)
                     outerslot = fetch_input_tuple(aggstate);
                     if (TupIsNull(outerslot))
                     {
+#ifdef __TBASE__
+						if (g_hybrid_hash_agg)
+						{
+							dump_hashtable_if_spilled(aggstate);
+						}
+#endif
                         /* no more outer-plan tuples available */
                         if (hasGroupingSets)
                         {
@@ -2619,11 +3513,20 @@ agg_fill_hash_table(AggState *aggstate)
                 /* close buffile */
                 ExecDropSingleTupleTableSlot(aggstate->dataslot);
                 aggstate->dataslot = NULL;
+
+				if (g_hybrid_hash_agg)
+				{
+					dump_hashtable_if_spilled(aggstate);
+				}			
                 break;
             }
             else
             {
 #endif
+				if (g_hybrid_hash_agg)
+				{
+					dump_hashtable_if_spilled(aggstate);
+				}
             break;
 #ifdef __TBASE__
             }
@@ -2670,8 +3573,16 @@ agg_fill_hash_table(AggState *aggstate)
     aggstate->table_filled = true;
     /* Initialize to walk the first hash table */
     select_current_set(aggstate, 0, true);
+#ifdef __TBASE__
+	if (!aggstate->perhash[0].hashtable->spilled)
+	{
+		ResetTupleHashIterator(aggstate->perhash[0].hashtable,
+						   &aggstate->perhash[0].hashiter);
+	}
+#else
     ResetTupleHashIterator(aggstate->perhash[0].hashtable,
                            &aggstate->perhash[0].hashiter);
+#endif
 }
 
 /*
@@ -2721,6 +3632,17 @@ agg_retrieve_hash_table(AggState *aggstate)
         if (entry == NULL)
         {
             int            nextset = aggstate->current_set + 1;
+
+#ifdef __TBASE__
+			if (perhash->hashtable->hybrid)
+			{
+				if (!HybridHashtableLoadDone(perhash->hashtable))
+				{
+					LoadHybridHashtable(aggstate, perhash->hashtable, &perhash->hashiter);
+					continue;
+				}
+			}
+#endif
 
             if (nextset < aggstate->num_hashes)
             {
@@ -3252,6 +4174,11 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
         Datum        textInitVal;
         Datum        initValue;
         bool        initValueIsNull;
+#ifdef __TBASE__
+		Oid         combfn_oid;
+		Oid         serial_func;
+		Oid         deserial_func;
+#endif
 
         /* Planner should have assigned aggregate to correct level */
         Assert(aggref->agglevelsup == 0);
@@ -3310,6 +4237,12 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
         }
         else
             transfn_oid = aggform->aggtransfn;
+
+#ifdef __TBASE__
+		combfn_oid = aggform->aggcombinefn;
+		serial_func = aggform->aggserialfn;
+		deserial_func = aggform->aggdeserialfn;
+#endif
 
         /* Final function only required if we're finalizing the aggregates */
         if (DO_AGGSPLIT_SKIPFINAL(aggstate->aggsplit))
@@ -3482,6 +4415,108 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
                                       initValue, initValueIsNull,
                                       inputTypes, numArguments);
             peragg->transno = transno;
+
+#ifdef __TBASE__
+			pertrans->serial_func_id = InvalidOid;
+			pertrans->deserial_func_id = InvalidOid;
+			if (g_hybrid_hash_agg)
+			{
+				if (OidIsValid(combfn_oid))
+				{
+					Expr	   *combinefnexpr;
+
+					build_aggregate_combinefn_expr(aggtranstype,
+												   aggref->inputcollid,
+												   combfn_oid,
+												   &combinefnexpr);
+					fmgr_info(combfn_oid, &pertrans->combfn);
+					fmgr_info_set_expr((Node *) combinefnexpr, &pertrans->combfn);
+
+					InitFunctionCallInfoData(pertrans->combfn_fcinfo,
+											 &pertrans->combfn,
+											 2,
+											 pertrans->aggCollation,
+											 (void *) aggstate, NULL);
+
+					/*
+					 * Ensure that a combine function to combine INTERNAL states is not
+					 * strict. This should have been checked during CREATE AGGREGATE, but
+					 * the strict property could have been changed since then.
+					 */
+					if (pertrans->combfn.fn_strict && aggtranstype == INTERNALOID)
+						ereport(ERROR,
+								(errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+								 errmsg("combine function for aggregate %u must be declared as STRICT",
+										aggref->aggfnoid)));
+				}
+				else
+				{
+					if (use_hashing)
+					{
+						int i = 0;
+						
+						for (i = 0; i < aggstate->num_hashes; i++)
+						{
+							AggStatePerHash perhash = &aggstate->perhash[i];
+
+							perhash->hashtable->hybrid = false;
+
+							tuplehash_set_hybrid(perhash->hashtable->hashtab, 0, 0, false);
+						}
+					}
+				}
+
+				if (aggtranstype == INTERNALOID)
+				{
+					if (!OidIsValid(serial_func) || !OidIsValid(deserial_func))
+					{
+						if (use_hashing)
+						{
+							int i = 0;
+							
+							for (i = 0; i < aggstate->num_hashes; i++)
+							{
+								AggStatePerHash perhash = &aggstate->perhash[i];
+
+								perhash->hashtable->hybrid = false;
+
+								tuplehash_set_hybrid(perhash->hashtable->hashtab, 0, 0, false);
+							}
+						}
+					}
+					else
+					{
+						Expr	   *serialfnexpr = NULL;
+						Expr	   *deserialfnexpr = NULL;
+
+						pertrans->serial_func_id = serial_func;
+						pertrans->deserial_func_id = deserial_func;
+
+						build_aggregate_serialfn_expr(serial_func,
+							  &serialfnexpr);
+						fmgr_info(serial_func, &pertrans->serial_func);
+						fmgr_info_set_expr((Node *) serialfnexpr, &pertrans->serial_func);
+
+						InitFunctionCallInfoData(pertrans->serial_func_fcinfo,
+												 &pertrans->serial_func,
+												 1,
+												 InvalidOid,
+												 (void *) aggstate, NULL);
+
+						build_aggregate_deserialfn_expr(deserial_func,
+														&deserialfnexpr);
+						fmgr_info(deserial_func, &pertrans->deserial_func);
+						fmgr_info_set_expr((Node *) deserialfnexpr, &pertrans->deserial_func);
+
+						InitFunctionCallInfoData(pertrans->deserial_func_fcinfo,
+												 &pertrans->deserial_func,
+												 2,
+												 InvalidOid,
+												 (void *) aggstate, NULL);
+					}
+				}
+			}
+#endif
         }
         ReleaseSysCache(aggTuple);
     }

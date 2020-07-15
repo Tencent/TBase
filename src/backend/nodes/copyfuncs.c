@@ -1043,6 +1043,10 @@ _copyAgg(const Agg *from)
     COPY_BITMAPSET_FIELD(aggParams);
     COPY_NODE_FIELD(groupingSets);
     COPY_NODE_FIELD(chain);
+#ifdef __TBASE__
+	COPY_SCALAR_FIELD(entrySize);
+	COPY_SCALAR_FIELD(hybrid);
+#endif
 
     return newnode;
 }
@@ -4120,6 +4124,7 @@ _copyVacuumShardStmt(const VacuumShardStmt *from)
 
     return newnode;
 }
+
 #endif
 
 static ExplainStmt *
@@ -4863,6 +4868,18 @@ _copyPartitionBy(const PartitionBy *from)
 
     return newnode;
 }
+
+static SampleStmt *
+_copySampleStmt(const SampleStmt *from)
+{
+	SampleStmt *newnode = makeNode(SampleStmt);
+
+	COPY_NODE_FIELD(relation);
+	COPY_SCALAR_FIELD(rownum);
+
+	return newnode;
+}
+
 
 static AddDropPartitions *
 _copyAddDropPartitions(const AddDropPartitions *from)
@@ -6256,6 +6273,9 @@ copyObjectImpl(const void *from)
             retval = _copyCheckOverLapStmt(from);
             break;
 #endif
+	    case T_SampleStmt:
+	        retval = _copySampleStmt(from);
+	        break;
         default:
             elog(ERROR, "unrecognized node type: %d", (int) nodeTag(from));
             retval = 0;            /* keep compiler quiet */

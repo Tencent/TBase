@@ -1819,11 +1819,13 @@ retry:
         {
             elog(ERROR, "shard map in share memory has not been initialized yet.");
         }
-        
+		LWLockAcquire(ShardMapLock, LW_SHARED);	
         if(bms_is_member(tuple->t_shardid, g_DatanodeShardgroupBitmap))
         {
+			LWLockRelease(ShardMapLock);
             return false;
         }
+		LWLockRelease(ShardMapLock);
     }
 
     if (!HeapTupleHeaderXminCommitted(tuple))
@@ -2303,11 +2305,13 @@ HeapTupleSatisfiesUnshard(HeapTuple htup, Snapshot snapshot, Buffer buffer)
         {
             elog(ERROR, "shard map in share memory has not been initialized yet.");
         }
-        
+		LWLockAcquire(ShardMapLock, LW_SHARED);	
         if(bms_is_member(tuple->t_shardid, g_DatanodeShardgroupBitmap))
         {
+			LWLockRelease(ShardMapLock);
             return false;
         }
+		LWLockRelease(ShardMapLock);
     }
 
     if (!HeapTupleHeaderXminCommitted(tuple))
@@ -3814,15 +3818,9 @@ XidInMVCCSnapshotDistri(HeapTupleHeader tuple, TransactionId xid, Snapshot snaps
                 lock_type = BUFFER_LOCK_SHARE;
             }
 
-            if(lock_type != -1)
-            {
-                LockBuffer(buffer, BUFFER_LOCK_UNLOCK);    
-            }
             XactLockTableWait(xid, NULL, NULL, XLTW_None);
             if(lock_type != -1)
             {
-                
-                LockBuffer(buffer, lock_type);
                 /* Avoid deadlock */
                 if(TransactionIdDidAbort(xid))
                 {

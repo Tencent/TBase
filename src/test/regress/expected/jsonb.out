@@ -546,6 +546,15 @@ SELECT (test_json->>3) IS NULL AS expect_true FROM test_jsonb WHERE json_type = 
  t
 (1 row)
 
+-- distribute
+SELECT test_json, count(test_json) from test_jsonb group by test_json order by test_json;
+                                                  test_json                                                  | count 
+-------------------------------------------------------------------------------------------------------------+-------
+ "a scalar"                                                                                                  |     1
+ ["zero", "one", "two", null, "four", "five", [1, 2, 3], {"f1": 9}]                                          |     1
+ {"field1": "val1", "field2": "val2", "field3": null, "field4": 4, "field5": [1, 2, 3], "field6": {"f1": 9}} |     1
+(3 rows)
+
 -- corner cases
 select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb -> null::text;
  ?column? 

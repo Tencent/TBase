@@ -582,7 +582,7 @@ heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rootoffnum,
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
                 if(htup->t_infomask & HEAP_XMAX_IS_MULTI)
                 {
-                    int ret = TransactionIdGetCommitTsData(HeapTupleHeaderGetUpdateXid(htup), &committs, NULL);
+                    TransactionIdGetCommitTsData(HeapTupleHeaderGetUpdateXid(htup), &committs, NULL);
                 }
                 else
                 {

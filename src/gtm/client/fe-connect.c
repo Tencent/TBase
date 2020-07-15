@@ -548,6 +548,15 @@ keep_going:                        /* We will come back to here until there is
                         }
                     }
 
+					if (!pg_set_noblock(conn->sock))
+					{
+						char sebuf[256];
+						appendGTMPQExpBuffer(&conn->errorMessage,
+										  libpq_gettext("could not set socket to nonblocking mode: %s\n"),
+										  pqStrerror(SOCK_ERRNO, sebuf, sizeof(sebuf)));
+						break;
+					}
+
                     /*
                      * Start/make connection.  This should not block, since we
                      * are in nonblock mode.  If it does, well, too bad.

@@ -116,6 +116,7 @@
 #include "access/xact.h"
 #include "access/xlog_internal.h"
 #include "access/transam.h"
+#include "utils/ruleutils.h"
 #endif
 
 #ifdef __TBASE__
@@ -2008,6 +2009,7 @@ do_autovacuum(void)
     HeapScanDesc relScan;
     Form_pg_database dbForm;
     List       *table_oids = NIL;
+	List	   *interval_parent_oids = NIL;
     List       *orphan_oids = NIL;
     HASHCTL        ctl;
     HTAB       *table_toast_map;
@@ -2177,7 +2179,16 @@ do_autovacuum(void)
 
         /* Relations that need work are added to table_oids */
         if (dovacuum || doanalyze)
-            table_oids = lappend_oid(table_oids, relid);
+		{
+			if (classForm->relpartkind == RELPARTKIND_PARENT)
+			{
+				interval_parent_oids = lappend_oid(interval_parent_oids, relid);
+			}
+			else 
+			{
+				table_oids = lappend_oid(table_oids, relid);
+			}
+		}
 
         /*
          * Remember TOAST associations for the second pass.  Note: we must do
@@ -2207,6 +2218,8 @@ do_autovacuum(void)
             }
         }
     }
+
+	table_oids = list_concat(table_oids, interval_parent_oids);
 
     heap_endscan(relScan);
 

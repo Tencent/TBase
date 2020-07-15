@@ -48,7 +48,8 @@ typedef enum
     PROMOTE_COMMAND,
     RESTART_COMMAND,
     STATUS_COMMAND,
-    RECONNECT_COMMAND
+	RECONNECT_COMMAND,
+	RELOAD_COMMAND
 } CtlCommand;
 
 #define DEFAULT_WAIT    60
@@ -71,6 +72,7 @@ static char *argv0 = NULL;
 #ifdef __TBASE__
 static char *gtm_host = NULL;
 static char *gtm_port = NULL;
+static char *startup_gts = NULL;
 pthread_key_t    threadinfo_key;
 GTM_ThreadID    TopMostThreadID;
 int    tcp_keepalives_idle = 0;
@@ -266,6 +268,7 @@ start_gtm(void)
 {
     char        cmd[MAXPGPATH];
     char        gtm_app_path[MAXPGPATH];
+	char        gtm_startup_gts[MAXPGPATH];
     int            len;
 
     /*
@@ -275,6 +278,7 @@ start_gtm(void)
 
     memset(gtm_app_path, 0, MAXPGPATH);
     memset(cmd, 0, MAXPGPATH);
+	memset(gtm_startup_gts, 0, MAXPGPATH);
 
     /*
      * Build gtm binary path. We should leave one byte at the end for '\0'
@@ -298,12 +302,16 @@ start_gtm(void)
 
     strncat(gtm_app_path, gtm_app, MAXPGPATH - len - 1);
 
+	if (startup_gts != NULL)
+		snprintf(gtm_startup_gts,MAXPGPATH,"-g %s",startup_gts);
+
     if (log_file != NULL)
-        len = snprintf(cmd, MAXPGPATH - 1, "\"%s\" %s%s -l %s &" ,
-                 gtm_app_path, gtmdata_opt, gtm_opts, log_file);
+		len = snprintf(cmd, MAXPGPATH - 1, "\"%s\" %s%s -l %s %s &" ,
+				 gtm_app_path, gtmdata_opt, gtm_opts, log_file, gtm_startup_gts);
     else
-        len = snprintf(cmd, MAXPGPATH - 1, "\"%s\" %s%s < \"%s\" 2>&1 &" ,
-                 gtm_app_path, gtmdata_opt, gtm_opts, DEVNULL);
+		len = snprintf(cmd, MAXPGPATH - 1, "\"%s\" %s%s %s < \"%s\" 2>&1 &" ,
+				 gtm_app_path, gtmdata_opt, gtm_opts, gtm_startup_gts, DEVNULL);
+
 
     if (len >= MAXPGPATH - 1)
     {
@@ -711,6 +719,36 @@ do_promote(void)
     }
 }
 
+static void
+do_reload(void)
+{
+	pgpid_t		pid;
+
+	pid = get_pgpid();
+
+	if (pid == 0)				/* no pid file */
+	{
+		write_stderr(_("%s: PID file \"%s\" does not exist\n"), progname, pid_file);
+		write_stderr(_("Is server running?\n"));
+		exit(1);
+	}
+	else if (pid < 0)			/* standalone backend, not gtm */
+	{
+		pid = -pid;
+		write_stderr(_("%s: cannot promote server; "
+					   "single-user server is running (PID: %ld)\n"),
+					 progname, pid);
+		exit(1);
+	}
+
+	if (kill((pid_t) pid, SIGHUP) != 0)
+	{
+		write_stderr(_("%s: could not send reload signal (PID: %ld): %s\n"), progname, pid,
+					 strerror(errno));
+		exit(1);
+	}
+}
+
 /*
  * At least we expect the following argument
  *
@@ -1109,6 +1147,7 @@ do_help(void)
          "                 [-o \"OPTIONS\"]\n"), progname);
     printf(_("  %s status  -Z STARTUP_MODE [-H host] [-P port] [-w] [-t SECS] [-D DATADIR]\n"), progname);
     printf(_("  %s reconnect -Z STARTUP_MODE [-D DATADIR] -o \"OPTIONS\"]\n"), progname);
+	printf(_("  %s reload [-D DATADIR]\"]\n"), progname);
 
     printf(_("\nCommon options:\n"));
     printf(_("  -D DATADIR             location of the database storage area\n"));
@@ -1210,6 +1249,8 @@ main(int argc, char **argv)
         exit(1);
     }
 
+	signal(SIGPIPE, SIG_IGN);
+
     /*
      * 'Action' can be before or after args so loop over both. Some
      * getopt_long() implementations will reorder argv[] to place all flags
@@ -1221,7 +1262,7 @@ main(int argc, char **argv)
     /* process command-line options */
     while (optind < argc)
     {
-        while ((c = getopt(argc, argv, "D:i:l:m:o:p:t:wWZ:H:P:")) != -1)
+		while ((c = getopt(argc, argv, "D:i:l:m:o:p:t:wWZ:H:P:g:")) != -1)
         {
             switch (c)
             {
@@ -1292,7 +1333,10 @@ main(int argc, char **argv)
                     
                 case 'P':
                     gtm_port = xstrdup(optarg);
-                    break;                
+					break;
+				case 'g':
+					startup_gts = xstrdup(optarg);
+					break;
 #endif
                 default:
                     /* getopt_long already issued a suitable error message */
@@ -1323,6 +1367,8 @@ main(int argc, char **argv)
                 ctl_command = STATUS_COMMAND;
             else if (strcmp(argv[optind], "reconnect") == 0)
                 ctl_command = RECONNECT_COMMAND;
+			else if (strcmp(argv[optind], "reload") == 0)
+				ctl_command = RELOAD_COMMAND;
             else
             {
                 write_stderr(_("%s: unrecognized operation mode \"%s\"\n"),
@@ -1416,6 +1462,7 @@ main(int argc, char **argv)
             case START_COMMAND:
             case PROMOTE_COMMAND:
             case STATUS_COMMAND:
+			case RELOAD_COMMAND:
                 do_wait = false;
                 break;
             case STOP_COMMAND:
@@ -1473,6 +1520,9 @@ main(int argc, char **argv)
         case RECONNECT_COMMAND:
             do_reconnect();
             break;
+		case RELOAD_COMMAND:
+			do_reload();
+			break;
         default:
             break;
     }

@@ -78,6 +78,7 @@
 #include "access/htup.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_type.h"
+#include "executor/executor.h"
 #include "nodes/parsenodes.h"
 #include "storage/buf.h"
 #include "storage/lock.h"
@@ -270,6 +271,18 @@ typedef struct
     AnalyzeInfo info;
 }    AnalyzeInfoEntry;
 
+typedef struct 
+{
+	double samplenum;
+	double totalnum;
+	double deadnum;
+	int64 totalpages;
+	int64 visiblepages;
+	HeapTuple *rows;
+}SampleRowsContext;
+
+
+
 #endif
 
 /* in commands/vacuum.c */
@@ -304,7 +317,7 @@ extern void vacuum_set_xid_limits(Relation rel,
 extern void vac_update_datfrozenxid(void);
 extern void vacuum_delay_point(void);
 #ifdef XCP
-extern void vacuum_rel_coordinator(Relation onerel, bool is_outer);
+extern void vacuum_rel_coordinator(Relation onerel, bool is_outer, VacuumParams *params);
 TargetEntry *make_relation_tle(Oid reloid, const char *relname, const char *column);
 #endif
 
@@ -350,6 +363,8 @@ extern AnalyzeInfoEntry *FetchAllQueryAnalyzeInfo(HASH_SEQ_STATUS *status, bool 
 extern void ClearQueryAnalyzeInfo(void);
 
 extern char *GetAnalyzeInfo(int nodeid, char *key);
+
+extern void ExecSample(SampleStmt *stmt, DestReceiver *dest);
 #endif
 
 #endif                            /* VACUUM_H */

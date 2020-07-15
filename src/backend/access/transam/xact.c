@@ -156,6 +156,7 @@ int            MyXactFlags;
 
 #ifdef _SHARDING_
 bool        g_allow_dml_on_datanode = false;
+bool		g_allow_force_ddl = false;
 #endif
 
 #ifdef __TBASE__
@@ -7027,6 +7028,23 @@ XactLogCommitRecord(TimestampTz global_timestamp,
     XLogSetRecordFlags(XLOG_INCLUDE_ORIGIN);
     end_lsn = XLogInsert(RM_XACT_ID, info);
     
+#ifdef __TBASE__
+	{
+		uint32		id,
+					off;
+		/* Decode ID and offset */
+		id = (uint32) (end_lsn >> 32);
+		off = (uint32) end_lsn;
+
+		elog(DEBUG5, "XactLogCommitRecord %s, xid=%d, lsn=%X/%X, global_timestamp=%s, abort_time=%s, twophase_xid=%d",
+				(info & XLOG_XACT_COMMIT) ? "COMMIT" : "COMMIT_PREPARED",
+				GetCurrentTransactionIdIfAny(), id, off,
+				timestamptz_to_str(global_timestamp),
+				timestamptz_to_str(commit_time),
+				twophase_xid);
+	}
+#endif
+
     return end_lsn;
 }
 
@@ -7128,6 +7146,24 @@ XactLogAbortRecord(TimestampTz global_timestamp,
         XLogRegisterData((char *) (&xl_twophase), sizeof(xl_xact_twophase));
 
     end_lsn = XLogInsert(RM_XACT_ID, info);
+
+#ifdef __TBASE__
+	{
+		uint32		id,
+					off;
+		/* Decode ID and offset */
+		id = (uint32) (end_lsn >> 32);
+		off = (uint32) end_lsn;
+
+		elog(DEBUG5, "XactLogAbortRecord %s, xid=%d, lsn=%X/%X, global_timestamp=%s, abort_time=%s, twophase_xid=%d",
+				(info & XLOG_XACT_ABORT) ? "ABORT" : "ABORT_PREPARED",
+				GetCurrentTransactionIdIfAny(), id, off,
+				timestamptz_to_str(global_timestamp),
+				timestamptz_to_str(abort_time),
+				twophase_xid);
+	}
+#endif
+
     return end_lsn;
 }
 

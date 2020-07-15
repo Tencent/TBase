@@ -885,6 +885,9 @@ pgstat_report_stat(bool force)
             this_msg = entry->t_shared ? &shared_msg : &regular_msg;
             this_ent = &this_msg->m_entry[this_msg->m_nentries];
             this_ent->t_id = entry->t_id;
+#ifdef __TBASE__
+			this_ent->t_parent_id = entry->t_parent_id;
+#endif
             memcpy(&this_ent->t_counts, &entry->t_counts,
                    sizeof(PgStat_TableCounts));
             if (++this_msg->m_nentries >= PGSTAT_NUM_TABENTRIES)
@@ -1741,6 +1744,9 @@ pgstat_initstats(Relation rel)
 
     /* Else find or make the PgStat_TableStatus entry, and update link */
     rel->pgstat_info = get_tabstat_entry(rel_id, rel->rd_rel->relisshared);
+#ifdef __TBASE__
+	rel->pgstat_info->t_parent_id = rel->rd_rel->relparent;
+#endif
 }
 
 /*
@@ -5765,7 +5771,65 @@ pgstat_recv_inquiry(PgStat_MsgInquiry *msg, int len)
                                          msg->databaseid);
 }
 
+#ifdef __TBASE__
+static void 
+pgstat_update_tabstat(PgStat_StatTabEntry *tabentry, 
+					  PgStat_TableEntry *tabmsg, bool found)
+{
+	if (!found)
+	{
+		/*
+			* If it's a new table entry, initialize counters to the values we
+			* just got.
+			*/
+		tabentry->numscans = tabmsg->t_counts.t_numscans;
+		tabentry->tuples_returned = tabmsg->t_counts.t_tuples_returned;
+		tabentry->tuples_fetched = tabmsg->t_counts.t_tuples_fetched;
+		tabentry->tuples_inserted = tabmsg->t_counts.t_tuples_inserted;
+		tabentry->tuples_updated = tabmsg->t_counts.t_tuples_updated;
+		tabentry->tuples_deleted = tabmsg->t_counts.t_tuples_deleted;
+		tabentry->tuples_hot_updated = tabmsg->t_counts.t_tuples_hot_updated;
+		tabentry->n_live_tuples = tabmsg->t_counts.t_delta_live_tuples;
+		tabentry->n_dead_tuples = tabmsg->t_counts.t_delta_dead_tuples;
+		tabentry->changes_since_analyze = tabmsg->t_counts.t_changed_tuples;
+		tabentry->blocks_fetched = tabmsg->t_counts.t_blocks_fetched;
+		tabentry->blocks_hit = tabmsg->t_counts.t_blocks_hit;
 
+		tabentry->vacuum_timestamp = 0;
+		tabentry->vacuum_count = 0;
+		tabentry->autovac_vacuum_timestamp = 0;
+		tabentry->autovac_vacuum_count = 0;
+		tabentry->analyze_timestamp = 0;
+		tabentry->analyze_count = 0;
+		tabentry->autovac_analyze_timestamp = 0;
+		tabentry->autovac_analyze_count = 0;
+	}
+	else
+	{
+		/*
+			* Otherwise add the values to the existing entry.
+			*/
+		tabentry->numscans += tabmsg->t_counts.t_numscans;
+		tabentry->tuples_returned += tabmsg->t_counts.t_tuples_returned;
+		tabentry->tuples_fetched += tabmsg->t_counts.t_tuples_fetched;
+		tabentry->tuples_inserted += tabmsg->t_counts.t_tuples_inserted;
+		tabentry->tuples_updated += tabmsg->t_counts.t_tuples_updated;
+		tabentry->tuples_deleted += tabmsg->t_counts.t_tuples_deleted;
+		tabentry->tuples_hot_updated += tabmsg->t_counts.t_tuples_hot_updated;
+		/* If table was truncated, first reset the live/dead counters */
+		if (tabmsg->t_counts.t_truncated)
+		{
+			tabentry->n_live_tuples = 0;
+			tabentry->n_dead_tuples = 0;
+		}
+		tabentry->n_live_tuples += tabmsg->t_counts.t_delta_live_tuples;
+		tabentry->n_dead_tuples += tabmsg->t_counts.t_delta_dead_tuples;
+		tabentry->changes_since_analyze += tabmsg->t_counts.t_changed_tuples;
+		tabentry->blocks_fetched += tabmsg->t_counts.t_blocks_fetched;
+		tabentry->blocks_hit += tabmsg->t_counts.t_blocks_hit;
+	}
+}
+#endif
 /* ----------
  * pgstat_recv_tabstat() -
  *
@@ -5800,65 +5864,81 @@ pgstat_recv_tabstat(PgStat_MsgTabstat *msg, int len)
         tabentry = (PgStat_StatTabEntry *) hash_search(dbentry->tables,
                                                        (void *) &(tabmsg->t_id),
                                                        HASH_ENTER, &found);
+#ifndef __TBASE__													
+		if (!found)
+		{
+			/*
+				* If it's a new table entry, initialize counters to the values we
+				* just got.
+				*/
+			tabentry->numscans = tabmsg->t_counts.t_numscans;
+			tabentry->tuples_returned = tabmsg->t_counts.t_tuples_returned;
+			tabentry->tuples_fetched = tabmsg->t_counts.t_tuples_fetched;
+			tabentry->tuples_inserted = tabmsg->t_counts.t_tuples_inserted;
+			tabentry->tuples_updated = tabmsg->t_counts.t_tuples_updated;
+			tabentry->tuples_deleted = tabmsg->t_counts.t_tuples_deleted;
+			tabentry->tuples_hot_updated = tabmsg->t_counts.t_tuples_hot_updated;
+			tabentry->n_live_tuples = tabmsg->t_counts.t_delta_live_tuples;
+			tabentry->n_dead_tuples = tabmsg->t_counts.t_delta_dead_tuples;
+			tabentry->changes_since_analyze = tabmsg->t_counts.t_changed_tuples;
+			tabentry->blocks_fetched = tabmsg->t_counts.t_blocks_fetched;
+			tabentry->blocks_hit = tabmsg->t_counts.t_blocks_hit;
 
-        if (!found)
-        {
-            /*
-             * If it's a new table entry, initialize counters to the values we
-             * just got.
-             */
-            tabentry->numscans = tabmsg->t_counts.t_numscans;
-            tabentry->tuples_returned = tabmsg->t_counts.t_tuples_returned;
-            tabentry->tuples_fetched = tabmsg->t_counts.t_tuples_fetched;
-            tabentry->tuples_inserted = tabmsg->t_counts.t_tuples_inserted;
-            tabentry->tuples_updated = tabmsg->t_counts.t_tuples_updated;
-            tabentry->tuples_deleted = tabmsg->t_counts.t_tuples_deleted;
-            tabentry->tuples_hot_updated = tabmsg->t_counts.t_tuples_hot_updated;
-            tabentry->n_live_tuples = tabmsg->t_counts.t_delta_live_tuples;
-            tabentry->n_dead_tuples = tabmsg->t_counts.t_delta_dead_tuples;
-            tabentry->changes_since_analyze = tabmsg->t_counts.t_changed_tuples;
-            tabentry->blocks_fetched = tabmsg->t_counts.t_blocks_fetched;
-            tabentry->blocks_hit = tabmsg->t_counts.t_blocks_hit;
-
-            tabentry->vacuum_timestamp = 0;
-            tabentry->vacuum_count = 0;
-            tabentry->autovac_vacuum_timestamp = 0;
-            tabentry->autovac_vacuum_count = 0;
-            tabentry->analyze_timestamp = 0;
-            tabentry->analyze_count = 0;
-            tabentry->autovac_analyze_timestamp = 0;
-            tabentry->autovac_analyze_count = 0;
-        }
-        else
-        {
-            /*
-             * Otherwise add the values to the existing entry.
-             */
-            tabentry->numscans += tabmsg->t_counts.t_numscans;
-            tabentry->tuples_returned += tabmsg->t_counts.t_tuples_returned;
-            tabentry->tuples_fetched += tabmsg->t_counts.t_tuples_fetched;
-            tabentry->tuples_inserted += tabmsg->t_counts.t_tuples_inserted;
-            tabentry->tuples_updated += tabmsg->t_counts.t_tuples_updated;
-            tabentry->tuples_deleted += tabmsg->t_counts.t_tuples_deleted;
-            tabentry->tuples_hot_updated += tabmsg->t_counts.t_tuples_hot_updated;
-            /* If table was truncated, first reset the live/dead counters */
-            if (tabmsg->t_counts.t_truncated)
-            {
-                tabentry->n_live_tuples = 0;
-                tabentry->n_dead_tuples = 0;
-            }
-            tabentry->n_live_tuples += tabmsg->t_counts.t_delta_live_tuples;
-            tabentry->n_dead_tuples += tabmsg->t_counts.t_delta_dead_tuples;
-            tabentry->changes_since_analyze += tabmsg->t_counts.t_changed_tuples;
-            tabentry->blocks_fetched += tabmsg->t_counts.t_blocks_fetched;
-            tabentry->blocks_hit += tabmsg->t_counts.t_blocks_hit;
-        }
-
+			tabentry->vacuum_timestamp = 0;
+			tabentry->vacuum_count = 0;
+			tabentry->autovac_vacuum_timestamp = 0;
+			tabentry->autovac_vacuum_count = 0;
+			tabentry->analyze_timestamp = 0;
+			tabentry->analyze_count = 0;
+			tabentry->autovac_analyze_timestamp = 0;
+			tabentry->autovac_analyze_count = 0;
+		}
+		else
+		{
+			/*
+				* Otherwise add the values to the existing entry.
+				*/
+			tabentry->numscans += tabmsg->t_counts.t_numscans;
+			tabentry->tuples_returned += tabmsg->t_counts.t_tuples_returned;
+			tabentry->tuples_fetched += tabmsg->t_counts.t_tuples_fetched;
+			tabentry->tuples_inserted += tabmsg->t_counts.t_tuples_inserted;
+			tabentry->tuples_updated += tabmsg->t_counts.t_tuples_updated;
+			tabentry->tuples_deleted += tabmsg->t_counts.t_tuples_deleted;
+			tabentry->tuples_hot_updated += tabmsg->t_counts.t_tuples_hot_updated;
+			/* If table was truncated, first reset the live/dead counters */
+			if (tabmsg->t_counts.t_truncated)
+			{
+				tabentry->n_live_tuples = 0;
+				tabentry->n_dead_tuples = 0;
+			}
+			tabentry->n_live_tuples += tabmsg->t_counts.t_delta_live_tuples;
+			tabentry->n_dead_tuples += tabmsg->t_counts.t_delta_dead_tuples;
+			tabentry->changes_since_analyze += tabmsg->t_counts.t_changed_tuples;
+			tabentry->blocks_fetched += tabmsg->t_counts.t_blocks_fetched;
+			tabentry->blocks_hit += tabmsg->t_counts.t_blocks_hit;
+		}
+#else
+		pgstat_update_tabstat(tabentry, tabmsg, found);
+#endif
         /* Clamp n_live_tuples in case of negative delta_live_tuples */
         tabentry->n_live_tuples = Max(tabentry->n_live_tuples, 0);
         /* Likewise for n_dead_tuples */
         tabentry->n_dead_tuples = Max(tabentry->n_dead_tuples, 0);
+#ifdef __TBASE__
+		if (tabmsg->t_parent_id != InvalidOid)
+		{
+			tabentry = (PgStat_StatTabEntry *) hash_search(dbentry->tables,
+													   (void *) &(tabmsg->t_parent_id),
+													   HASH_ENTER, &found);
 
+			pgstat_update_tabstat(tabentry, tabmsg, found);
+
+			/* Clamp n_live_tuples in case of negative delta_live_tuples */
+			tabentry->n_live_tuples = Max(tabentry->n_live_tuples, 0);
+			/* Likewise for n_dead_tuples */
+			tabentry->n_dead_tuples = Max(tabentry->n_dead_tuples, 0);
+		}
+#endif
         /*
          * Add per-table stats to the per-database entry, too.
          */

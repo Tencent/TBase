@@ -1332,7 +1332,7 @@ slot_deform_tuple(TupleTableSlot *slot, int natts)
  * slot_deform_datarow
  *         Extract data from the DataRow message into Datum/isnull arrays.
  *
- * We always extract all atributes, as specified in tts_tupleDescriptor,
+ * We always extract all attributes, as specified in tts_tupleDescriptor,
  * because there is no easy way to find random attribute in the DataRow.
  *
  * XXX There's an opportunity for optimization - we might extract only the
@@ -1370,7 +1370,8 @@ slot_deform_datarow(TupleTableSlot *slot)
     if (col_count != natts)
         ereport(ERROR,
                 (errcode(ERRCODE_DATA_CORRUPTED),
-                 errmsg("Tuple does not match the descriptor")));
+				 errmsg("Tuple does not match the descriptor, tuple cols %d, descriptor cols %d", 
+				 col_count, natts)));
 
     if (slot->tts_attinmeta == NULL)
     {
@@ -2335,4 +2336,50 @@ void slot_deform_tuple_extern(void *slot, int natts)
     return;
 }
 
+void
+heap_tuple_set_shardid(HeapTuple tup, void *tupleslot, AttrNumber diskey, AttrNumber secdiskey,
+				             Oid relid)
+{
+	int   shardId;
+	Datum value;
+	bool  isdisnull;
+	Oid   typeOfDistCol;
+	Datum secvalue;
+	Oid   sectypeOfDistCol;
+	bool  secisnull;
+	TupleTableSlot *slot = (TupleTableSlot *)tupleslot;
+	
+	if(diskey < 1 || diskey > slot->tts_tupleDescriptor->natts)
+	{
+		elog(ERROR, "AttrNum[%d] of distribute key is invalid, ",diskey);
+	}
+
+	if(secdiskey  > slot->tts_tupleDescriptor->natts)
+	{
+		elog(ERROR, "AttrNum[%d] of second distribute key is invalid, ", secdiskey);
+	}		
+
+	/* process sharding maping */		
+	typeOfDistCol = slot->tts_tupleDescriptor->attrs[diskey - 1]->atttypid;
+	value     	  = slot->tts_values[diskey - 1];
+	isdisnull	  = slot->tts_isnull[diskey - 1];
+
+	/* secondary distribute key */
+	if (secdiskey != InvalidAttrNumber)
+	{
+		sectypeOfDistCol = slot->tts_tupleDescriptor->attrs[secdiskey - 1]->atttypid;
+		secvalue     	 = slot->tts_values[secdiskey - 1];
+		secisnull	     = slot->tts_isnull[secdiskey - 1];
+	}
+	else
+	{
+		sectypeOfDistCol = InvalidOid;	
+		secvalue         = 0;
+		secisnull        = true;
+	}
+
+	shardId = EvaluateShardId(typeOfDistCol, isdisnull, value, 
+		                      sectypeOfDistCol, secisnull, secvalue, relid);
+	HeapTupleHeaderSetShardId(tup->t_data, shardId);	
+}
 #endif

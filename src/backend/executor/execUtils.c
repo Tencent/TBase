@@ -751,7 +751,14 @@ ExecOpenScanRelationPartition(EState *estate, Index scanrelid, int eflags, int p
 
     partoid = RelationGetPartition(rel, partidx, false);
 
-    partrel = heap_open(partoid, lockmode);
+	if (partoid)
+	{
+	    partrel = heap_open(partoid, lockmode);
+	}
+	else
+	{
+		partrel = NULL;
+	}
 
     heap_close(rel, NoLock);
     /*

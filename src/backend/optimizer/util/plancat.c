@@ -417,10 +417,10 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
                     else
 #endif
                         info->pages = RelationGetNumberOfBlocks(indexRelation);
-                    info->tuples = rel->tuples;
 #ifdef __TBASE__
                 }
 #endif
+				info->tuples = rel->tuples;
             }
             else
             {
@@ -1086,7 +1086,14 @@ estimate_rel_size(Relation rel, int32 *attr_widths,
                 rel->rd_rel->relpages == 0 &&
                 !rel->rd_rel->relhassubclass &&
                 rel->rd_rel->relkind != RELKIND_INDEX)
+			{
                 curpages = 10;
+			}
+
+			if (rel->rd_rel->relpages > curpages)
+			{
+				curpages = rel->rd_rel->relpages;
+			}
 
             /* report estimated # pages */
             *pages = curpages;
@@ -1969,6 +1976,11 @@ GetIntervalPartitionPages(Relation rel, bool isindex, bool statistic)
         {
             partoid = RelationGetPartition(rel, partidx, isindex);
 
+			if (InvalidOid == partoid)
+			{
+			    continue;
+			}
+
             if (isindex)
                 childrel = index_open(partoid, AccessShareLock);
             else
@@ -1993,6 +2005,12 @@ GetIntervalPartitionPages(Relation rel, bool isindex, bool statistic)
         for (partidx = 0, i = 0; partidx < nparts && i < scannum; i++)
         {
             partoid = RelationGetPartition(rel, partidx, isindex);
+
+			if (InvalidOid == partoid)
+			{
+				partidx += step;
+			    continue;
+			}
 
             if (isindex)
                 childrel = index_open(partoid, AccessShareLock);

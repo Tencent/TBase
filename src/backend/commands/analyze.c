@@ -73,8 +73,10 @@
 #include "utils/snapmgr.h"
 #endif
 #ifdef __TBASE__
+#include "funcapi.h"
 #include "nodes/nodes.h"
 #include "utils/ruleutils.h"
+#include "nodes/pg_list.h"
 #endif
 #ifdef _MLS_
 #include "utils/relcrypt.h"
@@ -136,10 +138,23 @@ static Datum std_fetch_func(VacAttrStatsP stats, int rownum, bool *isNull);
 static Datum ind_fetch_func(VacAttrStatsP stats, int rownum, bool *isNull);
 
 #ifdef XCP
+#ifndef __TBASE__
 static void analyze_rel_coordinator(Relation onerel, bool inh, int attr_cnt,
                         VacAttrStats **vacattrstats, int nindexes,
                         Relation *indexes, AnlIndexData *indexdata);
+#endif
 extern bool random_collect_stats;
+#endif
+
+#ifdef __TBASE__
+static void get_rel_pages_visiblepages(Relation onerel, 
+						   BlockNumber *pages, 
+						   BlockNumber *visiblepages);
+static int acquire_coordinator_sample_rows(Relation onerel, int elevel,
+												HeapTuple *rows, int targrows,
+												double *totalrows, double *totaldeadrows,
+												int64 *totalpages, int64 *visiblepages);
+
 #endif
 
 /*
@@ -172,9 +187,10 @@ analyze_rel(Oid relid, RangeVar *relation, int options,
                 analyze_rel(child, relation, options, params, va_cols, in_outer_xact,
                             bstrategy);
             }
-    
-            pfree(childs);
+			if (childs)
+				pfree(childs);
             childs = NULL;
+			CommandCounterIncrement();
         }
 
         relation_close(onerel, NoLock);
@@ -415,6 +431,9 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
     Oid            save_userid;
     int            save_sec_context;
     int            save_nestlevel;
+	bool		iscoordinator = false;
+	int64		coordpages = 0;
+	int64		coordvisiblepages = 0;
 
     if (inh)
         ereport(elevel,
@@ -577,14 +596,18 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
             }
         }
     }
+	iscoordinator = (IS_PGXC_COORDINATOR && 
+					 onerel->rd_locator_info && 
+					 !RELATION_IS_COORDINATOR_LOCAL(onerel));
 
+#ifndef __TBASE__
 #ifdef XCP
-    if (IS_PGXC_COORDINATOR && onerel->rd_locator_info)
+	if (iscoordinator)
     {
         /*
          * Fetch relation statistics from remote nodes and update
          */
-        vacuum_rel_coordinator(onerel, in_outer_xact);
+		vacuum_rel_coordinator(onerel, in_outer_xact, params);
 
         /*
          * Fetch attribute statistics from remote nodes.
@@ -599,7 +622,7 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
         goto cleanup;
     }
 #endif
-
+#endif
     /*
      * Determine how many rows we need to sample, using the worst case from
      * all analyzable columns.  We use a lower bound of 100 rows to avoid
@@ -627,7 +650,17 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
      * Acquire the sample rows
      */
     rows = (HeapTuple *) palloc(targrows * sizeof(HeapTuple));
-    if (inh)
+#ifdef __TBASE__
+	if (iscoordinator)
+	{
+		numrows = acquire_coordinator_sample_rows(onerel, elevel,
+												rows, targrows,
+												&totalrows, &totaldeadrows,
+												&coordpages, &coordvisiblepages);
+	}
+	else
+#endif
+	if (inh || RELATION_IS_INTERVAL(onerel))
         numrows = acquire_inherited_sample_rows(onerel, elevel,
                                                 rows, targrows,
                                                 &totalrows, &totaldeadrows);
@@ -730,33 +763,23 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
     if (!inh)
     {
         BlockNumber relallvisible;
-
-        visibilitymap_count(onerel, &relallvisible, NULL);
-
 #ifdef __TBASE__
-        if(IS_PGXC_DATANODE && RELATION_IS_INTERVAL(onerel))
-        {
-            float part_tuples = 0.0;
-            int part_visible = 0;
-            List *childs = NULL;
-            Oid partoid;
-            ListCell *lc;
-    
-            childs = RelationGetAllPartitions(onerel);
-            totalrows = 0;
-            relallvisible = 0;
-            foreach(lc, childs)
-            {
-                partoid = lfirst_oid(lc);
-                if(get_rel_stat(partoid, NULL, &part_tuples, &part_visible))
-                {
-                    totalrows += part_tuples;
-                    relallvisible += part_visible;
-                }
-            }
-    
-            list_free(childs);
-        }
+		if (iscoordinator)
+		{
+			relpages = coordpages;
+			relallvisible = coordvisiblepages;
+		}
+		else 
+		{
+#endif
+			visibilitymap_count(onerel, &relallvisible, NULL);
+
+	#ifdef __TBASE__
+			if(IS_PGXC_DATANODE && RELATION_IS_INTERVAL(onerel))
+			{
+				get_rel_pages_visiblepages(onerel, &relpages, &relallvisible);
+			}
+		}
 #endif
 
         vac_update_relstats(onerel,
@@ -793,11 +816,13 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
         }
     }
 
+#ifndef __TBASE__
 #ifdef XCP
     /*
      * Coordinator skips getting local stats of distributed table up to here
      */
 cleanup:
+#endif
 #endif
     /*
      * Report ANALYZE to the stats collector, too.  However, if doing
@@ -1467,9 +1492,15 @@ acquire_inherited_sample_rows(Relation onerel, int elevel,
      * Find all members of inheritance set.  We only need AccessShareLock on
      * the children.
      */
-    tableOIDs =
-        find_all_inheritors(RelationGetRelid(onerel), AccessShareLock, NULL);
-
+	if (RELATION_IS_INTERVAL(onerel))
+	{
+		tableOIDs = RelationGetAllPartitions(onerel);
+	}
+	else 
+	{
+		tableOIDs =
+			find_all_inheritors(RelationGetRelid(onerel), AccessShareLock, NULL);
+	}
     /*
      * Check that there's at least one descendant, else fail.  This could
      * happen despite analyze_rel's relhassubclass check, if table once had a
@@ -1508,7 +1539,14 @@ acquire_inherited_sample_rows(Relation onerel, int elevel,
         BlockNumber relpages = 0;
 
         /* We already got the needed lock */
-        childrel = heap_open(childOID, NoLock);
+		if (RELATION_IS_INTERVAL(onerel))
+		{
+			childrel = heap_open(childOID, AccessShareLock);
+		}
+		else 
+		{
+			childrel = heap_open(childOID, NoLock);
+		}
 
         /* Ignore if temp table of another backend */
         if (RELATION_IS_OTHER_TEMP(childrel))
@@ -1814,6 +1852,7 @@ update_attstats(Oid relid, bool inh, int natts, VacAttrStats **vacattrstats)
     heap_close(sd, RowExclusiveLock);
 }
 
+#ifndef __TBASE__
 /*
  *    update_ext_stats() -- update extended statistics
  */
@@ -1882,6 +1921,7 @@ update_ext_stats(Name nspname, Name name,
     heap_freetuple(stup);
     heap_close(sd, RowExclusiveLock);
 }
+#endif
 
 /*
  * Standard fetch function for use by compute_stats subroutines.
@@ -3135,6 +3175,7 @@ compare_mcvs(const void *a, const void *b)
 
 
 #ifdef XCP
+#ifndef __TBASE__
 /*
  * coord_accu_distinct_stat
  *        Accumulate the distinct statistics for the attribute.
@@ -4346,6 +4387,7 @@ analyze_rel_coordinator(Relation onerel, bool inh, int attr_cnt,
     coord_collect_extended_stats(onerel, attr_cnt);
 }
 #endif
+#endif
 #ifdef __TBASE__
 Size
 QueryAnalyzeInfoShmemSize(void)
@@ -4758,4 +4800,435 @@ GetAnalyzeInfo(int nodeid, char *key)
 
     return NULL;
 }
+
+static void 
+get_rel_pages_visiblepages(Relation onerel,
+						   BlockNumber *pages, 
+						   BlockNumber *visiblepages)
+{
+	if (onerel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE ||
+		onerel->rd_rel->relhassubclass || RELATION_IS_INTERVAL(onerel))
+	{
+		List * childs;
+		ListCell * lc;
+
+		if (RELATION_IS_INTERVAL(onerel))
+		{
+			childs = RelationGetAllPartitions(onerel);
+		}
+		else 
+		{
+			childs =
+				find_all_inheritors(RelationGetRelid(onerel), NoLock, NULL);
+		}
+
+		*pages = 0;
+		*visiblepages = 0;
+
+		foreach (lc, childs)
+		{
+			Oid			childOID = lfirst_oid(lc);
+			Relation	childrel;
+			BlockNumber visible;
+
+			/* We already got the needed lock */
+			childrel = heap_open(childOID, AccessShareLock);
+
+			/* Ignore if temp table of another backend */
+			if (RELATION_IS_OTHER_TEMP(childrel))
+			{
+				/* ... but release the lock on it */
+				Assert(childrel != onerel);
+				heap_close(childrel, AccessShareLock);
+				continue;
+			}
+
+			/* Check table type (MATVIEW can't happen, but might as well allow) */
+			if (childrel->rd_rel->relkind == RELKIND_RELATION ||
+				childrel->rd_rel->relkind == RELKIND_MATVIEW)
+			{
+				*pages += RelationGetNumberOfBlocks(childrel);
+				visibilitymap_count(childrel, &visible, NULL);
+				*visiblepages += visible;
+				heap_close(childrel, AccessShareLock);
+			}
+			else
+			{
+				Assert(childrel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE);
+				heap_close(childrel, AccessShareLock);
+				continue;
+			}
+		}
+		list_free(childs);
+	}
+	else 
+	{
+		*pages = RelationGetNumberOfBlocks(onerel);
+		visibilitymap_count(onerel, visiblepages, NULL);
+	}
+}
+
+#define SAMPLE_ATTR_NUM 6
+
+void ExecSample(SampleStmt *stmt, DestReceiver *dest)
+{
+
+	Oid			 relid;
+	Relation	 onerel;
+	TupleDesc 	 tupdesc;
+	TupleDesc	 rowdesc;
+	HeapTuple 	*rows;
+	int 		 targetrows = stmt->rownum;
+	SampleRowsContext *context;
+	TupOutputState *tstate;
+	int 		 index = 0;
+	bool 		 nulls[SAMPLE_ATTR_NUM];
+	Datum 		 values[SAMPLE_ATTR_NUM];
+	
+	if (!IS_PGXC_COORDINATOR && !IS_PGXC_DATANODE)
+	{
+		elog(ERROR, "SAMPLE only support on Coordinator or Datanode");
+	}
+
+	if (stmt->rownum <= 0)
+	{
+		elog(ERROR, "SAMPLE row number must larger than 0");
+	}
+
+	relid = RangeVarGetRelid(stmt->relation, NoLock, false);
+	onerel = try_relation_open(relid, AccessShareLock);
+
+	if (!onerel)
+		elog(ERROR, "could not open relation with OID %u", relid);
+
+	/*
+	 * Check permissions --- this should match vacuum's check!
+	 */
+	if (!(pg_class_ownercheck(RelationGetRelid(onerel), GetUserId()) ||
+		  (pg_database_ownercheck(MyDatabaseId, GetUserId()) && !onerel->rd_rel->relisshared)))
+	{
+		relation_close(onerel, AccessShareLock);
+		elog(ERROR, "Permission denied for ownership");
+		return;
+	}
+
+	/*
+	 * Silently ignore tables that are temp tables of other backends ---
+	 * trying to analyze these is rather pointless, since their contents are
+	 * probably not up-to-date on disk.  (We don't throw a warning here; it
+	 * would just lead to chatter during a database-wide ANALYZE.)
+	 */
+	if (RELATION_IS_OTHER_TEMP(onerel))
+	{
+		relation_close(onerel, AccessShareLock);
+		elog(ERROR, "SAMPLE do not suppport temp table");
+		return;
+	}
+
+	/*
+	 * We can ANALYZE any table except pg_statistic. See update_attstats
+	 */
+	if (RelationGetRelid(onerel) == StatisticRelationId)
+	{
+		relation_close(onerel, AccessShareLock);
+		elog(ERROR, "SAMPLE do not support pg_statistic");
+		return;
+	}
+
+	/* Check that it's a plain table, materialized view */
+	if (onerel->rd_rel->relkind != RELKIND_RELATION &&
+		onerel->rd_rel->relkind != RELKIND_MATVIEW &&
+		onerel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
+	{
+		relation_close(onerel, AccessShareLock);
+		elog(ERROR, "SAMPLE only support Tables or Materialized Views");
+		return;
+
+	}
+
+	rowdesc = BlessTupleDesc(RelationGetDescr(onerel));
+	rows = (HeapTuple *) palloc(targetrows * sizeof(HeapTuple));
+	context = (SampleRowsContext *)palloc0(sizeof(SampleRowsContext));
+	context->rows = rows;
+	vac_strategy = GetAccessStrategy(BAS_VACUUM);
+
+	/* initialize acquire sample rows */
+	if (IS_PGXC_COORDINATOR && onerel->rd_locator_info && 
+		!RELATION_IS_COORDINATOR_LOCAL(onerel))
+	{
+		context->samplenum = acquire_coordinator_sample_rows(onerel, DEBUG2,
+ 														   rows, stmt->rownum, 
+ 														   &context->totalnum, 
+ 														   &context->deadnum,
+														   &context->totalpages,
+														   &context->visiblepages);
+	}
+	else
+	{
+		BlockNumber relpages;
+		BlockNumber relallvisible;
+		get_rel_pages_visiblepages(onerel, &relpages,
+								   &relallvisible);
+
+		context->totalpages = relpages;
+		context->visiblepages = relallvisible;
+
+		if (onerel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE ||
+			onerel->rd_rel->relhassubclass || RELATION_IS_INTERVAL(onerel))
+		{
+			context->samplenum = acquire_inherited_sample_rows(onerel, DEBUG2, 
+	 														   rows, stmt->rownum, 
+	 														   &context->totalnum, 
+	 														   &context->deadnum);
+	 	}
+		else 
+		{
+			context->samplenum = acquire_sample_rows(onerel, DEBUG2, 
+													 rows, stmt->rownum, 
+													 &context->totalnum, 
+													 &context->deadnum);
+		}
+	}
+
+	tupdesc = CreateTemplateTupleDesc(SAMPLE_ATTR_NUM, false);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 1, "samplenum",
+					   FLOAT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 2, "totalnum",
+					   FLOAT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 3, "deadnum",
+					   FLOAT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 4, "totalpages",
+					   INT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 5, "visiblepages",
+					   INT8OID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 6, "rows",
+					   onerel->rd_rel->reltype, -1, 0);
+
+	tstate = begin_tup_output_tupdesc(dest, tupdesc);
+	MemSet(nulls, 0, sizeof(nulls));
+	nulls[5] = true;
+	values[0] = Float8GetDatum(context->samplenum);
+	values[1] = Float8GetDatum(context->totalnum);
+	values[2] = Float8GetDatum(context->deadnum);
+	values[3] = Int64GetDatum(context->totalpages);
+	values[4] = Int64GetDatum(context->visiblepages);
+
+	do_tup_output(tstate, values, nulls);
+	
+	if (context->samplenum > 0)
+	{
+		for (index = 0; index < context->samplenum; index++)
+		{
+			nulls[0] = true;
+			nulls[1] = true;
+			nulls[2] = true;
+			nulls[3] = true;
+			nulls[4] = true;
+			nulls[5] = false;
+			values[5] = heap_copy_tuple_as_datum(context->rows[index], rowdesc);
+			do_tup_output(tstate, values, nulls);
+		}
+
+	}
+
+	end_tup_output(tstate);
+
+	pfree(rows);
+	pfree(context);
+	
+	relation_close(onerel, AccessShareLock);
+	return;
+
+}
+
+static int 
+acquire_coordinator_sample_rows(Relation onerel, int elevel,
+												HeapTuple *rows, int targrows,
+												double *totalrows, double *totaldeadrows,
+												int64 *totalpages, int64 *visiblepages)
+{
+	char		   *nspname;
+	char		   *relname;
+	/* Fields to run query to read statistics from data nodes */
+	StringInfoData	query;
+	EState		   *estate;
+	MemoryContext	oldcontext;
+	RemoteQuery 	*step;
+	RemoteQueryState *node;
+	RelationLocInfo *rellocinfo;
+	TupleTableSlot *result;
+	bool			isreplica = false;
+	Var			   *dummy;
+	double			samplenum = 0;
+	double			totalnum = 0;
+	double			deadnum = 0;
+	int				numrows = 0;
+	double			samplerows = 0;
+	double			rowstoskip = -1;	/* -1 means not set yet */
+	ReservoirStateData rstate;
+	int64			totalpagesnum = 0;
+	int64			visiblepagesnum = 0;
+
+	/* Get the relation identifier */
+	relname = RelationGetRelationName(onerel);
+	nspname = get_namespace_name(RelationGetNamespace(onerel));
+	rellocinfo = onerel->rd_locator_info;
+	isreplica = IsRelationReplicated(rellocinfo);
+
+	/* Make up query string */
+	initStringInfo(&query);
+
+	if (onerel->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
+	{
+		appendStringInfo(&query, "SAMPLE %s(%d)", relname, targrows);
+	}
+	else 
+	{
+		appendStringInfo(&query, "SAMPLE %s.%s(%d)", nspname, relname, targrows);
+	}
+
+	/* Build up RemoteQuery */
+	step = makeNode(RemoteQuery);
+	step->combine_type = COMBINE_TYPE_NONE;
+	step->exec_nodes = makeNode(ExecNodes);
+	step->exec_nodes->nodeList = NULL;
+	if (isreplica)
+	{
+		step->exec_nodes->nodeList = lappend_int(step->exec_nodes->nodeList, linitial_int(rellocinfo->rl_nodeList));
+	}
+	else 
+	{
+		step->exec_nodes->nodeList = rellocinfo->rl_nodeList;
+	}
+	
+	step->sql_statement = query.data;
+	step->force_autocommit = false;
+	step->exec_type = EXEC_ON_DATANODES;
+
+	dummy = makeVar(1, 0, FLOAT8OID, 0, InvalidOid, 0);
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 makeTargetEntry((Expr *) dummy, 0, "samplenum", false));
+	dummy = makeVar(1, 1, FLOAT8OID, 0, InvalidOid, 0);
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 makeTargetEntry((Expr *) dummy, 1, "totalnum", false));
+	dummy = makeVar(1, 2, FLOAT8OID, 0, InvalidOid, 0);
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 makeTargetEntry((Expr *) dummy, 2, "deadnum", false));
+	dummy = makeVar(1, 3, INT8OID, 0, InvalidOid, 0);
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 makeTargetEntry((Expr *) dummy, 3, "totalpages", false));
+	dummy = makeVar(1, 4, INT8OID, 0, InvalidOid, 0);
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 makeTargetEntry((Expr *) dummy, 4, "visiblepages", false));
+	dummy = makeVar(1, 5, onerel->rd_rel->reltype, 0, InvalidOid, 0);
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 makeTargetEntry((Expr *) dummy, 5, "rows", false));
+
+	/* Execute query on the data nodes */
+	estate = CreateExecutorState();
+	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
+	estate->es_snapshot = GetActiveSnapshot();
+	node = ExecInitRemoteQuery(step, estate, 0);
+	MemoryContextSwitchTo(oldcontext);
+
+	/* Prepare for sampling rows */
+	reservoir_init_selection_state(&rstate, targrows);
+
+	result = ExecRemoteQuery((PlanState *) node);
+	
+	while (result != NULL && !TupIsNull(result))
+	{
+		slot_getallattrs(result);
+		
+		if (result->tts_isnull[0] == false)
+		{
+			samplenum += DatumGetFloat8(result->tts_values[0]);
+		}
+
+		if (result->tts_isnull[1] == false)
+		{
+			totalnum += DatumGetFloat8(result->tts_values[1]);
+		}
+
+		if (result->tts_isnull[2] == false)
+		{
+			deadnum += DatumGetFloat8(result->tts_values[2]);
+		}
+
+		if (result->tts_isnull[3] == false)
+		{
+			totalpagesnum += DatumGetInt64(result->tts_values[3]);
+		}
+
+		if (result->tts_isnull[4] == false)
+		{
+			visiblepagesnum += DatumGetInt64(result->tts_values[4]);
+		}
+
+		if (result->tts_isnull[5] == false)
+		{
+			if (numrows < targrows)
+			{
+				HeapTupleHeader td = DatumGetHeapTupleHeader(result->tts_values[5]);
+				HeapTupleData tmptup;
+
+				/* Build a temporary HeapTuple control structure */
+				tmptup.t_len = HeapTupleHeaderGetDatumLength(td);
+				ItemPointerSetInvalid(&(tmptup.t_self));
+				tmptup.t_tableOid = InvalidOid;
+				tmptup.t_data = td;
+
+				/* Build a copy and return it */
+				rows[numrows++] = heap_copytuple(&tmptup);
+			}
+			else
+			{
+				/*
+					* t in Vitter's paper is the number of records already
+					* processed.  If we need to compute a new S value, we
+					* must use the not-yet-incremented value of samplerows as
+					* t.
+					*/
+				if (rowstoskip < 0)
+					rowstoskip = reservoir_get_next_S(&rstate, samplerows, targrows);
+
+				if (rowstoskip <= 0)
+				{
+					/*
+						* Found a suitable tuple, so save it, replacing one
+						* old tuple at random
+						*/
+					int			k = (int) (targrows * sampler_random_fract(rstate.randstate));
+					HeapTupleHeader td = DatumGetHeapTupleHeader(result->tts_values[5]);
+					HeapTupleData tmptup;
+
+					/* Build a temporary HeapTuple control structure */
+					tmptup.t_len = HeapTupleHeaderGetDatumLength(td);
+					ItemPointerSetInvalid(&(tmptup.t_self));
+					tmptup.t_tableOid = InvalidOid;
+					tmptup.t_data = td;
+					Assert(k >= 0 && k < targrows);
+					heap_freetuple(rows[k]);
+					rows[k] = heap_copytuple(&tmptup);
+				}
+
+				rowstoskip -= 1;
+			}
+			samplerows += 1;
+		}
+		
+		result = ExecRemoteQuery((PlanState *) node);
+	}
+
+	ExecEndRemoteQuery(node);
+	
+	*totalrows = totalnum;
+	*totaldeadrows = deadnum;
+	*totalpages = totalpagesnum;
+	*visiblepages = visiblepagesnum;
+
+	return numrows;
+}
+
+
 #endif

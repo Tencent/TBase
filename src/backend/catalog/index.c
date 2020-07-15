@@ -1409,6 +1409,10 @@ index_drop(Oid indexId, bool concurrent)
      * using it.)
      */
     heapId = IndexGetRelation(indexId, false);
+	if (g_allow_force_ddl && !OidIsValid(heapId))
+	{
+	    return;
+	}
     lockmode = concurrent ? ShareUpdateExclusiveLock : AccessExclusiveLock;
     userHeapRelation = heap_open(heapId, lockmode);
     userIndexRelation = index_open(indexId, lockmode);
@@ -3360,8 +3364,9 @@ IndexGetRelation(Oid indexId, bool missing_ok)
     tuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexId));
     if (!HeapTupleIsValid(tuple))
     {
-        if (missing_ok)
+		if (missing_ok || g_allow_force_ddl)
             return InvalidOid;
+
         elog(ERROR, "cache lookup failed for index %u", indexId);
     }
     index = (Form_pg_index) GETSTRUCT(tuple);

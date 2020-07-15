@@ -298,6 +298,35 @@ process_syncing_tables_for_sync(XLogRecPtr current_lsn)
 {
     Assert(IsTransactionState());
 
+#ifdef __SUBSCRIPTION__
+
+	if (MySubscription->is_all_actived == true &&
+				MySubscription->parallel_number > 1)
+	{
+		ListCell   *lc_simple;
+
+		/*get parallel_index != 0 other sub_child worker's MyLogicalRepWorker*/
+		List *parallel_sub_workers_list = GetTbaseSubscriptnParallelWorker(MySubscription->oid);
+
+		foreach (lc_simple, parallel_sub_workers_list)
+		{
+			LogicalRepWorker *sub_worker = (LogicalRepWorker *) lfirst(lc_simple);
+			SpinLockAcquire(&sub_worker->relmutex);
+			if (current_lsn < sub_worker->reply_lsn)
+			{
+				/* must bigger than other parallel worker's lsn, else return */
+				SpinLockRelease(&sub_worker->relmutex);
+				return;
+			}
+			SpinLockRelease(&sub_worker->relmutex);
+		}
+
+ 	   list_free(parallel_sub_workers_list);
+
+	}
+
+#endif
+
     SpinLockAcquire(&MyLogicalRepWorker->relmutex);
 
     if (MyLogicalRepWorker->relstate == SUBREL_STATE_CATCHUP &&
@@ -525,6 +554,8 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
                 /* If we told worker to catch up, wait for it. */
                 if (rstate->state == SUBREL_STATE_SYNCWAIT)
                 {
+					bool is_syncdone = false;
+
                     /* Signal the sync worker, as it may be waiting for us. */
                     if (syncworker->proc)
                         logicalrep_worker_wakeup_ptr(syncworker);
@@ -542,50 +573,112 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
                         started_tx = true;
                     }
 
-                    wait_for_relation_state_change(rstate->relid,
+					is_syncdone = wait_for_relation_state_change(rstate->relid,
                                                    SUBREL_STATE_SYNCDONE);
+#ifdef __SUBSCRIPTION__
+					/* make parallel_index != 0 other sub_child worker's state about rstate->relid to SUBREL_STATE_SYNCDONE.
+					 * because other sub_child worker's state is SUBREL_STATE_INIT after AlterSubscription_refresh,
+					 * and other sub_child worker can't start sync woker to change the state
+					 * */
+					if (is_syncdone && MySubscription->parallel_number > 1 && MySubscription->parallel_index == 0)
+					{
+						ListCell   *lc_simple;
+						ListCell   *notready_simple;
+
+						/* get parallel sub_child_ids from tbase_subscription_parallel where sub_parent in
+						 *  (select sub_parent from tbase_subscription_parallel where sub_child = MySubscription->oid)
+						 *  */
+
+						List *parallel_childids_list = GetTbaseSubscriptnParallelChild(MySubscription->oid);
+
+
+						/* update pg_subscription_rel set srsubstate = SUBREL_STATE_SYNCDONE
+						 * where srrelid = rstate->relid and srsubid in (${parallel_pid_list})
+						 * */
+
+						foreach (lc_simple, parallel_childids_list)
+						{
+							Oid sub_oid = lfirst_oid(lc_simple);
+							if (sub_oid != MySubscription->oid)
+							{
+							 	List * notready_list = NIL;
+
+								notready_list =  GetSubscriptionNotReadyRelations(sub_oid);
+								if (notready_list != NIL)
+								{
+									foreach (notready_simple, notready_list)
+									{
+										SubscriptionRelState *sub_rel_state = (SubscriptionRelState *) lfirst(notready_simple);
+										if (sub_rel_state->relid == rstate->relid)
+										{
+											/*
+											 * just process the worker's state is <= SUBREL_STATE_SYNCDONE
+											 */
+											SetSubscriptionRelState(sub_oid,
+													rstate->relid,
+													SUBREL_STATE_SYNCDONE,
+													rstate->lsn, true, false);
+										}
+									}
+								}
+							}
+						}
+
+						list_free(parallel_childids_list);
+					}
+#endif
                 }
                 else
                     LWLockRelease(LogicalRepWorkerLock);
             }
             else
             {
-                /*
-                 * If there is no sync worker for this table yet, count
-                 * running sync workers for this subscription, while we have
-                 * the lock.
-                 */
-                int            nsyncworkers =
-                logicalrep_sync_worker_count(MyLogicalRepWorker->subid);
+#ifdef __SUBSCRIPTION__
+				/* parallel_index must is 0 ,if want to start sync worker*/
+				if (MySubscription->parallel_index == 0)
+				{
+#endif
+					/*
+					 * If there is no sync worker for this table yet, count
+					 * running sync workers for this subscription, while we have
+					 * the lock.
+					 */
+					int			nsyncworkers =
+							logicalrep_sync_worker_count(MyLogicalRepWorker->subid);
 
-                /* Now safe to release the LWLock */
-                LWLockRelease(LogicalRepWorkerLock);
+					/* Now safe to release the LWLock */
+					LWLockRelease(LogicalRepWorkerLock);
 
-                /*
-                 * If there are free sync worker slot(s), start a new sync
-                 * worker for the table.
-                 */
-                if (nsyncworkers < max_sync_workers_per_subscription)
-                {
-                    TimestampTz now = GetCurrentTimestamp();
-                    struct tablesync_start_time_mapping *hentry;
-                    bool        found;
+					/*
+					 * If there are free sync worker slot(s), start a new sync
+					 * worker for the table.
+					 */
+					if (nsyncworkers < max_sync_workers_per_subscription)
+					{
+						TimestampTz now = GetCurrentTimestamp();
+						struct tablesync_start_time_mapping *hentry;
+						bool		found;
 
-                    hentry = hash_search(last_start_times, &rstate->relid,
+						hentry = hash_search(last_start_times, &rstate->relid,
                                          HASH_ENTER, &found);
 
-                    if (!found ||
-                        TimestampDifferenceExceeds(hentry->last_start_time, now,
+						if (!found ||
+								TimestampDifferenceExceeds(hentry->last_start_time, now,
                                                    wal_retrieve_retry_interval))
-                    {
-                        logicalrep_worker_launch(MyLogicalRepWorker->dbid,
+						{
+							logicalrep_worker_launch(MyLogicalRepWorker->dbid,
                                                  MySubscription->oid,
                                                  MySubscription->name,
                                                  MyLogicalRepWorker->userid,
                                                  rstate->relid);
-                        hentry->last_start_time = now;
+							hentry->last_start_time = now;
+						}
                     }
+#ifdef __SUBSCRIPTION__
                 }
+				else
+					LWLockRelease(LogicalRepWorkerLock);
+#endif
             }
         }
     }
@@ -973,6 +1066,8 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
             {
                 Relation    rel;
                 WalRcvExecResult *res;
+				bool origin_startpos_is_greater = true;
+
 #ifdef __STORAGE_SCALABLE__
                 List        *shards = NULL;
                 uint64      nTups_copy = 0;
@@ -1036,11 +1131,20 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
                  * decoding.
                  */
 #ifdef __STORAGE_SCALABLE__
-                walrcv_create_slot(wrconn, slotname, true,
-                                   CRS_USE_SNAPSHOT, origin_startpos, 
-                                   MySubscription->name, MySubscription->oid,
-                                   get_namespace_name(RelationGetNamespace(rel)),
-                                   RelationGetRelationName(rel));
+				if (shards)
+				{
+					walrcv_create_slot(wrconn, slotname, true,
+									   CRS_USE_SNAPSHOT, origin_startpos,
+									   MySubscription->name, MySubscription->oid,
+									   get_namespace_name(RelationGetNamespace(rel)),
+									   RelationGetRelationName(rel));
+				}
+				else
+				{
+					walrcv_create_slot(wrconn, slotname, true,
+									   CRS_USE_SNAPSHOT, origin_startpos,
+									   NULL, InvalidOid, NULL, NULL);
+				}
 
                 UpdateSubTableStatistics(MyLogicalRepWorker->subid, MyLogicalRepWorker->relid,
                                          0, 0, 0, 0, 0, STATE_DATACOPY, true);
@@ -1088,6 +1192,36 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
                 /* Wait for main apply worker to tell us to catchup. */
                 wait_for_worker_state_change(SUBREL_STATE_CATCHUP);
 
+
+#ifdef __SUBSCRIPTION__
+
+	           if (MySubscription->is_all_actived == true &&
+				    MySubscription->parallel_number > 1)
+	           {
+	        	   ListCell   *lc_simple;
+
+	        	   /*get parallel_index != 0 other sub_child worker's MyLogicalRepWorker*/
+	        	   List *parallel_sub_workers_list = GetTbaseSubscriptnParallelWorker(MySubscription->oid);
+
+	        	   foreach (lc_simple, parallel_sub_workers_list)
+	        	   {
+	        		   LogicalRepWorker *sub_worker = (LogicalRepWorker *) lfirst(lc_simple);
+	        		   SpinLockAcquire(&sub_worker->relmutex);
+	        		   if (*origin_startpos < sub_worker->reply_lsn)
+	        		   {
+	        			   /* must greater than other parallel worker's lsn, else return */
+	        			   SpinLockRelease(&sub_worker->relmutex);
+	        			   origin_startpos_is_greater = false;
+	        			   break;
+	        		   }
+	        		   SpinLockRelease(&sub_worker->relmutex);
+	        	   }
+
+	        	   list_free(parallel_sub_workers_list);
+
+	           }
+
+#endif
                 /*----------
                  * There are now two possible states here:
                  * a) Sync is behind the apply.  If that's the case we need to
@@ -1098,7 +1232,8 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
                  *      the state to SYNCDONE and finish.
                  *----------
                  */
-                if (*origin_startpos >= MyLogicalRepWorker->relstate_lsn)
+				if (origin_startpos_is_greater == true &&
+						*origin_startpos >= MyLogicalRepWorker->relstate_lsn)
                 {
                     /*
                      * Update the new state in catalog.  No need to bother

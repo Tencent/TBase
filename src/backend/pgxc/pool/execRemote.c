@@ -997,7 +997,7 @@ validate_combiner(ResponseCombiner *combiner)
     /* There was error message while combining */
     if (combiner->errorMessage)
     {
-        elog(LOG, "validate_combiner there is errorMessage in combiner");
+		elog(LOG, "validate_combiner there is errorMessage in combiner, errorMessage: %s", combiner->errorMessage);
         return false;
     }
     /* Check if state is defined */
@@ -1012,7 +1012,7 @@ validate_combiner(ResponseCombiner *combiner)
             || combiner->request_type == REQUEST_TYPE_QUERY)
             && combiner->command_complete_count != combiner->node_count)
     {
-        elog(LOG, "validate_combiner request_type is %d, command_complete_count:%d not equal node_count:%d", combiner->request_type, combiner->command_complete_count, combiner->node_count);
+		elog(DEBUG1, "validate_combiner request_type is %d, command_complete_count:%d not equal node_count:%d", combiner->request_type, combiner->command_complete_count, combiner->node_count);
         return false;
     }
 
@@ -3088,8 +3088,16 @@ handle_response(PGXCNodeHandle *conn, ResponseCombiner *combiner)
         {
             PGXCNodeSetConnectionState(conn,
                     DN_CONNECTION_STATE_ERROR_FATAL);
+#ifdef __TBASE__
+			elog(DEBUG5, "handle_response, fatal_conn=%p, fatal_conn->nodename=%s, fatal_conn->sock=%d, "
+				"fatal_conn->read_only=%d, fatal_conn->transaction_status=%c, "
+				"fatal_conn->sock_fatal_occurred=%d, conn->backend_pid=%d, fatal_conn->error=%s", 
+				conn, conn->nodename, conn->sock, conn->read_only, conn->transaction_status,
+				conn->sock_fatal_occurred, conn->backend_pid,  conn->error);
+#endif
             closesocket(conn->sock);
             conn->sock = NO_SOCKET;
+			conn->sock_fatal_occurred = true;
 
             ereport(ERROR,
                     (errcode(ERRCODE_INTERNAL_ERROR),
@@ -3481,6 +3489,16 @@ pgxc_node_begin(int conn_count, PGXCNodeHandle **connections,
         {
             need_send_begin = true;
         }
+
+		/* 
+		 * Send the Coordinator info down to the PGXC node at the beginning of transaction,
+		 * In this way, Datanode can print this Coordinator info into logfile, 
+		 * and those infos can be found in Datanode logifile if needed during debugging
+		 */
+		if (need_send_begin && IS_PGXC_COORDINATOR)
+		{
+			pgxc_node_send_coord_info(connections[i], MyProcPid, MyProc->lxid);
+		}
 #endif        
 
         elog(DEBUG5, "[PLPGSQL] pgxc_node_begin need_tran_block %d, connections[%d]->transaction_status %c need_send_begin:%d",
@@ -3611,6 +3629,16 @@ pgxc_node_remote_cleanup_all(void)
             continue;
         }
 
+#ifdef __TBASE__
+		/* 
+		 * At the end of the transaction, 
+		 * clean up the CN info sent to the DN in pgxc_node_begin
+		 */
+		if (IS_PGXC_COORDINATOR)
+		{
+			pgxc_node_send_coord_info(handle, 0, 0);
+		}
+#endif
         /*
          * We must go ahead and release connections anyway, so do not throw
          * an error if we have a problem here.
@@ -3637,6 +3665,16 @@ pgxc_node_remote_cleanup_all(void)
             continue;
         }
 
+#ifdef __TBASE__
+		/* 
+		 * At the end of the transaction, 
+		 * clean up the CN info sent to the DN in pgxc_node_begin
+		 */
+		if (IS_PGXC_COORDINATOR)
+		{
+			pgxc_node_send_coord_info(handle, 0, 0);
+		}
+#endif
         /*
          * We must go ahead and release connections anyway, so do not throw
          * an error if we have a problem here.
@@ -5221,7 +5259,7 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
 {// #lizard forgives
 #ifdef __TBASE__
 #define ROLLBACK_PREPARED_CMD_LEN 256
-    bool             force_release_handle = false;
+	bool                  force_release_handle = false;
 #endif
     int                ret    = -1;
     int                result = 0;
@@ -5622,7 +5660,7 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
         {
             /* Clean up remote sessions */
             pgxc_node_remote_cleanup_all();
-            release_handles(false);
+			release_handles(false);
         }
     }
     else
@@ -6040,6 +6078,18 @@ DataNodeCopyEnd(PGXCNodeHandle *handle, bool is_error)
     return false;
 }
 
+#ifdef __TBASE__
+/*
+ * Get Node connections of all Datanodes
+ */
+PGXCNodeAllHandles *
+get_exec_connections_all_dn(bool is_global_session)
+{
+	PGXCNodeAllHandles *pgxc_handles_connections = get_exec_connections(NULL, NULL, EXEC_ON_DATANODES, is_global_session);
+	return pgxc_handles_connections;
+}
+
+#endif
 
 /*
  * Get Node connections depending on the connection type:
@@ -7212,7 +7262,7 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
     for (i = 0; i < all_handles->co_conn_count; i++)
     {
         PGXCNodeHandle *handle = all_handles->coord_handles[i];
-        if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+		if (handle->sock != NO_SOCKET)
         {        
             if ((handle->state != DN_CONNECTION_STATE_IDLE) || !node_ready_for_query(handle))
             {
@@ -7264,6 +7314,12 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
 #endif
             }
         }
+#ifdef __TBASE__
+		else
+		{
+			elog(LOG, "PreAbort_Remote cn node %s pid %d, invalid socket %d!", handle->nodename, handle->backend_pid, handle->sock);
+		}
+#endif
     }
 
     /*
@@ -7272,7 +7328,7 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
     for (i = 0; i < all_handles->dn_conn_count; i++)
     {
         PGXCNodeHandle *handle = all_handles->datanode_handles[i];
-        if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+		if (handle->sock != NO_SOCKET)
         {        
             if (handle->state == DN_CONNECTION_STATE_COPY_IN  ||
                 handle->state == DN_CONNECTION_STATE_COPY_OUT || 
@@ -7366,6 +7422,12 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
 
             }
         }
+#ifdef __TBASE__
+		else
+		{
+			elog(LOG, "PreAbort_Remote dn node %s pid %d, invalid socket %d!", handle->nodename, handle->backend_pid, handle->sock);
+		}
+#endif
     }
 
     if (cancel_co_count || cancel_dn_count)
@@ -7621,9 +7683,12 @@ PostPrepare_Remote(char *prepareGID, bool implicit)
 bool
 IsTwoPhaseCommitRequired(bool localWrite)
 {// #lizard forgives
-    PGXCNodeAllHandles *handles;
+	PGXCNodeAllHandles *handles = NULL;
     bool                found = localWrite;
-    int                 i;
+    int                 i = 0;
+#ifdef __TBASE__
+    int                                     sock_fatal_count = 0;
+#endif
 
     /* Never run 2PC on Datanode-to-Datanode connection */
     if (IS_PGXC_DATANODE)
@@ -7644,10 +7709,48 @@ IsTwoPhaseCommitRequired(bool localWrite)
     if (!TransactionIdIsValid(GetTopTransactionIdIfAny()))
         return false;
 
+#ifdef __TBASE__
+	handles = get_sock_fatal_handles();
+	sock_fatal_count = handles->dn_conn_count + handles->co_conn_count;
+
+	for (i = 0; i < handles->dn_conn_count; i++)
+	{
+		PGXCNodeHandle *conn = handles->datanode_handles[i];
+
+		elog(LOG, "IsTwoPhaseCommitRequired, fatal_conn=%p, fatal_conn->nodename=%s, fatal_conn->sock=%d, "
+			"fatal_conn->read_only=%d, fatal_conn->transaction_status=%c, "
+			"fatal_conn->sock_fatal_occurred=%d, conn->backend_pid=%d, fatal_conn->error=%s", 
+			conn, conn->nodename, conn->sock, conn->read_only, conn->transaction_status,
+			conn->sock_fatal_occurred, conn->backend_pid,  conn->error);
+	}
+
+	for (i = 0; i < handles->co_conn_count; i++)
+	{
+		PGXCNodeHandle *conn = handles->coord_handles[i];
+
+		elog(LOG, "IsTwoPhaseCommitRequired, fatal_conn=%p, fatal_conn->nodename=%s, fatal_conn->sock=%d, "
+			"fatal_conn->read_only=%d, fatal_conn->transaction_status=%c, "
+			"fatal_conn->sock_fatal_occurred=%d, conn->backend_pid=%d, fatal_conn->error=%s", 
+			conn, conn->nodename, conn->sock, conn->read_only, conn->transaction_status,
+			conn->sock_fatal_occurred, conn->backend_pid,  conn->error);
+	}
+	pfree_pgxc_all_handles(handles);
+
+	if (sock_fatal_count != 0)
+	{
+		elog(ERROR, "IsTwoPhaseCommitRequired, Found %d sock fatal handles exist", sock_fatal_count);
+	}
+#endif
+
     handles = get_current_handles();
     for (i = 0; i < handles->dn_conn_count; i++)
     {
         PGXCNodeHandle *conn = handles->datanode_handles[i];
+
+#ifdef __TBASE__
+		elog(DEBUG5, "IsTwoPhaseCommitRequired, conn->nodename=%s, conn->sock=%d, conn->read_only=%d, conn->transaction_status=%c", 
+			conn->nodename, conn->sock, conn->read_only, conn->transaction_status);
+#endif
         if (conn->sock != NO_SOCKET && !conn->read_only &&
                 conn->transaction_status == 'T')
         {
@@ -7665,6 +7768,11 @@ IsTwoPhaseCommitRequired(bool localWrite)
     for (i = 0; i < handles->co_conn_count; i++)
     {
         PGXCNodeHandle *conn = handles->coord_handles[i];
+
+#ifdef __TBASE__
+		elog(DEBUG5, "IsTwoPhaseCommitRequired, conn->nodename=%s, conn->sock=%d, conn->read_only=%d, conn->transaction_status=%c", 
+			conn->nodename, conn->sock, conn->read_only, conn->transaction_status);
+#endif
         if (conn->sock != NO_SOCKET && !conn->read_only &&
                 conn->transaction_status == 'T')
         {
@@ -7680,6 +7788,11 @@ IsTwoPhaseCommitRequired(bool localWrite)
         }
     }
     pfree_pgxc_all_handles(handles);
+
+#ifdef __TBASE__
+	elog(DEBUG5, "IsTwoPhaseCommitRequired return false");
+#endif
+
     return false;
 }
 
@@ -8925,7 +9038,7 @@ pgxc_connections_cleanup(ResponseCombiner *combiner)
             {
                 case DNStatus_ERR:                    
                     {
-                        elog(LOG, "Failed to read response from data node:%s pid:%d when ending query for ERROR, node status:%d", conn->nodename, conn->backend_pid, conn->state);
+						elog(DEBUG1, "Failed to read response from data node:%s pid:%d when ending query for ERROR, node status:%d", conn->nodename, conn->backend_pid, conn->state);
                         break;
                     }
                     
@@ -8959,7 +9072,7 @@ pgxc_connections_cleanup(ResponseCombiner *combiner)
                     {
                         case DNStatus_ERR:                    
                             {
-                                elog(LOG, "Failed to read response from data node:%u when ending query for ERROR, state:%d", conn->nodeoid, conn->state);
+								elog(DEBUG1, "Failed to read response from data node:%u when ending query for ERROR, state:%d", conn->nodeoid, conn->state);
                                 break;
                             }
                             
@@ -10828,9 +10941,11 @@ ExecDisconnectRemoteSubplan(RemoteSubplanState *node)
                     ereport(ERROR,
                             (errcode(ERRCODE_INTERNAL_ERROR),
                              errmsg("Failed to disconnect from node %d.", conn->nodeoid)));
-                
-                elog(LOG, "send disconnect to node %d with cursor %s, remote_pid %d, nconsumers %d.", conn->nodeoid, cursor,
-                           conn->backend_pid, list_length(plan->distributionRestrict));
+				if (g_DataPumpDebug)
+				{
+					elog(LOG, "send disconnect to node %d with cursor %s, remote_pid %d, nconsumers %d.", conn->nodeoid, cursor,
+						       conn->backend_pid, list_length(plan->distributionRestrict));
+				}
             }
         }
 
@@ -10919,12 +11034,12 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
             for (i = 0; i < all_handles->co_conn_count; i++)
             {
                 PGXCNodeHandle *handle = all_handles->coord_handles[i];
-                if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+				if (handle->sock != NO_SOCKET)
                 {
                     if (handle->state != DN_CONNECTION_STATE_IDLE || !node_ready_for_query(handle) || pgxc_node_is_data_enqueued(handle))
                     {
                         elog(DEBUG1, "pgxc_abort_connections node:%s not ready for query, status:%d", handle->nodename, handle->state);
-                        if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+						if (handle->sock != NO_SOCKET)
                         {
                             pgxc_node_flush_read(handle);
                             handle->state = DN_CONNECTION_STATE_IDLE;
@@ -10958,7 +11073,7 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
             for (i = 0; i < all_handles->dn_conn_count; i++)
             {
                 PGXCNodeHandle *handle = all_handles->datanode_handles[i];
-                if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+				if (handle->sock != NO_SOCKET)
                 {
                     if (handle->state != DN_CONNECTION_STATE_IDLE || !node_ready_for_query(handle) || pgxc_node_is_data_enqueued(handle))
                     {
@@ -10992,7 +11107,7 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
             for (i = 0; i < all_handles->co_conn_count; i++)
             {
                 PGXCNodeHandle *handle = all_handles->coord_handles[i];
-                if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+				if (handle->sock != NO_SOCKET)
                 {
                     if (handle->state != DN_CONNECTION_STATE_IDLE || !node_ready_for_query(handle) || pgxc_node_is_data_enqueued(handle))
                     {
@@ -11002,6 +11117,11 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
                         {
                             need_loop_check = true;
                         }
+						if (proc_exit_inprogress)
+						{
+							handle->state = DN_CONNECTION_STATE_IDLE;
+							handle->last_command = 'Z';
+						}
                     }
                     else
                     {
@@ -11028,7 +11148,7 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
             for (i = 0; i < all_handles->dn_conn_count; i++)
             {
                 PGXCNodeHandle *handle = all_handles->datanode_handles[i];
-                if (handle->sock != NO_SOCKET && handle->sock < FD_SETSIZE)
+				if (handle->sock != NO_SOCKET)
                 {
                     if (handle->state != DN_CONNECTION_STATE_IDLE || !node_ready_for_query(handle) || pgxc_node_is_data_enqueued(handle))
                     {
@@ -11038,6 +11158,11 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
                         {
                             need_loop_check = true;
                         }
+						if (proc_exit_inprogress)
+						{
+							handle->state = DN_CONNECTION_STATE_IDLE;
+							handle->last_command = 'Z';
+						}
                     }
                     else
                     {
@@ -11375,9 +11500,11 @@ get_success_nodes(int node_count, PGXCNodeHandle **handles, char node_type, Stri
         {
             if (failednodes->len == 0)
                 appendStringInfo(failednodes, "Error message received from nodes:");
+#ifndef _PG_REGRESS_
             appendStringInfo(failednodes, " %s#%d",
                 (node_type == PGXC_NODE_COORDINATOR ? "coordinator" : "datanode"),
                 nodenum + 1);
+#endif
         }
     }
     return success_nodes;
@@ -11676,28 +11803,6 @@ pgxc_append_param_junkval(TupleTableSlot *slot, AttrNumber attno,
     }
 }
 
-/* get the data type's name by oid, for example 
-  * given Oid 23, find the type name is int32
-  */
-static char *
-get_typeName(Oid typid)
-{
-    HeapTuple        tuple;
-    Form_pg_type    typeForm;
-    char           *result;
-
-    tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
-
-    if (!HeapTupleIsValid(tuple))
-            elog(ERROR, "cache lookup failed for type %u", typid);
-
-    typeForm = (Form_pg_type) GETSTRUCT(tuple);
-    result = pstrdup(NameStr(typeForm->typname));
-    ReleaseSysCache(tuple);
-
-    return result;
-}
-
 /* handle escape char '''  in source char sequence */
 static char*
 handleEscape(char *source, bool *special_case)
@@ -11866,7 +11971,7 @@ SetDataRowParams(ModifyTableState *mtstate, RemoteQueryState *node, TupleTableSl
                         att = tdesc->attrs[attindex];
                         getTypeOutputInfo(att->atttypid, &typeOutput, &typIsVarlena);           
                         columnValue = DatumGetCString(OidFunctionCall1(typeOutput, dataSlot->tts_values[attindex]));
-                        typename = get_typeName(att->atttypid);
+	    				typename = get_typename(att->atttypid);
                         columnValue = handleEscape(columnValue, &special_case);
                         if(special_case)
                             appendStringInfo(&select_buf, "%s = E'%s'::%s", att->attname.data, columnValue, typename);
@@ -12328,6 +12433,11 @@ void SetCurrentHandlesReadonly(void)
 void
 SubTranscation_PreCommit_Remote(void)
 {
+	MemoryContext old;
+	MemoryContext temp = AllocSetContextCreate(TopMemoryContext,
+												  "SubTransaction remote commit context",
+												  ALLOCSET_DEFAULT_SIZES);
+	old = MemoryContextSwitchTo(temp);
     /* Only local coord can send down commit_subtxn when exec plpgsql */
     if (InPlpgsqlFunc() && IS_PGXC_LOCAL_COORDINATOR)
     {
@@ -12337,7 +12447,8 @@ SubTranscation_PreCommit_Remote(void)
     {
         pgxc_node_remote_commit(TXN_TYPE_CommitTxn, false);
     }
-    
+	MemoryContextSwitchTo(old);
+	MemoryContextDelete(temp);
 }
 
 /*

@@ -410,5 +410,6 @@ ReorderBufferTXN *ReorderBufferGetOldestTXN(ReorderBuffer *);
 void        ReorderBufferSetRestartPoint(ReorderBuffer *, XLogRecPtr ptr);
 
 void        StartupReorderBuffer(void);
+void DeleteSpillToDiskSnap(TransactionId xid);
 
 #endif

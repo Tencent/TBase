@@ -335,8 +335,8 @@ logicalrep_rel_att_by_name(LogicalRepRelation *remoterel, const char *attname)
 LogicalRepRelMapEntry *
 logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
 {// #lizard forgives
-    LogicalRepRelMapEntry *entry;
-    bool        found;
+	LogicalRepRelMapEntry *entry = NULL;
+	bool		found = false;
 
     if (LogicalRepRelMap == NULL)
         logicalrep_relmap_init();
@@ -345,9 +345,25 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
     entry = hash_search(LogicalRepRelMap, (void *) &remoteid,
                         HASH_FIND, &found);
 
+#ifdef __SUBSCRIPTION__
+	if (!found)
+	{
+		if (am_tbase_subscript_dispatch_worker())
+		{
+			//elog(LOG, "no relation map entry for remote relation ID %u, ignoring this subscription", remoteid);
+			return NULL;
+		}
+		else
+		{
+			elog(ERROR, "no relation map entry for remote relation ID %u",
+			 	remoteid);
+		}
+	}
+#else
     if (!found)
         elog(ERROR, "no relation map entry for remote relation ID %u",
              remoteid);
+#endif
 
     /* Need to update the local cache? */
     if (!OidIsValid(entry->localreloid))
@@ -367,10 +383,27 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
                                               remoterel->relname, -1),
                                  lockmode, true);
         if (!OidIsValid(relid))
-            ereport(ERROR,
+		{
+			if (am_tbase_subscript_dispatch_worker())
+			{
+				/*Since the received data of the publisher's table does not have this table locally,
+				 * the log will be printed frequently, which will cause log expand.
+				 * So, comment it out first.
+				 * */
+
+				//elog(LOG, "The subscriber cannot find the table name received from the publisher locally, ignoring the subscription for %s.%s.",
+				//			remoterel->nspname, remoterel->relname);
+				return NULL;
+
+			}
+			else
+			{
+			    ereport(ERROR,
                     (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                      errmsg("logical replication target relation \"%s.%s\" does not exist",
                             remoterel->nspname, remoterel->relname)));
+			}
+		}
         entry->localrel = heap_open(relid, NoLock);
 
         /* Check for supported relkind. */
@@ -468,11 +501,18 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
     else
         entry->localrel = heap_open(entry->localreloid, lockmode);
 
-    if (entry->state != SUBREL_STATE_READY)
-        entry->state = GetSubscriptionRelState(MySubscription->oid,
-                                               entry->localreloid,
-                                               &entry->statelsn,
-                                               true);
+#ifdef __SUBSCRIPTION__
+	if (MySubscription != NULL)
+	{
+#endif
+	    if (entry->state != SUBREL_STATE_READY)
+			entry->state = GetSubscriptionRelState(MySubscription->oid,
+					            entry->localreloid,
+								&entry->statelsn,
+								true);
+#ifdef __SUBSCRIPTION__
+	}
+#endif
 
     return entry;
 }
@@ -483,6 +523,11 @@ logicalrep_rel_open(LogicalRepRelId remoteid, LOCKMODE lockmode)
 void
 logicalrep_rel_close(LogicalRepRelMapEntry *rel, LOCKMODE lockmode)
 {
+#ifdef __SUBSCRIPTION__
+	if (NULL == rel)
+		return;
+#endif
+
     heap_close(rel->localrel, lockmode);
     rel->localrel = NULL;
 }
@@ -701,7 +746,7 @@ bool logical_apply_ignore_pk_conflict(void)
 {
     return g_logical_apply_ignore_pk_conflict;
 }
-
+#if 0
 /*
  * Executor state preparation for evaluation of constraint expressions,
  * indexes and triggers.
@@ -709,7 +754,7 @@ bool logical_apply_ignore_pk_conflict(void)
  * This is based on similar code in copy.c
  */
 static EState *
-logical_apply_create_estate_for_rel(Relation rel)
+logical_apply_create_estate_for_rel_dn_exec(Relation rel)
 {
     EState       *estate = NULL;
     ResultRelInfo *resultRelInfo = NULL;
@@ -748,7 +793,7 @@ logical_apply_create_estate_for_rel(Relation rel)
  * than on the upstream.
  */
 static void
-logical_apply_slot_fill_defaults(Relation rel,
+logical_apply_slot_fill_defaults_dn_exec(Relation rel,
                                     EState *estate,
                                        TupleTableSlot *slot,
                                        char **values)
@@ -761,6 +806,7 @@ logical_apply_slot_fill_defaults(Relation rel,
     int           *defmap = NULL;
     ExprState **defexprs = NULL;
     ExprContext *econtext = NULL;
+	int         upstream_att_index = 0;
 
     econtext = GetPerTupleExprContext(estate);
     defmap = (int *) palloc(num_phys_attrs * sizeof(int));
@@ -770,8 +816,14 @@ logical_apply_slot_fill_defaults(Relation rel,
     {
         Expr       *defexpr = NULL;
 
-        if (desc->attrs[attnum]->attisdropped || values[attnum] != NULL)
+		if (desc->attrs[attnum]->attisdropped)
             continue;
+
+		if (values[upstream_att_index] != NULL)
+		{
+			upstream_att_index++;
+			continue;
+		}
 
         defexpr = (Expr *) build_column_default(rel, attnum + 1);
 
@@ -785,6 +837,7 @@ logical_apply_slot_fill_defaults(Relation rel,
             defmap[num_defaults] = attnum;
             num_defaults++;
         }
+		upstream_att_index++;
     }
 
     for (i = 0; i < num_defaults; i++)
@@ -798,12 +851,13 @@ logical_apply_slot_fill_defaults(Relation rel,
  * use better.
  */
 static void
-logical_apply_slot_store_cstrings(TupleTableSlot *slot,
+logical_apply_slot_store_cstrings_dn_exec(TupleTableSlot *slot,
                                         Relation rel,
                                         char **values)
 {
     int            natts = slot->tts_tupleDescriptor->natts;
     int            i = 0;
+	int         upstream_att_index = 0;
 
     ExecClearTuple(slot);
 
@@ -812,17 +866,30 @@ logical_apply_slot_store_cstrings(TupleTableSlot *slot,
     {
         Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
 
-        if (!att->attisdropped && values[i] != NULL)
+		if (att->attisdropped)
+		{
+			/*
+			 * We assign NULL to dropped attributes, NULL values, and missing
+			 * values (missing values should be later filled using
+			 * logical_apply_slot_fill_defaults).
+			 */
+			slot->tts_values[i] = (Datum) 0;
+			slot->tts_isnull[i] = true;
+			continue;
+		}
+
+		if (values[upstream_att_index] != NULL)
         {
             Oid            typinput = InvalidOid;
             Oid            typioparam = InvalidOid;
 
             getTypeInputInfo(att->atttypid, &typinput, &typioparam);
             slot->tts_values[i] = OidInputFunctionCall(typinput,
-                                                       values[i],
+													   values[upstream_att_index],
                                                        typioparam,
                                                        att->atttypmod);
             slot->tts_isnull[i] = false;
+
         }
         else
         {
@@ -834,6 +901,9 @@ logical_apply_slot_store_cstrings(TupleTableSlot *slot,
             slot->tts_values[i] = (Datum) 0;
             slot->tts_isnull[i] = true;
         }
+
+		upstream_att_index++;
+
     }
 
     ExecStoreVirtualTuple(slot);
@@ -846,13 +916,14 @@ logical_apply_slot_store_cstrings(TupleTableSlot *slot,
  * of the types.
  */
 static void
-logical_apply_slot_modify_cstrings(TupleTableSlot *slot,
+logical_apply_slot_modify_cstrings_dn_exec(TupleTableSlot *slot,
                                         Relation rel,
                                          char **values,
                                          bool *replaces)
 {
     int            natts = slot->tts_tupleDescriptor->natts;
     int            i = 0;
+	int         upstream_att_index = 0;
 
     slot_getallattrs(slot);
     ExecClearTuple(slot);
@@ -862,17 +933,23 @@ logical_apply_slot_modify_cstrings(TupleTableSlot *slot,
     {
         Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
 
-        if (!replaces[i])
+		if (att->attisdropped)
             continue;
 
-        if (values[i] != NULL)
+		if (!replaces[upstream_att_index])
+		{
+			upstream_att_index++;
+			continue;
+		}
+
+		if (values[upstream_att_index] != NULL)
         {
             Oid            typinput = InvalidOid;
             Oid            typioparam = InvalidOid;
 
             getTypeInputInfo(att->atttypid, &typinput, &typioparam);
             slot->tts_values[i] = OidInputFunctionCall(typinput,
-                                                       values[i],
+													   values[upstream_att_index],
                                                        typioparam,
                                                        att->atttypmod);
             slot->tts_isnull[i] = false;
@@ -882,6 +959,8 @@ logical_apply_slot_modify_cstrings(TupleTableSlot *slot,
             slot->tts_values[i] = (Datum) 0;
             slot->tts_isnull[i] = true;
         }
+
+		upstream_att_index++;
     }
 
     ExecStoreVirtualTuple(slot);
@@ -891,7 +970,7 @@ logical_apply_slot_modify_cstrings(TupleTableSlot *slot,
  * logical apply insert message from CN
  */
 static void
-logical_apply_insert(StringInfo s)
+logical_apply_insert_dn_exec(StringInfo s)
 {
     Relation rel = NULL;
     LogicalRepTupleData newtup;
@@ -953,7 +1032,7 @@ logical_apply_insert(StringInfo s)
  * logical apply update message from CN
  */
 static void 
-logical_apply_update(StringInfo s)
+logical_apply_update_dn_exec_dn_exec(StringInfo s)
 {
     Relation     rel = NULL;
     Oid            idxoid = InvalidOid;
@@ -1074,7 +1153,7 @@ logical_apply_update(StringInfo s)
  * logical apply delete message from CN
  */
 static void
-logical_apply_delete(StringInfo s)
+logical_apply_delete_dn_exec(StringInfo s)
 {
     Relation             rel = NULL;
     LogicalRepTupleData oldtup;
@@ -1168,33 +1247,24 @@ logical_apply_delete(StringInfo s)
 
     CommandCounterIncrement();
 }
+
 /*
- * Logical apply protocol message dispatcher.
+ * logical apply Handle RELATION message from CN.
+ *
+ * Note we don't do validation against local schema here. The validation
+ * against local schema is postponed until first change for given relation
+ * comes as we only care about it when applying changes for it anyway and we
+ * do less locking this way.
  */
-void logical_apply_dispatch(StringInfo s)
+static void
+logical_apply_relation_dn_exec(StringInfo s)
 {
-    char action = pq_getmsgbyte(s);
+	LogicalRepRelation *rel;
 
-    TbaseSubscriptionApplyWorkerSet();
-
-    switch (action)
-    {
-            /* INSERT */
-        case 'I':
-            logical_apply_insert(s);
-            break;
-            /* UPDATE */
-        case 'U':
-            logical_apply_update(s);
-            break;
-            /* DELETE */
-        case 'D':
-            logical_apply_delete(s);
-            break;
-        default:
-            ereport(ERROR,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                     errmsg("invalid logical apply message type %c", action)));
-    }
+	rel = logicalrep_read_rel(s);
+	logicalrep_relmap_update(rel);
 }
+
+#endif
+
 #endif

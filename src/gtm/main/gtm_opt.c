@@ -35,6 +35,8 @@
 #define CONFIG_FILENAME "gtm.conf"
 const char *config_filename = CONFIG_FILENAME;
 
+volatile sig_atomic_t ConfigReloadPending = false;
+
 /*
  * Variables declared elsewhere for gtm, mainly option variables.
  */
@@ -151,7 +153,7 @@ struct config_bool ConfigureNamesBool[] =
            0
         },
         &Backup_synchronously,
-        false, false, NULL
+		false, NULL, NULL, false, NULL
     },
 #ifdef __TBASE__    
     {
@@ -161,65 +163,65 @@ struct config_bool ConfigureNamesBool[] =
            0
         },
         &enable_sync_commit,
-        false, false, NULL
+		false, NULL, NULL, false, NULL
     },
     {
-        {GTM_OPTNAME_ENABLE_DEBUG, GTMC_SIGHUP,
+		{GTM_OPTNAME_ENABLE_DEBUG, GTMC_STARTUP,
            gettext_noop("enable GTM debug print."),
            gettext_noop("Default value is off."),
            0
         },
         &enable_gtm_debug,
-        false, false, NULL
+		false, NULL, NULL, false, NULL
     },
 #ifdef __XLOG__
     {
-        {GTM_OPTNAME_ARCHIVE_MODE, GTMC_SIGHUP,
+		{GTM_OPTNAME_ARCHIVE_MODE, GTMC_STARTUP,
            gettext_noop("enable archive."),
            gettext_noop("Default value is off."),
            0
         },
         &archive_mode,
-        false, false, NULL
+		false, NULL, NULL, false, NULL
     },
     {
-        {GTM_OPTNAME_ENABLE_XLOG_DEBUG, GTMC_SIGHUP,
+		{GTM_OPTNAME_ENABLE_XLOG_DEBUG, GTMC_STARTUP,
            gettext_noop("enable GTM xlog debug print."),
            gettext_noop("Default value is off."),
            0
         },
         &enalbe_gtm_xlog_debug,
-        false, false, NULL
+		false, NULL, NULL, false, NULL
     },
 #endif
     /* Set it as a GUC only if we are running regression. */
     {
-        {GTM_OPTNAME_ENABLE_SEQ_DEBUG, GTMC_SIGHUP,
+		{GTM_OPTNAME_ENABLE_SEQ_DEBUG, GTMC_STARTUP,
            gettext_noop("enable GTM sequence debug."),
            gettext_noop("Default value is off."),
            0
         },
         &enable_gtm_sequence_debug,
 #ifdef _PG_REGRESS_
-        true, false, NULL
+		true, NULL, NULL, false, NULL
 #else
-        false, false, NULL
+		false, NULL, NULL, false, NULL
 #endif
     },
 #endif
     {
-            {GTM_OPTNAME_CLUSTER_READ_ONLY, GTMC_SIGHUP,
+			{GTM_OPTNAME_CLUSTER_READ_ONLY, GTMC_STARTUP,
              gettext_noop("Nodes connected with gtm will be readonly."),
              gettext_noop("Default value is off."),
              0
             },
             &GTMClusterReadOnly,
-            false, false, NULL
+			false, NULL, NULL, false, NULL
     },
 
     /* End-of-list marker */
     {
-        {NULL, 0, NULL, NULL, 0}, NULL, false, false, NULL
+		{NULL, 0, NULL, NULL, 0}, NULL, false, NULL, NULL, false, NULL
     }
 };
 
@@ -233,17 +235,17 @@ struct config_int ConfigureNamesInt[] =
             0
         },
         &GTMPortNumber,
-        0, 0, INT_MAX,
+		0, 0, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
-        {GTM_OPTNAME_ACTIVE_PORT, GTMC_SIGHUP,
+		{GTM_OPTNAME_ACTIVE_PORT, GTMC_STARTUP,
             gettext_noop("GTM server port number when it works as GTM-Standby."),
             NULL,
             0
         },
         &active_port,
-        0, 0, INT_MAX,
+		0, 0, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
@@ -253,7 +255,7 @@ struct config_int ConfigureNamesInt[] =
             GTMOPT_UNIT_TIME
         },
         &tcp_keepalives_idle,
-        0, 0, INT_MAX,
+		0, 0, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
@@ -263,7 +265,7 @@ struct config_int ConfigureNamesInt[] =
             GTMOPT_UNIT_TIME
         },
         &tcp_keepalives_interval,
-        0, 0, INT_MAX,
+		0, 0, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
@@ -273,7 +275,7 @@ struct config_int ConfigureNamesInt[] =
             0
         },
         &tcp_keepalives_count,
-        0, 0, INT_MAX,
+		0, 0, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
@@ -284,7 +286,7 @@ struct config_int ConfigureNamesInt[] =
             0
         },
         &scale_factor_threads,
-        1, 0, INT_MAX,
+		1, 0, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
@@ -295,30 +297,30 @@ struct config_int ConfigureNamesInt[] =
             0
         },
         &worker_thread_number,
-        2, 0, INT_MAX,
+		2, 0, INT_MAX, NULL, NULL,
         0, NULL
     },            
 #ifdef __XLOG__
     {
         {
-            GTM_OPTNAME_WAL_WRITER_DELAY, GTMC_SIGHUP,
+			GTM_OPTNAME_WAL_WRITER_DELAY, GTMC_STARTUP,
             gettext_noop("Wal_writer will flush xlog every wal_writer_delay ms."),
             NULL,
             0
         },
         &wal_writer_delay,
-        100, 10, INT_MAX,
+		100, 10, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
         {
-            GTM_OPTNAME_CHECKPOINT_INTERVAL, GTMC_SIGHUP,
+			GTM_OPTNAME_CHECKPOINT_INTERVAL, GTMC_STARTUP,
             gettext_noop("Checkpointer will do checkpoint every checkpoint_interval minute."),
             NULL,
             0
         },
         &checkpoint_interval,
-        30, 1, INT_MAX,
+		30, 1, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
@@ -329,7 +331,7 @@ struct config_int ConfigureNamesInt[] =
             0
         },
         &max_reserved_wal_number,
-        0, 0, INT_MAX,
+		0, 0, INT_MAX, NULL, NULL,
         0, NULL
     },
     {
@@ -340,9 +342,20 @@ struct config_int ConfigureNamesInt[] =
             0
         },
         &max_wal_sender,
-        3, 0, 100,
+		3, 0, 100, NULL, NULL,
         0, NULL
     },
+	{
+		{
+			GTM_OPTNAME_MAX_WAL_SENDER, GTMC_STARTUP,
+			gettext_noop("print time cost in ms when cost is larger then it."),
+			NULL,
+			0
+		},
+		&warnning_time_cost,
+		500, 0, INT_MAX,
+		0, NULL
+	},
 #endif
     {
             {
@@ -352,7 +365,7 @@ struct config_int ConfigureNamesInt[] =
                     0
             },
             &GTMGTSFreezeLimit,
-            365 * 100, 0, INT_MAX,
+			365 * 100, 0, INT_MAX, NULL, NULL,
             0, NULL
     },
     {
@@ -363,13 +376,13 @@ struct config_int ConfigureNamesInt[] =
                     0
             },
             &GTMStartupGTSDelta,
-            300 , 0, INT_MAX,
+			300 , 0, INT_MAX, NULL, NULL,
             0, NULL
     },
 
     /* End-of-list marker */
     {
-        {NULL, 0, NULL, NULL, 0}, NULL, 0, 0, 0, 0, NULL
+		{NULL, 0, NULL, NULL, 0}, NULL, 0, 0, 0, NULL, NULL, 0, NULL
     }
 };
 
@@ -378,7 +391,7 @@ struct config_real ConfigureNamesReal[] =
 {
     /* End-of-list marker */
     {
-        {NULL, 0, NULL, NULL, 0}, NULL, 0.0, 0.0, 0.0, 0.0, NULL
+		{NULL, 0, NULL, NULL, 0}, NULL, 0.0, 0.0, 0.0, NULL, NULL, 0.0, NULL
     }
 };
 
@@ -392,18 +405,20 @@ struct config_string ConfigureNamesString[] =
         },
         &GTMDataDir,
         NULL,
+		NULL, NULL,
         NULL,
         NULL
     },
 
     {
-        {GTM_OPTNAME_CONFIG_FILE, GTMC_SIGHUP,
+		{GTM_OPTNAME_CONFIG_FILE, GTMC_STARTUP,
              gettext_noop("Configuration file name."),
              NULL,
              0
         },
         &GTMConfigFileName,
         CONFIG_FILENAME,
+		NULL, NULL,
         NULL,
         NULL
     },
@@ -416,6 +431,7 @@ struct config_string ConfigureNamesString[] =
         },
         &NodeName,
         "gtm",
+		NULL, NULL,
         NULL,
         NULL
     },
@@ -428,61 +444,67 @@ struct config_string ConfigureNamesString[] =
         },
         &ListenAddresses,
         "*",
+		NULL, NULL,
         NULL, NULL
     },
 
     {
-        {GTM_OPTNAME_ACTIVE_HOST, GTMC_SIGHUP,
+		{GTM_OPTNAME_ACTIVE_HOST, GTMC_STARTUP,
             gettext_noop("Address of target GTM ACT."),
             gettext_noop("This parameter is effective only when it runs as GTM-Standby"),
             0
         },
         &active_addr,
         NULL,
+		NULL, NULL,
         NULL, NULL
     },
 
     {
-        {GTM_OPTNAME_LOG_FILE, GTMC_SIGHUP,
+		{GTM_OPTNAME_LOG_FILE, GTMC_STARTUP,
             gettext_noop("Log file name."),
             NULL,
             0
         },
         &GTMLogFile,
         "gtm.log",
+		NULL, NULL,
         NULL, NULL
     },
 
     {
-        {GTM_OPTNAME_ERROR_REPORTER, GTMC_SIGHUP,
+		{GTM_OPTNAME_ERROR_REPORTER, GTMC_STARTUP,
             gettext_noop("Command to report various errors."),
             NULL,
             0
         },
         &error_reporter,
         NULL,
+		NULL, NULL,
         NULL, NULL
     },
 
     {
-        {GTM_OPTNAME_STATUS_READER, GTMC_SIGHUP,
+		{GTM_OPTNAME_STATUS_READER, GTMC_STARTUP,
             gettext_noop("Command to get status of global XC node status."),
             gettext_noop("Runs when configuration file is read by SIGHUP"),
             0
         },
         &status_reader,
         NULL,
+		NULL, NULL,
         NULL, NULL
     },
 #ifdef __XLOG__
     {
-        {GTM_OPTNAME_ARCHIVE_COMMAND, GTMC_SIGHUP,
+		{GTM_OPTNAME_ARCHIVE_COMMAND, GTMC_STARTUP,
             gettext_noop("Archive use this command to backup xlog."),
             NULL,
             0
         },
         &archive_command,
         NULL,
+		NULL, NULL,
         NULL, NULL
     },
 
@@ -493,7 +515,8 @@ struct config_string ConfigureNamesString[] =
             0
         },
         &synchronous_standby_names,
-        NULL,
+		"",
+		NULL, NULL,
         NULL, NULL
     },
     
@@ -505,6 +528,7 @@ struct config_string ConfigureNamesString[] =
         },
         &application_name,
         "",
+		NULL, NULL,
         NULL, NULL
     },
     {
@@ -515,6 +539,7 @@ struct config_string ConfigureNamesString[] =
         },
         &recovery_command,
         NULL,
+		NULL, NULL,
         NULL, NULL
     },
     {
@@ -525,23 +550,25 @@ struct config_string ConfigureNamesString[] =
         },
         &recovery_target_timestamp,
         NULL,
+		NULL, NULL,
         NULL, NULL
     },
 #endif
     {
-            {GTM_OPTNAME_STARTUP_GTS_SET, GTMC_STARTUP,
-             gettext_noop("Force start GTM with this GTS"),
-             NULL,
-             0
-            },
-            &GTMStartupGTSSet,
-            NULL,
-            NULL, NULL
+		{GTM_OPTNAME_STARTUP_GTS_SET, GTMC_STARTUP,
+		 gettext_noop("Force start GTM with this GTS"),
+		 NULL,
+		 0
+		},
+		&GTMStartupGTSSet,
+		NULL,
+		NULL, NULL,
+		NULL, NULL
     },
 
     /* End-of-list marker */
     {
-        {NULL, 0, NULL, NULL}, NULL, NULL, NULL, NULL
+		{NULL, 0, NULL, NULL}, NULL, NULL, NULL, NULL, NULL, NULL
     }
 };
 
@@ -549,7 +576,7 @@ struct config_string ConfigureNamesString[] =
 struct config_enum ConfigureNamesEnum[] =
 {
     {
-        {GTM_OPTNAME_LOG_MIN_MESSAGES, GTMC_SIGHUP,
+		{GTM_OPTNAME_LOG_MIN_MESSAGES, GTMC_STARTUP,
             gettext_noop("Minimum message level to write to the log file."),
             NULL,
              0
@@ -557,11 +584,12 @@ struct config_enum ConfigureNamesEnum[] =
         &log_min_messages,
         WARNING,
         server_message_level_options,
+		NULL,NULL,
         WARNING, NULL
     },
 
     {
-        {GTM_OPTNAME_STARTUP, GTMC_SIGHUP,
+		{GTM_OPTNAME_STARTUP, GTMC_STARTUP,
             gettext_noop("Specifies startup mode, act or standby."),
             NULL,
             0
@@ -569,12 +597,13 @@ struct config_enum ConfigureNamesEnum[] =
         &GTM_StandbyMode,
         GTM_ACT_MODE,
         gtm_startup_mode_options,
+		NULL,NULL,
         GTM_ACT_MODE, NULL
     },
 
     /* End-of-list marker */
     {
-        {NULL, 0, NULL, NULL, 0}, NULL, 0, NULL, 0, NULL
+		{NULL, 0, NULL, NULL, 0}, NULL, 0, NULL,NULL,NULL, 0, NULL
     }
 };
 

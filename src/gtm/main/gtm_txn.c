@@ -55,14 +55,12 @@ static void init_GTM_TransactionInfo(GTM_TransactionInfo *gtm_txninfo,
                                      GTMProxy_ConnID connid,
                                      const char *global_sessionid,
                                      bool readonly);
-static void clean_GTM_TransactionInfo(GTM_TransactionInfo *gtm_txninfo);
 static GTM_TransactionHandle GTM_GlobalSessionIDToHandle(
                                     const char *global_sessionid);
 
 GlobalTransactionId ControlXid;  /* last one written to control file */
 GTM_Transactions GTMTransactions;
 #ifdef __TBASE__
-static void GTM_TxnInvalidateSeqStorageHandle(GTM_TransactionInfo *gtm_txninfo);
 #endif
 void
 GTM_InitTxnManager(void)
@@ -296,54 +294,6 @@ GTM_HandleToTransactionInfo(GTM_TransactionHandle handle)
     return gtm_txninfo;
 }
 
-
-/*
- * Remove the given transaction info structures from the global array. If the
- * calling thread does not have enough cached structures, we in fact keep the
- * structure in the global array and also add it to the list of cached
- * structures for this thread. This ensures that the next transaction starting
- * in this thread can quickly get a free slot in the array of transactions and
- * also avoid repeated malloc/free of the structures.
- *
- * Also compute the latestCompletedXid.
- */
-static void
-GTM_RemoveTransInfoMulti(GTM_TransactionInfo *gtm_txninfo[], int txn_count)
-{
-    int ii;
-
-    /*
-     * Remove the transaction structure from the global list of open
-     * transactions
-     */
-    GTM_RWLockAcquire(&GTMTransactions.gt_TransArrayLock, GTM_LOCKMODE_WRITE);
-
-    for (ii = 0; ii < txn_count; ii++)
-    {
-        if (gtm_txninfo[ii] == NULL)
-            continue;
-
-        GTMTransactions.gt_open_transactions = gtm_list_delete(GTMTransactions.gt_open_transactions, gtm_txninfo[ii]);
-
-        if (GlobalTransactionIdIsNormal(gtm_txninfo[ii]->gti_gxid) &&
-            GlobalTransactionIdFollowsOrEquals(gtm_txninfo[ii]->gti_gxid,
-                                               GTMTransactions.gt_latestCompletedXid))
-            GTMTransactions.gt_latestCompletedXid = gtm_txninfo[ii]->gti_gxid;
-
-        elog(DEBUG1, "GTM_RemoveTransInfoMulti: removing transaction id %u, %u, handle (%d)",
-                gtm_txninfo[ii]->gti_gxid, gtm_txninfo[ii]->gti_client_id,
-                gtm_txninfo[ii]->gti_handle);
-
-        /*
-         * Now mark the transaction as aborted and mark the structure as not-in-use
-         */
-        clean_GTM_TransactionInfo(gtm_txninfo[ii]);
-    }
-
-    GTM_RWLockRelease(&GTMTransactions.gt_TransArrayLock);
-    return;
-}
-
 /*
  * Remove all transaction infos associated with the caller thread and the given
  * backend
@@ -352,64 +302,8 @@ GTM_RemoveTransInfoMulti(GTM_TransactionInfo *gtm_txninfo[], int txn_count)
  */
 void
 GTM_RemoveAllTransInfos(uint32 client_id, int backend_id)
-{// #lizard forgives
-#ifdef __TBASE__
+{
     return;
-#else
-    gtm_ListCell *cell, *prev;
-    /*
-     * Scan the global list of open transactions
-     */
-    GTM_RWLockAcquire(&GTMTransactions.gt_TransArrayLock, GTM_LOCKMODE_WRITE);
-    prev = NULL;
-    cell = gtm_list_head(GTMTransactions.gt_open_transactions);
-    while (cell != NULL)
-    {
-        GTM_TransactionInfo *gtm_txninfo = gtm_lfirst(cell);
-        /*
-         * Check if current entry is associated with the thread
-         * A transaction in prepared state has to be kept alive in the structure.
-         * It will be committed by another thread than this one.
-         */
-        if ((gtm_txninfo->gti_in_use) &&
-            (gtm_txninfo->gti_state != GTM_TXN_PREPARED) &&
-            (gtm_txninfo->gti_state != GTM_TXN_PREPARE_IN_PROGRESS) &&
-            (GTM_CLIENT_ID_EQ(gtm_txninfo->gti_client_id, client_id)) &&
-            ((gtm_txninfo->gti_proxy_client_id == backend_id) || (backend_id == -1)))
-        {
-            /* remove the entry */
-            GTMTransactions.gt_open_transactions = gtm_list_delete_cell(GTMTransactions.gt_open_transactions, cell, prev);
-
-            /* update the latestCompletedXid */
-            if (GlobalTransactionIdIsNormal(gtm_txninfo->gti_gxid) &&
-                GlobalTransactionIdFollowsOrEquals(gtm_txninfo->gti_gxid,
-                                                   GTMTransactions.gt_latestCompletedXid))
-                GTMTransactions.gt_latestCompletedXid = gtm_txninfo->gti_gxid;
-
-            elog(DEBUG1, "GTM_RemoveAllTransInfos: removing transaction id %u, %u:%u %d:%d",
-                    gtm_txninfo->gti_gxid, gtm_txninfo->gti_client_id,
-                    client_id, gtm_txninfo->gti_proxy_client_id, backend_id);
-            /*
-             * Now mark the transaction as aborted and mark the structure as not-in-use
-             */
-            clean_GTM_TransactionInfo(gtm_txninfo);
-
-            /* move to next cell in the list */
-            if (prev)
-                cell = gtm_lnext(prev);
-            else
-                cell = gtm_list_head(GTMTransactions.gt_open_transactions);
-        }
-        else
-        {
-            prev = cell;
-            cell = gtm_lnext(cell);
-        }
-    }
-
-    GTM_RWLockRelease(&GTMTransactions.gt_TransArrayLock);
-    return;
-#endif
 }
 
 /*
@@ -865,93 +759,6 @@ init_GTM_TransactionInfo(GTM_TransactionInfo *gtm_txninfo,
     gtm_txninfo->gti_proxy_client_id = connid;
 }
 
-
-/*
- * Clean up the TransactionInfo slot and pfree all the palloc'ed memory,
- * except txid array of the snapshot, which is reused.
- */
-static void
-clean_GTM_TransactionInfo(GTM_TransactionInfo *gtm_txninfo)
-{
-    gtm_ListCell *lc PG_USED_FOR_ASSERTS_ONLY;
-
-    if (gtm_txninfo->gti_state == GTM_TXN_ABORT_IN_PROGRESS)
-    {
-#ifndef __TBASE__
-        /*
-         * First drop any sequences created in this transaction. We must do
-         * this before restoring any dropped sequences because the new sequence
-         * may have reused old name
-         */
-        gtm_foreach(lc, gtm_txninfo->gti_created_seqs)
-        {
-            GTM_SeqRemoveCreated(gtm_lfirst(lc));
-        }
-
-        /*
-         * Restore dropped sequences to their original state
-         */
-        gtm_foreach(lc, gtm_txninfo->gti_dropped_seqs)
-        {
-            GTM_SeqRestoreDropped(gtm_lfirst(lc));
-        }
-
-        /*
-         * Restore altered sequences to their original state
-         */
-        gtm_foreach(lc, gtm_txninfo->gti_altered_seqs)
-        {
-            GTM_SeqRestoreAltered(gtm_lfirst(lc));
-        }
-#endif
-    }
-    else if (gtm_txninfo->gti_state == GTM_TXN_COMMIT_IN_PROGRESS)
-    {
-#ifndef __TBASE__            
-        /*
-         * Remove sequences dropped in this transaction permanently. No action
-         * needed for sequences created in this transaction
-         */
-        gtm_foreach(lc, gtm_txninfo->gti_dropped_seqs)
-        {
-            GTM_SeqRemoveDropped(gtm_lfirst(lc));
-        }
-        /*
-         * Remove original copies of sequences altered in this transaction
-         * permanently. The altered copies stay.
-         */
-        gtm_foreach(lc, gtm_txninfo->gti_altered_seqs)
-        {
-            GTM_SeqRemoveAltered(gtm_lfirst(lc));
-        }
-#endif
-    }
-
-    gtm_list_free(gtm_txninfo->gti_created_seqs);
-    gtm_list_free(gtm_txninfo->gti_dropped_seqs);
-    gtm_list_free(gtm_txninfo->gti_altered_seqs);
-
-    gtm_txninfo->gti_dropped_seqs = gtm_NIL;
-    gtm_txninfo->gti_created_seqs = gtm_NIL;
-    gtm_txninfo->gti_altered_seqs = gtm_NIL;
-
-    gtm_txninfo->gti_state = GTM_TXN_ABORTED;
-    gtm_txninfo->gti_in_use = false;
-    gtm_txninfo->gti_snapshot_set = false;
-
-    if (gtm_txninfo->gti_gid)
-    {
-        pfree(gtm_txninfo->gti_gid);
-        gtm_txninfo->gti_gid = NULL;
-    }
-    if (gtm_txninfo->nodestring)
-    {
-        pfree(gtm_txninfo->nodestring);
-        gtm_txninfo->nodestring = NULL;
-    }
-}
-
-
 void
 GTM_BkupBeginTransactionMulti(GTM_IsolationLevel *isolevel,
                               bool *readonly,
@@ -1006,10 +813,6 @@ GTM_RollbackTransactionGXID(GlobalTransactionId gxid)
 int
 GTM_RollbackTransactionMulti(GTM_TransactionHandle txn[], int txn_count, int status[])
 {
-    int32 ret = -1;
-    GTM_TransactionInfo *gtm_txninfo[txn_count];
-    int ii;
-
     return txn_count;
 }
 
@@ -1044,12 +847,6 @@ GTM_CommitTransactionMulti(GTM_TransactionHandle txn[], int txn_count,
         int waited_xid_count, GlobalTransactionId *waited_xids,
         int status[])
 {
-    GTM_TransactionInfo *gtm_txninfo[txn_count];
-    GTM_TransactionInfo *remove_txninfo[txn_count];
-    int remove_count = 0;
-    int ii;
-    int32 ret = -1;
-
     return txn_count;
 }
 
@@ -3792,40 +3589,6 @@ int GTM_GetAllTransactions(GTM_TransactionInfo txninfo[], uint32 txncnt);
 uint32 GTM_GetAllPrepared(GlobalTransactionId gxids[], uint32 gxidcnt);
 
 #ifdef __TBASE__
-/*
- * Invalidate SEQ storage of the TXN.
- */
-void GTM_TxnInvalidateSeqStorageHandle(GTM_TransactionInfo *gtm_txninfo)
-{
-    gtm_ListCell *lc;
-    
-    if (enable_gtm_sequence_debug)
-    {
-        if (gtm_txninfo->gti_gid)
-        {
-            elog(LOG, "GTM_TxnInvalidateSeqStorageHandle for txn:%s", gtm_txninfo->gti_gid);
-        }
-    }
-    
-    gtm_foreach(lc, gtm_txninfo->gti_created_seqs)
-    {
-        GTM_SeqInvalidateHandle(gtm_lfirst(lc));
-    }
-
-    
-    gtm_foreach(lc, gtm_txninfo->gti_dropped_seqs)
-    {
-        GTM_SeqInvalidateHandle(gtm_lfirst(lc));
-    }
-
-    /*
-     * Restore altered sequences to their original state
-     */
-    gtm_foreach(lc, gtm_txninfo->gti_altered_seqs)
-    {
-        GTM_SeqInvalidateAlteredSeq(gtm_lfirst(lc));
-    }
-}
 
 void
 ProcessFinishGIDTransactionCommand(Port *myport, StringInfo message)

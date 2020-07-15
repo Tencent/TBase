@@ -267,7 +267,7 @@ extern void StoreStartXid(TransactionId transactionid);
 extern TransactionId GetNewTransactionId(bool isSubXact);
 #endif /* PGXC */
 #ifdef XCP
-extern bool TransactionIdIsCurrentGlobalTransactionId(TransactionId xid);
+extern bool TransactIdIsCurentGlobalTransacId(TransactionId xid);
 extern TransactionId GetNextTransactionId(void);
 extern void ExtendLogs(TransactionId xid);
 #endif

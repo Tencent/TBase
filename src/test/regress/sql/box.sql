@@ -38,7 +38,7 @@ INSERT INTO BOX_TBL (f1) VALUES ('(2.3, 4.5)');
 INSERT INTO BOX_TBL (f1) VALUES ('asdfasdf(ad');
 
 
-SELECT '' AS four, * FROM BOX_TBL;
+SELECT four, f1::varchar FROM (SELECT '' AS four, * FROM BOX_TBL) t order by 1,2;
 
 SELECT '' AS four, b.*, area(b.f1) as barea
    FROM BOX_TBL b ORDER BY (b.f1[0])[0], (b.f1[0])[1], (b.f1[2])[0], (b.f1[2])[1];

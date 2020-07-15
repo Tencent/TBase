@@ -109,6 +109,9 @@ typedef struct PGXCNodeHandlesLookupEnt
 } PGXCNodeHandlesLookupEnt;
 static int
 pgxc_check_socket_health(int sock, int forRead, int forWrite, time_t end_time);
+
+static int	pgxc_coordinator_proc_pid = 0;
+static TransactionId pgxc_coordinator_proc_vxid = InvalidTransactionId;
 #endif
 
 /* Current size of dn_handles and co_handles */
@@ -157,6 +160,7 @@ static int    get_char(PGXCNodeHandle * conn, char *out);
 #ifdef __TBASE__
 static ParamEntry * paramlist_get_paramentry(List *param_list, const char *name);
 static ParamEntry * paramentry_copy(ParamEntry * src_entry);
+static void PGXCNodeHandleError(PGXCNodeHandle *handle, char *msg_body, int len);
 #endif
 
 /*
@@ -185,6 +189,7 @@ init_pgxc_handle(PGXCNodeHandle *pgxc_handle)
     pgxc_handle->outEnd = 0;
     pgxc_handle->needSync = false;
 #ifdef __TBASE__    
+	pgxc_handle->sock_fatal_occurred = false;
     pgxc_handle->plpgsql_need_begin_sub_txn = false;
     pgxc_handle->plpgsql_need_begin_txn = false;
 #endif
@@ -647,6 +652,7 @@ pgxc_node_init(PGXCNodeHandle *handle, int sock, bool global_session, int pid)
     handle->plpgsql_need_begin_sub_txn = false;
     handle->plpgsql_need_begin_txn = false;
     handle->sendGxidVersion = 0;
+	handle->sock_fatal_occurred = false;
 #endif
     /*
      * We got a new connection, set on the remote node the session parameters
@@ -785,7 +791,7 @@ pgxc_node_receive(const int conn_count,
 #endif
         }
 #ifdef __TBASE__
-        elog(LOG, "no message in buffer");
+		elog(DEBUG1, "no message in buffer");
         return DNStatus_ERR;
 #else
         return ERROR_OCCURED;
@@ -873,7 +879,7 @@ retry:
                     PGXCNodeSetConnectionState(conn,
                             DN_CONNECTION_STATE_ERROR_FATAL);
                     add_error_message(conn, "unexpected EOF on datanode connection.");
-                    elog(LOG, "unexpected EOF on node:%s pid:%d", conn->nodename, conn->backend_pid);
+					elog(LOG, "unexpected EOF on node:%s pid:%d, read_status:%d, EOF:%d", conn->nodename, conn->backend_pid, read_status, EOF);
                     #if 0
                     /*
                      * before returning, also update the shared health
@@ -1179,8 +1185,18 @@ retry:
                 PGXCNodeSetConnectionState(conn,
                         DN_CONNECTION_STATE_ERROR_FATAL);    /* No more connection to
                                                             * backend */
+#ifdef __TBASE__
+				elog(DEBUG5, "pgxc_node_read_data, fatal_conn=%p, fatal_conn->nodename=%s, fatal_conn->sock=%d, "
+					"fatal_conn->read_only=%d, fatal_conn->transaction_status=%c, "
+					"fatal_conn->sock_fatal_occurred=%d, conn->backend_pid=%d, fatal_conn->error=%s", 
+					conn, conn->nodename, conn->sock, conn->read_only, conn->transaction_status,
+					conn->sock_fatal_occurred, conn->backend_pid,  conn->error);
+#endif
                 closesocket(conn->sock);
                 conn->sock = NO_SOCKET;
+#ifdef __TBASE__
+				conn->sock_fatal_occurred = true;
+#endif
             }
             return -1;
         }
@@ -1484,9 +1500,9 @@ release_handles(bool force)
         }
     }
 
-    //destroy = true;
+	//destroy = true;
     /* And finally release all the connections on pooler */
-    PoolManagerReleaseConnections(destroy);
+	PoolManagerReleaseConnections(destroy);
 
     datanode_count = 0;
     coord_count = 0;
@@ -1873,7 +1889,8 @@ send_some(PGXCNodeHandle *handle, int len)
                     add_error_message(handle, "server closed the connection unexpectedly\n"
                     "\tThis probably means the server terminated abnormally\n"
                               "\tbefore or while processing the request.\n");
-
+					PGXCNodeSetConnectionState(handle,
+							DN_CONNECTION_STATE_ERROR_FATAL);
                     /*
                      * We used to close the socket here, but that's a bad idea
                      * since there might be unread data waiting (typically, a
@@ -2554,8 +2571,10 @@ pgxc_node_send_query_internal(PGXCNodeHandle * handle, const char *query,
      * Its appropriate to send ROLLBACK commands on a failed connection, but
      * for everything else we expect the connection to be in a sane state
      */
-    elog(DEBUG5, "pgxc_node_send_query - handle->state %d, node %s, query %s",
-            handle->state, handle->nodename, query);
+	elog(DEBUG5, "pgxc_node_send_query - handle->nodename=%s, handle->sock=%d, "
+			  "handle->read_only=%d, handle->transaction_status=%c, handle->state %d, node %s, query: %s",
+			  handle->nodename, handle->sock, handle->read_only, handle->transaction_status,
+			  handle->state, handle->nodename, query);
     if ((handle->state != DN_CONNECTION_STATE_IDLE) &&
         !(handle->state == DN_CONNECTION_STATE_ERROR_FATAL && rollback))
     {
@@ -3227,6 +3246,72 @@ pgxc_node_send_timestamp(PGXCNodeHandle *handle, TimestampTz timestamp)
     return 0;
 }
 
+#ifdef __TBASE__
+/*
+ * Send the Coordinator info down to the PGXC node at the beginning of transaction,
+ * In this way, Datanode can print this Coordinator info into logfile, 
+ * and those infos can be found in Datanode logifile if needed during debugging
+ */
+int
+pgxc_node_send_coord_info(PGXCNodeHandle * handle, int coord_pid, TransactionId coord_vxid)
+{
+	int	msgLen = 0;
+	int	i32 = 0;
+
+	if (!IS_PGXC_COORDINATOR)
+		return 0;
+
+	/* size + coord_pid + coord_vxid */
+	msgLen = 4 + 4 + 4;
+
+	/* msgType + msgLen */
+	if (ensure_out_buffer_capacity(handle->outEnd + 1 + msgLen, handle) != 0)
+	{
+		add_error_message(handle, "pgxc_node_send_coord_info out of memory");
+		return EOF;
+	}
+
+	handle->outBuffer[handle->outEnd++] = 'U';		/* coord info */
+
+	msgLen = htonl(msgLen);
+	memcpy(handle->outBuffer + handle->outEnd, &msgLen, 4);
+	handle->outEnd += 4;
+
+	i32 = htonl(coord_pid);
+	memcpy(handle->outBuffer + handle->outEnd, &i32, 4);
+	handle->outEnd += 4;
+
+	i32 = htonl(coord_vxid);
+	memcpy(handle->outBuffer + handle->outEnd, &i32, 4);
+	handle->outEnd += 4;
+
+	return 0;
+}
+
+inline void pgxc_set_coordinator_proc_pid(int proc_pid)
+{
+	pgxc_coordinator_proc_pid = (IS_PGXC_COORDINATOR ? MyProcPid : proc_pid);
+}
+
+inline void pgxc_set_coordinator_proc_vxid(TransactionId proc_vxid)
+{
+	TransactionId lxid = (MyProc != NULL ? MyProc->lxid : InvalidTransactionId);
+
+	pgxc_coordinator_proc_vxid = (IS_PGXC_COORDINATOR ? lxid : proc_vxid);
+}
+
+inline int pgxc_get_coordinator_proc_pid(void)
+{
+	return (IS_PGXC_COORDINATOR ? MyProcPid : pgxc_coordinator_proc_pid);
+}
+
+inline TransactionId pgxc_get_coordinator_proc_vxid(void)
+{
+	TransactionId lxid = (MyProc != NULL ? MyProc->lxid : InvalidTransactionId);
+
+	return (IS_PGXC_COORDINATOR ? lxid : pgxc_coordinator_proc_vxid);
+}
+#endif
 
 /*
  * Add another message to the list of errors to be returned back to the client
@@ -3243,16 +3328,24 @@ add_error_message(PGXCNodeHandle *handle, const char *message)
     {
         int32 offset = 0;
 #ifdef _PG_REGRESS_
-        elog(LOG, "add_error_message node:%s, running with pid %d non first time error before append: %s, error ptr:%lx",
-                handle->nodename, handle->backend_pid, message, (uint64)handle->error);
+		elog(LOG, "add_error_message node:%s, running with pid %d non first time error before append: %s, error ptr:%lx, "
+				"handle->nodename=%s, handle->sock=%d, "
+			  	"handle->read_only=%d, handle->transaction_status=%c, handle->state %d",
+				handle->nodename, handle->backend_pid, message, (uint64)handle->error,
+				handle->nodename, handle->sock, handle->read_only, handle->transaction_status,
+			  	handle->state);
 #endif
 
         offset = strnlen(handle->error, MAX_ERROR_MSG_LENGTH);
         snprintf(handle->error + offset, MAX_ERROR_MSG_LENGTH - offset, "%s", message);
         
 #ifdef _PG_REGRESS_
-        elog(LOG, "add_error_message node:%s, running with pid %d non first time after append error: %s, ptr:%lx",
-                handle->nodename, handle->backend_pid, handle->error, (uint64) handle->error);
+		elog(LOG, "add_error_message node:%s, running with pid %d non first time after append error: %s, ptr:%lx, "
+				"handle->nodename=%s, handle->sock=%d, "
+			  	"handle->read_only=%d, handle->transaction_status=%c, handle->state %d",
+				handle->nodename, handle->backend_pid, handle->error, (uint64) handle->error,
+				handle->nodename, handle->sock, handle->read_only, handle->transaction_status,
+			  	handle->state);
 #endif
     }
     else
@@ -3260,8 +3353,12 @@ add_error_message(PGXCNodeHandle *handle, const char *message)
         snprintf(handle->error, MAX_ERROR_MSG_LENGTH, "%s", message);
         
 #ifdef _PG_REGRESS_
-        elog(LOG, "add_error_message node:%s, running with pid %d first time error: %s, ptr:%lx",
-                handle->nodename, handle->backend_pid, handle->error, (uint64)handle->error);
+		elog(LOG, "add_error_message node:%s, running with pid %d first time error: %s, ptr:%lx, "
+				"handle->nodename=%s, handle->sock=%d, "
+			  	"handle->read_only=%d, handle->transaction_status=%c, handle->state %d",
+				handle->nodename, handle->backend_pid, handle->error, (uint64)handle->error,
+				handle->nodename, handle->sock, handle->read_only, handle->transaction_status,
+			  	handle->state);
 #endif
 
     }
@@ -3300,8 +3397,12 @@ void add_error_message_from_combiner(PGXCNodeHandle *handle, void *combiner_inpu
         }
         
 #ifdef _PG_REGRESS_
-        elog(LOG, "add_error_message node:%s, running with pid %d non first time error: %s, error ptr:%lx",
-                handle->nodename, handle->backend_pid, handle->error, (uint64)handle->error);
+        elog(LOG, "add_error_message_from_combiner node:%s, running with pid %d non first time error: %s, error ptr:%lx, "
+        		"handle->nodename=%s, handle->sock=%d, "
+			  	"handle->read_only=%d, handle->transaction_status=%c, handle->state %d",
+                handle->nodename, handle->backend_pid, handle->error, (uint64)handle->error,
+                handle->nodename, handle->sock, handle->read_only, handle->transaction_status,
+			  	handle->state);
 #endif
 
     }
@@ -3324,8 +3425,12 @@ void add_error_message_from_combiner(PGXCNodeHandle *handle, void *combiner_inpu
         }
         
 #ifdef _PG_REGRESS_
-        elog(LOG, "add_error_message node:%s, running with pid %d first time error: %s, ptr:%lx",
-                handle->nodename, handle->backend_pid, handle->error, (uint64)handle->error);
+		elog(LOG, "add_error_message_from_combiner node:%s, running with pid %d first time error: %s, ptr:%lx, "
+				"handle->nodename=%s, handle->sock=%d, "
+			  	"handle->read_only=%d, handle->transaction_status=%c, handle->state %d",
+				handle->nodename, handle->backend_pid, handle->error, (uint64)handle->error,
+				handle->nodename, handle->sock, handle->read_only, handle->transaction_status,
+			  	handle->state);
 #endif
     }
 
@@ -3846,6 +3951,62 @@ get_current_handles(void)
 
     return result;
 }
+
+#ifdef __TBASE__
+PGXCNodeAllHandles *
+get_sock_fatal_handles(void)
+{
+	PGXCNodeAllHandles *result = NULL;
+	PGXCNodeHandle	   *node_handle = NULL;
+	int					i = 0;
+
+	result = (PGXCNodeAllHandles *) palloc(sizeof(PGXCNodeAllHandles));
+	if (!result)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("get_sock_fatal_handles out of memory")));
+	}
+
+	result->primary_handle = NULL;
+	result->co_conn_count = 0;
+	result->dn_conn_count = 0;
+
+	result->datanode_handles = (PGXCNodeHandle **)
+							   palloc(NumDataNodes * sizeof(PGXCNodeHandle *));
+	if (!result->datanode_handles)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("get_sock_fatal_handles out of memory")));
+	}
+
+	for (i = 0; i < NumDataNodes; i++)
+	{
+		node_handle = &dn_handles[i];
+		if (node_handle->sock_fatal_occurred == true)
+			result->datanode_handles[result->dn_conn_count++] = node_handle;
+	}
+
+	result->coord_handles = (PGXCNodeHandle **)
+							palloc(NumCoords * sizeof(PGXCNodeHandle *));
+	if (!result->coord_handles)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("get_sock_fatal_handles out of memory")));
+	}
+
+	for (i = 0; i < NumCoords; i++)
+	{
+		node_handle = &co_handles[i];
+		if (node_handle->sock_fatal_occurred == true)
+			result->coord_handles[result->co_conn_count++] = node_handle;
+	}
+
+	return result;
+}
+#endif
 
 /* Free PGXCNodeAllHandles structure */
 void
@@ -4481,9 +4642,9 @@ pgxc_node_set_query(PGXCNodeHandle *handle, const char *set_query)
 
         if (msgtype == 'E')    /* ErrorResponse */
         {
-            int32 offset = strnlen(handle->error, MAX_ERROR_MSG_LENGTH);
-            snprintf(handle->error + offset, MAX_ERROR_MSG_LENGTH - offset, "%s", msg);
-            PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_ERROR_FATAL);
+                        PGXCNodeHandleError(handle, msg, msglen);
+                        PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_ERROR_FATAL);
+                        elog(ERROR,"pgxc_node_set_query: %s",handle->error);
             break;
         }
 
@@ -4706,6 +4867,81 @@ PGXCNodeSetConnectionState(PGXCNodeHandle *handle, DNConnectionState new_state)
             "new state %d", handle->nodename, handle->state, new_state);
     handle->state = new_state;
 }
+
+#ifdef __TBASE__
+/*
+ * Handle ErrorResponse ('E') message from a Datanode connection for PGXCNodeHandle
+ */
+static void
+PGXCNodeHandleError(PGXCNodeHandle *handle, char *msg_body, int len)
+{
+    char *message = NULL;
+    char *detail = NULL;
+    char *hint = NULL;
+    int   offset = 0;
+    char  *message_combine = NULL;
+
+    /*
+     * Scan until point to terminating \0
+     */
+    while (offset + 1 < len)
+    {
+        /* pointer to the field message */
+        char *str = msg_body + offset + 1;
+
+        switch (msg_body[offset])
+        {
+            case 'M':	/* message */
+                message = str;
+                break;
+            case 'D':	/* details */
+                detail = str;
+                break;
+
+            case 'H':	/* hint */
+                hint = str;
+                break;
+
+                /* Fields not yet in use */
+            case 'C':	/* code */
+            case 'S':	/* severity */
+            case 'R':	/* routine */
+            case 'P':	/* position string */
+            case 'p':	/* position int */
+            case 'q':	/* int query */
+            case 'W':	/* where */
+            case 'F':	/* file */
+            case 'L':	/* line */
+            default:
+                break;
+        }
+
+        /* code, message and \0 */
+        offset += strlen(str) + 2;
+    }
+
+    message_combine = palloc(MAX_ERROR_MSG_LENGTH);
+
+#ifdef _PG_REGRESS_
+    snprintf(message_combine, MAX_ERROR_MSG_LENGTH,
+             "message:%s,detail:%s,hint:%s ",
+             message ? message : "",
+             detail  ? detail  : "",
+             hint ? hint: "");
+#else
+    snprintf(message_combine, MAX_ERROR_MSG_LENGTH,
+             "nodename:%s,backend_pid:%d,message:%s,detail:%s,hint:%s ",
+             handle->nodename,
+             handle->backend_pid,
+             message ? message : "",
+             detail  ? detail  : "",
+             hint ? hint: "");
+#endif
+    add_error_message(handle,message_combine);
+
+    pfree(message_combine);
+}
+#endif
 
 /*
  * Do a "Diff" of backend NODE metadata and the one present in catalog
@@ -5031,6 +5267,7 @@ pgxc_check_socket_health(int sock, int forRead, int forWrite, time_t end_time)
 #ifdef HAVE_POLL
     struct pollfd input_fd;
     int            timeout_ms;
+	int         ret;
 
     if (!forRead && !forWrite)
         return 0;
@@ -5059,7 +5296,17 @@ pgxc_check_socket_health(int sock, int forRead, int forWrite, time_t end_time)
             timeout_ms = 0;
     }
 
-    return poll(&input_fd, 1, timeout_ms);
+	ret = poll(&input_fd, 1, timeout_ms);
+	if (ret > 0)
+	{
+		if (input_fd.revents & POLLERR ||
+			input_fd.revents & POLLNVAL ||
+			input_fd.revents & POLLHUP)
+		{
+			return -1;
+		}
+	}
+	return ret;
 #else                            /* !HAVE_POLL */
 
     fd_set        input_mask;

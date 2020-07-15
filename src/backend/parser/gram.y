@@ -307,7 +307,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 		CreatePublicationStmt AlterPublicationStmt
 		CreateSubscriptionStmt AlterSubscriptionStmt DropSubscriptionStmt
 		CreateShardStmt MoveDataStmt DropShardStmt CleanShardingStmt CreateKeyValuesStmt
-		AlterNodeGroupStmt LockNodeStmt 
+		AlterNodeGroupStmt LockNodeStmt SampleStmt
 
 %type <node>	select_no_parens select_with_parens select_clause
 				simple_select values_clause
@@ -725,9 +725,9 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	RESET RESTART RESTRICT RETURNING RETURNS REVOKE RIGHT ROLE ROLLBACK ROLLBACK_SUBTXN ROLLUP
 	ROW ROWS RULE
 
-	SAVEPOINT SCHEMA SCHEMAS SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
+	SAMPLE SAVEPOINT SCHEMA SCHEMAS SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SESSIONTIMEZONE SET SETS SETOF SHARDING SHARE SHOW
-	SIMILAR SIMPLE SKIP SMALLINT SNAPSHOT SOME SQL_P STABLE STANDALONE_P
+	SIMILAR SIMPLE SKIP SLOT SMALLINT SNAPSHOT SOME SQL_P STABLE STANDALONE_P
 	START STATEMENT STATISTICS STDIN STDOUT STEP STORAGE STRICT_P STRIP_P
 	SUBSCRIPTION SUBSTRING SUCCESSFUL SYMMETRIC SYSDATE SYSID SYSTEM_P SYSTIMESTAMP 
 
@@ -1004,6 +1004,7 @@ stmt :
 			| RevokeStmt
 			| RevokeRoleStmt
 			| RuleStmt
+			| SampleStmt
 			| SecLabelStmt
 			| SelectStmt
 			| TransactionStmt
@@ -6941,6 +6942,7 @@ comment_type_name:
 			| ROLE								{ $$ = OBJECT_ROLE; }
 			| SCHEMA							{ $$ = OBJECT_SCHEMA; }
 			| SERVER							{ $$ = OBJECT_FOREIGN_SERVER; }
+			| SLOT						        { $$ = OBJECT_REPLICATION_SLOT; }
 			| SUBSCRIPTION						{ $$ = OBJECT_SUBSCRIPTION; }
 			| TABLESPACE						{ $$ = OBJECT_TABLESPACE; }
 		;
@@ -7055,6 +7057,7 @@ security_label_type_name:
 			| PUBLICATION						{ $$ = OBJECT_PUBLICATION; }
 			| ROLE								{ $$ = OBJECT_ROLE; }
 			| SCHEMA							{ $$ = OBJECT_SCHEMA; }
+			| SLOT						        { $$ = OBJECT_REPLICATION_SLOT; }
 			| SUBSCRIPTION						{ $$ = OBJECT_SUBSCRIPTION; }
 			| TABLESPACE						{ $$ = OBJECT_TABLESPACE; }
 		;
@@ -8791,6 +8794,15 @@ RenameStmt: ALTER AGGREGATE aggregate_with_argtypes RENAME TO name
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_FOREIGN_SERVER;
 					n->object = (Node *) makeString($3);
+					n->newname = $6;
+					n->missing_ok = false;
+					$$ = (Node *)n;
+				}
+			| ALTER SLOT name RENAME TO name
+				{
+					RenameStmt *n = makeNode(RenameStmt);
+					n->renameType = OBJECT_REPLICATION_SLOT;
+					n->subname = $3;
 					n->newname = $6;
 					n->missing_ok = false;
 					$$ = (Node *)n;
@@ -11354,6 +11366,22 @@ CleanAuditStmt:
 			;
 
 /* __AUDIT__ END */
+
+
+/* _SAMPLE_ BEGIN */
+SampleStmt:
+			SAMPLE qualified_name '(' Iconst ')'
+				{
+					SampleStmt *n = makeNode(SampleStmt);
+					
+					n->relation = $2;
+					n->rownum = $4;
+					
+					$$ = (Node *)n;
+				}
+			;
+
+/* _SAMPLE_ END */
 
 /* PGXC_BEGIN */
 PauseStmt: PAUSE CLUSTER
@@ -16661,6 +16689,7 @@ unreserved_keyword:
 			| ROLLUP
 			| ROWS
 			| RULE
+			| SAMPLE
 			| SAVEPOINT
 			| SCHEMA
 			| SCHEMAS
@@ -16682,6 +16711,7 @@ unreserved_keyword:
 			| SHOW
 			| SIMPLE
 			| SKIP
+			| SLOT
 			| SNAPSHOT
 			| SQL_P
 			| STABLE

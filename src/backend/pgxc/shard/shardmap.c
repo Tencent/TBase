@@ -611,7 +611,16 @@ static void SyncShardMapList_CN(bool force)
     g_GroupShardingMgr->needLock = true;
 
     LWLockAcquire(ShardMapLock, LW_EXCLUSIVE);    
+
+	/* in case of race conditions */
+	if (!force && g_UpdateShardingGroupInfo.nGroups == 0 && g_GroupShardingMgr->inited)
+	{
+		LWLockRelease(ShardMapLock);
+		g_GroupShardingMgr->needLock = false;
+		return;
+	}
     
+	g_GroupShardingMgr->inited = false;
     SyncShardMapList_Node_CN();
     g_GroupShardingMgr->inited = true;
         
@@ -644,7 +653,16 @@ static void SyncShardMapList_DN(bool force)
     /* tell others use lock to access shard map */
     g_GroupShardingMgr_DN->needLock = true;
 
-    LWLockAcquire(ShardMapLock, LW_EXCLUSIVE);    
+	LWLockAcquire(ShardMapLock, LW_EXCLUSIVE);
+
+	/* in case of race conditions */
+	if (!force && g_UpdateShardingGroupInfo.nGroups == 0 && g_GroupShardingMgr_DN->inited)
+	{
+		LWLockRelease(ShardMapLock);
+		g_GroupShardingMgr_DN->needLock = false;
+		return;
+	}
+	g_GroupShardingMgr_DN->inited = false;
     
     g_GroupShardingMgr_DN->inited = SyncShardMapList_Node_DN();
         
@@ -1891,12 +1909,14 @@ void ForceRefreshShardMap(Oid groupoid)
     {    
         if (IS_PGXC_COORDINATOR)
         {
+			g_GroupShardingMgr->inited = false;
             SyncShardMapList_Node_CN();
             g_GroupShardingMgr->inited = true;
 
         }
         else if (IS_PGXC_DATANODE)
         {    
+			g_GroupShardingMgr_DN->inited = false;
             g_GroupShardingMgr_DN->inited = SyncShardMapList_Node_DN();
         }
     }
@@ -2077,7 +2097,10 @@ CopyShardGroups_DN(Bitmapset * dest)
         return NULL;
     }
 
+	LWLockAcquire(ShardMapLock, LW_SHARED);	
     memcpy(dest, g_DatanodeShardgroupBitmap, SHARD_TABLE_BITMAP_SIZE);
+	LWLockRelease(ShardMapLock);
+	
     return dest;
 }
 
@@ -3705,7 +3728,8 @@ tbase_shard_statistic(PG_FUNCTION_ARGS)
         {
             InitShardStatistic(&rec[i]);
         }
-    
+
+		LWLockAcquire(ShardMapLock, LW_SHARED);	
         for (i = 0; i < npools; i++)
         {
             for (j = 0; j < nelems; j++)
@@ -3722,6 +3746,7 @@ tbase_shard_statistic(PG_FUNCTION_ARGS)
                 }
             }
         }
+		LWLockRelease(ShardMapLock);
 
         status->rec = rec;
         MemoryContextSwitchTo(oldcontext);
@@ -4028,6 +4053,11 @@ pg_clear_cold_access(void)
 {
     char   returnstr[MAXPGPATH] = {0};
     struct stat stat_buf;    
+
+	if(!IS_PGXC_DATANODE)
+	{
+		elog(ERROR, "can only called on datanode");
+	}	
     
     /* remove dual write info from share memory */
     g_AccessCtl->needlock = true;

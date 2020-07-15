@@ -55,6 +55,7 @@
 #include "commands/trigger.h"
 #include "commands/typecmds.h"
 #include "commands/user.h"
+#include "commands/slotfuncs.h"
 #include "parser/parse_func.h"
 #include "miscadmin.h"
 #include "rewrite/rewriteDefine.h"
@@ -403,6 +404,11 @@ ExecRenameStmt(RenameStmt *stmt)
                 heap_close(catalog, RowExclusiveLock);
 
                 return address;
+            }
+
+        case OBJECT_REPLICATION_SLOT:
+            {
+                return RenameSlot(stmt->subname, stmt->newname);
             }
 
         default:

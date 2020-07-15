@@ -50,6 +50,7 @@
 #include "utils/resowner.h"
 #include "lib/stringinfo.h"
 #include "libpq/pqformat.h"
+#include "common/username.h"
 #include "pgxc/locator.h"
 #include "pgxc/pgxc.h"
 #include "pgxc/nodemgr.h"
@@ -520,7 +521,7 @@ static void  *pooler_async_utility_thread(void *arg);
 static void  *pooler_async_connection_management_thread(void *arg);
 static void  *pooler_sync_remote_operator_thread(void *arg);
 
-static void   pooler_async_build_connection(DatabasePool *pool, int32 pool_version, int32 nodeidx, Oid node, 
+static bool   pooler_async_build_connection(DatabasePool *pool, int32 pool_version, int32 nodeidx, Oid node, 
                                             int32 size, char *connStr, bool bCoord);
 static BitmapMgr *BmpMgrCreate(uint32 objnum);
 static int        BmpMgrAlloc(BitmapMgr *mgr);
@@ -556,7 +557,9 @@ static int  refresh_database_pools(PoolAgent *agent);
 static void pooler_async_ping_node(Oid node);
 static bool match_databasepool(DatabasePool *databasePool, const char* user_name, const char* database);
 static int handle_close_pooled_connections(PoolAgent * agent, StringInfo s);
-
+#ifdef __TBASE__
+static void ConnectPoolManager(void);
+#endif
 
 
 #define IncreaseSlotRefCount(slot,filename,linenumber)\
@@ -1141,8 +1144,6 @@ PoolManagerConnect(PoolHandle *handle,
 void
 PoolManagerReconnect(void)
 {
-    PoolHandle *handle;
-
     HOLD_POOLER_RELOAD();
 
     if (poolHandle)
@@ -1150,11 +1151,7 @@ PoolManagerReconnect(void)
         PoolManagerDisconnect();
     }
     
-    handle = GetPoolManagerHandle();
-    PoolManagerConnect(handle,
-                       get_database_name(MyDatabaseId),
-                       GetUserNameFromId(GetUserId(), false),
-                       session_options());
+	ConnectPoolManager();
 
     RESUME_POOLER_RELOAD();
 }
@@ -1171,7 +1168,6 @@ PoolManagerSetCommand(PGXCNodeHandle **connections, int32 count, PoolCommandType
     char msgtype = 's';
     char *p   = NULL;
     char *sep = NULL;
-    PoolHandle *handle = NULL;
     
     if (PoolConnectDebugPrint)
     {
@@ -1265,9 +1261,7 @@ PoolManagerSetCommand(PGXCNodeHandle **connections, int32 count, PoolCommandType
 
     if (NULL == poolHandle)
     {
-        handle = GetPoolManagerHandle();
-        PoolManagerConnect(handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
 
     if (poolHandle)
@@ -1442,15 +1436,12 @@ PoolManagerLock(bool is_lock)
     char msgtype = 'o';
     int n32;
     int msglen = 8;
-    PoolHandle *handle;
 
     HOLD_POOLER_RELOAD();
 
     if (poolHandle == NULL)
     {
-        handle = GetPoolManagerHandle();
-        PoolManagerConnect(handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
 
     /* Message type */
@@ -1690,7 +1681,6 @@ PoolManagerGetConnections(List *datanodelist, List *coordlist, int **pids)
     int           *fds;
     int            totlen = list_length(datanodelist) + list_length(coordlist);
     int            nodes[totlen + 2];
-    PoolHandle *handle;
     int         pool_recvpids_num;
     int         pool_recvfds_ret;
 
@@ -1700,9 +1690,7 @@ PoolManagerGetConnections(List *datanodelist, List *coordlist, int **pids)
     
     if (poolHandle == NULL)
     {
-        handle = GetPoolManagerHandle();
-        PoolManagerConnect(handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
     
     /*
@@ -1802,13 +1790,10 @@ PoolManagerAbortTransactions(char *dbname, char *username, int **proc_pids)
     char        msgtype = 'a';
     int        dblen = dbname ? strlen(dbname) + 1 : 0;
     int        userlen = username ? strlen(username) + 1 : 0;
-    PoolHandle *handle;
     
     if (poolHandle == NULL)
     {
-        handle = GetPoolManagerHandle();
-        PoolManagerConnect(handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
 
     /* Message type */
@@ -1857,15 +1842,12 @@ PoolManagerCleanConnection(List *datanodelist, List *coordlist, char *dbname, ch
     char            msgtype = 'f';
     int            userlen = username ? strlen(username) + 1 : 0;
     int            dblen = dbname ? strlen(dbname) + 1 : 0;
-    PoolHandle *handle;
 
     HOLD_POOLER_RELOAD();
 
     if (poolHandle == NULL)
     {
-        handle = GetPoolManagerHandle();
-        PoolManagerConnect(handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
 
     nodes[0] = htonl(list_length(datanodelist));
@@ -1935,7 +1917,6 @@ bool
 PoolManagerCheckConnectionInfo(void)
 {
     int res;
-    PoolHandle *pool_handle;
 
     /*
      * New connection may be established to clean connections to
@@ -1943,15 +1924,7 @@ PoolManagerCheckConnectionInfo(void)
      */
     if (poolHandle == NULL)
     {
-        pool_handle = GetPoolManagerHandle();
-        if (pool_handle == NULL)
-        {
-            ereport(ERROR,
-                (errcode(ERRCODE_IO_ERROR),
-                 errmsg("Can not connect to pool manager")));
-        }
-        PoolManagerConnect(pool_handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
     
     PgxcNodeListAndCount();
@@ -4311,7 +4284,11 @@ reload_database_pools(PoolAgent *agent)
             if (connstr_chk == NULL || strcmp(connstr_chk, nodePool->connstr))
             {
                 /* Node has been removed or altered */
+#ifdef __TBASE__
+				if (nodePool->size == nodePool->freeSize || connstr_chk == NULL)
+#else
                 if (nodePool->size == nodePool->freeSize)
+#endif
                 {
                     elog(LOG, POOL_MGR_PREFIX"nodePool:%s has been changed, size:%d, freeSize:%d, destory it now", nodePool->connstr, nodePool->size, nodePool->freeSize);                    
                     destroy_node_pool(nodePool);
@@ -4738,8 +4715,10 @@ grow_pool(DatabasePool *dbPool, int32 nodeidx, Oid node, bool bCoord)
                 
                 if (size)
                 {
-                    pooler_async_build_connection(dbPool, nodePool->m_version, nodeidx, node, size, nodePool->connstr, bCoord);
-                    nodePool->asyncInProgress = true;
+    				if (pooler_async_build_connection(dbPool, nodePool->m_version, nodeidx, node, size, nodePool->connstr, bCoord))
+					{
+    					nodePool->asyncInProgress = true;
+					}
                 }
             }
         }
@@ -4763,6 +4742,7 @@ static void
 destroy_slot_ex(int32 nodeidx, Oid node, PGXCNodePoolSlot *slot, char *file, int32 line)
 {// #lizard forgives
     int32                  threadid = 0;
+    uint64              pipeput_loops = 0;
     PGXCPoolConnectReq *connReq;
     MemoryContext        oldcontext;
 
@@ -4832,8 +4812,13 @@ destroy_slot_ex(int32 nodeidx, Oid node, PGXCNodePoolSlot *slot, char *file, int
 
     while (-1 == PipePut(g_PoolConnControl.request[threadid % MAX_SYNC_NETWORK_THREAD], (void*)connReq))
     {
-        elog(LOG, POOL_MGR_PREFIX"destroy_slot_ex fail to async close connection node:%u ",node);        
+		pipeput_loops++;
     }
+
+	if (pipeput_loops > 0)
+	{
+		elog(LOG, POOL_MGR_PREFIX"destroy_slot_ex fail to async close connection node:%u for loops %lu", node, pipeput_loops);
+	}
     
     /* signal thread to start build job */
     ThreadSemaUp(&g_PoolConnControl.sem[threadid % MAX_SYNC_NETWORK_THREAD]);
@@ -4854,7 +4839,8 @@ destroy_slot_ex(int32 nodeidx, Oid node, PGXCNodePoolSlot *slot, char *file, int
 static void
 close_slot(int32 nodeidx, Oid node, PGXCNodePoolSlot *slot)
 {// #lizard forgives
-    int32 threadid; 
+    int32 threadid;
+    uint64 pipeput_loops = 0;
     PGXCPoolConnectReq *connReq;
     if (!slot)
     {
@@ -4893,8 +4879,13 @@ close_slot(int32 nodeidx, Oid node, PGXCNodePoolSlot *slot)
     connReq->slot[0].conn          = slot->conn;
     while (-1 == PipePut(g_PoolConnControl.request[threadid % MAX_SYNC_NETWORK_THREAD], (void*)connReq))
     {
-        elog(LOG, POOL_MGR_PREFIX"fail to async close connection node:%u ",node);        
+		pipeput_loops++;	
     }
+
+	if (pipeput_loops > 0)
+	{
+		elog(LOG, POOL_MGR_PREFIX"fail to async close connection node:%u for loops %lu", node, pipeput_loops);
+	}
     
     /* signal thread to start build job */
     ThreadSemaUp(&g_PoolConnControl.sem[threadid % MAX_SYNC_NETWORK_THREAD]);
@@ -6521,6 +6512,7 @@ static void pooler_sync_connections_to_nodepool(void)
 /* async warm a conection */
 static void pooler_async_warm_connection(DatabasePool *pool, PGXCNodePoolSlot *slot, PGXCNodePool *nodePool, Oid node)
 {
+	uint64 pipeput_loops = 0;
     PGXCAsyncWarmInfo *asyncInfo = NULL;
     MemoryContext     oldcontext;
     
@@ -6532,8 +6524,13 @@ static void pooler_async_warm_connection(DatabasePool *pool, PGXCNodePoolSlot *s
     asyncInfo->node           = node;
     while (-1 == PipePut(g_AsynUtilityPipeSender, (void*)asyncInfo))
     {
-        elog(LOG, POOL_MGR_PREFIX"fail to async warm connection db:%s user:%s node:%u", pool->database, pool->user_name, node);
+		pipeput_loops++;
     }
+
+	if (pipeput_loops > 0)
+	{
+        elog(LOG, POOL_MGR_PREFIX"fail to async warm connection db:%s user:%s node:%u for loops %lu", pool->database, pool->user_name, node, pipeput_loops);
+	}
 
     /* increase warming count */
     nodePool->nwarming++;
@@ -6548,6 +6545,7 @@ static void pooler_async_warm_connection(DatabasePool *pool, PGXCNodePoolSlot *s
 /* async query the memrory usage of a conection */
 static void pooler_async_query_connection(DatabasePool *pool, PGXCNodePoolSlot *slot, int32 nodeidx, Oid node)
 {
+	uint64 pipeput_loops = 0;
     PGXCAsyncWarmInfo *asyncInfo = NULL;
     
     MemoryContext     oldcontext;    
@@ -6561,8 +6559,13 @@ static void pooler_async_query_connection(DatabasePool *pool, PGXCNodePoolSlot *
     asyncInfo->node           = node;
     while (-1 == PipePut(g_AsynUtilityPipeSender, (void*)asyncInfo))
     {
-        elog(LOG, POOL_MGR_PREFIX"fail to async query connection db:%s user:%s node:%u", pool->database, pool->user_name, node);
+		pipeput_loops++;
     }
+
+	if (pipeput_loops > 0)
+	{
+	    elog(LOG, POOL_MGR_PREFIX"fail to async query connection db:%s user:%s node:%u for loops %lu", pool->database, pool->user_name, node, pipeput_loops);
+	}
 
     ThreadSemaUp(&g_AsnyUtilitysem);
     if (PoolConnectDebugPrint)
@@ -6575,6 +6578,7 @@ static void pooler_async_query_connection(DatabasePool *pool, PGXCNodePoolSlot *
 /* async ping a node */
 static void pooler_async_ping_node(Oid node)
 {
+	uint64 pipeput_loops = 0;
     PGXCAsyncWarmInfo *asyncInfo = NULL;
     MemoryContext     oldcontext;
     NodeDefinition       *nodeDef   = NULL;
@@ -6617,8 +6621,13 @@ static void pooler_async_ping_node(Oid node)
     
     while (-1 == PipePut(g_AsynUtilityPipeSender, (void*)asyncInfo))
     {
-        elog(LOG, POOL_MGR_PREFIX"fail to async ping node:%u", node);
+		pipeput_loops++;
     }
+
+	if (pipeput_loops > 0)
+	{
+		elog(LOG, POOL_MGR_PREFIX"fail to async ping node:%u for loops %lu", node, pipeput_loops);
+	}
     
     ThreadSemaUp(&g_AsnyUtilitysem);
     if (PoolConnectDebugPrint)
@@ -6634,11 +6643,21 @@ static void pooler_async_ping_node(Oid node)
 
 
 /* async batch connection build  */
-static void pooler_async_build_connection(DatabasePool *pool, int32 pool_version, int32 nodeidx, Oid node, int32 size, char *connStr, bool bCoord)
+static bool pooler_async_build_connection(DatabasePool *pool, int32 pool_version, int32 nodeidx, Oid node, int32 size, char *connStr, bool bCoord)
 {
+	int32 threadid; 
+	uint64 pipeput_loops = 0;
     PGXCPoolConnectReq *connReq = NULL;
-
     MemoryContext     oldcontext;    
+
+	/* if no free pipe line avaliable, do nothing */
+	threadid = pooler_async_task_pick_thread(&g_PoolConnControl, nodeidx);
+	if (-1 == threadid)
+	{
+		elog(LOG, POOL_MGR_PREFIX"no pipeline avaliable, pooler_async_build_connection node:%u nodeidx:%d", node, nodeidx);	
+		return false;
+	}
+	
     oldcontext = MemoryContextSwitchTo(PoolerMemoryContext);
     connReq  = (PGXCPoolConnectReq*)palloc0(sizeof(PGXCPoolConnectReq) + (size - 1) * sizeof(PGXCNodePoolSlot));
     connReq->cmd       = COMMAND_CONNECTION_BUILD;
@@ -6651,18 +6670,25 @@ static void pooler_async_build_connection(DatabasePool *pool, int32 pool_version
     connReq->validSize = 0;
     connReq->m_version = pool_version;
 
-    while (-1 == PipePut(g_PoolConnControl.request[nodeidx % MAX_SYNC_NETWORK_THREAD], (void*)connReq))
+	while (-1 == PipePut(g_PoolConnControl.request[threadid], (void*)connReq))
     {
-        elog(LOG, POOL_MGR_PREFIX"fail to async build connection db:%s user:%s node:%u size:%d", pool->database, pool->user_name, node, size);        
+		pipeput_loops++;		
     }
+
+	if (pipeput_loops > 0)
+	{
+	    elog(LOG, POOL_MGR_PREFIX"fail to async build connection db:%s user:%s node:%u size:%d for loops %lu", pool->database, pool->user_name, node, size, pipeput_loops);
+	}
     
     /* signal thread to start build job */
-    ThreadSemaUp(&g_PoolConnControl.sem[nodeidx % MAX_SYNC_NETWORK_THREAD]);
+	ThreadSemaUp(&g_PoolConnControl.sem[threadid]);
     if (PoolConnectDebugPrint)
     {
         elog(LOG, POOL_MGR_PREFIX"async build connection db:%s user:%s node:%u size:%d", pool->database, pool->user_name, node, size);
     }
     MemoryContextSwitchTo(oldcontext);
+
+	return true;
 }
 
 /* aync acquire connection */
@@ -6670,6 +6696,7 @@ static bool dispatch_async_network_operation(PGXCPoolAsyncReq *req)
 {
     int32 threadid = 0;
     Oid   node     = 0;
+	uint64 pipeput_loops = 0;
 
     /* choose a thread to handle the msg */
     threadid = pooler_async_task_pick_thread(&g_PoolSyncNetworkControl, req->nodeindex);
@@ -6696,8 +6723,13 @@ static bool dispatch_async_network_operation(PGXCPoolAsyncReq *req)
     /* dispatch the msg to the handling thread */
     while (-1 == PipePut(g_PoolSyncNetworkControl.request[threadid % MAX_SYNC_NETWORK_THREAD], (void*)req))
     {
-        elog(LOG, POOL_MGR_PREFIX"fail to async network operation pid:%d bCoord:%d nodeindex:%d current_status:%d final_status:%d thread:%d req_seq:%d", req->agent->pid, req->bCoord, req->nodeindex, req->current_status, req->final_status, threadid, req->req_seq);        
+		pipeput_loops++;		
     }
+
+	if (pipeput_loops > 0)
+	{
+        elog(LOG, POOL_MGR_PREFIX"fail to async network operation pid:%d bCoord:%d nodeindex:%d current_status:%d final_status:%d thread:%d req_seq:%d for loops %lu", req->agent->pid, req->bCoord, req->nodeindex, req->current_status, req->final_status, threadid, req->req_seq, pipeput_loops);
+	}
 
     /* increase agent ref count */
     agent_increase_ref_count(req->agent);
@@ -8563,12 +8595,36 @@ static void refresh_node_map(void)
     int             numDn;
     int             nodeindex;
     bool            found;
+#ifdef __TBASE__
+	bool           inited = false;
+#endif
 
     if (NULL == g_nodemap)
     {
         /* init node map */
         create_node_map();
+#ifdef __TBASE__
+		inited = true;
+#endif
     }
+#ifdef __TBASE__
+	/* reset hashtab */
+	if (!inited)
+	{
+		HASH_SEQ_STATUS scan_status;
+		PGXCMapNode  *item;
+
+		hash_seq_init(&scan_status, g_nodemap);
+		while ((item = (PGXCMapNode *) hash_seq_search(&scan_status)) != NULL)
+		{
+			if (hash_search(g_nodemap, (const void *) &item->nodeoid,
+							HASH_REMOVE, NULL) == NULL)
+			{
+				elog(ERROR, POOL_MGR_PREFIX"node map hash table corrupted");
+			}
+		}
+	}
+#endif
     PgxcNodeGetOids(&coOids, &dnOids, &numCo, &numDn, false);
 
     for (nodeindex = 0; nodeindex < numCo; nodeindex++)
@@ -9571,6 +9627,15 @@ PoolPingNodeRecheck(Oid nodeoid)
     NodeDefinition *nodeDef;
     char connstr[MAXPGPATH * 2 + 256];
     bool    healthy;
+    const char *username = NULL;
+    char *errstr = NULL;
+
+    username = get_user_name(&errstr);
+    if (errstr != NULL)
+    {
+        elog(WARNING, "Could not get current username errmsg: %s", errstr);
+        return;
+    }
 
     nodeDef = PgxcNodeGetDefinition(nodeoid);
     if (nodeDef == NULL)
@@ -9582,8 +9647,8 @@ PoolPingNodeRecheck(Oid nodeoid)
     }
 
     sprintf(connstr,
-            "host=%s port=%d", NameStr(nodeDef->nodehost),
-            nodeDef->nodeport);
+			"host=%s port=%d user=%s dbname=%s", NameStr(nodeDef->nodehost),
+			nodeDef->nodeport, username, get_database_name(MyDatabaseId));
     status = PGXCNodePing(connstr);
     healthy = (status == 0);
 
@@ -9615,6 +9680,12 @@ PoolAsyncPingNodes()
     int                numCo;
     int                numDn;
     int                i;
+
+	/* pipe is full, no need to continue */
+	if (IS_ASYNC_PIPE_FULL())
+	{
+		return;
+	}	
 
     coOids = (Oid*)palloc(sizeof(Oid) * TBASE_MAX_COORDINATOR_NUMBER);
     if (coOids == NULL)
@@ -10556,15 +10627,12 @@ PoolManagerClosePooledConnections(const char *dbname, const char *username)
     int     res = 0;
     int        dblen = dbname ? strlen(dbname) + 1 : 0;
     int        userlen = username ? strlen(username) + 1 : 0;
-    PoolHandle *handle = NULL;
 
     HOLD_POOLER_RELOAD();
     
     if (poolHandle == NULL)
     {
-        handle = GetPoolManagerHandle();
-        PoolManagerConnect(handle, get_database_name(MyDatabaseId),
-                           GetClusterUserName(), session_options());
+		ConnectPoolManager();
     }
 
     /* Message type */
@@ -10668,3 +10736,25 @@ static bool match_databasepool(DatabasePool *databasePool, const char* user_name
 
     return true;
 }
+#ifdef __TBASE__
+static void
+ConnectPoolManager(void)
+{
+	bool need_abort = false;
+	PoolHandle *handle = NULL;
+	
+	handle = GetPoolManagerHandle();
+	if (!IsTransactionOrTransactionBlock())
+	{
+		StartTransactionCommand();
+		need_abort = true;
+	}
+	PoolManagerConnect(handle, get_database_name(MyDatabaseId),
+					   GetClusterUserName(), session_options());
+	if (need_abort)
+	{
+		AbortCurrentTransaction();
+	}
+
+}
+#endif

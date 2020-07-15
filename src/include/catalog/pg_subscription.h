@@ -132,6 +132,8 @@ extern char *GetSubscriptionTableDesc(Oid proid);
 #ifdef __SUBSCRIPTION__
 
 extern void ActiveAllParallelTbaseSubscriptions(XLogRecPtr active_lsn);
+extern List *GetTbaseSubscriptnParallelChild(Oid subid);
+extern List *GetTbaseSubscriptnParallelWorker(Oid subid);
 
 #define Natts_tbase_subscription                            7
 #define Anum_tbase_subscription_sub_name                    1

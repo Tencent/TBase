@@ -228,7 +228,7 @@ SendRowDescriptionMessage(TupleDesc typeinfo, List *targetlist, int16 *formats)
         if (IsConnFromCoord())
         {
             char       *typename;
-            typename = get_typename(atttypid);
+			typename = get_typenamespace_typename(atttypid);
             pq_sendstring(&buf, typename);
         }
 #endif

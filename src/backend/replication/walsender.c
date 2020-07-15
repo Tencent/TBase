@@ -244,7 +244,7 @@ static void StartLogicalReplication(StartReplicationCmd *cmd);
 static void ProcessStandbyMessage(void);
 static void ProcessStandbyReplyMessage(void);
 static void ProcessStandbyHSFeedbackMessage(void);
-static void ProcessRepliesIfAny(void);
+static void ProcessRepliesIfAny(TransactionId xid);
 static void WalSndKeepalive(bool requestReply);
 static void WalSndKeepaliveIfNecessary(TimestampTz now);
 static void WalSndCheckTimeOut(TimestampTz now);
@@ -1559,7 +1559,7 @@ WalSndWriteData(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid,
         }
 
         /* Check for input from the client */
-        ProcessRepliesIfAny();
+		ProcessRepliesIfAny(xid);
 
         /* Try to flush pending output to the client */
         if (pq_flush_if_writable() != 0)
@@ -1671,7 +1671,7 @@ WalSndWaitForWal(XLogRecPtr loc)
         }
 
         /* Check for input from the client */
-        ProcessRepliesIfAny();
+		ProcessRepliesIfAny(InvalidTransactionId);
 
         /*
          * If we're shutting down, trigger pending WAL to be written out,
@@ -1930,7 +1930,7 @@ exec_replication_command(const char *cmd_string)
  * end has closed the connection.
  */
 static void
-ProcessRepliesIfAny(void)
+ProcessRepliesIfAny(TransactionId xid)
 {// #lizard forgives
     unsigned char firstchar;
     int            r;
@@ -2008,6 +2008,14 @@ ProcessRepliesIfAny(void)
                  * 'X' means that the standby is closing down the socket.
                  */
             case 'X':
+				ereport(LOG,
+						(errcode(ERRCODE_PROTOCOL_VIOLATION),
+						 errmsg("standby message type \"%c\", the standby is closing down the socket",firstchar)));
+				if (TransactionIdIsValid(xid))
+				{
+				    DeleteSpillToDiskSnap(xid);
+				}
+
                 proc_exit(0);
 
             default:
@@ -2491,7 +2499,7 @@ WalSndLoop(WalSndSendDataCallback send_data)
         }
 
         /* Check for input from the client */
-        ProcessRepliesIfAny();
+		ProcessRepliesIfAny(InvalidTransactionId);
 
         /*
          * If we have received CopyDone from the client, sent CopyDone

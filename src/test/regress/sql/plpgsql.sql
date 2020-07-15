@@ -2589,7 +2589,7 @@ end$$ language plpgsql;
 
 select footest();
 
-select * from foo order by 1, 2;
+select * from foo order by f1,f2;
 
 create or replace function footest() returns void as $$
 declare x record;
@@ -2848,7 +2848,7 @@ select shadowtest(1);
 
 create function sc_test() returns setof integer as $$
 declare
-  c scroll cursor for select f1 from int4_tbl;
+  c scroll cursor for select f1 from int4_tbl order by 1;
   x integer;
 begin
   open c;
@@ -2861,11 +2861,11 @@ begin
 end;
 $$ language plpgsql;
 
-select * from sc_test();
+select * from sc_test() order by 1;
 
 create or replace function sc_test() returns setof integer as $$
 declare
-  c no scroll cursor for select f1 from int4_tbl;
+  c no scroll cursor for select f1 from int4_tbl order by 1;
   x integer;
 begin
   open c;
@@ -2878,14 +2878,14 @@ begin
 end;
 $$ language plpgsql;
 
-select * from sc_test();  -- fails because of NO SCROLL specification
+select * from sc_test() order by 1;  -- fails because of NO SCROLL specification
 
 create or replace function sc_test() returns setof integer as $$
 declare
   c refcursor;
   x integer;
 begin
-  open c scroll for select f1 from int4_tbl;
+  open c scroll for select f1 from int4_tbl order by 1;
   fetch last from c into x;
   while found loop
     return next x;
@@ -2895,14 +2895,14 @@ begin
 end;
 $$ language plpgsql;
 
-select * from sc_test();
+select * from sc_test() order by 1;
 
 create or replace function sc_test() returns setof integer as $$
 declare
   c refcursor;
   x integer;
 begin
-  open c scroll for execute 'select f1 from int4_tbl';
+  open c scroll for execute 'select f1 from int4_tbl order by 1';
   fetch last from c into x;
   while found loop
     return next x;
@@ -2912,14 +2912,14 @@ begin
 end;
 $$ language plpgsql;
 
-select * from sc_test();
+select * from sc_test() order by 1;
 
 create or replace function sc_test() returns setof integer as $$
 declare
   c refcursor;
   x integer;
 begin
-  open c scroll for execute 'select f1 from int4_tbl';
+  open c scroll for execute 'select f1 from int4_tbl order by 1';
   fetch last from c into x;
   while found loop
     return next x;
@@ -2930,7 +2930,7 @@ begin
 end;
 $$ language plpgsql;
 
-select * from sc_test();
+select * from sc_test() order by 1;
 
 create or replace function sc_test() returns setof integer as $$
 declare
@@ -2952,7 +2952,7 @@ begin
 end;
 $$ language plpgsql;
 
-select * from sc_test();
+select * from sc_test() order by 1;
 
 create or replace function sc_test() returns setof integer as $$
 declare
@@ -2969,7 +2969,7 @@ begin
 end;
 $$ language plpgsql;
 
-select * from sc_test();
+select * from sc_test() order by 1;
 
 drop function sc_test();
 

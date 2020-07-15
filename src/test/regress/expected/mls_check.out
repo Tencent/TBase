@@ -418,8 +418,11 @@ ERROR:  INVALID INPUT:table_name:tbl_datamask_xx or schema_name:public or attr_n
 CONTEXT:  PL/pgSQL function mls_datamask_create(name,name,name,integer,numeric) line 45 at RAISE
 --fail:over length
 select MLS_DATAMASK_CREATE('public', 'tbl_datamask_xx', 'x_m',  2, 33);
-ERROR:  INVALID INPUT:mask length is 33 is out of range
-CONTEXT:  PL/pgSQL function mls_datamask_create(name,name,name,integer,numeric) line 70 at RAISE
+ mls_datamask_create 
+---------------------
+ t
+(1 row)
+
 --fail:system table is unsupported
 select MLS_DATAMASK_CREATE('pg_catalog', 'pg_database', 'datdba',  1, 1024);
 ERROR:  system table:pg_database is unsupported
@@ -453,11 +456,8 @@ select MLS_DATAMASK_CREATE('public', 'tbl_datamask_xx', 'j_m',  1, 9999999);
 (1 row)
 
 select MLS_DATAMASK_CREATE('public', 'tbl_datamask_xx', 'x_m',  2, 32);
- mls_datamask_create 
----------------------
- t
-(1 row)
-
+ERROR:  ERROR: table:public.tbl_datamask_xx has attnum:8 bound datamask policy, datamask:33
+CONTEXT:  PL/pgSQL function mls_datamask_create(name,name,name,integer,numeric) line 92 at RAISE
 select MLS_DATAMASK_CREATE('public', 'tbl_datamask_xx', 'y_m',  4);
  mls_datamask_create 
 ---------------------
@@ -505,9 +505,9 @@ select MLS_DATAMASK_CREATE_USER_POLICY('public', 'tbl_datamask_xx', 'godlike2');
 select * from tbl_datamask_xx order by i;
   i   | i_m  |  ii  | ii_m  |      j      |   j_m   |         x          |                                            x_m                                             |      y      |     y_m     
 ------+------+------+-------+-------------+---------+--------------------+--------------------------------------------------------------------------------------------+-------------+-------------
- 1024 | 9999 | 7788 | 22072 | 42949672960 | 9999999 | 112233201804035566 | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX                                                           | abcdefghijk | abcdefgXXXX
- 1025 | 9999 |      | 22072 |             | 9999999 | all is null        | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX                                                           |             | XXXX
- 1026 | 9999 |      | 22072 |             | 9999999 | all is null        | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXooong string, i guess here is over 32 bytes length, emmmmm |             | tbase!XXXX
+ 1024 | 9999 | 7788 | 22072 | 42949672960 | 9999999 | 112233201804035566 | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX                                                          | abcdefghijk | abcdefgXXXX
+ 1025 | 9999 |      | 22072 |             | 9999999 | all is null        | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX                                                          |             | XXXX
+ 1026 | 9999 |      | 22072 |             | 9999999 | all is null        | XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXoong string, i guess here is over 32 bytes length, emmmmm |             | tbase!XXXX
 (3 rows)
 
 \c regression godlike
@@ -595,12 +595,25 @@ insert into tbl_datamask_xx (i, i_m)values(10240, 10240) returning i_m;
 
 --case6:fail, join test, there should be no record returning, cause, i_m in xx has mask
 select tbl_datamask_xx.i from tbl_datamask_xx, tbl_datamask_yy where tbl_datamask_xx.i_m = tbl_datamask_yy.i_m;
-ERROR:  column(attrname:i_m) with datamask policy is forbidden in expression
+ i 
+---
+(0 rows)
+
 --case7:fail, select test, 
 select * from tbl_datamask_xx where i_m = 1024 order by i;
-ERROR:  column(attrname:i_m) with datamask policy is forbidden in expression
+ i | i_m | ii | ii_m | j | j_m | x | x_m | y | y_m 
+---+-----+----+------+---+-----+---+-----+---+-----
+(0 rows)
+
 select * from tbl_datamask_xx where i_m = 7777 order by i;
-ERROR:  column(attrname:i_m) with datamask policy is forbidden in expression
+   i   | i_m  |  ii  | ii_m  |      j      |   j_m   |         x          |                                            x_m                                             |      y      |     y_m     
+-------+------+------+-------+-------------+---------+--------------------+--------------------------------------------------------------------------------------------+-------------+-------------
+  1024 | 7777 | 7788 | 22072 | 42949672960 | 9999999 | 112233201804035566 | XXXXX3201804035566                                                                         | abcdefghijk | abcdefgXXXX
+  1025 | 7777 |      | 22072 |             | 9999999 | all is null        | XXXXX                                                                                      |             | XXXX
+  1026 | 7777 |      | 22072 |             | 9999999 | all is null        | XXXXXis a very very very looooooooong string, i guess here is over 32 bytes length, emmmmm |             | tbase!XXXX
+ 10240 | 7777 |      | 22072 |             | 9999999 |                    | XXXXX                                                                                      |             | XXXX
+(4 rows)
+
 --case8:fail, join test, 
 select * from tbl_datamask_xx xx, (select yy.i from tbl_datamask_yy yy, tbl_datamask_zz zz where yy.i=zz.i) a where xx.i = a.i order by xx.i;
   i   | i_m  |  ii  | ii_m  |      j      |   j_m   |         x          |        x_m         |      y      |     y_m     |  i   
@@ -609,11 +622,20 @@ select * from tbl_datamask_xx xx, (select yy.i from tbl_datamask_yy yy, tbl_data
 (1 row)
 
 select * from tbl_datamask_yy yy join tbl_datamask_xx xx on yy.i_m = xx.i_m order by xx.i;
-ERROR:  column(attrname:i_m) with datamask policy is forbidden in expression
+ i | i_m | ii | ii_m | j | j_m | x | x_m | y | y_m | i | i_m | ii | ii_m | j | j_m | x | x_m | y | y_m 
+---+-----+----+------+---+-----+---+-----+---+-----+---+-----+----+------+---+-----+---+-----+---+-----
+(0 rows)
+
 select * from tbl_datamask_yy yy join tbl_datamask_xx xx using (i_m) order by xx.i;
-ERROR:  column(attrname:i_m) with datamask policy is forbidden in expression
+ i_m | i | ii | ii_m | j | j_m | x | x_m | y | y_m | i | ii | ii_m | j | j_m | x | x_m | y | y_m 
+-----+---+----+------+---+-----+---+-----+---+-----+---+----+------+---+-----+---+-----+---+-----
+(0 rows)
+
 select * from tbl_datamask_yy yy, (select z.i from tbl_datamask_zz z , ( select i, i_m from tbl_datamask_xx )x where x.i_m = 1024 and z.i = x.i) xx where yy.i = xx.i order by xx.i;
-ERROR:  column(attrname:i_m) with datamask policy is forbidden in expression
+ i | i_m | ii | ii_m | j | j_m | x | x_m | y | y_m | i 
+---+-----+----+------+---+-----+---+-----+---+-----+---
+(0 rows)
+
 --case9:drop datamask policy
 \c regression mls_admin
 select MLS_DATAMASK_DROP_USER_POLICY('public', 'tbl_datamask_xx', 'i_m', 'godlike');

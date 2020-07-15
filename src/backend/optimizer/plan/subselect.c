@@ -157,7 +157,10 @@ static Bitmapset *finalize_plan(PlannerInfo *root,
 static bool finalize_primnode(Node *node, finalize_primnode_context *context);
 static bool finalize_agg_primnode(Node *node, finalize_primnode_context *context);
 
-
+#ifdef __TBASE__
+static Expr * convert_OR_EXIST_sublink_to_join(PlannerInfo *root, SubLink *sublink, Node **jtlink);
+static Node * get_or_exist_subquery_targetlist(PlannerInfo *root, Node *node,List **targetList, List **joinClause, int *next_attno);
+#endif
 /*
  * Select a PARAM_EXEC number to identify the given Var as a parameter for
  * the current subquery, or for a nestloop's inner scan.
@@ -1388,51 +1391,15 @@ SS_process_ctes(PlannerInfo *root)
 #ifdef __TBASE__
 static bool
 simplify_ANY_query(PlannerInfo *root, Query *query)
-{// #lizard forgives
-    Node *whereclause = NULL;
-
-    if (!enable_pullup_subquery)
-        return false;
-    
-    if (query->commandType != CMD_SELECT ||
-        query->setOperations ||
-        query->hasAggs ||
-        query->groupingSets ||
-        query->hasWindowFuncs ||
-        query->hasTargetSRFs ||
-        query->hasModifyingCTE ||
-        query->havingQual ||
-        query->limitOffset ||
-        query->rowMarks ||
-        query->hasSubLinks ||
-        query->cteList ||
-        query->distinctClause ||
-        query->sortClause)
-        return false;
-
-    whereclause = query->jointree->quals;
-    
-    if (contain_vars_upper_level((Node *)whereclause, 1))
-        return false;
-
-    if (list_length(query->rtable) > 1)
-        return false;
-
-    query->jointree->quals = NULL;
-    if (contain_vars_upper_level((Node *)query, 0))
-    {
-        query->jointree->quals = whereclause;
-        return false;
-    }
-    query->jointree->quals = whereclause;
-    
-    return true;
+{
+    return false;
 }
 
 static bool
 simplify_EXPR_query(PlannerInfo *root, Query *query)
 {// #lizard forgives
     Node *whereclause = NULL;
+    ListCell *lc = NULL;
 
     if (!enable_pullup_subquery)
         return false;
@@ -1453,6 +1420,15 @@ simplify_EXPR_query(PlannerInfo *root, Query *query)
         query->sortClause)
         return false;
 
+    foreach(lc, query->rtable)
+    {
+    	RangeTblEntry *rte = (RangeTblEntry *)lfirst(lc);
+    	if (rte->rtekind == RTE_SUBQUERY)
+    	{
+    		return false;
+    	}
+    }
+
     whereclause = query->jointree->quals;
     
     if (contain_vars_upper_level((Node *)whereclause, 1))
@@ -1471,41 +1447,8 @@ simplify_EXPR_query(PlannerInfo *root, Query *query)
 
 static bool
 simplify_ALL_query(PlannerInfo *root, Query *query)
-{// #lizard forgives
-    Node *whereclause = NULL;
-
-    if (!enable_pullup_subquery)
-        return false;
-        
-    if (query->commandType != CMD_SELECT ||
-        query->setOperations ||
-        query->groupingSets ||
-        query->hasWindowFuncs ||
-        query->hasTargetSRFs ||
-        query->hasModifyingCTE ||
-        query->havingQual ||
-        query->limitOffset ||
-        query->rowMarks ||
-        query->hasSubLinks ||
-        query->cteList ||
-        query->distinctClause ||
-        query->sortClause)
-        return false;
-
-    whereclause = query->jointree->quals;
-    
-    if (contain_vars_upper_level((Node *)whereclause, 1))
-        return false;
-
-    query->jointree->quals = NULL;
-    if (contain_vars_upper_level((Node *)query, 0))
-    {
-        query->jointree->quals = whereclause;
-        return false;
-    }
-    query->jointree->quals = whereclause;
-
-    return true;
+{
+    return false;
 }
 
 /* 
@@ -1513,7 +1456,7 @@ simplify_ALL_query(PlannerInfo *root, Query *query)
   * return true.
   */
 static bool
-contain_notexpr_or_neopexpr(Node *whereclause, bool hasAgg, List **joinquals, List **pullupquals, List **subquals)
+contain_notexpr_or_neopexpr(Node *whereclause, bool check_or, List **joinquals)
 {// #lizard forgives
     ListCell *cell;
     
@@ -1521,18 +1464,46 @@ contain_notexpr_or_neopexpr(Node *whereclause, bool hasAgg, List **joinquals, Li
     {
         BoolExpr *expr = (BoolExpr *)whereclause;
 
-        if (hasAgg)
+		if (or_clause(whereclause))
         {
-            if (or_clause(whereclause))
+			List *last = NIL;
+			int i = 0;
+
+			if(!check_or)
                 return true;
+
+			/* look for common expr */
+			foreach(cell, expr->args)
+			{
+				List *cur = NIL;
+				
+				if(contain_notexpr_or_neopexpr(lfirst(cell), check_or, &cur))
+					return true;
+
+				if (i == 0)
+				{
+					last = cur;
+				}
+				else if (!equal(last, cur))
+				{
+					return true;
+				}
+
+				i++;
+			}
+
+			*joinquals = list_concat(*joinquals, last);
+
+			return false;
         }
 
+		/* and expr */
         foreach(cell, expr->args)
         {
             bool result;
             Node *arg = lfirst(cell);
 
-            result = contain_notexpr_or_neopexpr(arg, hasAgg, joinquals, pullupquals, subquals);
+			result = contain_notexpr_or_neopexpr(arg, check_or, joinquals);
 
             if (result)
                 return true;
@@ -1546,34 +1517,25 @@ contain_notexpr_or_neopexpr(Node *whereclause, bool hasAgg, List **joinquals, Li
         Expr *lexpr  =  linitial(expr->args);
 
         if (!contain_vars_of_level((Node *)expr, 1))
-        {
-            if (contain_vars_of_level((Node *)expr, 0))
-            {
-                *subquals = lappend(*subquals, expr);
-            }
-            
             return false;
-        }
-
-        *pullupquals = lappend(*pullupquals, expr);
 
         if (!contain_vars_of_level((Node *)expr, 0))
             return false;
 
         *joinquals = lappend(*joinquals, expr);
-            
-        if (hasAgg)
-        {
-            if (!op_hashjoinable(expr->opno, exprType((Node *)lexpr)))
-                return true;
-        }
 
+		
+		if (!op_hashjoinable(expr->opno, exprType((Node *)lexpr)))
+        {
+			return true;
+        }
+			
         foreach(cell, expr->args)
         {
             bool result;
             Node *arg = lfirst(cell);
 
-            result = contain_notexpr_or_neopexpr(arg, hasAgg, joinquals, pullupquals, subquals);
+			result = contain_notexpr_or_neopexpr(arg, check_or, joinquals);
 
             if (result)
                 return true;
@@ -1590,13 +1552,33 @@ contain_notexpr_or_neopexpr(Node *whereclause, bool hasAgg, List **joinquals, Li
         bool result;
         RelabelType *label = (RelabelType *)whereclause;
 
-        result = contain_notexpr_or_neopexpr((Node *)label->arg, hasAgg, joinquals, pullupquals, subquals);
+		result = contain_notexpr_or_neopexpr((Node *)label->arg, check_or, joinquals);
         if (result)
                 return true;
         return false;
     }
 
     return true;
+}
+
+static List *
+append_var_to_subquery_targetlist(Var *var, List *targetList, TargetEntry **target)
+{
+	Var *temp_var = NULL;
+	TargetEntry *ent = NULL;
+	int varno = 0;
+
+	temp_var = copyObject(var);
+
+	ent = makeTargetEntry((Expr *)temp_var, temp_var->varoattno, NULL, false);
+
+	targetList = lappend(targetList, ent);
+	varno = list_length(targetList);
+
+	ent->resno = varno;
+	var->varattno = var->varoattno = varno;
+	*target = ent;
+	return targetList;
 }
 
 static void
@@ -1609,7 +1591,7 @@ add_vars_to_subquery_targetlist(Node     *whereClause, Query *subselect, int rti
     {
         Var *var = lfirst(cell);
 
-        if (var->varno == rtindex)
+		if (var->varno == rtindex || rtindex == -1)
         {
             bool match = false;
             ListCell *lc;
@@ -1648,7 +1630,7 @@ add_vars_to_subquery_targetlist(Node     *whereClause, Query *subselect, int rti
 
             if (!match)
             {
-                ent = makeTargetEntry((Expr *)temp_var, temp_var->varoattno, NULL, false);
+				ent = makeTargetEntry((Expr *)temp_var, temp_var->varoattno, " ", false);
     
                 subselect->targetList = lappend(subselect->targetList, ent);
 
@@ -2150,51 +2132,55 @@ convert_EXISTS_sublink_to_join(PlannerInfo *root, SubLink *sublink,
   */
 JoinExpr *
 convert_EXPR_sublink_to_join(PlannerInfo *root, OpExpr *expr,
-                            Relids available_rels)
+		                    Relids available_rels, Node **filter)
 {// #lizard forgives
     JoinExpr   *result;
-    Query       *parse = root->parse;
-    SubLink    *sublink;
-    Query       *subselect;
-    Node       *whereClause;
-    Node       *quals;
-    int            rtoffset;
-    Relids        clause_varnos;
-    ListCell    *cell;
-    Var         *var;
-    int         varno;
-    int            rtindex;
+    Query *parse = root->parse;
+    SubLink *sublink;
+    Query *subselect;
+    Node *whereClause;
+    Relids clause_varnos;
+    ListCell *cell;
+    int varno;
+    int rtindex;
     ParseState *pstate;
     RangeTblEntry *rte;
     RangeTblRef *rtr;
-    List        *joinquals = NULL;
-    List        *pullupquals = NULL;
-    List        *subquals = NULL;
+    List *joinquals = NIL;
+    List *pullupquals = NIL;
+    List *sublinks = NIL;
+    int ressortgroupref = 0;
+    TargetEntry *ent = NULL;
+    bool count_agg = false;
+    bool hasAgg = false;
+    ListCell *lc;
+    TargetEntry *tent;
+    List *vars;
 
-    /* get the sublink if exists, if not , do nothing */
-    var = NULL;
-    sublink = NULL;
-    foreach(cell, expr->args)
+    if (root->parse->commandType != CMD_SELECT)
     {
-        Node *arg = lfirst(cell);
-    
-        if (IsA(arg, Var))
-        {
-            var = (Var *)arg;
-        }
-        else if (IsA(arg, SubLink))
-        {
-            sublink = (SubLink *)arg;
-    
-            if (sublink->subLinkType != EXPR_SUBLINK)
-            {
-                sublink = NULL;
-            }
-        }
+    	return NULL;
     }
 
-    /* the arguments of operator must be one of Var or Sublink */
-    if (!var || !sublink)
+    expr = copyObject(expr);
+
+    find_sublink_walker((Node *)expr, &sublinks);
+
+    /* only one sublink can be handled */
+    if (list_length(sublinks) != 1)
+    {
+        return NULL;
+    }
+
+    sublink = linitial(sublinks);
+
+    /* only process agg case */
+    if (!((Query *)sublink->subselect)->hasAggs)
+    {
+        return NULL;
+    }
+
+    if (list_length(((Query *)sublink->subselect)->rtable) > 2)
     {
         return NULL;
     }
@@ -2214,12 +2200,63 @@ convert_EXPR_sublink_to_join(PlannerInfo *root, OpExpr *expr,
      * The rest of the sub-select must not refer to any Vars of the parent
      * query.  (Vars of higher levels should be okay, though.)
      */
-    if (contain_vars_of_level((Node *) subselect, 1))
+	if (contain_vars_of_level((Node *)subselect, 1))
         return NULL;
 
     /* subquery must contain one output */
     if (list_length(subselect->targetList) != 1)
         return NULL;
+
+	/* output must not be count */
+	tent = (TargetEntry *)linitial(subselect->targetList);
+
+	vars = pull_var_clause((Node *)tent->expr, PVC_INCLUDE_AGGREGATES |
+														 PVC_RECURSE_PLACEHOLDERS |
+														 PVC_RECURSE_WINDOWFUNCS);
+	foreach (lc, vars)
+	{
+		Node *n = (Node *)lfirst(lc);
+
+		if (IsA(n, Var))
+		{
+			return NULL;
+		}
+		else if (IsA(n, Aggref))
+		{
+			Aggref *ref = (Aggref *)n;
+			char *name = NULL;
+			hasAgg = true;
+
+			/* count agg */
+			if(ref->aggfnoid == 2147 || ref->aggfnoid == 2803)
+			{
+				count_agg = true;
+				continue;
+			}
+
+			name = get_func_name(ref->aggfnoid);
+			if(name == NULL)
+				return NULL;
+
+			/* strict agg is allowed */
+			if(strcmp(name,"max") == 0 ||
+				strcmp(name,"min") == 0 ||
+				strcmp(name,"stddev") == 0 ||
+				strcmp(name,"sum") == 0 ||
+				strcmp(name,"avg") == 0 ||
+				strcmp(name,"variance") == 0 )
+			{
+				continue;
+			}
+
+			return NULL;
+		}
+	}
+
+	if (!hasAgg)
+	{
+		return NULL;
+	}
 
     /*
      * On the other hand, the WHERE clause must contain some Vars of the
@@ -2227,11 +2264,15 @@ convert_EXPR_sublink_to_join(PlannerInfo *root, OpExpr *expr,
      */
     if (!contain_vars_of_level(whereClause, 1))
         return NULL;
-    
+
     /* process 'op' and 'bool' expr only */
-    if (contain_notexpr_or_neopexpr(whereClause, subselect->hasAggs, &joinquals, &pullupquals, &subquals))
+	if (contain_notexpr_or_neopexpr(whereClause, true, &joinquals))
         return NULL;
-    
+
+	/* should not have others quals contain vars of parent query */
+	if (pullupquals)
+		return NULL;
+
     /*
      * We don't risk optimizing if the WHERE clause is volatile, either.
      */
@@ -2249,176 +2290,447 @@ convert_EXPR_sublink_to_join(PlannerInfo *root, OpExpr *expr,
 
     if (!bms_is_subset(clause_varnos, available_rels))
         return NULL;
-    
 
-    if (subselect->hasAggs)
+	/* 
+     * whereclause can only be 'and' expr and 'op =' expr , this
+     * has been checked before.
+	 */
+	if (!joinquals)
+		return NULL;
+
+	vars = pull_vars_of_level((Node *)joinquals, 0);
+
+	/* construct groupby clause */
+	foreach (cell, vars)
     {
-        /* 
-          * whereclause can only be 'and' expr and 'op =' expr , this
-          * has been checked before.
-          */
-        int offset = 0;
-        int  ressortgroupref = 0;
-        TargetEntry *ent = NULL;
-        List *vars;
+		Oid sortop;
+		Oid eqop;
+		bool hashable;
+		Oid restype;
+		SortGroupClause *grpcl;
 
-        if (!joinquals)
-            return NULL;
+		Var *var = (Var *)lfirst(cell);
 
-        vars = pull_vars_of_level((Node *)joinquals, 0);
-        
-        /* construct groupby clause */
-        foreach(cell, vars)
-        {
-            Oid            sortop;
-            Oid            eqop;
-            bool        hashable;
-            Oid         restype;
-            SortGroupClause *grpcl;
-        
-            Var *var = (Var *)lfirst(cell);
+		RangeTblEntry *tbl = (RangeTblEntry *)list_nth(subselect->rtable, var->varno - 1);
 
-            RangeTblEntry *tbl = (RangeTblEntry *)list_nth(subselect->rtable, var->varno - 1);
+		if (tbl->rtekind != RTE_RELATION && tbl->rtekind != RTE_CTE)
+			return NULL;
 
-            if (tbl->rtekind != RTE_RELATION)
-                return NULL;
-            
-            restype = exprType((Node *)var);
+		restype = exprType((Node *)var);
 
-            grpcl = makeNode(SortGroupClause);
+		grpcl = makeNode(SortGroupClause);
 
-            ressortgroupref++;
+		ressortgroupref++;
 
+		if (tbl->rtekind == RTE_RELATION)
+		{
             ent = makeTargetEntry((Expr *)copyObject(var), var->varoattno, get_relid_attribute_name(tbl->relid, var->varoattno), false);
+		}
+		else
+		{
+			int plan_id;
+			int ndx;
+			ListCell *lc;
+			Plan *cte_plan;
+			TargetEntry *cte_ent = NULL;
 
-            ent->ressortgroupref = ressortgroupref;
+			/*
+			 * Note: cte_plan_ids can be shorter than cteList, if we are still working
+			 * on planning the CTEs (ie, this is a side-reference from another CTE).
+			 * So we mustn't use forboth here.
+			 */
+			ndx = 0;
+			foreach (lc, root->parse->cteList)
+			{
+				CommonTableExpr *cte = (CommonTableExpr *)lfirst(lc);
 
-            subselect->targetList = lappend(subselect->targetList, ent);
+				if (strcmp(cte->ctename, tbl->ctename) == 0)
+					break;
+				ndx++;
+			}
+			if (lc == NULL) /* shouldn't happen */
+				elog(ERROR, "could not find CTE \"%s\"", tbl->ctename);
+			if (ndx >= list_length(root->cte_plan_ids))
+				elog(ERROR, "could not find plan for CTE \"%s\"", tbl->ctename);
+			plan_id = list_nth_int(root->cte_plan_ids, ndx);
+			cte_plan = (Plan *)lfirst(list_nth_cell(root->glob->subplans, plan_id - 1));
+			cte_ent = (TargetEntry *)lfirst(list_nth_cell(cte_plan->targetlist, var->varattno - 1));
+			ent = makeTargetEntry((Expr *)copyObject(var), var->varoattno, cte_ent->resname, false);
+		}
 
-            varno = list_length(subselect->targetList);
+		ent->ressortgroupref = ressortgroupref;
 
-            ent->resno = varno;
+		subselect->targetList = lappend(subselect->targetList, ent);
 
-            //var->varattno = var->varoattno = varno;
+		varno = list_length(subselect->targetList);
 
-            /* determine the eqop and optional sortop */
-            get_sort_group_operators(restype,
-                                     false, true, false,
-                                     &sortop, &eqop, NULL,
-                                     &hashable);
+		ent->resno = varno;
 
-            grpcl->tleSortGroupRef = ressortgroupref;
-            grpcl->eqop = eqop;
-            grpcl->sortop = sortop;
-            grpcl->nulls_first = false; /* OK with or without sortop */
-            grpcl->hashable = hashable;
+		//var->varattno = var->varoattno = varno;
 
-            subselect->groupClause = lappend(subselect->groupClause, grpcl);
-        }
+		/* determine the eqop and optional sortop */
+		get_sort_group_operators(restype,
+								 false, true, false,
+								 &sortop, &eqop, NULL,
+								 &hashable);
 
-        rtindex = list_length(parse->rtable);
+		grpcl->tleSortGroupRef = ressortgroupref;
+		grpcl->eqop = eqop;
+		grpcl->sortop = sortop;
+		grpcl->nulls_first = false; /* OK with or without sortop */
+		grpcl->hashable = hashable;
 
-        offset = rtindex;
+		subselect->groupClause = lappend(subselect->groupClause, grpcl);
+	}
 
-        OffsetVarNodes((Node *)whereClause, rtindex, 0);
+	rtindex = list_length(parse->rtable);
 
-        IncrementVarSublevelsUp((Node *)whereClause, -1, 1);
+	add_vars_to_subquery_targetlist((Node *)whereClause, subselect, -1, 0);
 
-        pstate = make_parsestate(NULL);
+	pstate = make_parsestate(NULL);
+	rte = addRangeTableEntryForSubquery(pstate,
+										subselect,
+										makeAlias("EXPR_subquery", NIL),
+										false,
+										false);
+	parse->rtable = lappend(parse->rtable, rte);
+	rtindex = list_length(parse->rtable);
 
-        //subselect->jointree->quals = (Node *)makeBoolExpr(AND_EXPR, list_make1(subquals), 0);
+	/*
+	 * Form a RangeTblRef for the pulled-up sub-select.
+	 */
+	rtr = makeNode(RangeTblRef);
+	rtr->rtindex = rtindex;
 
-        rte = addRangeTableEntryForSubquery(pstate,
-                                    subselect,
-                                    makeAlias("EXPR_subquery", NIL),
-                                    false,
-                                    false);
+	/* adjust all sublevelup 0 varno to rtindex */
+	{
+		int i = 0;
+		int n = list_length(subselect->rtable);
 
-        parse->rtable = lappend(parse->rtable, rte);
-        rtindex = list_length(parse->rtable);
+		for(i = 1; i <= n ;i++)
+			ChangeVarNodes((Node *)whereClause, i, rtindex, 0);
+	}
 
-        /*
-         * Form a RangeTblRef for the pulled-up sub-select.
-         */
-        rtr = makeNode(RangeTblRef);
-        rtr->rtindex = rtindex;
+	/* pullup whereclause , all sublevel-1 vars change to 0 */
+	IncrementVarSublevelsUp((Node *)whereClause, -1, 1);
 
-        add_vars_to_subquery_targetlist((Node *)whereClause, subselect, rtindex, offset);
+	/* form join quals */
+	ent = (TargetEntry *)linitial(subselect->targetList);
 
-        /* form join quals */
-        ent = (TargetEntry *)linitial(subselect->targetList);
+	{
+		Node *target = (Node *)makeVarFromTargetEntry(rtindex, ent);
+		
+		if(count_agg)
+		{
+			CoalesceExpr *coalesce = makeNode(CoalesceExpr);
+			coalesce->args = list_make2(target,makeConst(INT8OID, -1,InvalidOid,sizeof(int64),Int64GetDatum(0),false,true));
+			coalesce->coalescetype = INT8OID;
+			target = (Node *)coalesce;
+		}
         
-        list_delete(expr->args, sublink);
+		expr = (OpExpr *)substitute_sublink_with_node((Node *)expr, sublink,target);
+	}
+	/*
+	 * And finally, build the JoinExpr node.
+	 */
+	result = makeNode(JoinExpr);
+	result->jointype = JOIN_LEFT;
+	result->isNatural = false;
+	result->larg = NULL; /* caller must fill this in */
+	result->rarg = (Node *)rtr;
+	result->usingClause = NIL;
+	result->quals = whereClause;
+	result->alias = NULL;
+	result->rtindex = 0; /* we don't need an RTE for it */
 
-        expr->args = lappend(expr->args, makeVarFromTargetEntry(rtindex, ent));
 
-        quals = (Node *)makeBoolExpr(AND_EXPR, list_make2(expr, whereClause), 0);
+	*filter = (Node *)expr;
 
-        /*
-         * And finally, build the JoinExpr node.
-         */
-        result = makeNode(JoinExpr);
-        result->jointype = JOIN_INNER;
-        result->isNatural = false;
-        result->larg = NULL;        /* caller must fill this in */
-        result->rarg = (Node *) rtr;
-        result->usingClause = NIL;
-        result->quals = quals;
-        result->alias = NULL;
-        result->rtindex = 0;        /* we don't need an RTE for it */
-
-        return result;
-    }
-    else
-    {
-        TargetEntry *tent;
-        
-        rtoffset = list_length(parse->rtable);
-        OffsetVarNodes((Node *) subselect, rtoffset, 0);
-        OffsetVarNodes(whereClause, rtoffset, 0);
-
-        /*
-         * Upper-level vars in subquery will now be one level closer to their
-         * parent than before; in particular, anything that had been level 1
-         * becomes level zero.
-         */
-        IncrementVarSublevelsUp((Node *) subselect, -1, 1);
-        IncrementVarSublevelsUp(whereClause, -1, 1);
-
-        /* Now we can attach the modified subquery rtable to the parent */
-        parse->rtable = list_concat(parse->rtable, subselect->rtable);
-
-        tent = (TargetEntry *)linitial(subselect->targetList);
-
-        list_delete(expr->args, sublink);
-
-        expr->args = lappend(expr->args, copyObject(tent->expr));
-
-        quals = (Node *)makeBoolExpr(AND_EXPR, list_make2(expr, whereClause), 0);
-        
-        /*
-         * And finally, build the JoinExpr node.
-         */
-        result = makeNode(JoinExpr);
-        result->jointype = JOIN_INNER;
-        result->isNatural = false;
-        result->larg = NULL;        /* caller must fill this in */
-        /* flatten out the FromExpr node if it's useless */
-        if (list_length(subselect->jointree->fromlist) == 1)
-            result->rarg = (Node *) linitial(subselect->jointree->fromlist);
-        else
-            result->rarg = (Node *) subselect->jointree;
-        result->usingClause = NIL;
-        result->quals = quals;
-        result->alias = NULL;
-        result->rtindex = 0;        /* we don't need an RTE for it */
-
-        return result;
-    }
-
-    return NULL;
+	return result;
 }
 
+List *
+convert_OR_EXIST_sublink_to_join_recurse(PlannerInfo *root, Node *node, Node **jtlink)
+{
+	List *new_clauses = NIL;
+	if (node == NULL)
+		return NULL;
+
+	if (IsA(node, SubLink))
+	{
+		SubLink *sublink = (SubLink *)node;
+		Expr *expr = NULL;
+		Assert(sublink->subLinkType == EXISTS_SUBLINK);
+
+		expr = convert_OR_EXIST_sublink_to_join(root, sublink, jtlink);
+		new_clauses = lappend(new_clauses, expr);
+    }
+	else if (or_clause(node))
+	{
+		List *result = NIL;
+		ListCell *l;
+		foreach (l, ((BoolExpr *)node)->args)
+		{
+			result = convert_OR_EXIST_sublink_to_join_recurse(root,
+															  (Node *)lfirst(l),
+															  jtlink);
+			if (result)
+				new_clauses = list_concat(new_clauses, result);
+		}
+	}
+	return new_clauses;
+}
+
+static Node *
+get_or_exist_subquery_targetlist(PlannerInfo *root, Node *node, List **targetList, List **joinClause, int *next_attno)
+{
+	if (and_clause(node))
+	{
+		ListCell *l = NULL;
+		List *new_args = NULL;
+		Node *result = NULL;
+
+		foreach (l, ((BoolExpr *)node)->args)
+		{
+			result = get_or_exist_subquery_targetlist(root, (Node *)lfirst(l), targetList, joinClause, next_attno);
+			if (result != NULL)
+			{
+				new_args = lappend(new_args, result);
+			}
+		}
+		if (list_length(new_args) == 1)
+		{
+			return (Node *)list_head(new_args);
+		}
+		else if (list_length(new_args) == 0)
+		{
+			return NULL;
+		}
+		return (Node *)make_andclause(new_args);
+	}
+	else if (IsA(node, OpExpr) && pull_vars_of_level(node, 1) != NULL)
+    {
+		Node *expr;
+		List *vars;
+		Var *var;
+
+		vars = pull_vars_of_level(node, 0);
+
+		Assert(list_length(vars) == 1);
+        
+		*targetList = lappend(*targetList, lfirst(vars->head));
+		expr = copyObject(node);
+		vars = pull_vars_of_level(expr, 0);
+		var  = lfirst(vars->head);
+
+		var->varattno = *next_attno;
+		*next_attno = *next_attno + 1;
+		*joinClause = lappend(*joinClause, expr);
+
+		return NULL;
+	}
+	return node;
+}
+
+static Expr *
+convert_OR_EXIST_sublink_to_join(PlannerInfo *root, SubLink *sublink, Node **jtlink)
+{
+	JoinExpr *joinExpr;
+	RangeTblRef *rtr;
+	RangeTblEntry *rte;
+	List *distinctColums = NIL;
+	List *joinClause = NIL;
+	ListCell *cell;
+	Query *parse = root->parse;
+	Query *subselect = (Query *)sublink->subselect;
+	Node *whereClause;
+	Expr *expr;
+	NullTest *ntest;
+	ParseState *pstate;
+	List *fake_colnames = NIL;
+	int rtindex;
+	int subrtindex;
+	int i;
+	int ressortgroupref;
+	int next_attno;
+
+	Assert(sublink->subLinkType == EXISTS_SUBLINK);
+
+	subselect = copyObject(subselect);
+	simplify_EXISTS_query(root, subselect);
+
+	whereClause = subselect->jointree->quals;
+	subselect->jointree->quals = NULL;
+
+	pstate = make_parsestate(NULL);
+	rte = addRangeTableEntryForSubquery(pstate,
+										subselect,
+										makeAlias("EXIST_subquery", NIL),
+										false,
+										false);
+
+	parse->rtable = lappend(parse->rtable, rte);
+	rtindex = list_length(parse->rtable);
+	rtr = makeNode(RangeTblRef);
+	rtr->rtindex = rtindex;
+	next_attno = 1;
+	subselect->jointree->quals =
+		get_or_exist_subquery_targetlist(root, whereClause, &distinctColums, &joinClause, &next_attno);
+	ressortgroupref = 0;
+
+	foreach (cell, distinctColums)
+	{
+		Oid sortop;
+		Oid eqop;
+		bool hashable;
+		Oid restype;
+		SortGroupClause *grpcl;
+		TargetEntry *entry;
+		subselect->targetList = append_var_to_subquery_targetlist((Var *)lfirst(cell), subselect->targetList, &entry);
+		restype = exprType((Node *)entry->expr);
+		get_sort_group_operators(restype,
+								 false, true, false,
+								 &sortop, &eqop, NULL,
+								 &hashable);
+		ressortgroupref++;
+		entry->ressortgroupref = ressortgroupref;
+		grpcl = makeNode(SortGroupClause);
+		grpcl->tleSortGroupRef = ressortgroupref;
+		grpcl->eqop = eqop;
+		grpcl->sortop = sortop;
+		grpcl->nulls_first = false; /* OK with or without sortop */
+		grpcl->hashable = hashable;
+		subselect->groupClause = lappend(subselect->groupClause, grpcl);
+    }
+
+	expr = (Expr *)makeBoolConst(true, false);
+	subselect->targetList = lappend(subselect->targetList, (makeTargetEntry(expr,
+																			list_length(subselect->targetList) + 1,
+																			NULL,
+																			false)));
+	foreach (cell, subselect->targetList)
+	{
+		fake_colnames = lappend(fake_colnames, makeString(pstrdup("fake")));
+	}
+	rte->eref = makeAlias("EXIST_subquery", fake_colnames);
+
+	joinExpr = makeNode(JoinExpr);
+	joinExpr->jointype = JOIN_LEFT;
+	joinExpr->isNatural = false;
+	joinExpr->larg = (Node *)(*jtlink);
+	joinExpr->rarg = (Node *)rtr;
+	joinExpr->usingClause = NIL;
+	joinExpr->alias = NULL;
+	joinExpr->rtindex = 0; /* we don't need an RTE for it */
+
+	if (list_length(joinClause) == 1)
+		joinExpr->quals = (Node *)linitial(joinClause);
+	else
+		joinExpr->quals = (Node *)make_andclause(joinClause);
+
+	*jtlink = (Node *)joinExpr;
+
+	subrtindex = list_length(subselect->rtable);
+	for (i = 1; i <= subrtindex; i++)
+	{
+		ChangeVarNodes(joinExpr->quals, i, rtindex, 0);
+	}
+
+	IncrementVarSublevelsUp(joinExpr->quals, -1, 1);
+	ntest = makeNode(NullTest);
+	ntest->arg = (Expr *)makeVar(rtindex,
+								 list_length(subselect->targetList),
+								 BOOLOID,
+								 -1,
+								 InvalidOid,
+								 0);
+	ntest->nulltesttype = IS_NOT_NULL;
+	ntest->argisrow = false;
+	ntest->location = -1;
+	return (Expr *)ntest;
+}
+
+bool
+check_or_exist_qual_pullupable(PlannerInfo *root, Node *node)
+{
+	ListCell *l = NULL;
+
+	if (and_clause(node))
+	{
+		foreach (l, ((BoolExpr *)node)->args)
+		{
+			if (!check_or_exist_qual_pullupable(root, (Node *)lfirst(l)))
+				return false;
+		}
+		return true;
+	}
+	else if (or_clause(node))
+	{
+		return pull_vars_of_level((Node *)lfirst(l), 1) == NIL;
+	}
+	else
+	{
+		List *vars = pull_vars_of_level(node, 1);
+		if (vars == NIL)
+			return true;
+
+		if (IsA(node, OpExpr))
+		{
+			HeapTuple opertup;
+			Form_pg_operator operform;
+			char *oprname;
+
+			OpExpr *expr = (OpExpr *)node;
+
+			opertup = SearchSysCache1(OPEROID, ObjectIdGetDatum(expr->opno));
+			if (!HeapTupleIsValid(opertup))
+				return false;
+				
+			operform = (Form_pg_operator)GETSTRUCT(opertup);
+			oprname = NameStr(operform->oprname);
+
+			ReleaseSysCache(opertup);
+			if (strcmp(oprname, "=") == 0 && list_length(expr->args) == 2)
+				return true;
+		}
+		return false;
+	}
+	return true;
+}
+
+bool check_or_exist_sublink_pullupable(PlannerInfo *root, Node *node)
+{
+	Node    *whereClause;
+	Query   *subselect;
+
+	if(node == NULL)
+		return false;
+	
+	subselect = (Query *)copyObject(((SubLink *)(node))->subselect);
+
+	if (subselect->cteList)
+		return false;
+		
+	if (!simplify_EXISTS_query(root, subselect))
+		return false;
+		
+	if (subselect->jointree->fromlist == NIL)
+		return false;
+
+	whereClause = subselect->jointree->quals;
+	subselect->jointree->quals = NULL;
+
+	if (contain_vars_of_level((Node *)subselect, 1))
+		return false;
+
+	if (!contain_vars_of_level(whereClause, 1))
+		return false;
+
+	if (contain_volatile_functions(whereClause))
+		return false;
+
+	return true;
+}
 /*
   * try to convert all sublink to join or new query
   */
@@ -2445,8 +2757,6 @@ convert_ALL_sublink_to_join(PlannerInfo *root, SubLink *sublink,
     TargetEntry *ent = NULL;
     int        nEnt  = 0;
     List       *joinquals = NULL;
-    List        *pullupquals = NULL;
-    List        *subquals = NULL;
 
     subselect = (Query *)copyObject(sublink->subselect);
 
@@ -2567,7 +2877,7 @@ convert_ALL_sublink_to_join(PlannerInfo *root, SubLink *sublink,
             return NULL;
 
         /* process 'op' and 'bool' expr only */
-        if (contain_notexpr_or_neopexpr(whereClause, true, &joinquals, &pullupquals, &subquals))
+		if (contain_notexpr_or_neopexpr(whereClause, true, &joinquals))
             return NULL;
 
         if (contain_volatile_functions(whereClause))

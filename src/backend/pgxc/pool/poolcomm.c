@@ -742,8 +742,8 @@ pool_recvfds(PoolPort *port, int *fds, int count)
         }
         else if (0 == r)
         {
-            struct stat;
-            if (fstat(Socket(*port), &stat) < 0)
+            struct stat st;
+            if (fstat(Socket(*port), &st) < 0)
             {
                 break;
             }

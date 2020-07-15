@@ -1754,7 +1754,8 @@ typedef enum ObjectType
     OBJECT_TSTEMPLATE,
     OBJECT_TYPE,
     OBJECT_USER_MAPPING,
-    OBJECT_VIEW
+	OBJECT_VIEW,
+	OBJECT_REPLICATION_SLOT
 } ObjectType;
 
 /* ----------------------
@@ -3897,5 +3898,15 @@ typedef struct CleanAuditStmt        /* clean audit*/
 }CleanAuditStmt;
 
 #endif                            /* __AUDIT__ */
+
+#ifdef __TBASE__
+
+typedef struct SampleStmt
+{
+	NodeTag		type;
+	RangeVar   *relation;		/* single table to process, or NULL */
+	int		    rownum;			/* number of sample rows or 30000 default */
+}SampleStmt;
+#endif
 
 #endif                            /* PARSENODES_H */

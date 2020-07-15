@@ -23,6 +23,7 @@
 #include "utils/memutils.h"
 #ifdef _MLS_
 #include "utils/mls.h"
+#include "utils/datamask.h"
 #endif
 
 #ifdef __AUDIT_FGA__
@@ -33,6 +34,7 @@
 #include "pgxc/shardmap.h"
 #include "access/htup_details.h"
 #include "utils/guc.h"
+#include "storage/nodelock.h"
 #endif
 
 static bool tlist_matches_tupdesc(PlanState *ps, List *tlist, Index varno, TupleDesc tupdesc);
@@ -139,6 +141,7 @@ ExecScan(ScanState *node,
     ProjectionInfo *projInfo;
     
 #ifdef __AUDIT_FGA__
+	ShardID 	shardid = InvalidShardID;
     ListCell      *item;
 
     char *cmd_type = "SELECT";
@@ -200,7 +203,14 @@ next_record:
                         goto next_record;
                     }
                 }
+
                 MlsExecCheck(node, slot);
+
+				if(node && datamask_scan_key_contain_mask(node))
+				{
+					ExecClearTuple(slot);
+                    return NULL;
+				}
             }
 
 #ifdef __TBASE__
@@ -214,6 +224,8 @@ next_record:
                     HeapTuple tup = slot->tts_tuple;
 
                     UpdateShardStatistic(CMD_SELECT, HeapTupleGetShardId(tup), 0, 0);
+
+					LightLockCheck(commandType, InvalidOid, HeapTupleGetShardId(tup));
                 }
             }
 #endif
@@ -259,6 +271,7 @@ next_record:
         }
 
 #ifdef __TBASE__
+		shardid = InvalidShardID;
         /* update shard statistic info about select if needed */
         if (g_StatShardInfo && IS_PGXC_DATANODE)
         {
@@ -269,6 +282,8 @@ next_record:
                 HeapTuple tup = slot->tts_tuple;
 
                 UpdateShardStatistic(CMD_SELECT, HeapTupleGetShardId(tup), 0, 0);
+
+				shardid = HeapTupleGetShardId(tup);
             }
         }
 #endif
@@ -318,7 +333,12 @@ next_record:
                 }
             }
 #endif
-            
+#ifdef __TBASE__
+			if (IS_PGXC_DATANODE)
+			{
+				LightLockCheck(commandType, InvalidOid, shardid);
+			}
+#endif
             /*             * Found a satisfactory scan tuple.
              */
             if (projInfo)

@@ -117,7 +117,7 @@ cmd_t *prepare_initDatanodeMaster(char *nodeName)
              sval(VAR_gtmName),
              sval(VAR_gtmMasterServer),
              sval(VAR_gtmMasterPort));
-        
+
     /* Initialize postgresql.conf */
     appendCmdEl(cmdInitdb, (cmdPgConf = initCmd(aval(VAR_datanodeMasterServers)[idx])));
     snprintf(newCommand(cmdPgConf), MAXLINE,
@@ -157,14 +157,14 @@ cmd_t *prepare_initDatanodeMaster(char *nodeName)
             );
     if(isVarYes(VAR_multiCluster) && !is_none(aval(VAR_datanodeMasterCluster)[idx]))
     {
-        fprintf(f, 
+        fprintf(f,
                 "pgxc_main_cluster_name = %s\n"
                 "pgxc_cluster_name = %s\n",
                 sval(VAR_pgxcMainClusterName),
                 aval(VAR_datanodeMasterCluster)[idx]);
     }
     fclose(f);
-    
+
     /* Additional Initialization for log_shipping */
     if (isVarYes(VAR_datanodeSlave) && !is_none(aval(VAR_datanodeSlaveServers)[idx]))
     {
@@ -202,7 +202,7 @@ cmd_t *prepare_initDatanodeMaster(char *nodeName)
     {
         cmd_t *cmd_PgConf;
         appendCmdEl(cmdInitdb, (cmd_PgConf = initCmd(aval(VAR_datanodeMasterServers)[idx])));
-        snprintf(newCommand(cmd_PgConf), MAXLINE, 
+        snprintf(newCommand(cmd_PgConf), MAXLINE,
                  "cat >> %s/postgresql.conf", aval(VAR_datanodeMasterDirs)[idx]);
         if ((f = prepareLocalStdin(newFilename(cmd_PgConf->localStdin), MAXPATH, NULL)) == NULL)
         {
@@ -212,7 +212,7 @@ cmd_t *prepare_initDatanodeMaster(char *nodeName)
         fprintf(f, "# End of Addition\n");
         fclose(f);
     }
-        
+
     /* pg_hba.conf */
     appendCmdEl(cmdInitdb, (cmdPgHba = initCmd(aval(VAR_datanodeMasterServers)[idx])));
     snprintf(newCommand(cmdPgHba), MAXLINE,
@@ -234,8 +234,8 @@ cmd_t *prepare_initDatanodeMaster(char *nodeName)
     CleanArray(fileList);
     for (jj = 0; aval(VAR_datanodePgHbaEntries)[jj]; jj++)
     {
-        fprintf(f, 
-                "host all %s %s trust\n", 
+        fprintf(f,
+                "host all %s %s trust\n",
                 sval(VAR_pgxcOwner), aval(VAR_datanodePgHbaEntries)[jj]);
         if (isVarYes(VAR_datanodeSlave))
             if (!is_none(aval(VAR_datanodeSlaveServers)[idx]))
@@ -289,7 +289,7 @@ cmd_t *prepare_initDatanodeSlave(char *nodeName)
     int startMaster;
     char timestamp[MAXTOKEN+1];
     char remoteDirCheck[MAXPATH * 2 + 128];
-    
+
     if ((idx = datanodeIdx(nodeName)) < 0)
     {
         elog(WARNING, "WARNING: specified node %s is not datanode. skipping.\n", nodeName);
@@ -303,7 +303,7 @@ cmd_t *prepare_initDatanodeSlave(char *nodeName)
     if (!doesExist(VAR_datanodeSlaveServers, idx) || is_none(aval(VAR_datanodeSlaveServers)[idx]))
     {
         elog(WARNING, "WARNING: slave not configured for datanode %s\n",
-                nodeName);
+             nodeName);
         return NULL;
     }
 
@@ -311,11 +311,11 @@ cmd_t *prepare_initDatanodeSlave(char *nodeName)
     if (!forceInit)
     {
         sprintf(remoteDirCheck, "if [ '$(ls -A %s 2> /dev/null)' ]; then echo 'ERROR: "
-                "target directory (%s) exists and not empty. "
-                "Skip Datanode initilialization'; exit; fi;",
+                                "target directory (%s) exists and not empty. "
+                                "Skip Datanode initilialization'; exit; fi;",
                 aval(VAR_datanodeSlaveDirs)[idx],
                 aval(VAR_datanodeSlaveDirs)[idx]
-               );
+        );
     }
 
     /* Build slave's directory -1- */
@@ -337,14 +337,15 @@ cmd_t *prepare_initDatanodeSlave(char *nodeName)
 
     /* Obtain base backup of the master */
     appendCmdEl(cmdBuildDir, (cmdBaseBkup = initCmd(aval(VAR_datanodeSlaveServers)[idx])));
-    snprintf(newCommand(cmdBaseBkup), MAXLINE, 
-             "pg_basebackup -p %s -h %s -D %s --wal-method=stream",
-             aval(VAR_datanodePorts)[idx], aval(VAR_datanodeMasterServers)[idx],
+    snprintf(newCommand(cmdBaseBkup), MAXLINE,
+             "pg_basebackup -U %s -p %s -h %s -D %s --wal-method=stream",
+             aval(VAR_pgxcOwner)[0],
+             aval(VAR_datanodePorts)[idx],
+             aval(VAR_datanodeMasterServers)[idx],
              aval(VAR_datanodeSlaveDirs)[idx]);
-
     /* Configure recovery.conf of the slave */
     appendCmdEl(cmdBuildDir, (cmdRecovConf = initCmd(aval(VAR_datanodeSlaveServers)[idx])));
-    snprintf(newCommand(cmdRecovConf), MAXLINE, 
+    snprintf(newCommand(cmdRecovConf), MAXLINE,
              "cat >> %s/recovery.conf",
              aval(VAR_datanodeSlaveDirs)[idx]);
     if ((f = prepareLocalStdin(newFilename(cmdRecovConf->localStdin), MAXPATH, NULL)) == NULL)
@@ -358,9 +359,9 @@ cmd_t *prepare_initDatanodeSlave(char *nodeName)
             "standby_mode = on\n"
             "primary_conninfo = 'host = %s port = %s user = %s application_name = %s'\n"
             "# restore_command = 'cp %s/%%f %%p'\n"
-            "# archive_cleanup_command = 'pg_archivecleanup %s %%r'\n",        
+            "# archive_cleanup_command = 'pg_archivecleanup %s %%r'\n",
             timeStampString(timestamp, MAXTOKEN),
-            aval(VAR_datanodeMasterServers)[idx], aval(VAR_datanodePorts)[idx], 
+            aval(VAR_datanodeMasterServers)[idx], aval(VAR_datanodePorts)[idx],
             sval(VAR_pgxcOwner), aval(VAR_datanodeNames)[idx],
             aval(VAR_datanodeArchLogDirs)[idx],
             aval(VAR_datanodeArchLogDirs)[idx]);
@@ -368,7 +369,7 @@ cmd_t *prepare_initDatanodeSlave(char *nodeName)
 
     /* Configure slave's postgresql.conf */
     appendCmdEl(cmdBuildDir, (cmdPgConf = initCmd(aval(VAR_datanodeSlaveServers)[idx])));
-    snprintf(newCommand(cmdPgConf), MAXPATH, 
+    snprintf(newCommand(cmdPgConf), MAXPATH,
              "cat >> %s/postgresql.conf",
              aval(VAR_datanodeSlaveDirs)[idx]);
     if ((f = prepareLocalStdin(newFilename(cmdPgConf->localStdin), MAXPATH, NULL)) == NULL)
@@ -376,7 +377,7 @@ cmd_t *prepare_initDatanodeSlave(char *nodeName)
         cleanCmd(cmd);
         return(NULL);
     }
-    
+
     fprintf(f,
             "#==========================================\n"
             "# Added to startup the slave, %s\n"
@@ -389,7 +390,7 @@ cmd_t *prepare_initDatanodeSlave(char *nodeName)
             aval(VAR_datanodeSlavePoolerPorts)[idx]);
     if(isVarYes(VAR_multiCluster) && !is_none(aval(VAR_datanodeSlaveCluster)[idx]))
     {
-        fprintf(f, 
+        fprintf(f,
                 "prefer_olap = true\n"
                 "olap_optimizer = true\n"
                 "pgxc_main_cluster_name = %s\n"
@@ -595,7 +596,7 @@ cmd_t *prepare_stopDatanodeMaster(char *nodeName, char *immediate)
 {
     cmd_t *cmdStopDatanodeMaster;
     int idx;
-    
+
     if ((idx = datanodeIdx(nodeName)) < 0)
     {
         elog(WARNING, "WARNING: %s is not a datanode. Skipping\n", nodeName);
@@ -1350,6 +1351,7 @@ int add_datanodeSlave(char *name, char *host, int port, int pooler, char *dir,
     int kk;
     bool wal;
     int size;
+    char *__p__ = NULL;
 
     if (walDir && (strcasecmp(walDir, "none") != 0))
         wal = true;
@@ -1442,7 +1444,7 @@ int add_datanodeSlave(char *name, char *host, int port, int pooler, char *dir,
                 sval(VAR_pgxcOwner), aval(VAR_datanodePgHbaEntries)[kk]);
     }
 
-    char *__p__ = getIpAddress(host);
+    __p__ = getIpAddress(host);
     fprintf(f,
             "host replication %s %s/32 trust\n"
             "# End of addition ===============================\n",
@@ -1515,8 +1517,9 @@ int add_datanodeSlave(char *name, char *host, int port, int pooler, char *dir,
     doImmediate(aval(VAR_datanodeMasterServers)[idx], NULL, 
                 "pg_ctl start -w -Z datanode -D %s", aval(VAR_datanodeMasterDirs)[idx]);
     /* pg_basebackup */
-    doImmediate(host, NULL, "pg_basebackup -p %s -h %s -D %s --wal-method=stream %s %s",
-                aval(VAR_datanodePorts)[idx],
+	doImmediate(host, NULL, "pg_basebackup -U %s -p %s -h %s -D %s --wal-method=stream %s %s",
+	            aval(VAR_pgxcOwner)[0],
+	            aval(VAR_datanodePorts)[idx],
                 aval(VAR_datanodeMasterServers)[idx], dir,
                 wal ? "--waldir" : "",
                 wal ? walDir : "");
@@ -1866,7 +1869,7 @@ cmd_t *prepare_cleanDatanodeMaster(char *nodeName)
         wal = true;
     else
         wal = false;
-    
+
     cmd = initCmd(aval(VAR_datanodeMasterServers)[idx]);
     snprintf(newCommand(cmd), MAXLINE,
              "rm -rf %s; %s %s %s mkdir -p %s; chmod 0700 %s; rm -f /tmp/.s.*%d*",
@@ -1916,7 +1919,7 @@ cmd_t *prepare_cleanDatanodeSlave(char *nodeName)
     cmd_t *cmd;
     int idx;
     bool wal;
-    
+
     if ((idx = datanodeIdx(nodeName)) <  0)
     {
         elog(ERROR, "ERROR: %s is not a datanode\n", nodeName);
@@ -1930,7 +1933,7 @@ cmd_t *prepare_cleanDatanodeSlave(char *nodeName)
         wal = true;
     else
         wal = false;
-    
+
     cmd = initCmd(aval(VAR_datanodeSlaveServers)[idx]);
     snprintf(newCommand(cmd), MAXLINE,
              "rm -rf %s; %s %s %s mkdir -p %s; chmod 0700 %s",
@@ -2133,9 +2136,9 @@ cmd_t *prepare_killDatanodeMaster(char *nodeName)
         char *pidList = getChPidList(aval(VAR_datanodeMasterServers)[dnIndex], postmasterPid);
 
         snprintf(newCommand(cmd), MAXLINE,
-                 "kill -9 %d %s;"    /* Kill the postmaster and all its children */
-                 "rm -rf /tmp/.s.'*'%d'*'",        /* Remove the socket */
-                 postmasterPid, 
+                 "kill -9 %d %s;"	/* Kill the postmaster and all its children */
+                 "rm -rf /tmp/.s.'*'%d'*'",		/* Remove the socket */
+                 postmasterPid,
                  pidList,
                  atoi(aval(VAR_datanodePorts)[dnIndex]));
         freeAndReset(pidList);
@@ -2144,7 +2147,7 @@ cmd_t *prepare_killDatanodeMaster(char *nodeName)
     {
         elog(WARNING, "WARNING: pid for datanode master \"%s\" was not found.  Remove socket only.\n", nodeName);
         snprintf(newCommand(cmd), MAXLINE,
-                 "rm -rf /tmp/.s.'*'%d'*'",        /* Remove the socket */
+                 "rm -rf /tmp/.s.'*'%d'*'",		/* Remove the socket */
                  atoi(aval(VAR_datanodePorts)[dnIndex]));
     }
     return(cmd);

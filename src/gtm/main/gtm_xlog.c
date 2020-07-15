@@ -75,6 +75,7 @@
  */
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/timeb.h>
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
@@ -137,7 +138,7 @@ XLogCtlData     *XLogCtl;
 XLogSyncStandby *XLogSync;
 XLogSyncConfig  *SyncConfig;
 
-bool  SyncReady;
+volatile bool  SyncReady;
 /* Protects ControlData */
 GTM_RWLock       ControlDataLock;
 ControlFileData *ControlData;
@@ -198,11 +199,31 @@ static void gtm_init_replication_data(GTM_StandbyReplication *replication);
 
 static void GTM_RecoveryUpdateMetaData(XLogRecPtr redo_end_pos,XLogRecPtr preXLogRecord,uint64 segment_no,int idx);
 
+static bool CheckSyncStandbyInList(char *application_name);
+
 /* string process tools */
 static char * strip(char *s);
 static bool is_contain(const char *pattern,char ch);
 static char * skip_to_next(char *s,const char *token);
 static bool start_with_ignore_case(const char *s,const char *pattern);
+
+
+static void clear_notify_queue(void);
+static void init_standby_replication(void);
+static void init_syncconfig(void);
+static void init_xlogsync(void);
+static void clear_syncconfig(void);
+static void load_syncconfig(void);
+static void load_xlogsync(void);
+static void init_sync_structures(void);
+
+static long long
+getSystemTime()
+{
+    struct timeb t;
+    ftime(&t);
+    return 1000 * t.time + t.millitm;
+}
 
 char *
 GetFormatedCommandLine(char *ans,int size,const char *cmd,char *file_name,char *relative_path)
@@ -412,9 +433,15 @@ GetMaxSyncStandbyCompletePtr()
     heap_destroy(&h);
 
     if(enalbe_gtm_xlog_debug)
-        elog(LOG,"GetMaxSyncStandbyCompletePtr result %X/%X",(uint32)((*temp_key)>>32),(uint32)(*temp_key));
-    elog(LOG,"count XLogSync->sync_standbys %d ret",XLogSync->sync_standbys->length);
-    return *temp_key;
+    {
+		if(temp_key)
+	        	elog(LOG,"GetMaxSyncStandbyCompletePtr result %X/%X",(uint32)((*temp_key)>>32),(uint32)(*temp_key));
+		else
+	        	elog(LOG,"GetMaxSyncStandbyCompletePtr result 0");
+			
+    }
+
+    return temp_key ? *temp_key : InvalidXLogRecPtr;
 }
 
 /*
@@ -429,7 +456,7 @@ NotifyWaitingQueue(void)
     bool      notify_one = false;
     int       ret = 0;
 
-    elog(LOG,"count XLogSync->sync_standbys %d",XLogSync->sync_standbys->length);
+    
 
     /* get max sync xlog position */
     check_ptr = GetMaxSyncStandbyCompletePtr();
@@ -441,6 +468,7 @@ NotifyWaitingQueue(void)
     }
 
     GTM_MutexLockAcquire(&XLogSync->wait_queue_mutex);
+	XLogSync->synced_lsn = XLogSync->synced_lsn > check_ptr ? XLogSync->synced_lsn : check_ptr;
 
     while(ret = heap_min(&XLogSync->wait_queue,(void **)&key,(void **)&waiter),ret)
     {
@@ -532,6 +560,14 @@ WaitSyncComplete(XLogRecPtr ptr)
     waiter->finished = false;
 
     GTM_MutexLockAcquire(&XLogSync->wait_queue_mutex);
+	/* avoid reload changes which will cause hug up*/
+    if(XLogSync->synced_lsn >= ptr)
+	{
+	    if(enalbe_gtm_xlog_debug)
+		    elog(LOG,"WaitSyncComplete %X/%X early finished",(uint32)(ptr>>32),(uint32)ptr);
+		GTM_MutexLockRelease(&XLogSync->wait_queue_mutex);
+        return ;
+	}
     heap_insert(&XLogSync->wait_queue,&waiter->pos,waiter);
     GTM_MutexLockRelease(&XLogSync->wait_queue_mutex);
 
@@ -1210,6 +1246,8 @@ BeforeReplyToClientXLogTrigger(void)
 {
     GTM_ThreadInfo *thr = GetMyThreadInfo;
     XLogRecPtr  endPos;
+    long long start_time;
+    long long end_time;
 
     ReleaseXLogRecordWriteLocks();
 
@@ -1225,6 +1263,8 @@ BeforeReplyToClientXLogTrigger(void)
         return ;
     }
 
+    start_time = getSystemTime();
+
     /* release thread lock ,so that we don't block GTM_StoreLock in xlog flush waiting. */
     if(thr->handle_standby)
         GTM_RWLockRelease(&thr->thr_lock);
@@ -1236,6 +1276,11 @@ BeforeReplyToClientXLogTrigger(void)
 
     if(thr->handle_standby)
         GTM_RWLockAcquire(&thr->thr_lock, GTM_LOCKMODE_WRITE);
+
+    end_time = getSystemTime();
+
+    if(end_time - start_time > warnning_time_cost)
+        elog(LOG, "BeforeReplyToClientXLogTrigger lsn %X/%X cost %lld ms", (uint32)(endPos >> 32), (uint32)endPos, end_time - start_time);
 }
 
 /* Read xlog file to buff */
@@ -2262,93 +2307,9 @@ start_with_ignore_case(const char *s,const char *pattern)
 /* Init sync replication data */
 void
 GTM_StandbyBaseinit(void)
-{// #lizard forgives
-    char *sync_names = NULL;
-    char *original_sync_names = NULL;
-    char *stop = NULL;
-    int  sync_standby_num = 0;
-    bool any_mode = false;
-    int  i = 0;
-    MemoryContext oldContext;
-
-    oldContext = MemoryContextSwitchTo(TopMostMemoryContext);
-
-    g_StandbyReplication = palloc(max_wal_sender * sizeof(GTM_StandbyReplication));
-    if(g_StandbyReplication == NULL)
-    {
-        elog(LOG,"memory insufficient");
-        exit(1);
-    }
-
-    for(i = 0; i < max_wal_sender ; i++)
-        gtm_init_replication_data(g_StandbyReplication + i);
-
-    SyncConfig = (XLogSyncConfig *)malloc(sizeof(XLogSyncConfig));
-    if(SyncConfig == NULL)
-    {
-        elog(LOG,"memory insufficient");
-        exit(1);
-    }
-    SyncConfig->required_sync_num = 0;
-    SyncConfig->sync_application_targets = NULL;
-
-    XLogSync  = (XLogSyncStandby *)malloc(sizeof(XLogSyncStandby));
-    if(XLogSync == NULL)
-    {
-        elog(LOG,"memory insufficient");
-        exit(1);
-    }
-    XLogSync->head_xlog_hints = 0;
-    XLogSync->head_ptr = InvalidXLogRecPtr;
-    XLogSync->sync_standbys = NULL;
-    heap_create(&XLogSync->wait_queue,0,XLogRecPtrCompLess);
-    GTM_MutexLockInit(&XLogSync->check_mutex);
-    GTM_MutexLockInit(&XLogSync->wait_queue_mutex);
-
-    SyncReady = false;
-    
-    if (!enable_sync_commit)
-        return ;
-
-    original_sync_names = pstrdup(synchronous_standby_names);
-    sync_names = strip(original_sync_names);
-
-    if(start_with_ignore_case(sync_names,"any"))
-    {
-        any_mode = true;
-        sync_names += 3;
-    sync_names = strip(sync_names);
-
-        SyncConfig->required_sync_num = strtol(sync_names,&stop,10);
-
-        if(stop == sync_names)
-        {
-            elog(LOG,"expect a number after any in synchronous_standby_names");
-            exit(1);
-        }
-
-    sync_names = stop;
-
-    elog(LOG,"sync mode any %d",SyncConfig->required_sync_num);
-
-        sync_names = skip_to_next(sync_names,"("BLANK_CHARACTERS);
-    }
-
-    stop = NULL;
-    while(sync_names = strtok_r(sync_names,",)"BLANK_CHARACTERS,&stop),sync_names)
-    {
-        SyncConfig->sync_application_targets = gtm_lappend(SyncConfig->sync_application_targets,(void *)strdup(sync_names));
-    elog(LOG,"sync target %s",sync_names);
-        sync_standby_num++;
-    sync_names = NULL;
-    }
-
-    if(!any_mode)
-        SyncConfig->required_sync_num = sync_standby_num;
-    elog(LOG,"sync slave number %d",SyncConfig->required_sync_num);
-
-    pfree(original_sync_names);
-    MemoryContextSwitchTo(oldContext);
+{
+    init_sync_structures();
+    load_sync_structures();
 }
 
 /* Print xlog command for debug */
@@ -3421,10 +3382,13 @@ static void
 XLogWrite(XLogRecPtr req)
 {// #lizard forgives
     uint64  nleft;
+    uint64  total_write;
     uint64  start_pos;
     int     written;
     uint64  end_pos;
     XLogRecPtr flush_pos;
+    long long  start_time;
+    long long  end_time;
 
     end_pos = XLogRecPtrToFileOffset(req);
 
@@ -3451,6 +3415,8 @@ XLogWrite(XLogRecPtr req)
         nleft  = end_pos - start_pos;
     }
 
+    total_write = nleft;
+
     Assert(nleft <= GTM_XLOG_SEG_SIZE);
 
     if(nleft == 0)
@@ -3465,6 +3431,8 @@ XLogWrite(XLogRecPtr req)
              (uint32_t)(req >> 32),
              (uint32_t)req,nleft);
     }
+
+    start_time = getSystemTime();
 
     do
     {
@@ -3496,6 +3464,10 @@ XLogWrite(XLogRecPtr req)
     XLogCtl->last_write_idx = end_pos;
 
     fsync(XLogCtl->xlog_fd);
+    
+    end_time = getSystemTime();
+    if(end_time - start_time > warnning_time_cost)
+        elog(LOG, "XLogWrite size %ld lsn %X/%X cost %lld ms", total_write, (uint32)(req >> 32), (uint32)req, end_time - start_time);
 
     SpinLockAcquire(&XLogCtl->walwirte_info_lck);
     Assert(XLogCtl->LogwrtResult.Write  <= req);
@@ -3951,7 +3923,7 @@ CopyXLogRecordToBuff(char *data,XLogRecPtr start,XLogRecPtr end,size_t size)
             write_pos = 0;
         }
     }
-    Assert(write_pos == XLogRecPtrToBuffIdx(end));
+    Assert(write_pos % GTM_XLOG_SEG_SIZE == XLogRecPtrToBuffIdx(end));
 
     return true;
 }
@@ -4038,9 +4010,9 @@ gtm_standby_resign_to_walsender(Port *port,const char *node_name,const char *rep
 
         if(replication->is_use == false)
         {
-        if(enalbe_gtm_xlog_debug)
-        elog(LOG,"gtm_standby_resign_to_walsender node_name:%s replication_name:%s",node_name,replication_name);
-
+	    	if(enalbe_gtm_xlog_debug)
+				elog(LOG,"gtm_standby_resign_to_walsender node_name:%s replication_name:%s",node_name,replication_name);
+			
             replication->is_use  = true ;
             replication->port    = port ;
 
@@ -4050,7 +4022,10 @@ gtm_standby_resign_to_walsender(Port *port,const char *node_name,const char *rep
             if(enable_sync_commit && IsInSyncStandbyList(replication_name))
             {
                 replication->is_sync = true;
+
+				GTM_MutexLockAcquire(&XLogSync->check_mutex);
                 RegisterNewSyncStandby(replication);
+				GTM_MutexLockRelease(&XLogSync->check_mutex);
             }
             else
                 replication->is_sync = false;
@@ -4165,7 +4140,9 @@ IsInSyncStandbyList(const char *application_name)
     gtm_ListCell *cell = NULL;
 
     if(enalbe_gtm_xlog_debug)
-    elog(LOG,"IsInSyncStandbyList %s",application_name);
+		elog(LOG,"IsInSyncStandbyList %s",application_name);
+
+	GTM_MutexLockAcquire(&SyncConfig->lck);
 
     gtm_foreach(cell,SyncConfig->sync_application_targets)
     {
@@ -4174,9 +4151,28 @@ IsInSyncStandbyList(const char *application_name)
 
         if(strcmp((char *)gtm_lfirst(cell),application_name) == 0)
         {
+        	
+			GTM_MutexLockRelease(&SyncConfig->lck);
             return true;
         }
     }
+
+	GTM_MutexLockRelease(&SyncConfig->lck);
+    return false;
+}
+
+bool
+CheckSyncStandbyInList(char *application_name)
+{
+    gtm_ListCell *cell = NULL;
+    gtm_foreach(cell,XLogSync->sync_standbys)
+    {
+        if(strcmp(application_name,((GTM_StandbyReplication *)(gtm_lfirst(cell)))->application_name) == 0 )
+        {
+		return true;
+        }
+    }
+
     return false;
 }
 
@@ -4186,33 +4182,29 @@ IsInSyncStandbyList(const char *application_name)
 void
 RegisterNewSyncStandby(GTM_StandbyReplication *replication)
 {
-    gtm_ListCell *cell = NULL;
     MemoryContext oldContext;
 
     oldContext = MemoryContextSwitchTo(TopMostMemoryContext);
 
-    GTM_MutexLockAcquire(&XLogSync->check_mutex);
-
-    gtm_foreach(cell,XLogSync->sync_standbys)
+    if(CheckSyncStandbyInList(replication->application_name))
     {
-        if(strcmp(replication->application_name,((GTM_StandbyReplication *)(gtm_lfirst(cell)))->application_name) == 0 )
-        {
-            GTM_MutexLockRelease(&XLogSync->check_mutex);
-            elog(ERROR,"Standby %s already exist in sync list",replication->application_name);
-        }
+        elog(LOG,"Standby %s already exist in sync list",replication->application_name);
+	return ;
     }
 
     XLogSync->sync_standbys = gtm_lappend(XLogSync->sync_standbys,replication);
 
     SyncReady = (gtm_list_length(XLogSync->sync_standbys) >= SyncConfig->required_sync_num);
 
-    GTM_MutexLockRelease(&XLogSync->check_mutex);
+    if(enalbe_gtm_xlog_debug)
+        elog(LOG,"add SyncReady %d current lenth %d requireed %d",SyncReady,gtm_list_length(XLogSync->sync_standbys), SyncConfig->required_sync_num);
 
     MemoryContextSwitchTo(oldContext);
 
     if(enalbe_gtm_xlog_debug)
         elog(LOG,"RegisterNewSyncStandby %s",replication->application_name);
 }
+
 
 /*
  * Remove a sync standby from XLogSync->sync_standbys.
@@ -4226,13 +4218,233 @@ RemoveSyncStandby(GTM_StandbyReplication *replication)
     if(enalbe_gtm_xlog_debug)
         elog(LOG,"RemoveSyncStandby %s",replication->application_name);
 
-    GTM_MutexLockAcquire(&XLogSync->check_mutex);
-
     XLogSync->sync_standbys = gtm_list_delete(XLogSync->sync_standbys,replication);
     SyncReady = (gtm_list_length(XLogSync->sync_standbys) >= SyncConfig->required_sync_num);
 
-    GTM_MutexLockRelease(&XLogSync->check_mutex);
+    if(enalbe_gtm_xlog_debug)
+        elog(LOG,"remove SyncReady %d current lenth %d requireed %d",SyncReady,gtm_list_length(XLogSync->sync_standbys), SyncConfig->required_sync_num);
 
     MemoryContextSwitchTo(oldContext);
+}
+
+void 
+clear_notify_queue(void)
+{
+    XLogRecPtr *key    = NULL;
+    XLogWaiter *waiter = NULL;
+    int         ret    = 0;
+	
+	while(ret = heap_min(&XLogSync->wait_queue,(void **)&key,(void **)&waiter),ret)
+    {
+        heap_delmin(&XLogSync->wait_queue,(void **)&key,(void **)&waiter);
+
+        GTM_MutexLockAcquire(&waiter->lock);
+        waiter->finished = true;
+        GTM_CVSignal(&waiter->cv);
+        GTM_MutexLockRelease(&waiter->lock);
+    }
+}
+
+void 
+init_standby_replication(void)
+{
+    int i = 0;
+    g_StandbyReplication = palloc(max_wal_sender * sizeof(GTM_StandbyReplication));
+    if(g_StandbyReplication == NULL)
+    {
+        elog(LOG,"memory insufficient");
+        exit(1);
+    }
+
+    for(i = 0; i < max_wal_sender ; i++)
+        gtm_init_replication_data(g_StandbyReplication + i);
+}
+
+void 
+init_syncconfig(void)
+{
+	SyncConfig = (XLogSyncConfig *)malloc(sizeof(XLogSyncConfig));
+    if(SyncConfig == NULL)
+    {
+        elog(LOG,"memory insufficient");
+        exit(1);
+    }
+    SyncConfig->required_sync_num = 0;
+    SyncConfig->sync_application_targets = NULL;
+    GTM_MutexLockInit(&SyncConfig->lck);
+}
+
+void 
+init_xlogsync(void)
+{
+	XLogSync  = (XLogSyncStandby *)malloc(sizeof(XLogSyncStandby));
+    if(XLogSync == NULL)
+    {
+        elog(LOG,"memory insufficient");
+        exit(1);
+    }
+    XLogSync->head_xlog_hints = 0;
+    XLogSync->head_ptr = InvalidXLogRecPtr;
+    XLogSync->sync_standbys = NULL;
+    heap_create(&XLogSync->wait_queue,0,XLogRecPtrCompLess);
+    GTM_MutexLockInit(&XLogSync->check_mutex);
+    GTM_MutexLockInit(&XLogSync->wait_queue_mutex);
+}
+
+void 
+clear_syncconfig(void)
+{
+	gtm_ListCell *lc = NULL;
+		
+	gtm_foreach(lc, SyncConfig->sync_application_targets)
+	{
+		free((char *)gtm_lfirst(lc));
+	}
+	gtm_list_free(SyncConfig->sync_application_targets);
+	
+	SyncConfig->sync_application_targets = NULL;
+	SyncConfig->required_sync_num = 0;
+
+	return ;
+}
+
+void 
+load_syncconfig(void)
+{
+    char *sync_names = NULL;
+    char *original_sync_names = NULL;
+    char *stop = NULL;
+    int  sync_standby_num = 0;
+    bool any_mode = false;
+
+    MemoryContext oldContext;
+
+	GTM_MutexLockAcquire(&SyncConfig->lck);
+
+	clear_syncconfig();
+
+	if(!enable_sync_commit)
+	{
+		GTM_MutexLockRelease(&SyncConfig->lck);
+		return ;
+	}
+
+	oldContext = MemoryContextSwitchTo(TopMostMemoryContext);
+
+	original_sync_names = pstrdup(synchronous_standby_names);
+    sync_names = strip(original_sync_names);
+
+    if(start_with_ignore_case(sync_names,"any"))
+    {
+        any_mode = true;
+        sync_names += 3;
+		sync_names = strip(sync_names);
+
+        SyncConfig->required_sync_num = strtol(sync_names,&stop,10);
+
+        if(stop == sync_names)
+        {
+            elog(LOG,"expect a number after any in synchronous_standby_names");
+            exit(1);
+        }
+
+		sync_names = stop;
+
+		elog(LOG,"sync mode any %d",SyncConfig->required_sync_num);
+
+        sync_names = skip_to_next(sync_names,"("BLANK_CHARACTERS);
+    }
+
+    stop = NULL;
+    while(sync_names = strtok_r(sync_names,",)"BLANK_CHARACTERS,&stop),sync_names)
+    {
+        SyncConfig->sync_application_targets = gtm_lappend(SyncConfig->sync_application_targets,(void *)strdup(sync_names));
+		elog(LOG,"sync target %s",sync_names);
+        sync_standby_num++;
+		sync_names = NULL;
+    }
+
+    if(!any_mode)
+        SyncConfig->required_sync_num = sync_standby_num;
+	
+    elog(LOG,"sync slave number %d",SyncConfig->required_sync_num);
+
+    if(SyncConfig->required_sync_num == 0)
+	enable_sync_commit = false;
+
+    pfree(original_sync_names);
+    MemoryContextSwitchTo(oldContext);
+	
+	GTM_MutexLockRelease(&SyncConfig->lck);
+}
+
+void 
+load_xlogsync(void)
+{
+	GTM_StandbyReplication *replication = NULL;
+	int i = 0;
+
+	GTM_MutexLockAcquire(&XLogSync->check_mutex);
+	GTM_MutexLockAcquire(&XLogSync->wait_queue_mutex);
+
+	for(i = 0; i < max_wal_sender ;i++)
+	{
+		replication = g_StandbyReplication + i;
+		if(!replication->is_use)
+			continue;
+
+		GTM_MutexLockAcquire(&replication->lock);
+
+		replication->next_sync_pos = InvalidXLogRecPtr;
+		replication->sync_hint = false;
+
+		if(IsInSyncStandbyList(replication->application_name))
+		{
+			if(!CheckSyncStandbyInList(replication->application_name))
+			{
+				replication->is_sync = true;
+				RegisterNewSyncStandby(replication);
+			}
+		}
+		else
+		{
+			replication->is_sync = false;
+			RemoveSyncStandby(replication);
+		}
+
+		GTM_MutexLockRelease(&replication->lock);
+	}
+
+	if(!enable_sync_commit)
+		clear_notify_queue();
+
+	GTM_MutexLockRelease(&XLogSync->wait_queue_mutex);
+
+	NotifyWaitingQueue();
+
+	SyncReady = (gtm_list_length(XLogSync->sync_standbys) >= SyncConfig->required_sync_num);
+
+	GTM_MutexLockRelease(&XLogSync->check_mutex);
+}
+
+void 
+init_sync_structures(void)
+{
+	MemoryContext oldContext;
+	
+	oldContext = MemoryContextSwitchTo(TopMostMemoryContext);
+
+	init_standby_replication();
+	init_syncconfig();
+	init_xlogsync();
+
+	MemoryContextSwitchTo(oldContext);
+}
+
+void 
+load_sync_structures(void)
+{
+	load_syncconfig();
+	load_xlogsync();
 }
 
