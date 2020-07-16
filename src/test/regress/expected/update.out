@@ -103,26 +103,26 @@ ERROR:  multiple assignments to same column "b"
 UPDATE update_test
   SET (b,a) = (select a,b from update_test where b = 41 and c = 'car')
   WHERE a = 100 AND b = 20;
-SELECT * FROM update_test;
+SELECT * FROM update_test order by 1;
   a  | b  |  c  
 -----+----+-----
- 100 | 21 | 
   11 | 41 | car
   11 | 42 | car
   41 | 11 | 
+ 100 | 21 | 
 (4 rows)
 
 -- correlated sub-select:
 UPDATE update_test o
   SET (b,a) = (select a+1,b from update_test i
                where i.a=o.a and i.b=o.b and i.c is not distinct from o.c);
-SELECT * FROM update_test;
+SELECT * FROM update_test order by 1;
  a  |  b  |  c  
 ----+-----+-----
+ 11 |  42 | 
  21 | 101 | 
  41 |  12 | car
  42 |  12 | car
- 11 |  42 | 
 (4 rows)
 
 -- fail, multiple rows supplied:
@@ -131,7 +131,7 @@ ERROR:  more than one row returned by a subquery used as an expression
 -- set to null if no rows supplied:
 UPDATE update_test SET (b,a) = (select a+1,b from update_test where a = 1000)
   WHERE a = 11;
-SELECT * FROM update_test;
+SELECT * FROM update_test order by 1;
  a  |  b  |  c  
 ----+-----+-----
  21 | 101 | 
@@ -210,16 +210,16 @@ DROP TABLE upsert_test;
 -- movement convert UPDATEs into DELETE+INSERT.
 CREATE TABLE range_parted (
 	a text,
-   b bigint,
-   c numeric,
-   d int,
-   e varchar
+	b bigint,
+	c numeric,
+	d int,
+	e varchar
 ) PARTITION BY RANGE (a, b);
 -- Create partitions intentionally in descending bound order, so as to test
 -- that update-row-movement works with the leaf partitions not in bound order.
-CREATE TABLE part_b_20_b_30 (e varchar, c numeric, a text, b bigint, d int);
+CREATE TABLE part_b_20_b_30 (a text, b bigint, c numeric, d int, e varchar);
 ALTER TABLE range_parted ATTACH PARTITION part_b_20_b_30 FOR VALUES FROM ('b', 20) TO ('b', 30);
-CREATE TABLE part_b_10_b_20 (e varchar, c numeric, a text, b bigint, d int) PARTITION BY RANGE (c);
+CREATE TABLE part_b_10_b_20 (a text, b bigint, c numeric, d int, e varchar) PARTITION BY RANGE (c);
 CREATE TABLE part_b_1_b_10 PARTITION OF range_parted FOR VALUES FROM ('b', 1) TO ('b', 10);
 ALTER TABLE range_parted ATTACH PARTITION part_b_10_b_20 FOR VALUES FROM ('b', 10) TO ('b', 20);
 CREATE TABLE part_a_10_a_20 PARTITION OF range_parted FOR VALUES FROM ('a', 10) TO ('a', 20);
@@ -230,15 +230,11 @@ UPDATE part_b_10_b_20 set b = b - 6;
 -- Create some more partitions following the above pattern of descending bound
 -- order, but let's make the situation a bit more complex by having the
 -- attribute numbers of the columns vary from their parent partition.
-CREATE TABLE part_c_100_200 (e varchar, c numeric, a text, b bigint, d int) PARTITION BY range (abs(d));
-ALTER TABLE part_c_100_200 DROP COLUMN e, DROP COLUMN c, DROP COLUMN a;
-ALTER TABLE part_c_100_200 ADD COLUMN c numeric, ADD COLUMN e varchar, ADD COLUMN a text;
-ALTER TABLE part_c_100_200 DROP COLUMN b;
-ALTER TABLE part_c_100_200 ADD COLUMN b bigint;
+CREATE TABLE part_c_100_200 (a text, b bigint, c numeric, d int, e varchar) PARTITION BY range (abs(d));
 CREATE TABLE part_d_1_15 PARTITION OF part_c_100_200 FOR VALUES FROM (1) TO (15);
 CREATE TABLE part_d_15_20 PARTITION OF part_c_100_200 FOR VALUES FROM (15) TO (20);
 ALTER TABLE part_b_10_b_20 ATTACH PARTITION part_c_100_200 FOR VALUES FROM (100) TO (200);
-CREATE TABLE part_c_1_100 (e varchar, d int, c numeric, b bigint, a text);
+CREATE TABLE part_c_1_100 (a text, b bigint, c numeric, d int, e varchar);
 ALTER TABLE part_b_10_b_20 ATTACH PARTITION part_c_1_100 FOR VALUES FROM (1) TO (100);
 \set init_range_parted 'truncate range_parted; insert into range_parted VALUES (''a'', 1, 1, 1), (''a'', 10, 200, 1), (''b'', 12, 96, 1), (''b'', 13, 97, 2), (''b'', 15, 105, 16), (''b'', 17, 105, 19)'
 \set show_data 'select tableoid::regclass::text COLLATE "C" partname, * from range_parted ORDER BY 1, 2, 3, 4, 5, 6'
@@ -256,91 +252,57 @@ ALTER TABLE part_b_10_b_20 ATTACH PARTITION part_c_1_100 FOR VALUES FROM (1) TO 
 
 -- The order of subplans should be in bound order
 EXPLAIN (costs off) UPDATE range_parted set c = c - 50 WHERE c > 97;
-             QUERY PLAN              
--------------------------------------
- Update on range_parted
-   Update on part_a_1_a_10
-   Update on part_a_10_a_20
-   Update on part_b_1_b_10
-   Update on part_c_1_100
-   Update on part_d_1_15
-   Update on part_d_15_20
-   Update on part_b_20_b_30
-   ->  Seq Scan on part_a_1_a_10
-         Filter: (c > '97'::numeric)
-   ->  Seq Scan on part_a_10_a_20
-         Filter: (c > '97'::numeric)
-   ->  Seq Scan on part_b_1_b_10
-         Filter: (c > '97'::numeric)
-   ->  Seq Scan on part_c_1_100
-         Filter: (c > '97'::numeric)
-   ->  Seq Scan on part_d_1_15
-         Filter: (c > '97'::numeric)
-   ->  Seq Scan on part_d_15_20
-         Filter: (c > '97'::numeric)
-   ->  Seq Scan on part_b_20_b_30
-         Filter: (c > '97'::numeric)
-(22 rows)
+                QUERY PLAN                 
+-------------------------------------------
+ Remote Fast Query Execution
+   Node/s: datanode_1, datanode_2
+   ->  Update on range_parted
+         Update on part_a_1_a_10
+         Update on part_a_10_a_20
+         Update on part_b_1_b_10
+         Update on part_c_1_100
+         Update on part_d_1_15
+         Update on part_d_15_20
+         Update on part_b_20_b_30
+         ->  Seq Scan on part_a_1_a_10
+               Filter: (c > '97'::numeric)
+         ->  Seq Scan on part_a_10_a_20
+               Filter: (c > '97'::numeric)
+         ->  Seq Scan on part_b_1_b_10
+               Filter: (c > '97'::numeric)
+         ->  Seq Scan on part_c_1_100
+               Filter: (c > '97'::numeric)
+         ->  Seq Scan on part_d_1_15
+               Filter: (c > '97'::numeric)
+         ->  Seq Scan on part_d_15_20
+               Filter: (c > '97'::numeric)
+         ->  Seq Scan on part_b_20_b_30
+               Filter: (c > '97'::numeric)
+(24 rows)
 
 -- fail, row movement happens only within the partition subtree.
 UPDATE part_c_100_200 set c = c - 20, d = c WHERE c = 105;
 ERROR:  new row for relation "part_c_100_200" violates partition constraint
-DETAIL:  Failing row contains (105, 85, null, b, 15).
+DETAIL:  Failing row contains (b, 15, 85, 105, null).
 -- fail, no partition key update, so no attempt to move tuple,
 -- but "a = 'a'" violates partition constraint enforced by root partition)
 UPDATE part_b_10_b_20 set a = 'a';
-ERROR:  new row for relation "part_c_1_100" violates partition constraint
-DETAIL:  Failing row contains (null, 1, 96, 12, a).
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 -- ok, partition key update, no constraint violation
 UPDATE range_parted set d = d - 10 WHERE d > 10;
 -- ok, no partition key update, no constraint violation
 UPDATE range_parted set e = d;
 -- No row found
 UPDATE part_c_1_100 set c = c + 20 WHERE c = 98;
--- ok, row movement
-UPDATE part_b_10_b_20 set c = c + 20 returning c, b, a;
-  c  | b  | a 
------+----+---
- 116 | 12 | b
- 117 | 13 | b
- 125 | 15 | b
- 125 | 17 | b
-(4 rows)
-
 :show_data;
     partname    | a | b  |  c  | d | e 
 ----------------+---+----+-----+---+---
  part_a_10_a_20 | a | 10 | 200 | 1 | 1
  part_a_1_a_10  | a |  1 |   1 | 1 | 1
- part_d_1_15    | b | 12 | 116 | 1 | 1
- part_d_1_15    | b | 13 | 117 | 2 | 2
- part_d_1_15    | b | 15 | 125 | 6 | 6
- part_d_1_15    | b | 17 | 125 | 9 | 9
-(6 rows)
-
--- fail, row movement happens only within the partition subtree.
-UPDATE part_b_10_b_20 set b = b - 6 WHERE c > 116 returning *;
-ERROR:  new row for relation "part_d_1_15" violates partition constraint
-DETAIL:  Failing row contains (2, 117, 2, b, 7).
--- ok, row movement, with subset of rows moved into different partition.
-UPDATE range_parted set b = b - 6 WHERE c > 116 returning a, b + c;
- a | ?column? 
----+----------
- a |      204
- b |      124
- b |      134
- b |      136
-(4 rows)
-
-:show_data;
-   partname    | a | b  |  c  | d | e 
----------------+---+----+-----+---+---
- part_a_1_a_10 | a |  1 |   1 | 1 | 1
- part_a_1_a_10 | a |  4 | 200 | 1 | 1
- part_b_1_b_10 | b |  7 | 117 | 2 | 2
- part_b_1_b_10 | b |  9 | 125 | 6 | 6
- part_d_1_15   | b | 11 | 125 | 9 | 9
- part_d_1_15   | b | 12 | 116 | 1 | 1
+ part_c_1_100   | b | 12 |  96 | 1 | 1
+ part_c_1_100   | b | 13 |  97 | 2 | 2
+ part_d_1_15    | b | 15 | 105 | 6 | 6
+ part_d_1_15    | b | 17 | 105 | 9 | 9
 (6 rows)
 
 -- Common table needed for multiple test scenarios.
@@ -352,34 +314,34 @@ CREATE VIEW upview AS SELECT * FROM range_parted WHERE (select c > c1 FROM minta
 UPDATE upview set c = 199 WHERE b = 4;
 -- fail, check option violation
 UPDATE upview set c = 120 WHERE b = 4;
-ERROR:  new row violates check option for view "upview"
-DETAIL:  Failing row contains (a, 4, 120, 1, 1).
 -- fail, row movement with check option violation
 UPDATE upview set a = 'b', b = 15, c = 120 WHERE b = 4;
-ERROR:  new row violates check option for view "upview"
-DETAIL:  Failing row contains (b, 15, 120, 1, 1).
+ERROR:  could not plan this distributed update
+DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 -- ok, row movement, check option passes
 UPDATE upview set a = 'b', b = 15 WHERE b = 4;
+ERROR:  could not plan this distributed update
+DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 :show_data;
-   partname    | a | b  |  c  | d | e 
----------------+---+----+-----+---+---
- part_a_1_a_10 | a |  1 |   1 | 1 | 1
- part_b_1_b_10 | b |  7 | 117 | 2 | 2
- part_b_1_b_10 | b |  9 | 125 | 6 | 6
- part_d_1_15   | b | 11 | 125 | 9 | 9
- part_d_1_15   | b | 12 | 116 | 1 | 1
- part_d_1_15   | b | 15 | 199 | 1 | 1
+    partname    | a | b  |  c  | d | e 
+----------------+---+----+-----+---+---
+ part_a_10_a_20 | a | 10 | 200 | 1 | 1
+ part_a_1_a_10  | a |  1 |   1 | 1 | 1
+ part_c_1_100   | b | 12 |  96 | 1 | 1
+ part_c_1_100   | b | 13 |  97 | 2 | 2
+ part_d_1_15    | b | 15 | 105 | 6 | 6
+ part_d_1_15    | b | 17 | 105 | 9 | 9
 (6 rows)
 
 -- cleanup
 DROP VIEW upview;
 -- RETURNING having whole-row vars.
 :init_range_parted;
-UPDATE range_parted set c = 95 WHERE a = 'b' and b > 10 and c > 100 returning (range_parted), *;
- range_parted  | a | b  | c  | d  | e 
----------------+---+----+----+----+---
- (b,15,95,16,) | b | 15 | 95 | 16 | 
- (b,17,95,19,) | b | 17 | 95 | 19 | 
+UPDATE range_parted set c = 95 WHERE a = 'b' and b > 10 and c < 100 returning (range_parted), *;
+ range_parted | a | b  | c  | d | e 
+--------------+---+----+----+---+---
+ (b,12,95,1,) | b | 12 | 95 | 1 | 
+ (b,13,95,2,) | b | 13 | 95 | 2 | 
 (2 rows)
 
 :show_data;
@@ -387,10 +349,10 @@ UPDATE range_parted set c = 95 WHERE a = 'b' and b > 10 and c > 100 returning (r
 ----------------+---+----+-----+----+---
  part_a_10_a_20 | a | 10 | 200 |  1 | 
  part_a_1_a_10  | a |  1 |   1 |  1 | 
- part_c_1_100   | b | 12 |  96 |  1 | 
- part_c_1_100   | b | 13 |  97 |  2 | 
- part_c_1_100   | b | 15 |  95 | 16 | 
- part_c_1_100   | b | 17 |  95 | 19 | 
+ part_c_1_100   | b | 12 |  95 |  1 | 
+ part_c_1_100   | b | 13 |  95 |  2 | 
+ part_d_15_20   | b | 15 | 105 | 16 | 
+ part_d_15_20   | b | 17 | 105 | 19 | 
 (6 rows)
 
 -- Transition tables with update row movement
@@ -408,8 +370,9 @@ $$;
 CREATE TRIGGER trans_updatetrig
   AFTER UPDATE ON range_parted REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
   FOR EACH STATEMENT EXECUTE PROCEDURE trans_updatetrigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 UPDATE range_parted set c = (case when c = 96 then 110 else c + 1 end ) WHERE a = 'b' and b > 10 and c >= 96;
-NOTICE:  trigger = trans_updatetrig, old table = (b,12,96,1,), (b,13,97,2,), (b,15,105,16,), (b,17,105,19,), new table = (b,12,110,1,), (b,13,98,2,), (b,15,106,16,), (b,17,106,19,)
 :show_data;
     partname    | a | b  |  c  | d  | e 
 ----------------+---+----+-----+----+---
@@ -428,11 +391,14 @@ NOTICE:  trigger = trans_updatetrig, old table = (b,12,96,1,), (b,13,97,2,), (b,
 CREATE TRIGGER trans_deletetrig
   AFTER DELETE ON range_parted REFERENCING OLD TABLE AS old_table
   FOR EACH STATEMENT EXECUTE PROCEDURE trans_updatetrigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 CREATE TRIGGER trans_inserttrig
   AFTER INSERT ON range_parted REFERENCING NEW TABLE AS new_table
   FOR EACH STATEMENT EXECUTE PROCEDURE trans_updatetrigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 UPDATE range_parted set c = c + 50 WHERE a = 'b' and b > 10 and c >= 96;
-NOTICE:  trigger = trans_updatetrig, old table = (b,12,96,1,), (b,13,97,2,), (b,15,105,16,), (b,17,105,19,), new table = (b,12,146,1,), (b,13,147,2,), (b,15,155,16,), (b,17,155,19,)
 :show_data;
     partname    | a | b  |  c  | d  | e 
 ----------------+---+----+-----+----+---
@@ -445,7 +411,9 @@ NOTICE:  trigger = trans_updatetrig, old table = (b,12,96,1,), (b,13,97,2,), (b,
 (6 rows)
 
 DROP TRIGGER trans_deletetrig ON range_parted;
+ERROR:  trigger "trans_deletetrig" for table "range_parted" does not exist
 DROP TRIGGER trans_inserttrig ON range_parted;
+ERROR:  trigger "trans_inserttrig" for table "range_parted" does not exist
 -- Don't drop trans_updatetrig yet. It is required below.
 -- Test with transition tuple conversion happening for rows moved into the
 -- new partition. This requires a trigger that references transition table
@@ -461,36 +429,40 @@ BEGIN
 END $$ language plpgsql;
 CREATE TRIGGER trig_c1_100 BEFORE UPDATE OR INSERT ON part_c_1_100
    FOR EACH ROW EXECUTE PROCEDURE func_parted_mod_b();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 CREATE TRIGGER trig_d1_15 BEFORE UPDATE OR INSERT ON part_d_1_15
    FOR EACH ROW EXECUTE PROCEDURE func_parted_mod_b();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 CREATE TRIGGER trig_d15_20 BEFORE UPDATE OR INSERT ON part_d_15_20
    FOR EACH ROW EXECUTE PROCEDURE func_parted_mod_b();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 :init_range_parted;
 UPDATE range_parted set c = (case when c = 96 then 110 else c + 1 end) WHERE a = 'b' and b > 10 and c >= 96;
-NOTICE:  trigger = trans_updatetrig, old table = (b,13,96,1,), (b,14,97,2,), (b,16,105,16,), (b,18,105,19,), new table = (b,15,110,1,), (b,15,98,2,), (b,17,106,16,), (b,19,106,19,)
 :show_data;
     partname    | a | b  |  c  | d  | e 
 ----------------+---+----+-----+----+---
  part_a_10_a_20 | a | 10 | 200 |  1 | 
  part_a_1_a_10  | a |  1 |   1 |  1 | 
- part_c_1_100   | b | 15 |  98 |  2 | 
- part_d_15_20   | b | 17 | 106 | 16 | 
- part_d_15_20   | b | 19 | 106 | 19 | 
- part_d_1_15    | b | 15 | 110 |  1 | 
+ part_c_1_100   | b | 13 |  98 |  2 | 
+ part_d_15_20   | b | 15 | 106 | 16 | 
+ part_d_15_20   | b | 17 | 106 | 19 | 
+ part_d_1_15    | b | 12 | 110 |  1 | 
 (6 rows)
 
 :init_range_parted;
 UPDATE range_parted set c = c + 50 WHERE a = 'b' and b > 10 and c >= 96;
-NOTICE:  trigger = trans_updatetrig, old table = (b,13,96,1,), (b,14,97,2,), (b,16,105,16,), (b,18,105,19,), new table = (b,15,146,1,), (b,16,147,2,), (b,17,155,16,), (b,19,155,19,)
 :show_data;
     partname    | a | b  |  c  | d  | e 
 ----------------+---+----+-----+----+---
  part_a_10_a_20 | a | 10 | 200 |  1 | 
  part_a_1_a_10  | a |  1 |   1 |  1 | 
- part_d_15_20   | b | 17 | 155 | 16 | 
- part_d_15_20   | b | 19 | 155 | 19 | 
- part_d_1_15    | b | 15 | 146 |  1 | 
- part_d_1_15    | b | 16 | 147 |  2 | 
+ part_d_15_20   | b | 15 | 155 | 16 | 
+ part_d_15_20   | b | 17 | 155 | 19 | 
+ part_d_1_15    | b | 12 | 146 |  1 | 
+ part_d_1_15    | b | 13 | 147 |  2 | 
 (6 rows)
 
 -- Case where per-partition tuple conversion map array is allocated, but the
@@ -498,22 +470,25 @@ NOTICE:  trigger = trans_updatetrig, old table = (b,13,96,1,), (b,14,97,2,), (b,
 -- matching table attributes of the partition and the target table.
 :init_range_parted;
 UPDATE range_parted set b = 15 WHERE b = 1;
-NOTICE:  trigger = trans_updatetrig, old table = (a,1,1,1,), new table = (a,15,1,1,)
 :show_data;
     partname    | a | b  |  c  | d  | e 
 ----------------+---+----+-----+----+---
  part_a_10_a_20 | a | 10 | 200 |  1 | 
  part_a_10_a_20 | a | 15 |   1 |  1 | 
- part_c_1_100   | b | 13 |  96 |  1 | 
- part_c_1_100   | b | 14 |  97 |  2 | 
- part_d_15_20   | b | 16 | 105 | 16 | 
- part_d_15_20   | b | 18 | 105 | 19 | 
+ part_c_1_100   | b | 12 |  96 |  1 | 
+ part_c_1_100   | b | 13 |  97 |  2 | 
+ part_d_15_20   | b | 15 | 105 | 16 | 
+ part_d_15_20   | b | 17 | 105 | 19 | 
 (6 rows)
 
 DROP TRIGGER trans_updatetrig ON range_parted;
+ERROR:  trigger "trans_updatetrig" for table "range_parted" does not exist
 DROP TRIGGER trig_c1_100 ON part_c_1_100;
+ERROR:  trigger "trig_c1_100" for table "part_c_1_100" does not exist
 DROP TRIGGER trig_d1_15 ON part_d_1_15;
+ERROR:  trigger "trig_d1_15" for table "part_d_1_15" does not exist
 DROP TRIGGER trig_d15_20 ON part_d_15_20;
+ERROR:  trigger "trig_d15_20" for table "part_d_15_20" does not exist
 DROP FUNCTION func_parted_mod_b();
 -- RLS policies with update-row-movement
 -----------------------------------------
@@ -527,7 +502,7 @@ SET SESSION AUTHORIZATION regress_range_parted_user;
 -- This should fail with RLS violation error while moving row from
 -- part_a_10_a_20 to part_d_1_15, because we are setting 'c' to an odd number.
 UPDATE range_parted set a = 'b', c = 151 WHERE a = 'a' and c = 200;
-ERROR:  new row violates row-level security policy for table "range_parted"
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 RESET SESSION AUTHORIZATION;
 -- Create a trigger on part_d_1_15
 CREATE FUNCTION func_d_1_15() RETURNS trigger AS $$
@@ -537,12 +512,15 @@ BEGIN
 END $$ LANGUAGE plpgsql;
 CREATE TRIGGER trig_d_1_15 BEFORE INSERT ON part_d_1_15
    FOR EACH ROW EXECUTE PROCEDURE func_d_1_15();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 :init_range_parted;
 SET SESSION AUTHORIZATION regress_range_parted_user;
 -- Here, RLS checks should succeed while moving row from part_a_10_a_20 to
 -- part_d_1_15. Even though the UPDATE is setting 'c' to an odd number, the
 -- trigger at the destination partition again makes it an even number.
 UPDATE range_parted set a = 'b', c = 151 WHERE a = 'a' and c = 200;
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 RESET SESSION AUTHORIZATION;
 :init_range_parted;
 SET SESSION AUTHORIZATION regress_range_parted_user;
@@ -550,10 +528,11 @@ SET SESSION AUTHORIZATION regress_range_parted_user;
 -- 'c' to an even number, the trigger at the destination partition again makes
 -- it an odd number.
 UPDATE range_parted set a = 'b', c = 150 WHERE a = 'a' and c = 200;
-ERROR:  new row violates row-level security policy for table "range_parted"
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 -- Cleanup
 RESET SESSION AUTHORIZATION;
 DROP TRIGGER trig_d_1_15 ON part_d_1_15;
+ERROR:  trigger "trig_d_1_15" for table "part_d_1_15" does not exist
 DROP FUNCTION func_d_1_15();
 -- Policy expression contains SubPlan
 RESET SESSION AUTHORIZATION;
@@ -564,9 +543,10 @@ CREATE POLICY policy_range_parted_subplan on range_parted
 SET SESSION AUTHORIZATION regress_range_parted_user;
 -- fail, mintab has row with c1 = 120
 UPDATE range_parted set a = 'b', c = 122 WHERE a = 'a' and c = 200;
-ERROR:  new row violates row-level security policy "policy_range_parted_subplan" for table "range_parted"
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 -- ok
 UPDATE range_parted set a = 'b', c = 120 WHERE a = 'a' and c = 200;
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 -- RLS policy expression contains whole row.
 RESET SESSION AUTHORIZATION;
 :init_range_parted;
@@ -575,12 +555,13 @@ CREATE POLICY policy_range_parted_wholerow on range_parted AS RESTRICTIVE for UP
 SET SESSION AUTHORIZATION regress_range_parted_user;
 -- ok, should pass the RLS check
 UPDATE range_parted set a = 'b', c = 112 WHERE a = 'a' and c = 200;
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 RESET SESSION AUTHORIZATION;
 :init_range_parted;
 SET SESSION AUTHORIZATION regress_range_parted_user;
 -- fail, the whole row RLS check should fail
 UPDATE range_parted set a = 'b', c = 116 WHERE a = 'a' and c = 200;
-ERROR:  new row violates row-level security policy "policy_range_parted_wholerow" for table "range_parted"
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 -- Cleanup
 RESET SESSION AUTHORIZATION;
 DROP POLICY policy_range_parted ON range_parted;
@@ -603,35 +584,58 @@ $$;
 -- Triggers on root partition
 CREATE TRIGGER parent_delete_trig
   AFTER DELETE ON range_parted for each statement execute procedure trigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 CREATE TRIGGER parent_update_trig
   AFTER UPDATE ON range_parted for each statement execute procedure trigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 CREATE TRIGGER parent_insert_trig
   AFTER INSERT ON range_parted for each statement execute procedure trigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 -- Triggers on leaf partition part_c_1_100
 CREATE TRIGGER c1_delete_trig
   AFTER DELETE ON part_c_1_100 for each statement execute procedure trigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 CREATE TRIGGER c1_update_trig
   AFTER UPDATE ON part_c_1_100 for each statement execute procedure trigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 CREATE TRIGGER c1_insert_trig
   AFTER INSERT ON part_c_1_100 for each statement execute procedure trigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 -- Triggers on leaf partition part_d_1_15
 CREATE TRIGGER d1_delete_trig
   AFTER DELETE ON part_d_1_15 for each statement execute procedure trigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 CREATE TRIGGER d1_update_trig
   AFTER UPDATE ON part_d_1_15 for each statement execute procedure trigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 CREATE TRIGGER d1_insert_trig
   AFTER INSERT ON part_d_1_15 for each statement execute procedure trigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 -- Triggers on leaf partition part_d_15_20
 CREATE TRIGGER d15_delete_trig
   AFTER DELETE ON part_d_15_20 for each statement execute procedure trigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 CREATE TRIGGER d15_update_trig
   AFTER UPDATE ON part_d_15_20 for each statement execute procedure trigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 CREATE TRIGGER d15_insert_trig
   AFTER INSERT ON part_d_15_20 for each statement execute procedure trigfunc();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 -- Move all rows from part_c_100_200 to part_c_1_100. None of the delete or
 -- insert statement triggers should be fired.
 UPDATE range_parted set c = c - 50 WHERE c > 97;
-NOTICE:  trigger = parent_update_trig fired on table range_parted during UPDATE
 :show_data;
     partname    | a | b  |  c  | d  | e 
 ----------------+---+----+-----+----+---
@@ -644,17 +648,29 @@ NOTICE:  trigger = parent_update_trig fired on table range_parted during UPDATE
 (6 rows)
 
 DROP TRIGGER parent_delete_trig ON range_parted;
+ERROR:  trigger "parent_delete_trig" for table "range_parted" does not exist
 DROP TRIGGER parent_update_trig ON range_parted;
+ERROR:  trigger "parent_update_trig" for table "range_parted" does not exist
 DROP TRIGGER parent_insert_trig ON range_parted;
+ERROR:  trigger "parent_insert_trig" for table "range_parted" does not exist
 DROP TRIGGER c1_delete_trig ON part_c_1_100;
+ERROR:  trigger "c1_delete_trig" for table "part_c_1_100" does not exist
 DROP TRIGGER c1_update_trig ON part_c_1_100;
+ERROR:  trigger "c1_update_trig" for table "part_c_1_100" does not exist
 DROP TRIGGER c1_insert_trig ON part_c_1_100;
+ERROR:  trigger "c1_insert_trig" for table "part_c_1_100" does not exist
 DROP TRIGGER d1_delete_trig ON part_d_1_15;
+ERROR:  trigger "d1_delete_trig" for table "part_d_1_15" does not exist
 DROP TRIGGER d1_update_trig ON part_d_1_15;
+ERROR:  trigger "d1_update_trig" for table "part_d_1_15" does not exist
 DROP TRIGGER d1_insert_trig ON part_d_1_15;
+ERROR:  trigger "d1_insert_trig" for table "part_d_1_15" does not exist
 DROP TRIGGER d15_delete_trig ON part_d_15_20;
+ERROR:  trigger "d15_delete_trig" for table "part_d_15_20" does not exist
 DROP TRIGGER d15_update_trig ON part_d_15_20;
+ERROR:  trigger "d15_update_trig" for table "part_d_15_20" does not exist
 DROP TRIGGER d15_insert_trig ON part_d_15_20;
+ERROR:  trigger "d15_insert_trig" for table "part_d_15_20" does not exist
 -- Creating default partition for range
 :init_range_parted;
 create table part_def partition of range_parted default;
@@ -669,14 +685,16 @@ create table part_def partition of range_parted default;
  e      | character varying |           |          |         | extended |              | 
 Partition of: range_parted DEFAULT
 Partition constraint: (NOT ((a IS NOT NULL) AND (b IS NOT NULL) AND (((a = 'a'::text) AND (b >= '1'::bigint) AND (b < '10'::bigint)) OR ((a = 'a'::text) AND (b >= '10'::bigint) AND (b < '20'::bigint)) OR ((a = 'b'::text) AND (b >= '1'::bigint) AND (b < '10'::bigint)) OR ((a = 'b'::text) AND (b >= '10'::bigint) AND (b < '20'::bigint)) OR ((a = 'b'::text) AND (b >= '20'::bigint) AND (b < '30'::bigint)))))
- 
+Distribute By: HASH(a)
+Location Nodes: ALL DATANODES
+
 insert into range_parted values ('c', 9);
 -- ok
 update part_def set a = 'd' where a = 'c';
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 -- fail
 update part_def set a = 'a' where a = 'd';
-ERROR:  new row for relation "part_def" violates partition constraint
-DETAIL:  Failing row contains (a, 9, null, null, null).
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 :show_data;
     partname    | a | b  |  c  | d  | e 
 ----------------+---+----+-----+----+---
@@ -686,33 +704,18 @@ DETAIL:  Failing row contains (a, 9, null, null, null).
  part_c_1_100   | b | 13 |  97 |  2 | 
  part_d_15_20   | b | 15 | 105 | 16 | 
  part_d_15_20   | b | 17 | 105 | 19 | 
- part_def       | d |  9 |     |    | 
+ part_def       | c |  9 |     |    | 
 (7 rows)
 
 -- Update row movement from non-default to default partition.
 -- fail, default partition is not under part_a_10_a_20;
 UPDATE part_a_10_a_20 set a = 'ad' WHERE a = 'a';
-ERROR:  new row for relation "part_a_10_a_20" violates partition constraint
-DETAIL:  Failing row contains (ad, 10, 200, 1, null).
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 -- ok
 UPDATE range_parted set a = 'ad' WHERE a = 'a';
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 UPDATE range_parted set a = 'bd' WHERE a = 'b';
-:show_data;
- partname | a  | b  |  c  | d  | e 
-----------+----+----+-----+----+---
- part_def | ad |  1 |   1 |  1 | 
- part_def | ad | 10 | 200 |  1 | 
- part_def | bd | 12 |  96 |  1 | 
- part_def | bd | 13 |  97 |  2 | 
- part_def | bd | 15 | 105 | 16 | 
- part_def | bd | 17 | 105 | 19 | 
- part_def | d  |  9 |     |    | 
-(7 rows)
-
--- Update row movement from default to non-default partitions.
--- ok
-UPDATE range_parted set a = 'a' WHERE a = 'ad';
-UPDATE range_parted set a = 'b' WHERE a = 'bd';
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 :show_data;
     partname    | a | b  |  c  | d  | e 
 ----------------+---+----+-----+----+---
@@ -722,7 +725,25 @@ UPDATE range_parted set a = 'b' WHERE a = 'bd';
  part_c_1_100   | b | 13 |  97 |  2 | 
  part_d_15_20   | b | 15 | 105 | 16 | 
  part_d_15_20   | b | 17 | 105 | 19 | 
- part_def       | d |  9 |     |    | 
+ part_def       | c |  9 |     |    | 
+(7 rows)
+
+-- Update row movement from default to non-default partitions.
+-- ok
+UPDATE range_parted set a = 'a' WHERE a = 'ad';
+ERROR:  Distributed column or partition column "a" can't be updated in current version
+UPDATE range_parted set a = 'b' WHERE a = 'bd';
+ERROR:  Distributed column or partition column "a" can't be updated in current version
+:show_data;
+    partname    | a | b  |  c  | d  | e 
+----------------+---+----+-----+----+---
+ part_a_10_a_20 | a | 10 | 200 |  1 | 
+ part_a_1_a_10  | a |  1 |   1 |  1 | 
+ part_c_1_100   | b | 12 |  96 |  1 | 
+ part_c_1_100   | b | 13 |  97 |  2 | 
+ part_d_15_20   | b | 15 | 105 | 16 | 
+ part_d_15_20   | b | 17 | 105 | 19 | 
+ part_def       | c |  9 |     |    | 
 (7 rows)
 
 -- Cleanup: range_parted no longer needed.
@@ -737,10 +758,10 @@ INSERT into list_part1 VALUES ('a', 1);
 INSERT into list_default VALUES ('d', 10);
 -- fail
 UPDATE list_default set a = 'a' WHERE a = 'd';
-ERROR:  new row for relation "list_default" violates partition constraint
-DETAIL:  Failing row contains (a, 10).
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 -- ok
 UPDATE list_default set a = 'x' WHERE a = 'd';
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 DROP TABLE list_parted;
 --------------
 -- Some more update-partition-key test scenarios below. This time use list
@@ -751,19 +772,28 @@ CREATE TABLE list_parted (a numeric, b int, c int8) PARTITION BY list (a);
 CREATE TABLE sub_parted PARTITION OF list_parted for VALUES in (1) PARTITION BY list (b);
 CREATE TABLE sub_part1(b int, c int8, a numeric);
 ALTER TABLE sub_parted ATTACH PARTITION sub_part1 for VALUES in (1);
+ERROR:  table "sub_part1" contains column "a" at position 3, but parent "sub_parted" has it at position 1
+DETAIL:  Postgres-XL requires attribute positions to match
+HINT:  Check for column ordering and dropped columns, if any
 CREATE TABLE sub_part2(b int, c int8, a numeric);
 ALTER TABLE sub_parted ATTACH PARTITION sub_part2 for VALUES in (2);
+ERROR:  table "sub_part2" contains column "a" at position 3, but parent "sub_parted" has it at position 1
+DETAIL:  Postgres-XL requires attribute positions to match
+HINT:  Check for column ordering and dropped columns, if any
 CREATE TABLE list_part1(a numeric, b int, c int8);
 ALTER TABLE list_parted ATTACH PARTITION list_part1 for VALUES in (2,3);
 INSERT into list_parted VALUES (2,5,50);
 INSERT into list_parted VALUES (3,6,60);
 INSERT into sub_parted VALUES (1,1,60);
+ERROR:  no partition of relation "sub_parted" found for row
+DETAIL:  Partition key of the failing row contains (b) = (1).
 INSERT into sub_parted VALUES (1,2,10);
+ERROR:  no partition of relation "sub_parted" found for row
+DETAIL:  Partition key of the failing row contains (b) = (2).
 -- Test partition constraint violation when intermediate ancestor is used and
 -- constraint is inherited from upper root.
 UPDATE sub_parted set a = 2 WHERE c = 10;
-ERROR:  new row for relation "sub_part2" violates partition constraint
-DETAIL:  Failing row contains (2, 10, 2).
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 -- Test update-partition-key, where the unpruned partitions do not have their
 -- partition keys updated.
 SELECT tableoid::regclass::text, * FROM list_parted WHERE a = 2 ORDER BY 1;
@@ -787,14 +817,14 @@ BEGIN
 END $$ LANGUAGE plpgsql;
 CREATE TRIGGER parted_mod_b before update on sub_part1
    for each row execute procedure func_parted_mod_b();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4;
   tableoid  | a | b  | c  
 ------------+---+----+----
  list_part1 | 2 | 52 | 50
  list_part1 | 3 |  6 | 60
- sub_part1  | 1 |  1 | 60
- sub_part2  | 1 |  2 | 10
-(4 rows)
+(2 rows)
 
 -- This should do the tuple routing even though there is no explicit
 -- partition-key update, because there is a trigger on sub_part1.
@@ -804,11 +834,10 @@ SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4;
 ------------+---+----+----
  list_part1 | 2 | 52 | 50
  list_part1 | 3 |  6 | 60
- sub_part2  | 1 |  2 | 10
- sub_part2  | 1 |  2 | 70
-(4 rows)
+(2 rows)
 
 DROP TRIGGER parted_mod_b ON sub_part1;
+ERROR:  trigger "parted_mod_b" for table "sub_part1" does not exist
 -- If BR DELETE trigger prevented DELETE from happening, we should also skip
 -- the INSERT if that delete is part of UPDATE=>DELETE+INSERT.
 CREATE OR REPLACE FUNCTION func_parted_mod_b() returns trigger as $$
@@ -818,28 +847,26 @@ BEGIN
 END $$ LANGUAGE plpgsql;
 CREATE TRIGGER trig_skip_delete before delete on sub_part2
    for each row execute procedure func_parted_mod_b();
+ERROR:  Postgres-XL does not support TRIGGER yet
+DETAIL:  The feature is not currently supported
 UPDATE list_parted set b = 1 WHERE c = 70;
-NOTICE:  Trigger: Got OLD row (2,70,1), but returning NULL
 SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4;
   tableoid  | a | b  | c  
 ------------+---+----+----
  list_part1 | 2 | 52 | 50
  list_part1 | 3 |  6 | 60
- sub_part2  | 1 |  2 | 10
- sub_part2  | 1 |  2 | 70
-(4 rows)
+(2 rows)
 
 -- Drop the trigger. Now the row should be moved.
 DROP TRIGGER trig_skip_delete ON sub_part2;
+ERROR:  trigger "trig_skip_delete" for table "sub_part2" does not exist
 UPDATE list_parted set b = 1 WHERE c = 70;
 SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4;
   tableoid  | a | b  | c  
 ------------+---+----+----
  list_part1 | 2 | 52 | 50
  list_part1 | 3 |  6 | 60
- sub_part1  | 1 |  1 | 70
- sub_part2  | 1 |  2 | 10
-(4 rows)
+(2 rows)
 
 DROP FUNCTION func_parted_mod_b();
 -- UPDATE partition-key with FROM clause. If join produces multiple output
@@ -848,14 +875,13 @@ DROP FUNCTION func_parted_mod_b();
 CREATE TABLE non_parted (id int);
 INSERT into non_parted VALUES (1), (1), (1), (2), (2), (2), (3), (3), (3);
 UPDATE list_parted t1 set a = 2 FROM non_parted t2 WHERE t1.a = t2.id and a = 1;
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 SELECT tableoid::regclass::text, * FROM list_parted ORDER BY 1, 2, 3, 4;
   tableoid  | a | b  | c  
 ------------+---+----+----
- list_part1 | 2 |  1 | 70
- list_part1 | 2 |  2 | 10
  list_part1 | 2 | 52 | 50
  list_part1 | 3 |  6 | 60
-(4 rows)
+(2 rows)
 
 DROP TABLE non_parted;
 -- Cleanup: list_parted no longer needed.
@@ -879,8 +905,7 @@ insert into hpart2 values (2, 5);
 insert into hpart4 values (3, 4);
 -- fail
 update hpart1 set a = 3, b=4 where a = 1;
-ERROR:  new row for relation "hpart1" violates partition constraint
-DETAIL:  Failing row contains (3, 4).
+ERROR:  Distributed column or partition column "a" can't be updated in current version
 -- ok, row movement
 update hash_parted set b = b - 1 where b = 1;
 -- ok

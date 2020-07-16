@@ -1448,7 +1448,7 @@ copy test("........pg.dropped.1........") to stdout;
 ERROR:  column "........pg.dropped.1........" of relation "test" does not exist
 copy test from stdin;
 ERROR:  extra data after last expected column
-CONTEXT:  COPY test, line 1: "10	11	12"
+CONTEXT:  COPY test, line 1: "10	11	12", nodetype:1(1:cn,0:dn)
 select * from test order by b;
  b | c 
 ---+---
@@ -1971,8 +1971,8 @@ ERROR:  cannot alter table "tab1" because column "tab2.y" uses its row type
 create table at_partitioned (a int, b text) partition by range (a);
 create table at_part_1 partition of at_partitioned for values from (0) to (1000);
 insert into at_partitioned values (512, '0.123');
-create table at_part_2 (b text, a int);
-insert into at_part_2 values ('1.234', 1024);
+create table at_part_2 (a int, b text);
+insert into at_part_2 values (1024, '1.234');
 create index on at_partitioned (b);
 create index on at_partitioned (a);
 \d at_part_1
@@ -1990,16 +1990,16 @@ Indexes:
              Table "public.at_part_2"
  Column |  Type   | Collation | Nullable | Default 
 --------+---------+-----------+----------+---------
- b      | text    |           |          | 
  a      | integer |           |          | 
+ b      | text    |           |          | 
 
 alter table at_partitioned attach partition at_part_2 for values from (1000) to (2000);
 \d at_part_2
              Table "public.at_part_2"
  Column |  Type   | Collation | Nullable | Default 
 --------+---------+-----------+----------+---------
- b      | text    |           |          | 
  a      | integer |           |          | 
+ b      | text    |           |          | 
 Partition of: at_partitioned FOR VALUES FROM (1000) TO (2000)
 Indexes:
     "at_part_2_a_idx" btree (a)
@@ -2021,8 +2021,8 @@ Indexes:
              Table "public.at_part_2"
  Column |  Type   | Collation | Nullable | Default 
 --------+---------+-----------+----------+---------
- b      | numeric |           |          | 
  a      | integer |           |          | 
+ b      | numeric |           |          | 
 Partition of: at_partitioned FOR VALUES FROM (1000) TO (2000)
 Indexes:
     "at_part_2_a_idx" btree (a)
@@ -2992,8 +2992,7 @@ ALTER TABLE new_system_table RENAME TO old_system_table;
 CREATE INDEX old_system_table__othercol ON old_system_table (othercol);
 INSERT INTO old_system_table(othercol) VALUES ('somedata'), ('otherdata');
 UPDATE old_system_table SET id = -id;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
+ERROR:  Distributed column or partition column "id" can't be updated in current version
 DELETE FROM old_system_table WHERE othercol = 'somedata';
 TRUNCATE old_system_table;
 ALTER TABLE old_system_table DROP CONSTRAINT new_system_table_pkey;
@@ -3577,8 +3576,8 @@ CREATE OPERATOR CLASS custom_opclass FOR TYPE int4 USING HASH AS
 OPERATOR 1 = , FUNCTION 2 dummy_hashint4(int4, int8);
 -- check that the new partition won't overlap with an existing partition
 CREATE TABLE hash_parted (
-   a int,
-   b int
+	a int,
+	b int
 ) PARTITION BY HASH (a custom_opclass);
 CREATE TABLE hpart_1 PARTITION OF hash_parted FOR VALUES WITH (MODULUS 4, REMAINDER 0);
 CREATE TABLE fail_part (LIKE hpart_1);
@@ -3599,7 +3598,7 @@ ALTER TABLE hash_parted ATTACH PARTITION hpart_2 FOR VALUES WITH (MODULUS 4, REM
 -- check that leaf partitions are scanned when attaching a partitioned
 -- table
 CREATE TABLE hpart_5 (
-   LIKE hash_parted
+	LIKE hash_parted
 ) PARTITION BY LIST (b);
 -- check that violating rows are correctly reported
 CREATE TABLE hpart_5_a PARTITION OF hpart_5 FOR VALUES IN ('1', '2', '3');

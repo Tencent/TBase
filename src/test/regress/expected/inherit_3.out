@@ -864,6 +864,30 @@ select tableoid::regclass::text as relname, parted_tab.* from parted_tab order b
 (3 rows)
 
 drop table parted_tab;
+-- Check UPDATE with multi-level partitioned inherited target
+create table mlparted_tab (a int, b char, c text) partition by list (a);
+create table mlparted_tab_part1 partition of mlparted_tab for values in (1);
+create table mlparted_tab_part2 partition of mlparted_tab for values in (2) partition by list (b);
+create table mlparted_tab_part3 partition of mlparted_tab for values in (3);
+create table mlparted_tab_part2a partition of mlparted_tab_part2 for values in ('a');
+create table mlparted_tab_part2b partition of mlparted_tab_part2 for values in ('b');
+insert into mlparted_tab values (1, 'a'), (2, 'a'), (2, 'b'), (3, 'a');
+update mlparted_tab mlp set c = 'xxx'
+from
+  (select a from some_tab union all select a+1 from some_tab) ss (a)
+where (mlp.a = ss.a and mlp.b = 'b') or mlp.a = 3;
+ERROR:  could not plan this distributed update
+DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
+select tableoid::regclass::text as relname, mlparted_tab.* from mlparted_tab order by 1,2;
+       relname       | a | b | c 
+---------------------+---+---+---
+ mlparted_tab_part1  | 1 | a | 
+ mlparted_tab_part2a | 2 | a | 
+ mlparted_tab_part2b | 2 | b | 
+ mlparted_tab_part3  | 3 | a | 
+(4 rows)
+
+drop table mlparted_tab;
 drop table some_tab cascade;
 NOTICE:  drop cascades to table some_tab_child
 /* Test multiple inheritance of column defaults */
@@ -981,6 +1005,8 @@ NOTICE:  drop cascades to table c1
 -- tables. See the pgsql-hackers thread beginning Dec. 4/04
 create table base (i integer);
 create table derived () inherits (base);
+create table more_derived (like derived, b int) inherits (derived);
+NOTICE:  merging column "i" with inherited definition
 insert into derived (i) values (0);
 select derived::base from derived;
  derived 
@@ -997,16 +1023,20 @@ select NULL::derived::base;
 -- remove redundant conversions.
 explain (verbose on, costs off) select row(i, b)::more_derived::derived::base from more_derived;
                 QUERY PLAN                 
--------------------------------------------
- Seq Scan on public.more_derived
+----------------------------------------------------------------------------------------------
+ Remote Fast Query Execution
+   Output: ((ROW(more_derived.i, more_derived.b)::more_derived)::derived)::base
+   Node/s: datanode_1, datanode_2
+   Remote query: SELECT ((ROW(i, b)::more_derived)::derived)::base AS "row" FROM more_derived
+   ->  Seq Scan on public.more_derived
    Output: (ROW(i, b)::more_derived)::base
-(2 rows)
+(6 rows)
 
 explain (verbose on, costs off) select (1, 2)::more_derived::derived::base;
       QUERY PLAN       
------------------------
+-------------------------------------------
  Result
-   Output: '(1)'::base
+   Output: (ROW(1, 2)::more_derived)::base
 (2 rows)
 
 drop table more_derived;
@@ -1997,19 +2027,17 @@ explain (costs off) select * from list_parted where a in ('ab', 'cd', 'ef');
                Filter: ((a)::text = ANY ('{ab,cd,ef}'::text[]))
 (7 rows)
 
-explain (costs off) select * from list_parted where a = 'ab' or a in (null, 'cd');
+explain (costs off) select * from list_parted where a = 'ab' or a is null or a ='cd';
                                          QUERY PLAN                                          
 ---------------------------------------------------------------------------------------------
  Remote Fast Query Execution
    Node/s: datanode_1, datanode_2
    ->  Append
          ->  Seq Scan on part_ab_cd
-               Filter: (((a)::text = 'ab'::text) OR ((a)::text = ANY ('{NULL,cd}'::text[])))
-         ->  Seq Scan on part_ef_gh
-               Filter: (((a)::text = 'ab'::text) OR ((a)::text = ANY ('{NULL,cd}'::text[])))
+               Filter: (((a)::text = 'ab'::text) OR (a IS NULL) OR ((a)::text = 'cd'::text))
          ->  Seq Scan on part_null_xy
-               Filter: (((a)::text = 'ab'::text) OR ((a)::text = ANY ('{NULL,cd}'::text[])))
-(9 rows)
+               Filter: (((a)::text = 'ab'::text) OR (a IS NULL) OR ((a)::text = 'cd'::text))
+(7 rows)
 
 explain (costs off) select * from list_parted where a = 'ab';
                    QUERY PLAN                   
@@ -2172,13 +2200,15 @@ create table mcrparted4 partition of mcrparted for values from (20, 10, 10) to (
 create table mcrparted5 partition of mcrparted for values from (20, 20, 20) to (maxvalue, maxvalue, maxvalue);
 explain (costs off) select * from mcrparted where a = 0;	-- scans mcrparted0, mcrparted_def
              QUERY PLAN             
-------------------------------------
+---------------------------------------
  Remote Fast Query Execution
    Node/s: datanode_2
    ->  Append
          ->  Seq Scan on mcrparted0
                Filter: (a = 0)
-(5 rows)
+         ->  Seq Scan on mcrparted_def
+               Filter: (a = 0)
+(7 rows)
 
 explain (costs off) select * from mcrparted where a = 10 and abs(b) < 5;	-- scans mcrparted1, mcrparted_def
                     QUERY PLAN                     
@@ -2188,7 +2218,9 @@ explain (costs off) select * from mcrparted where a = 10 and abs(b) < 5;	-- scan
    ->  Append
          ->  Seq Scan on mcrparted1
                Filter: ((a = 10) AND (abs(b) < 5))
-(5 rows)
+         ->  Seq Scan on mcrparted_def
+               Filter: ((a = 10) AND (abs(b) < 5))
+(7 rows)
 
 explain (costs off) select * from mcrparted where a = 10 and abs(b) = 5;	-- scans mcrparted1, mcrparted2, mcrparted_def
                     QUERY PLAN                     
@@ -2200,11 +2232,13 @@ explain (costs off) select * from mcrparted where a = 10 and abs(b) = 5;	-- scan
                Filter: ((a = 10) AND (abs(b) = 5))
          ->  Seq Scan on mcrparted2
                Filter: ((a = 10) AND (abs(b) = 5))
-(7 rows)
+         ->  Seq Scan on mcrparted_def
+               Filter: ((a = 10) AND (abs(b) = 5))
+(9 rows)
 
 explain (costs off) select * from mcrparted where abs(b) = 5;	-- scans all partitions
              QUERY PLAN             
-------------------------------------
+---------------------------------------
  Remote Fast Query Execution
    Node/s: datanode_1, datanode_2
    ->  Append
@@ -2220,7 +2254,9 @@ explain (costs off) select * from mcrparted where abs(b) = 5;	-- scans all parti
                Filter: (abs(b) = 5)
          ->  Seq Scan on mcrparted5
                Filter: (abs(b) = 5)
-(15 rows)
+         ->  Seq Scan on mcrparted_def
+               Filter: (abs(b) = 5)
+(17 rows)
 
 explain (costs off) select * from mcrparted where a > -1;	-- scans all partitions
                 QUERY PLAN                 
@@ -2240,7 +2276,9 @@ explain (costs off) select * from mcrparted where a > -1;	-- scans all partition
                Filter: (a > '-1'::integer)
          ->  Seq Scan on mcrparted5
                Filter: (a > '-1'::integer)
-(15 rows)
+         ->  Seq Scan on mcrparted_def
+               Filter: (a > '-1'::integer)
+(17 rows)
 
 explain (costs off) select * from mcrparted where a = 20 and abs(b) = 10 and c > 10;	-- scans mcrparted4
                            QUERY PLAN                            
@@ -2264,7 +2302,9 @@ explain (costs off) select * from mcrparted where a = 20 and c > 20; -- scans mc
                Filter: ((c > 20) AND (a = 20))
          ->  Seq Scan on mcrparted5
                Filter: ((c > 20) AND (a = 20))
-(9 rows)
+         ->  Seq Scan on mcrparted_def
+               Filter: ((c > 20) AND (a = 20))
+(11 rows)
 
 drop table mcrparted;
 -- check that partitioned table Appends cope with being referenced in

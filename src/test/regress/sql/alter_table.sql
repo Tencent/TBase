@@ -1332,8 +1332,8 @@ alter table tab1 alter column b type varchar; -- fails
 create table at_partitioned (a int, b text) partition by range (a);
 create table at_part_1 partition of at_partitioned for values from (0) to (1000);
 insert into at_partitioned values (512, '0.123');
-create table at_part_2 (b text, a int);
-insert into at_part_2 values ('1.234', 1024);
+create table at_part_2 (a int, b text);
+insert into at_part_2 values (1024, '1.234');
 create index on at_partitioned (b);
 create index on at_partitioned (a);
 \d at_part_1

@@ -87,7 +87,7 @@ SELECT relname, spcname FROM pg_catalog.pg_tablespace t, pg_catalog.pg_class c
     where c.reltablespace = t.oid AND c.relname LIKE 'part%_idx';
 \d testschema.part_a_idx
 
--- partitioned rels cannot specify the default tablespace.  These fail:
+-- partitioned rels cannot specify the primary key.  These fail:
 CREATE TABLE testschema.dflt (a int PRIMARY KEY) PARTITION BY LIST (a) TABLESPACE pg_default;
 CREATE TABLE testschema.dflt (a int PRIMARY KEY USING INDEX TABLESPACE pg_default) PARTITION BY LIST (a);
 SET default_tablespace TO 'pg_default';
@@ -109,23 +109,17 @@ ALTER TABLE testschema.test_default_tab ADD CONSTRAINT test_index4 UNIQUE (id) U
 
 \d testschema.test_index1
 \d testschema.test_index2
-\d testschema.test_index3
-\d testschema.test_index4
 -- use a custom tablespace for default_tablespace
 SET default_tablespace TO regress_tblspace;
 -- tablespace should not change if no rewrite
 ALTER TABLE testschema.test_default_tab ALTER id TYPE bigint;
 \d testschema.test_index1
 \d testschema.test_index2
-\d testschema.test_index3
-\d testschema.test_index4
 SELECT * FROM testschema.test_default_tab;
 -- tablespace should not change even if there is an index rewrite
 ALTER TABLE testschema.test_default_tab ALTER id TYPE int;
 \d testschema.test_index1
 \d testschema.test_index2
-\d testschema.test_index3
-\d testschema.test_index4
 SELECT * FROM testschema.test_default_tab;
 -- now use the default tablespace for default_tablespace
 SET default_tablespace TO '';
@@ -133,14 +127,10 @@ SET default_tablespace TO '';
 ALTER TABLE testschema.test_default_tab ALTER id TYPE int;
 \d testschema.test_index1
 \d testschema.test_index2
-\d testschema.test_index3
-\d testschema.test_index4
 -- tablespace should not change even if there is an index rewrite
 ALTER TABLE testschema.test_default_tab ALTER id TYPE bigint;
 \d testschema.test_index1
 \d testschema.test_index2
-\d testschema.test_index3
-\d testschema.test_index4
 DROP TABLE testschema.test_default_tab;
 
 -- check that default_tablespace doesn't affect ALTER TABLE index rebuilds
@@ -157,23 +147,12 @@ ALTER TABLE testschema.test_default_tab_p ADD CONSTRAINT test_index4 UNIQUE (id)
 
 \d testschema.test_index1
 \d testschema.test_index2
-\d testschema.test_index3
-\d testschema.test_index4
 -- use a custom tablespace for default_tablespace
 SET default_tablespace TO regress_tblspace;
--- tablespace should not change if no rewrite
-ALTER TABLE testschema.test_default_tab_p ALTER val TYPE bigint;
-\d testschema.test_index1
-\d testschema.test_index2
-\d testschema.test_index3
-\d testschema.test_index4
-SELECT * FROM testschema.test_default_tab_p;
 -- tablespace should not change even if there is an index rewrite
 ALTER TABLE testschema.test_default_tab_p ALTER val TYPE int;
 \d testschema.test_index1
 \d testschema.test_index2
-\d testschema.test_index3
-\d testschema.test_index4
 SELECT * FROM testschema.test_default_tab_p;
 -- now use the default tablespace for default_tablespace
 SET default_tablespace TO '';
@@ -181,14 +160,10 @@ SET default_tablespace TO '';
 ALTER TABLE testschema.test_default_tab_p ALTER val TYPE int;
 \d testschema.test_index1
 \d testschema.test_index2
-\d testschema.test_index3
-\d testschema.test_index4
 -- tablespace should not change even if there is an index rewrite
 ALTER TABLE testschema.test_default_tab_p ALTER val TYPE bigint;
 \d testschema.test_index1
 \d testschema.test_index2
-\d testschema.test_index3
-\d testschema.test_index4
 DROP TABLE testschema.test_default_tab_p;
 
 -- check that default_tablespace affects index additions in ALTER TABLE
@@ -214,7 +189,7 @@ CREATE INDEX test_tab_b_idx ON testschema.test_tab (b);
 \d testschema.test_tab_unique
 \d testschema.test_tab_a_idx
 \d testschema.test_tab_b_idx
-ALTER TABLE testschema.test_tab ALTER b TYPE bigint, ADD UNIQUE (c);
+ALTER TABLE testschema.test_tab ALTER b TYPE bigint;
 \d testschema.test_tab_unique
 \d testschema.test_tab_a_idx
 \d testschema.test_tab_b_idx

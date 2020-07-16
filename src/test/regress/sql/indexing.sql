@@ -280,10 +280,8 @@ alter index idxpart_a_idx attach partition idxpart2_a_idx;
 drop table idxpart;
 
 -- Verify that attaching indexes maps attribute numbers correctly
-create table idxpart (col1 int, a int, col2 int, b int) partition by range (a);
-create table idxpart1 (b int, col1 int, col2 int, col3 int, a int);
-alter table idxpart drop column col1, drop column col2;
-alter table idxpart1 drop column col1, drop column col2, drop column col3;
+create table idxpart (a int, b int) partition by range (a);
+create table idxpart1 (a int, b int);
 alter table idxpart attach partition idxpart1 for values from (0) to (1000);
 create index idxpart_1_idx on only idxpart (b, a);
 create index idxpart1_1_idx on idxpart1 (b, a);
@@ -308,9 +306,9 @@ drop table idxpart;
 create table idxpart (a int, b int, c text) partition by range (a);
 create index idxparti on idxpart (a);
 create index idxparti2 on idxpart (c, b);
-create table idxpart1 (c text, a int, b int);
+create table idxpart1 (a int, b int, c text);
 alter table idxpart attach partition idxpart1 for values from (0) to (10);
-create table idxpart2 (c text, a int, b int);
+create table idxpart2 (a int, b int, c text);
 create index on idxpart2 (a);
 create index on idxpart2 (c, b);
 alter table idxpart attach partition idxpart2 for values from (10) to (20);
@@ -321,12 +319,9 @@ select c.relname, pg_get_indexdef(indexrelid)
 drop table idxpart;
 
 -- Verify that columns are mapped correctly in expression indexes
-create table idxpart (col1 int, col2 int, a int, b int) partition by range (a);
-create table idxpart1 (col2 int, b int, col1 int, a int);
-create table idxpart2 (col1 int, col2 int, b int, a int);
-alter table idxpart drop column col1, drop column col2;
-alter table idxpart1 drop column col1, drop column col2;
-alter table idxpart2 drop column col1, drop column col2;
+create table idxpart (a int, b int) partition by range (a);
+create table idxpart1 (a int, b int);
+create table idxpart2 (a int, b int);
 create index on idxpart2 (abs(b));
 alter table idxpart attach partition idxpart2 for values from (0) to (1);
 create index on idxpart (abs(b));
@@ -338,14 +333,11 @@ select c.relname, pg_get_indexdef(indexrelid)
 drop table idxpart;
 
 -- Verify that columns are mapped correctly for WHERE in a partial index
-create table idxpart (col1 int, a int, col3 int, b int) partition by range (a);
-alter table idxpart drop column col1, drop column col3;
-create table idxpart1 (col1 int, col2 int, col3 int, col4 int, b int, a int);
-alter table idxpart1 drop column col1, drop column col2, drop column col3, drop column col4;
+create table idxpart (a int, b int) partition by range (a);
+create table idxpart1 (a int, b int);
 alter table idxpart attach partition idxpart1 for values from (0) to (1000);
-create table idxpart2 (col1 int, col2 int, b int, a int);
+create table idxpart2 (a int, b int);
 create index on idxpart2 (a) where b > 1000;
-alter table idxpart2 drop column col1, drop column col2;
 alter table idxpart attach partition idxpart2 for values from (1000) to (2000);
 create index on idxpart (a) where b > 1000;
 select c.relname, pg_get_indexdef(indexrelid)
@@ -355,7 +347,7 @@ select c.relname, pg_get_indexdef(indexrelid)
 drop table idxpart;
 
 -- Column number mapping: dropped columns in the partition
-create table idxpart1 (drop_1 int, drop_2 int, col_keep int, drop_3 int);
+create table idxpart1 (col_keep int, drop_1 int, drop_2 int, drop_3 int);
 alter table idxpart1 drop column drop_1;
 alter table idxpart1 drop column drop_2;
 alter table idxpart1 drop column drop_3;
@@ -371,7 +363,7 @@ select attrelid::regclass, attname, attnum from pg_attribute
 drop table idxpart;
 
 -- Column number mapping: dropped columns in the parent table
-create table idxpart(drop_1 int, drop_2 int, col_keep int, drop_3 int) partition by range (col_keep);
+create table idxpart(col_keep int, drop_1 int, drop_2 int, drop_3 int) partition by range (col_keep);
 alter table idxpart drop column drop_1;
 alter table idxpart drop column drop_2;
 alter table idxpart drop column drop_3;

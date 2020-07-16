@@ -168,7 +168,7 @@ insert into part_default_p2 values ('de', 35);
 insert into list_parted values ('ab', 21);
 insert into list_parted values ('xx', 1);
 insert into list_parted values ('yy', 2);
-select tableoid::regclass, * from list_parted;
+select tableoid::regclass, * from list_parted order by 1,2,3;
 
 -- Check tuple routing for partitioned tables
 
@@ -253,7 +253,7 @@ insert into hpart3 values(11);
 
 -- view data
 select tableoid::regclass as part, a, a%4 as "remainder = a % 4"
-from hash_parted order by part;
+from hash_parted order by part,a;
 
 -- test \d+ output on a table which has both partitioned and unpartitioned
 -- partitions
@@ -375,7 +375,7 @@ insert into mlparted_def2 values (34, 50);
 create table mlparted_defd partition of mlparted_def default;
 insert into mlparted values (70, 100);
 
-select tableoid::regclass, * from mlparted_def;
+select tableoid::regclass, * from mlparted_def order by 1;
 
 -- check that message shown after failure to find a partition shows the
 -- appropriate key description (or none) in various situations

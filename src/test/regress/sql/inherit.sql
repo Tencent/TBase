@@ -699,7 +699,7 @@ explain (costs off) select * from list_parted;
 explain (costs off) select * from list_parted where a is null;
 explain (costs off) select * from list_parted where a is not null;
 explain (costs off) select * from list_parted where a in ('ab', 'cd', 'ef');
-explain (costs off) select * from list_parted where a = 'ab' or a in (null, 'cd');
+explain (costs off) select * from list_parted where a = 'ab' or a is null or a ='cd';
 explain (costs off) select * from list_parted where a = 'ab';
 
 create table range_list_parted (

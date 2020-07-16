@@ -830,3 +830,24 @@ select * from selfconflict order by 1;
 (3 rows)
 
 drop table selfconflict;
+-- check that the following works:
+-- insert into partitioned_table on conflict do nothing
+create table parted_conflict_test (a int, b char) partition by list (a);
+create table parted_conflict_test_1 partition of parted_conflict_test (b unique) for values in (1);
+ERROR:  Unique index of partitioned table must contain the hash/modulo distribution column.
+insert into parted_conflict_test values (1, 'a') on conflict do nothing;
+ERROR:  no partition of relation "parted_conflict_test" found for row
+DETAIL:  Partition key of the failing row contains (a) = (1).
+insert into parted_conflict_test values (1, 'a') on conflict do nothing;
+ERROR:  no partition of relation "parted_conflict_test" found for row
+DETAIL:  Partition key of the failing row contains (a) = (1).
+-- however, on conflict do update is not supported yet
+insert into parted_conflict_test values (1) on conflict (b) do update set a = excluded.a;
+ERROR:  Distributed column or partition column "a" can't be updated in current version
+-- but it works OK if we target the partition directly
+insert into parted_conflict_test_1 values (1) on conflict (b) do
+update set a = excluded.a;
+ERROR:  relation "parted_conflict_test_1" does not exist
+LINE 1: insert into parted_conflict_test_1 values (1) on conflict (b...
+                    ^
+drop table parted_conflict_test;

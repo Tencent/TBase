@@ -265,7 +265,7 @@ CREATE SCHEMA evttrig
 
 -- Partitioned tables with a partitioned index
 CREATE TABLE evttrig.parted (
-    id int PRIMARY KEY)
+    id int)
     PARTITION BY RANGE (id);
 CREATE TABLE evttrig.part_1_10 PARTITION OF evttrig.parted (id)
   FOR VALUES FROM (1) TO (10);

@@ -1405,7 +1405,7 @@ try_partition_wise_join(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2,
 		 * applicable to the parent join.
 		 */
 		child_restrictlist =
-			(List *) adjust_appendrel_attrs_nappinfos(root,
+			(List *) adjust_appendrel_attrs(root,
 											(Node *) parent_restrictlist,
 											nappinfos, appinfos);
 		pfree(appinfos);

@@ -1491,6 +1491,7 @@ ERROR:  server "s0" does not exist
  c2     | text    |           |          |         | extended |              | 
  c3     | date    |           |          |         | plain    |              | 
 Partition key: LIST (c1)
+Number of partitions: 0
 Distribute By: HASH(c1)
 Location Nodes: ALL DATANODES
 
@@ -1540,6 +1541,7 @@ ERROR:  relation "pt2_1" does not exist
  c2     | text    |           |          |         | extended |              | 
  c3     | date    |           |          |         | plain    |              | 
 Partition key: LIST (c1)
+Number of partitions: 0
 Distribute By: HASH(c1)
 Location Nodes: ALL DATANODES
 
@@ -1560,6 +1562,7 @@ ERROR:  relation "pt2_1" does not exist
  c2     | text    |           |          |         | extended |              | 
  c3     | date    |           |          |         | plain    |              | 
 Partition key: LIST (c1)
+Number of partitions: 0
 Distribute By: HASH(c1)
 Location Nodes: ALL DATANODES
 

@@ -172,7 +172,7 @@ select relname from pg_class where relname like 'temp_parted_oncommit_test%';
 -- all rows if partitions preserve their data.
 begin;
 create temp table temp_parted_oncommit_test (a int)
-  partition by list (a) on commit delete rows;
+  partition by list (a) on commit preserve rows;
 create temp table temp_parted_oncommit_test1
   partition of temp_parted_oncommit_test
   for values in (1) on commit preserve rows;

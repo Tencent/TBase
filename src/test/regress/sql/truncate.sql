@@ -263,7 +263,7 @@ CREATE FUNCTION tp_chk_data(OUT pktb regclass, OUT pkval int, OUT fktb regclass,
   END
 $$;
 CREATE TABLE truncprim (a int PRIMARY KEY);
-CREATE TABLE truncpart (a int REFERENCES truncprim)
+CREATE TABLE truncpart (a int)
   PARTITION BY RANGE (a);
 CREATE TABLE truncpart_1 PARTITION OF truncpart FOR VALUES FROM (0) TO (100);
 CREATE TABLE truncpart_2 PARTITION OF truncpart FOR VALUES FROM (100) TO (200)
@@ -271,7 +271,7 @@ CREATE TABLE truncpart_2 PARTITION OF truncpart FOR VALUES FROM (100) TO (200)
 CREATE TABLE truncpart_2_1 PARTITION OF truncpart_2 FOR VALUES FROM (100) TO (150);
 CREATE TABLE truncpart_2_d PARTITION OF truncpart_2 DEFAULT;
 
-TRUNCATE TABLE truncprim;	-- should fail
+TRUNCATE TABLE truncprim;
 
 select tp_ins_data();
 -- should truncate everything

@@ -1911,11 +1911,14 @@ describeOneTableDetails(const char *schemaname,
         {
 			char	   *parent_name = PQgetvalue(result, 0, 0);
 			char	   *partdef = PQgetvalue(result, 0, 1);
-			char       *partconstraintdef = NULL;
 
             printfPQExpBuffer(&tmpbuf, _("Partition of: %s %s"), parent_name,
                               partdef);
             printTableAddFooter(&cont, tmpbuf.data);
+
+			if (verbose)
+			{
+				char       *partconstraintdef = NULL;
 
             if (!PQgetisnull(result, 0, 2))
             	partconstraintdef = PQgetvalue(result, 0, 2);
@@ -1926,7 +1929,7 @@ describeOneTableDetails(const char *schemaname,
                 printfPQExpBuffer(&tmpbuf, _("Partition constraint: %s"),
                                   partconstraintdef);
                 printTableAddFooter(&cont, tmpbuf.data);
-
+			}
         }
 		PQclear(result);
     }
@@ -2258,6 +2261,13 @@ describeOneTableDetails(const char *schemaname,
 		if (tableinfo.hastriggers ||
 			tableinfo.relkind == RELKIND_PARTITIONED_TABLE)
         {
+			if (pset.sversion >= 100000 &&
+			        (tableinfo.ispartition || tableinfo.relkind == RELKIND_PARTITIONED_TABLE))
+			{
+                /*
+                 * Put the constraints defined in this table first, followed
+                 * by the constraints defined in ancestor partitioned tables.
+                 */
             printfPQExpBuffer(&buf,
 							  "SELECT conrelid = '%s'::pg_catalog.regclass AS sametable,\n"
 							  "  conname,\n"
@@ -2268,6 +2278,21 @@ describeOneTableDetails(const char *schemaname,
 							  " WHERE conrelid = relid AND contype = 'f'\n"
 							  " ORDER BY sametable DESC, conname;",
 							  oid, oid);
+
+			}
+			else
+			{
+				printfPQExpBuffer(&buf,
+				                  "SELECT true as sametable, conname,\n"
+				                  "  pg_catalog.pg_get_constraintdef(r.oid, true) as condef,\n"
+				                  "  conrelid::pg_catalog.regclass AS ontable\n"
+				                  " FROM pg_catalog.pg_constraint r\n"
+				                  " WHERE r.conrelid = '%s' AND r.contype = 'f'\n",
+				                  oid);
+
+				appendPQExpBuffer(&buf, " ORDER BY conname");
+			}
+
             result = PSQLexec(buf.data);
             if (!result)
                 goto error_return;
@@ -2276,6 +2301,11 @@ describeOneTableDetails(const char *schemaname,
 
             if (tuples > 0)
             {
+                int                     i_sametable = PQfnumber(result, "sametable"),
+                                        i_conname = PQfnumber(result, "conname"),
+                                        i_condef = PQfnumber(result, "condef"),
+                                        i_ontable = PQfnumber(result, "ontable");
+
                 printTableAddFooter(&cont, _("Foreign-key constraints:"));
                 for (i = 0; i < tuples; i++)
                 {
@@ -2284,10 +2314,15 @@ describeOneTableDetails(const char *schemaname,
 					 * a "TABLE tab" prefix when the constraint is defined in
 					 * a parent partitioned table.
 					 */
+                    if (strcmp(PQgetvalue(result, i, i_sametable), "f") == 0)
 					 printfPQExpBuffer(&buf, "    TABLE \"%s\" CONSTRAINT \"%s\" %s",
-					                                          PQgetvalue(result, i, 1),
-					                                          PQgetvalue(result, i, 2),
-					                                          PQgetvalue(result, i, 3));
+                                                              PQgetvalue(result, i, i_ontable),
+                                                              PQgetvalue(result, i, i_conname),
+                                                              PQgetvalue(result, i, i_condef));
+                    else
+                            printfPQExpBuffer(&buf, "    \"%s\" %s",
+                                                              PQgetvalue(result, i, i_conname),
+                                                              PQgetvalue(result, i, i_condef));
 
                     printTableAddFooter(&cont, buf.data);
                 }

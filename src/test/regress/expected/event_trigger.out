@@ -285,7 +285,7 @@ CREATE SCHEMA evttrig
 	CREATE TABLE two (col_c INTEGER CHECK (col_c > 0) REFERENCES one DEFAULT 42);
 -- Partitioned tables with a partitioned index
 CREATE TABLE evttrig.parted (
-    id int PRIMARY KEY)
+    id int)
     PARTITION BY RANGE (id);
 CREATE TABLE evttrig.part_1_10 PARTITION OF evttrig.parted (id)
   FOR VALUES FROM (1) TO (10);
@@ -304,11 +304,6 @@ NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table evttrig.one
 drop cascades to table evttrig.two
 drop cascades to table evttrig.parted
-NOTICE:  NORMAL: orig=f normal=t istemp=f type=table identity=evttrig.parted name={evttrig,parted} args={}
-NOTICE:  NORMAL: orig=f normal=t istemp=f type=table identity=evttrig.part_1_10 name={evttrig,part_1_10} args={}
-NOTICE:  NORMAL: orig=f normal=t istemp=f type=table identity=evttrig.part_10_20 name={evttrig,part_10_20} args={}
-NOTICE:  NORMAL: orig=f normal=t istemp=f type=table identity=evttrig.part_10_15 name={evttrig,part_10_15} args={}
-NOTICE:  NORMAL: orig=f normal=t istemp=f type=table identity=evttrig.part_15_20 name={evttrig,part_15_20} args={}
 DROP TABLE a_temp_tbl;
 DROP EVENT TRIGGER regress_event_trigger_report_dropped;
 ERROR:  event trigger "regress_event_trigger_report_dropped" does not exist

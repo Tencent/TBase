@@ -499,7 +499,7 @@ add_placeholders_to_child_joinrel(PlannerInfo *root, RelOptInfo *childrel,
 			if (bms_overlap(phv->phrels, parentrel->relids) &&
 				childrel->reloptkind == RELOPT_OTHER_JOINREL)
 			{
-				phv = (PlaceHolderVar *) adjust_appendrel_attrs_nappinfos(root,
+				phv = (PlaceHolderVar *) adjust_appendrel_attrs(root,
 																(Node *) phv,
 																nappinfos,
 																appinfos);

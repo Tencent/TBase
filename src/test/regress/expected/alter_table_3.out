@@ -2931,7 +2931,8 @@ ALTER TABLE new_system_table RENAME TO old_system_table;
 CREATE INDEX old_system_table__othercol ON old_system_table (othercol);
 INSERT INTO old_system_table(othercol) VALUES ('somedata'), ('otherdata');
 UPDATE old_system_table SET id = -id;
-ERROR:  Distributed column or partition column "id" can't be updated in current version
+ERROR:  could not plan this distributed update
+DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 DELETE FROM old_system_table WHERE othercol = 'somedata';
 TRUNCATE old_system_table;
 ALTER TABLE old_system_table DROP CONSTRAINT new_system_table_pkey;

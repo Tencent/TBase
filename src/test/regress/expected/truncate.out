@@ -485,8 +485,8 @@ DROP TABLE truncparted;
 -- Make sure truncate did execute on all tables
 CREATE FUNCTION tp_ins_data() RETURNS void LANGUAGE plpgsql AS $$
   BEGIN
-   INSERT INTO truncprim VALUES (1), (100), (150);
-   INSERT INTO truncpart VALUES (1), (100), (150);
+	INSERT INTO truncprim VALUES (1), (100), (150);
+	INSERT INTO truncpart VALUES (1), (100), (150);
   END
 $$;
 CREATE FUNCTION tp_chk_data(OUT pktb regclass, OUT pkval int, OUT fktb regclass, OUT fkval int)
@@ -499,17 +499,14 @@ CREATE FUNCTION tp_chk_data(OUT pktb regclass, OUT pkval int, OUT fktb regclass,
   END
 $$;
 CREATE TABLE truncprim (a int PRIMARY KEY);
-CREATE TABLE truncpart (a int REFERENCES truncprim)
+CREATE TABLE truncpart (a int)
   PARTITION BY RANGE (a);
 CREATE TABLE truncpart_1 PARTITION OF truncpart FOR VALUES FROM (0) TO (100);
 CREATE TABLE truncpart_2 PARTITION OF truncpart FOR VALUES FROM (100) TO (200)
   PARTITION BY RANGE (a);
 CREATE TABLE truncpart_2_1 PARTITION OF truncpart_2 FOR VALUES FROM (100) TO (150);
 CREATE TABLE truncpart_2_d PARTITION OF truncpart_2 DEFAULT;
-TRUNCATE TABLE truncprim;  -- should fail
-ERROR:  cannot truncate a table referenced in a foreign key constraint
-DETAIL:  Table "truncpart" references "truncprim".
-HINT:  Truncate table "truncpart" at the same time, or use TRUNCATE ... CASCADE.
+TRUNCATE TABLE truncprim;
 select tp_ins_data();
  tp_ins_data 
 -------------
@@ -530,13 +527,16 @@ select tp_ins_data();
 (1 row)
 
 -- should truncate everything
-SET client_min_messages TO WARNING;    -- suppress cascading notices
+SET client_min_messages TO WARNING;	-- suppress cascading notices
 TRUNCATE TABLE truncprim CASCADE;
 RESET client_min_messages;
 SELECT * FROM tp_chk_data();
- pktb | pkval | fktb | fkval 
-------+-------+------+-------
-(0 rows)
+ pktb | pkval |     fktb      | fkval 
+------+-------+---------------+-------
+      |       | truncpart_1   |     1
+      |       | truncpart_2_1 |   100
+      |       | truncpart_2_d |   150
+(3 rows)
 
 SELECT tp_ins_data();
  tp_ins_data 

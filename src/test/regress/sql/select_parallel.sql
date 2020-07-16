@@ -143,7 +143,9 @@ EXPLAIN (costs off) SELECT xc_node_id != 0 FROM t_worker_identifier;
 SELECT xc_node_id != 0 FROM t_worker_identifier;
 
 -- provoke error in worker
+SAVEPOINT settings;
 select stringu1::int2 from tenk1 where unique1 = 1;
+ROLLBACK TO SAVEPOINT settings;
 
 -- test interaction with set-returning functions
 SAVEPOINT settings;

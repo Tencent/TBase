@@ -819,7 +819,7 @@ build_child_join_rel(PlannerInfo *root, RelOptInfo *outer_rel,
 
 	/* Construct joininfo list. */
 	appinfos = find_appinfos_by_relids(root, joinrel->relids, &nappinfos);
-	joinrel->joininfo = (List *) adjust_appendrel_attrs_nappinfos(root,
+	joinrel->joininfo = (List *) adjust_appendrel_attrs(root,
 														(Node *) parent_joinrel->joininfo,
 														nappinfos,
 														appinfos);

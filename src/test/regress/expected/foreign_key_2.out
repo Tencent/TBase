@@ -1442,26 +1442,39 @@ drop table pktable2, fktable2;
 -- Ensure that works.
 CREATE TABLE fk_notpartitioned_pk (a INT, PRIMARY KEY(a), CHECK (a > 0));
 CREATE TABLE fk_partitioned_fk (a INT REFERENCES fk_notpartitioned_pk(a) PRIMARY KEY) PARTITION BY RANGE(a);
+ERROR:  foreign key constraints are not supported on partitioned tables
+LINE 1: CREATE TABLE fk_partitioned_fk (a INT REFERENCES fk_notparti...
+                                              ^
 CREATE TABLE fk_partitioned_fk_1 PARTITION OF fk_partitioned_fk FOR VALUES FROM (MINVALUE) TO (MAXVALUE);
+ERROR:  relation "fk_partitioned_fk" does not exist
 INSERT INTO fk_notpartitioned_pk VALUES (1);
 INSERT INTO fk_partitioned_fk VALUES (1);
+ERROR:  relation "fk_partitioned_fk" does not exist
+LINE 1: INSERT INTO fk_partitioned_fk VALUES (1);
+                    ^
 ALTER TABLE fk_notpartitioned_pk ALTER COLUMN a TYPE bigint;
 DELETE FROM fk_notpartitioned_pk WHERE a = 1;
-ERROR:  update or delete on table "fk_notpartitioned_pk" violates foreign key constraint "fk_partitioned_fk_a_fkey" on table "fk_partitioned_fk"
-DETAIL:  Key (a)=(1) is still referenced from table "fk_partitioned_fk".
 DROP TABLE fk_notpartitioned_pk, fk_partitioned_fk;
+ERROR:  table "fk_partitioned_fk" does not exist
 -- ensure we check partitions are "not used" when dropping constraints
 CREATE SCHEMA fkpart8
   CREATE TABLE tbl1(f1 int PRIMARY KEY)
   CREATE TABLE tbl2(f1 int REFERENCES tbl1 DEFERRABLE INITIALLY DEFERRED) PARTITION BY RANGE(f1)
   CREATE TABLE tbl2_p1 PARTITION OF tbl2 FOR VALUES FROM (minvalue) TO (maxvalue);
+ERROR:  foreign key constraints are not supported on partitioned tables
+LINE 3:   CREATE TABLE tbl2(f1 int REFERENCES tbl1 DEFERRABLE INITIA...
+                                   ^
 INSERT INTO fkpart8.tbl1 VALUES(1);
+ERROR:  relation "fkpart8.tbl1" does not exist
+LINE 1: INSERT INTO fkpart8.tbl1 VALUES(1);
+                    ^
 BEGIN;
 INSERT INTO fkpart8.tbl2 VALUES(1);
+ERROR:  relation "fkpart8.tbl2" does not exist
+LINE 1: INSERT INTO fkpart8.tbl2 VALUES(1);
+                    ^
 ALTER TABLE fkpart8.tbl2 DROP CONSTRAINT tbl2_f1_fkey;
-ERROR:  cannot ALTER TABLE "tbl2_p1" because it has pending trigger events
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
 COMMIT;
 DROP SCHEMA fkpart8 CASCADE;
-NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to table fkpart8.tbl1
-drop cascades to table fkpart8.tbl2
+ERROR:  schema "fkpart8" does not exist

@@ -3030,11 +3030,12 @@ insert into parent_tab values (generate_series(30,39));
 (1 row)
 
 \dPi
-                 List of partitioned indexes
-  Schema  |     Name     |         Owner         |  On table  
-----------+--------------+-----------------------+------------
- testpart | parent_index | testrole_partitioning | parent_tab
-(1 row)
+                     List of partitioned indexes
+  Schema  |        Name        |         Owner         |  On table   
+----------+--------------------+-----------------------+-------------
+ testpart | child_30_40_id_idx | testrole_partitioning | child_30_40
+ testpart | parent_index       | testrole_partitioning | parent_tab
+(2 rows)
 
 \dP testpart.*
                                      List of partitioned relations
@@ -3047,12 +3048,13 @@ insert into parent_tab values (generate_series(30,39));
 (4 rows)
 
 \dP
-                          List of partitioned relations
-  Schema  |     Name     |         Owner         |       Type        |  On table  
-----------+--------------+-----------------------+-------------------+------------
- testpart | parent_tab   | testrole_partitioning | partitioned table | 
- testpart | parent_index | testrole_partitioning | partitioned index | parent_tab
-(2 rows)
+                              List of partitioned relations
+  Schema  |        Name        |         Owner         |       Type        |  On table   
+----------+--------------------+-----------------------+-------------------+-------------
+ testpart | parent_tab         | testrole_partitioning | partitioned table | 
+ testpart | child_30_40_id_idx | testrole_partitioning | partitioned index | child_30_40
+ testpart | parent_index       | testrole_partitioning | partitioned index | parent_tab
+(3 rows)
 
 \dPtn
                   List of partitioned tables
