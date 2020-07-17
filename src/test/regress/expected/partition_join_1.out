@@ -3,7 +3,7 @@
 -- Test partition-wise join between partitioned tables
 --
 -- Enable partition-wise join, which by default is disabled.
-SET enable_partition_wise_join to true;
+--SET enable_partition_wise_join to true;
 --
 -- partitioned by a single column
 --
@@ -32,29 +32,23 @@ SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt2 t2 WHERE t1.a = t2.b AND t1.b =
 -----------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a
-         ->  Append
-               ->  Nested Loop
+         Sort Key: a
+         ->  Hash Join
+               Hash Cond: (t2.b = a)
+               ->  Append
+                     ->  Seq Scan on prt2_p1 t2
+                     ->  Seq Scan on prt2_p2 t2_1
+                     ->  Seq Scan on prt2_p3 t2_2
+               ->  Hash
                      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           ->  Seq Scan on prt1_p1 t1
-                                 Filter: (b = 0)
-                     ->  Index Scan using iprt2_p1_b on prt2_p1 t2
-                           Index Cond: (b = t1.a)
-               ->  Nested Loop
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           ->  Seq Scan on prt1_p2 t1_1
-                                 Filter: (b = 0)
-                     ->  Index Scan using iprt2_p2_b on prt2_p2 t2_1
-                           Index Cond: (b = t1_1.a)
-               ->  Nested Loop
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           ->  Seq Scan on prt1_p3 t1_2
-                                 Filter: (b = 0)
-                     ->  Bitmap Heap Scan on prt2_p3 t2_2
-                           Recheck Cond: (b = t1_2.a)
-                           ->  Bitmap Index Scan on iprt2_p3_b
-                                 Index Cond: (b = t1_2.a)
-(24 rows)
+                           ->  Append
+                                 ->  Seq Scan on prt1_p1 t1
+                                       Filter: (b = 0)
+                                 ->  Seq Scan on prt1_p2 t1_1
+                                       Filter: (b = 0)
+                                 ->  Seq Scan on prt1_p3 t1_2
+                                       Filter: (b = 0)
+(18 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt2 t2 WHERE t1.a = t2.b AND t1.b = 0 ORDER BY t1.a, t2.b;
   a  |  c   |  b  |  c   
@@ -68,40 +62,30 @@ SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt2 t2 WHERE t1.a = t2.b AND t1.b =
 -- left outer join, with whole-row reference
 EXPLAIN (COSTS OFF)
 SELECT t1, t2 FROM prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b WHERE t1.b = 0 ORDER BY t1.a, t2.b;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a, t2.b
-         ->  Result
-               ->  Append
-                     ->  Nested Loop Left Join
-                           ->  Seq Scan on prt1_p1 t1
-                                 Filter: (b = 0)
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  Index Scan using iprt2_p1_b on prt2_p1 t2
-                                             Index Cond: (t1.a = b)
-                     ->  Nested Loop Left Join
-                           ->  Seq Scan on prt1_p2 t1_1
-                                 Filter: (b = 0)
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  Index Scan using iprt2_p2_b on prt2_p2 t2_1
-                                             Index Cond: (t1_1.a = b)
-                     ->  Nested Loop Left Join
-                           ->  Seq Scan on prt1_p3 t1_2
-                                 Filter: (b = 0)
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  Bitmap Heap Scan on prt2_p3 t2_2
-                                             Recheck Cond: (t1_2.a = b)
-                                             ->  Bitmap Index Scan on iprt2_p3_b
-                                                   Index Cond: (t1_2.a = b)
-(31 rows)
+         Sort Key: a, b
+         ->  Hash Right Join
+               Hash Cond: (b = a)
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: b
+                     ->  Append
+                           ->  Seq Scan on prt2_p1 t2
+                           ->  Seq Scan on prt2_p2 t2_1
+                           ->  Seq Scan on prt2_p3 t2_2
+               ->  Hash
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: a
+                           ->  Append
+                                 ->  Seq Scan on prt1_p1 t1
+                                       Filter: (b = 0)
+                                 ->  Seq Scan on prt1_p2 t1_1
+                                       Filter: (b = 0)
+                                 ->  Seq Scan on prt1_p3 t1_2
+                                       Filter: (b = 0)
+(21 rows)
 
 SELECT t1, t2 FROM prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b WHERE t1.b = 0 ORDER BY t1.a, t2.b;
       t1      |      t2      
@@ -123,35 +107,32 @@ SELECT t1, t2 FROM prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b WHERE t1.b = 0 ORDER
 -- right outer join
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1 RIGHT JOIN prt2 t2 ON t1.a = t2.b WHERE t2.a = 0 ORDER BY t1.a, t2.b;
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a, t2.b
-         ->  Result
-               ->  Append
-                     ->  Nested Loop Left Join
-                           ->  Remote Subquery Scan on all (datanode_2)
-                                 Distribute results by H: b
-                                 ->  Seq Scan on prt2_p1 t2
-                                       Filter: (a = 0)
-                           ->  Index Scan using iprt1_p1_a on prt1_p1 t1
-                                 Index Cond: (a = t2.b)
-                     ->  Nested Loop Left Join
-                           ->  Remote Subquery Scan on all (datanode_2)
-                                 Distribute results by H: b
-                                 ->  Seq Scan on prt2_p2 t2_1
-                                       Filter: (a = 0)
-                           ->  Index Scan using iprt1_p2_a on prt1_p2 t1_1
-                                 Index Cond: (a = t2_1.b)
-                     ->  Nested Loop Left Join
-                           ->  Remote Subquery Scan on all (datanode_2)
-                                 Distribute results by H: b
-                                 ->  Seq Scan on prt2_p3 t2_2
-                                       Filter: (a = 0)
-                           ->  Index Scan using iprt1_p3_a on prt1_p3 t1_2
-                                 Index Cond: (a = t2_2.b)
-(26 rows)
+         Sort Key: a, b
+         ->  Nested Loop Left Join
+               ->  Remote Subquery Scan on all (datanode_2)
+                     Distribute results by H: b
+                     ->  Append
+                           ->  Seq Scan on prt2_p1 t2
+                                 Filter: (a = 0)
+                           ->  Seq Scan on prt2_p2 t2_1
+                                 Filter: (a = 0)
+                           ->  Seq Scan on prt2_p3 t2_2
+                                 Filter: (a = 0)
+               ->  Materialize
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: a
+                           ->  Append
+                                 ->  Index Scan using iprt1_p1_a on prt1_p1 t1
+                                       Index Cond: (a = b)
+                                 ->  Index Scan using iprt1_p2_a on prt1_p2 t1_1
+                                       Index Cond: (a = b)
+                                 ->  Index Scan using iprt1_p3_a on prt1_p3 t1_2
+                                       Index Cond: (a = b)
+(23 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1 RIGHT JOIN prt2 t2 ON t1.a = t2.b WHERE t2.a = 0 ORDER BY t1.a, t2.b;
   a  |  c   |  b  |  c   
@@ -169,43 +150,34 @@ SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1 RIGHT JOIN prt2 t2 ON t1.a = t2.b WHE
 -- full outer join, with placeholder vars
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT 50 phv, * FROM prt1 WHERE prt1.b = 0) t1 FULL JOIN (SELECT 75 phv, * FROM prt2 WHERE prt2.a = 0) t2 ON (t1.a = t2.b) WHERE t1.phv = t1.a OR t2.phv = t2.b ORDER BY t1.a, t2.b;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: prt1_p1.a, prt2_p1.b
-         ->  Append
-               ->  Hash Full Join
-                     Hash Cond: (prt1_p1.a = prt2_p1.b)
-                     Filter: (((50) = prt1_p1.a) OR ((75) = prt2_p1.b))
-                     ->  Seq Scan on prt1_p1
-                           Filter: (b = 0)
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_2)
-                                 Distribute results by H: b
+         Sort Key: a, b
+         ->  Hash Full Join
+               Hash Cond: (a = b)
+               Filter: (((50) = a) OR ((75) = b))
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: a
+                     ->  Append
+                           ->  Seq Scan on prt1_p1
+                                 Filter: (b = 0)
+                           ->  Seq Scan on prt1_p2
+                                 Filter: (b = 0)
+                           ->  Seq Scan on prt1_p3
+                                 Filter: (b = 0)
+               ->  Hash
+                     ->  Remote Subquery Scan on all (datanode_2)
+                           Distribute results by H: b
+                           ->  Append
                                  ->  Seq Scan on prt2_p1
                                        Filter: (a = 0)
-               ->  Hash Full Join
-                     Hash Cond: (prt1_p2.a = prt2_p2.b)
-                     Filter: (((50) = prt1_p2.a) OR ((75) = prt2_p2.b))
-                     ->  Seq Scan on prt1_p2
-                           Filter: (b = 0)
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_2)
-                                 Distribute results by H: b
                                  ->  Seq Scan on prt2_p2
                                        Filter: (a = 0)
-               ->  Hash Full Join
-                     Hash Cond: (prt1_p3.a = prt2_p3.b)
-                     Filter: (((50) = prt1_p3.a) OR ((75) = prt2_p3.b))
-                     ->  Seq Scan on prt1_p3
-                           Filter: (b = 0)
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_2)
-                                 Distribute results by H: b
                                  ->  Seq Scan on prt2_p3
                                        Filter: (a = 0)
-(34 rows)
+(25 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT 50 phv, * FROM prt1 WHERE prt1.b = 0) t1 FULL JOIN (SELECT 75 phv, * FROM prt2 WHERE prt2.a = 0) t2 ON (t1.a = t2.b) WHERE t1.phv = t1.a OR t2.phv = t2.b ORDER BY t1.a, t2.b;
  a  |  c   | b  |  c   
@@ -217,19 +189,26 @@ SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT 50 phv, * FROM prt1 WHERE prt1.b = 0)
 -- Join with pruned partitions from joining relations
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt2 t2 WHERE t1.a = t2.b AND t1.a < 450 AND t2.b > 250 AND t1.b = 0 ORDER BY t1.a, t2.b;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a
-         ->  Append
-               ->  Nested Loop
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           ->  Seq Scan on prt1_p2 t1
+         Sort Key: a
+         ->  Nested Loop
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     ->  Append
+                           ->  Seq Scan on prt1_p1 t1
                                  Filter: ((a < 450) AND (b = 0))
+                           ->  Seq Scan on prt1_p2 t1_1
+                                 Filter: ((a < 450) AND (b = 0))
+               ->  Append
                      ->  Index Scan using iprt2_p2_b on prt2_p2 t2
-                           Index Cond: ((b = t1.a) AND (b > 250))
-(10 rows)
+                           Index Cond: ((b = a) AND (b > 250))
+                     ->  Bitmap Heap Scan on prt2_p3 t2_1
+                           Recheck Cond: ((b = a) AND (b > 250))
+                           ->  Bitmap Index Scan on iprt2_p3_b
+                                 Index Cond: ((b = a) AND (b > 250))
+(17 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt2 t2 WHERE t1.a = t2.b AND t1.a < 450 AND t2.b > 250 AND t1.b = 0 ORDER BY t1.a, t2.b;
   a  |  c   |  b  |  c   
@@ -239,92 +218,84 @@ SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt2 t2 WHERE t1.a = t2.b AND t1.a <
 
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a < 450) t1 LEFT JOIN (SELECT * FROM prt2 WHERE b > 250) t2 ON t1.a = t2.b WHERE t1.b = 0 ORDER BY t1.a, t2.b;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
- Sort
-   Sort Key: prt1_p1.a, b
-   ->  Append
-         ->  Hash Left Join
-               Hash Cond: (prt1_p1.a = b)
-               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                     ->  Seq Scan on prt1_p1
-                           Filter: ((a < 450) AND (b = 0))
-               ->  Hash
-                     ->  Result
-                           One-Time Filter: false
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   ->  Sort
+         Sort Key: a, b
          ->  Nested Loop Left Join
-               ->  Seq Scan on prt1_p2
-                     Filter: ((a < 450) AND (b = 0))
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: a
+                     ->  Append
+                           ->  Seq Scan on prt1_p1
+                                 Filter: ((a < 450) AND (b = 0))
+                           ->  Seq Scan on prt1_p2
+                                 Filter: ((a < 450) AND (b = 0))
                ->  Materialize
                      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                            Distribute results by H: b
-                           ->  Index Scan using iprt2_p2_b on prt2_p2
-                                 Index Cond: ((prt1_p2.a = b) AND (b > 250))
-(19 rows)
+                           ->  Append
+                                 ->  Index Scan using iprt2_p2_b on prt2_p2
+                                       Index Cond: ((a = b) AND (b > 250))
+                                 ->  Bitmap Heap Scan on prt2_p3
+                                       Recheck Cond: ((a = b) AND (b > 250))
+                                       ->  Bitmap Index Scan on iprt2_p3_b
+                                             Index Cond: ((a = b) AND (b > 250))
+(21 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a < 450) t1 LEFT JOIN (SELECT * FROM prt2 WHERE b > 250) t2 ON t1.a = t2.b WHERE t1.b = 0 ORDER BY t1.a, t2.b;
-  a  |  c   |  b  |  c
+  a  |  c   |  b  |  c   
 -----+------+-----+------
-   0 | 0000 |     |
-  50 | 0050 |     |
- 100 | 0100 |     |
- 150 | 0150 |     |
- 200 | 0200 |     |
- 250 | 0250 |     |
+   0 | 0000 |     | 
+  50 | 0050 |     | 
+ 100 | 0100 |     | 
+ 150 | 0150 |     | 
+ 200 | 0200 |     | 
+ 250 | 0250 |     | 
  300 | 0300 | 300 | 0300
- 350 | 0350 |     |
- 400 | 0400 |     |
+ 350 | 0350 |     | 
+ 400 | 0400 |     | 
 (9 rows)
 
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a < 450) t1 FULL JOIN (SELECT * FROM prt2 WHERE b > 250) t2 ON t1.a = t2.b WHERE t1.b = 0 OR t2.a = 0 ORDER BY t1.a, t2.b;
                                  QUERY PLAN                                  
 -----------------------------------------------------------------------------
- Sort
-   Sort Key: prt1_p1.a, b
-   ->  Append
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   ->  Sort
+         Sort Key: a, b
          ->  Hash Full Join
-               Hash Cond: (prt1_p1.a = b)
-               Filter: ((prt1_p1.b = 0) OR (a = 0))
+               Hash Cond: (a = b)
+               Filter: ((b = 0) OR (a = 0))
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                     ->  Seq Scan on prt1_p1
-                           Filter: (a < 450)
-               ->  Hash
-                     ->  Result
-                           One-Time Filter: false
-         ->  Hash Full Join
-               Hash Cond: (prt1_p2.a = prt2_p2.b)
-               Filter: ((prt1_p2.b = 0) OR (prt2_p2.a = 0))
-               ->  Seq Scan on prt1_p2
-                     Filter: (a < 450)
+                     Distribute results by H: a
+                     ->  Append
+                           ->  Seq Scan on prt1_p1
+                                 Filter: (a < 450)
+                           ->  Seq Scan on prt1_p2
+                                 Filter: (a < 450)
                ->  Hash
                      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                            Distribute results by H: b
-                           ->  Seq Scan on prt2_p2
-                                 Filter: (b > 250)
-         ->  Hash Full Join
-               Hash Cond: (prt2_p3.b = a)
-               Filter: ((b = 0) OR (prt2_p3.a = 0))
-               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                     ->  Seq Scan on prt2_p3
-                           Filter: (b > 250)
-               ->  Hash
-                     ->  Result
-                           One-Time Filter: false
-(31 rows)
+                           ->  Append
+                                 ->  Seq Scan on prt2_p2
+                                       Filter: (b > 250)
+                                 ->  Seq Scan on prt2_p3
+                                       Filter: (b > 250)
+(21 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a < 450) t1 FULL JOIN (SELECT * FROM prt2 WHERE b > 250) t2 ON t1.a = t2.b WHERE t1.b = 0 OR t2.a = 0 ORDER BY t1.a, t2.b;
-  a  |  c   |  b  |  c
+  a  |  c   |  b  |  c   
 -----+------+-----+------
-   0 | 0000 |     |
-  50 | 0050 |     |
- 100 | 0100 |     |
- 150 | 0150 |     |
- 200 | 0200 |     |
- 250 | 0250 |     |
+   0 | 0000 |     | 
+  50 | 0050 |     | 
+ 100 | 0100 |     | 
+ 150 | 0150 |     | 
+ 200 | 0200 |     | 
+ 250 | 0250 |     | 
  300 | 0300 | 300 | 0300
- 350 | 0350 |     |
- 400 | 0400 |     |
+ 350 | 0350 |     | 
+ 400 | 0400 |     | 
      |      | 375 | 0375
      |      | 450 | 0450
      |      | 525 | 0525
@@ -333,55 +304,37 @@ SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a < 450) t1 FULL JO
 -- Semi-join
 EXPLAIN (COSTS OFF)
 SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t2.b FROM prt2 t2 WHERE t2.a = 0) AND t1.b = 0 ORDER BY t1.a;
-                                  QUERY PLAN                                  
-------------------------------------------------------------------------------
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
          Sort Key: t1.a
-         ->  Append
-               ->  Nested Loop
-                     ->  Remote Subquery Scan on all (datanode_2)
-                           Distribute results by H: b
-                           ->  HashAggregate
-                                 Group Key: t2.b
-                                 ->  Remote Subquery Scan on all (datanode_2)
-                                       Distribute results by H: b
-                                       ->  HashAggregate
-                                             Group Key: t2.b
+         ->  Nested Loop
+               ->  Remote Subquery Scan on all (datanode_2)
+                     ->  HashAggregate
+                           Group Key: b
+                           ->  Remote Subquery Scan on all (datanode_2)
+                                 Distribute results by H: b
+                                 ->  HashAggregate
+                                       Group Key: t2.b
+                                       ->  Append
                                              ->  Seq Scan on prt2_p1 t2
                                                    Filter: (a = 0)
-                     ->  Index Scan using iprt1_p1_a on prt1_p1 t1
-                           Index Cond: (a = t2.b)
-                           Filter: (b = 0)
-               ->  Nested Loop
-                     ->  Remote Subquery Scan on all (datanode_2)
-                           Distribute results by H: b
-                           ->  HashAggregate
-                                 Group Key: t2_1.b
-                                 ->  Remote Subquery Scan on all (datanode_2)
-                                       Distribute results by H: b
-                                       ->  HashAggregate
-                                             Group Key: t2_1.b
                                              ->  Seq Scan on prt2_p2 t2_1
                                                    Filter: (a = 0)
-                     ->  Index Scan using iprt1_p2_a on prt1_p2 t1_1
-                           Index Cond: (a = t2_1.b)
-                           Filter: (b = 0)
-               ->  Nested Loop
-                     ->  Remote Subquery Scan on all (datanode_2)
-                           Distribute results by H: b
-                           ->  HashAggregate
-                                 Group Key: t2_2.b
-                                 ->  Remote Subquery Scan on all (datanode_2)
-                                       Distribute results by H: b
-                                       ->  HashAggregate
-                                             Group Key: t2_2.b
                                              ->  Seq Scan on prt2_p3 t2_2
                                                    Filter: (a = 0)
-                     ->  Index Scan using iprt1_p3_a on prt1_p3 t1_2
-                           Index Cond: (a = t2_2.b)
+               ->  Append
+                     ->  Index Scan using iprt1_p1_a on prt1_p1 t1
+                           Index Cond: (a = b)
                            Filter: (b = 0)
-(46 rows)
+                     ->  Index Scan using iprt1_p2_a on prt1_p2 t1_1
+                           Index Cond: (a = b)
+                           Filter: (b = 0)
+                     ->  Index Scan using iprt1_p3_a on prt1_p3 t1_2
+                           Index Cond: (a = b)
+                           Filter: (b = 0)
+(28 rows)
 
 SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t2.b FROM prt2 t2 WHERE t2.a = 0) AND t1.b = 0 ORDER BY t1.a;
   a  | b |  c   
@@ -395,34 +348,24 @@ SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t2.b FROM prt2 t2 WHERE t2.a = 0)
 -- Anti-join with aggregates
 EXPLAIN (COSTS OFF)
 SELECT sum(t1.a), avg(t1.a), sum(t1.b), avg(t1.b) FROM prt1 t1 WHERE NOT EXISTS (SELECT 1 FROM prt2 t2 WHERE t1.a = t2.b);
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
  Finalize Aggregate
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Partial Aggregate
-               ->  Append
-                     ->  Hash Anti Join
-                           Hash Cond: (t1.a = t2.b)
+               ->  Hash Anti Join
+                     Hash Cond: (t1.a = b)
+                     ->  Append
                            ->  Seq Scan on prt1_p1 t1
-                           ->  Hash
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  Seq Scan on prt2_p1 t2
-                     ->  Hash Anti Join
-                           Hash Cond: (t1_1.a = t2_1.b)
                            ->  Seq Scan on prt1_p2 t1_1
-                           ->  Hash
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  Seq Scan on prt2_p2 t2_1
-                     ->  Nested Loop Anti Join
                            ->  Seq Scan on prt1_p3 t1_2
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  Index Only Scan using iprt2_p3_b on prt2_p3 t2_2
-                                             Index Cond: (b = t1_2.a)
-(25 rows)
+                     ->  Hash
+                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                 ->  Append
+                                       ->  Seq Scan on prt2_p1 t2
+                                       ->  Seq Scan on prt2_p2 t2_1
+                                       ->  Seq Scan on prt2_p3 t2_2
+(15 rows)
 
 SELECT sum(t1.a), avg(t1.a), sum(t1.b), avg(t1.b) FROM prt1 t1 WHERE NOT EXISTS (SELECT 1 FROM prt2 t2 WHERE t1.a = t2.b);
   sum  |         avg          | sum  |         avg         
@@ -435,24 +378,61 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM prt1 t1 LEFT JOIN LATERAL
 			  (SELECT t2.a AS t2a, t3.a AS t3a, least(t1.a,t2.a,t3.b) FROM prt1 t2 JOIN prt2 t3 ON (t2.a = t3.b)) ss
 			  ON t1.a = ss.t2a WHERE t1.b = 0 ORDER BY t1.a;
-ERROR:  could not devise a query plan for the given query
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   ->  Sort
+         Sort Key: a
+         ->  Nested Loop Left Join
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: a
+                     ->  Append
+                           ->  Seq Scan on prt1_p1 t1
+                                 Filter: (b = 0)
+                           ->  Seq Scan on prt1_p2 t1_1
+                                 Filter: (b = 0)
+                           ->  Seq Scan on prt1_p3 t1_2
+                                 Filter: (b = 0)
+               ->  Materialize
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: a
+                           ->  Nested Loop
+                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                       ->  Append
+                                             ->  Index Only Scan using iprt1_p1_a on prt1_p1 t2
+                                                   Index Cond: (a = a)
+                                             ->  Index Only Scan using iprt1_p2_a on prt1_p2 t2_1
+                                                   Index Cond: (a = a)
+                                             ->  Index Only Scan using iprt1_p3_a on prt1_p3 t2_2
+                                                   Index Cond: (a = a)
+                                 ->  Append
+                                       ->  Index Scan using iprt2_p1_b on prt2_p1 t3
+                                             Index Cond: (b = a)
+                                       ->  Index Scan using iprt2_p2_b on prt2_p2 t3_1
+                                             Index Cond: (b = a)
+                                       ->  Bitmap Heap Scan on prt2_p3 t3_2
+                                             Recheck Cond: (b = a)
+                                             ->  Bitmap Index Scan on iprt2_p3_b
+                                                   Index Cond: (b = a)
+(34 rows)
+
 SELECT * FROM prt1 t1 LEFT JOIN LATERAL
 			  (SELECT t2.a AS t2a, t3.a AS t3a, least(t1.a,t2.a,t3.b) FROM prt1 t2 JOIN prt2 t3 ON (t2.a = t3.b)) ss
 			  ON t1.a = ss.t2a WHERE t1.b = 0 ORDER BY t1.a;
-  a  | b |  c   | t2a | t3a | least
+  a  | b |  c   | t2a | t3a | least 
 -----+---+------+-----+-----+-------
    0 | 0 | 0000 |   0 |   0 |     0
-  50 | 0 | 0050 |     |     |
- 100 | 0 | 0100 |     |     |
+  50 | 0 | 0050 |     |     |      
+ 100 | 0 | 0100 |     |     |      
  150 | 0 | 0150 | 150 |   0 |   150
- 200 | 0 | 0200 |     |     |
- 250 | 0 | 0250 |     |     |
+ 200 | 0 | 0200 |     |     |      
+ 250 | 0 | 0250 |     |     |      
  300 | 0 | 0300 | 300 |   0 |   300
- 350 | 0 | 0350 |     |     |
- 400 | 0 | 0400 |     |     |
+ 350 | 0 | 0350 |     |     |      
+ 400 | 0 | 0400 |     |     |      
  450 | 0 | 0450 | 450 |   0 |   450
- 500 | 0 | 0500 |     |     |
- 550 | 0 | 0550 |     |     |
+ 500 | 0 | 0500 |     |     |      
+ 550 | 0 | 0550 |     |     |      
 (12 rows)
 
 EXPLAIN (COSTS OFF)
@@ -464,40 +444,31 @@ SELECT t1.a, ss.t2a, ss.t2c FROM prt1 t1 LEFT JOIN LATERAL
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
          Sort Key: a
-         ->  Hash Right Join
+         ->  Hash Left Join
                Hash Cond: ((c)::text = (c)::text)
                Filter: ((b + COALESCE(b, 0)) = 0)
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                      Distribute results by H: c
                      ->  Append
-                           ->  Hash Join
-                                 Hash Cond: (t2.a = t3.b)
-                                 ->  Seq Scan on prt1_p1 t2
-                                 ->  Hash
-                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                             Distribute results by H: b
-                                             ->  Seq Scan on prt2_p1 t3
-                           ->  Hash Join
-                                 Hash Cond: (t2_1.a = t3_1.b)
-                                 ->  Seq Scan on prt1_p2 t2_1
-                                 ->  Hash
-                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                             Distribute results by H: b
-                                             ->  Seq Scan on prt2_p2 t3_1
-                           ->  Nested Loop
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  Seq Scan on prt2_p3 t3_2
-                                 ->  Index Scan using iprt1_p3_a on prt1_p3 t2_2
-                                       Index Cond: (a = t3_2.b)
+                           ->  Seq Scan on prt1_p1 t1
+                           ->  Seq Scan on prt1_p2 t1_1
+                           ->  Seq Scan on prt1_p3 t1_2
                ->  Hash
                      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                            Distribute results by H: c
-                           ->  Append
-                                 ->  Seq Scan on prt1_p1 t1
-                                 ->  Seq Scan on prt1_p2 t1_1
-                                 ->  Seq Scan on prt1_p3 t1_2
-(36 rows)
+                           ->  Hash Join
+                                 Hash Cond: (t2.a = b)
+                                 ->  Append
+                                       ->  Seq Scan on prt1_p1 t2
+                                       ->  Seq Scan on prt1_p2 t2_1
+                                       ->  Seq Scan on prt1_p3 t2_2
+                                 ->  Hash
+                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                             ->  Append
+                                                   ->  Seq Scan on prt2_p1 t3
+                                                   ->  Seq Scan on prt2_p2 t3_1
+                                                   ->  Seq Scan on prt2_p3 t3_2
+(27 rows)
 
 SELECT t1.a, ss.t2a, ss.t2c FROM prt1 t1 LEFT JOIN LATERAL
 			  (SELECT t2.a AS t2a, t3.a AS t3a, t2.b t2b, t2.c t2c, least(t1.a,t2.a,t3.a) FROM prt1 t2 JOIN prt2 t3 ON (t2.a = t3.b)) ss
@@ -538,34 +509,27 @@ INSERT INTO prt2_e SELECT i, i, i % 25 FROM generate_series(0, 599, 3) i;
 ANALYZE prt2_e;
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_e t1, prt2_e t2 WHERE (t1.a + t1.b)/2 = (t2.b + t2.a)/2 AND t1.c = 0 ORDER BY t1.a, t2.b;
-                                         QUERY PLAN                                          
----------------------------------------------------------------------------------------------
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a, t2.b
-         ->  Append
-               ->  Hash Join
-                     Hash Cond: (((t2.b + t2.a) / 2) = ((t1.a + t1.b) / 2))
+         Sort Key: a, t2.b
+         ->  Hash Join
+               Hash Cond: (((t2.b + t2.a) / 2) = ((a + b) / 2))
+               ->  Append
                      ->  Seq Scan on prt2_e_p1 t2
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     ->  Seq Scan on prt2_e_p2 t2_1
+                     ->  Seq Scan on prt2_e_p3 t2_2
+               ->  Hash
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           ->  Append
                                  ->  Seq Scan on prt1_e_p1 t1
                                        Filter: (c = 0)
-               ->  Hash Join
-                     Hash Cond: (((t2_1.b + t2_1.a) / 2) = ((t1_1.a + t1_1.b) / 2))
-                     ->  Seq Scan on prt2_e_p2 t2_1
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                  ->  Seq Scan on prt1_e_p2 t1_1
                                        Filter: (c = 0)
-               ->  Nested Loop
-                     ->  Seq Scan on prt2_e_p3 t2_2
-                     ->  Materialize
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 ->  Index Scan using iprt1_e_p3_ab2 on prt1_e_p3 t1_2
-                                       Index Cond: (((a + b) / 2) = ((t2_2.b + t2_2.a) / 2))
+                                 ->  Seq Scan on prt1_e_p3 t1_2
                                        Filter: (c = 0)
-(25 rows)
+(18 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_e t1, prt2_e t2 WHERE (t1.a + t1.b)/2 = (t2.b + t2.a)/2 AND t1.c = 0 ORDER BY t1.a, t2.b;
   a  | c |  b  | c 
@@ -581,59 +545,42 @@ SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_e t1, prt2_e t2 WHERE (t1.a + t1.b)/2 = 
 --
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM prt1 t1, prt2 t2, prt1_e t3 WHERE t1.a = t2.b AND t1.a = (t3.a + t3.b)/2 AND t1.b = 0 ORDER BY t1.a, t2.b;
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a
-         ->  Result
-               ->  Append
-                     ->  Nested Loop
-                           Join Filter: (t1.a = (((t3.a + t3.b) / 2)))
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: a
-                                 ->  Nested Loop
-                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+         Sort Key: a
+         ->  Nested Loop
+               Join Filter: (a = (((a + b) / 2)))
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: a
+                     ->  Hash Join
+                           Hash Cond: (t2.b = a)
+                           ->  Append
+                                 ->  Seq Scan on prt2_p1 t2
+                                 ->  Seq Scan on prt2_p2 t2_1
+                                 ->  Seq Scan on prt2_p3 t2_2
+                           ->  Hash
+                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                       ->  Append
                                              ->  Seq Scan on prt1_p1 t1
                                                    Filter: (b = 0)
-                                       ->  Index Scan using iprt2_p1_b on prt2_p1 t2
-                                             Index Cond: (b = t1.a)
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: ((a + b) / 2)
-                                       ->  Index Scan using iprt1_e_p1_ab2 on prt1_e_p1 t3
-                                             Index Cond: (((a + b) / 2) = t2.b)
-                     ->  Nested Loop
-                           Join Filter: (t1_1.a = (((t3_1.a + t3_1.b) / 2)))
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: a
-                                 ->  Nested Loop
-                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                              ->  Seq Scan on prt1_p2 t1_1
                                                    Filter: (b = 0)
-                                       ->  Index Scan using iprt2_p2_b on prt2_p2 t2_1
-                                             Index Cond: (b = t1_1.a)
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: ((a + b) / 2)
-                                       ->  Index Scan using iprt1_e_p2_ab2 on prt1_e_p2 t3_1
-                                             Index Cond: (((a + b) / 2) = t2_1.b)
-                     ->  Nested Loop
-                           Join Filter: (t1_2.a = t2_2.b)
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: a
-                                 ->  Nested Loop
-                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                              ->  Seq Scan on prt1_p3 t1_2
                                                    Filter: (b = 0)
+               ->  Materialize
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: ((a + b) / 2)
+                           ->  Result
+                                 ->  Append
+                                       ->  Index Scan using iprt1_e_p1_ab2 on prt1_e_p1 t3
+                                             Index Cond: (((a + b) / 2) = b)
+                                       ->  Index Scan using iprt1_e_p2_ab2 on prt1_e_p2 t3_1
+                                             Index Cond: (((a + b) / 2) = b)
                                        ->  Index Scan using iprt1_e_p3_ab2 on prt1_e_p3 t3_2
-                                             Index Cond: (((a + b) / 2) = t1_2.a)
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  Index Scan using iprt2_p3_b on prt2_p3 t2_2
-                                             Index Cond: (b = ((t3_2.a + t3_2.b) / 2))
-(50 rows)
+                                             Index Cond: (((a + b) / 2) = b)
+(33 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM prt1 t1, prt2 t2, prt1_e t3 WHERE t1.a = t2.b AND t1.a = (t3.a + t3.b)/2 AND t1.b = 0 ORDER BY t1.a, t2.b;
   a  |  c   |  b  |  c   | ?column? | c 
@@ -646,58 +593,40 @@ SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM prt1 t1, prt2 t2, prt1_e t
 
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b) LEFT JOIN prt1_e t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t1.b = 0 ORDER BY t1.a, t2.b, t3.a + t3.b;
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a, t2.b, ((t3.a + t3.b))
-         ->  Result
-               ->  Append
-                     ->  Nested Loop Left Join
-                           ->  Nested Loop Left Join
-                                 ->  Seq Scan on prt1_p1 t1
-                                       Filter: (b = 0)
-                                 ->  Materialize
-                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                             Distribute results by H: b
-                                             ->  Index Scan using iprt2_p1_b on prt2_p1 t2
-                                                   Index Cond: (t1.a = b)
-                           ->  Materialize
+         Sort Key: a, b, ((a + b))
+         ->  Hash Right Join
+               Hash Cond: ((((a + b) / 2)) = a)
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: ((a + b) / 2)
+                     ->  Result
+                           ->  Append
+                                 ->  Seq Scan on prt1_e_p1 t3
+                                 ->  Seq Scan on prt1_e_p2 t3_1
+                                 ->  Seq Scan on prt1_e_p3 t3_2
+               ->  Hash
+                     ->  Hash Right Join
+                           Hash Cond: (b = a)
+                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                 Distribute results by H: b
+                                 ->  Append
+                                       ->  Seq Scan on prt2_p1 t2
+                                       ->  Seq Scan on prt2_p2 t2_1
+                                       ->  Seq Scan on prt2_p3 t2_2
+                           ->  Hash
                                  ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: ((a + b) / 2)
-                                       ->  Index Scan using iprt1_e_p1_ab2 on prt1_e_p1 t3
-                                             Index Cond: (t1.a = ((a + b) / 2))
-                     ->  Nested Loop Left Join
-                           ->  Nested Loop Left Join
-                                 ->  Seq Scan on prt1_p2 t1_1
-                                       Filter: (b = 0)
-                                 ->  Materialize
-                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                             Distribute results by H: b
-                                             ->  Index Scan using iprt2_p2_b on prt2_p2 t2_1
-                                                   Index Cond: (t1_1.a = b)
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: ((a + b) / 2)
-                                       ->  Index Scan using iprt1_e_p2_ab2 on prt1_e_p2 t3_1
-                                             Index Cond: (t1_1.a = ((a + b) / 2))
-                     ->  Nested Loop Left Join
-                           ->  Nested Loop Left Join
-                                 ->  Seq Scan on prt1_p3 t1_2
-                                       Filter: (b = 0)
-                                 ->  Materialize
-                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                             Distribute results by H: b
-                                             ->  Bitmap Heap Scan on prt2_p3 t2_2
-                                                   Recheck Cond: (t1_2.a = b)
-                                                   ->  Bitmap Index Scan on iprt2_p3_b
-                                                         Index Cond: (t1_2.a = b)
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: ((a + b) / 2)
-                                       ->  Index Scan using iprt1_e_p3_ab2 on prt1_e_p3 t3_2
-                                             Index Cond: (t1_2.a = ((a + b) / 2))
-(49 rows)
+                                       Distribute results by H: a
+                                       ->  Append
+                                             ->  Seq Scan on prt1_p1 t1
+                                                   Filter: (b = 0)
+                                             ->  Seq Scan on prt1_p2 t1_1
+                                                   Filter: (b = 0)
+                                             ->  Seq Scan on prt1_p3 t1_2
+                                                   Filter: (b = 0)
+(31 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b) LEFT JOIN prt1_e t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t1.b = 0 ORDER BY t1.a, t2.b, t3.a + t3.b;
   a  |  c   |  b  |  c   | ?column? | c 
@@ -718,59 +647,44 @@ SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2
 
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b) RIGHT JOIN prt1_e t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t3.c = 0 ORDER BY t1.a, t2.b, t3.a + t3.b;
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a, t2.b, ((t3.a + t3.b))
-         ->  Result
-               ->  Append
-                     ->  Nested Loop Left Join
+         Sort Key: a, b, ((a + b))
+         ->  Nested Loop Left Join
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: a
+                     ->  Hash Right Join
+                           Hash Cond: (a = (((a + b) / 2)))
                            ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                  Distribute results by H: a
-                                 ->  Nested Loop Left Join
-                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                             Distribute results by H: ((a + b) / 2)
-                                             ->  Seq Scan on prt1_e_p1 t3
-                                                   Filter: (c = 0)
-                                       ->  Index Scan using iprt1_p1_a on prt1_p1 t1
-                                             Index Cond: (a = ((t3.a + t3.b) / 2))
-                           ->  Materialize
+                                 ->  Append
+                                       ->  Seq Scan on prt1_p1 t1
+                                       ->  Seq Scan on prt1_p2 t1_1
+                                       ->  Seq Scan on prt1_p3 t1_2
+                           ->  Hash
                                  ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  Index Scan using iprt2_p1_b on prt2_p1 t2
-                                             Index Cond: (t1.a = b)
-                     ->  Nested Loop Left Join
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: a
-                                 ->  Nested Loop Left Join
-                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                             Distribute results by H: ((a + b) / 2)
-                                             ->  Seq Scan on prt1_e_p2 t3_1
-                                                   Filter: (c = 0)
-                                       ->  Index Scan using iprt1_p2_a on prt1_p2 t1_1
-                                             Index Cond: (a = ((t3_1.a + t3_1.b) / 2))
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  Index Scan using iprt2_p2_b on prt2_p2 t2_1
-                                             Index Cond: (t1_1.a = b)
-                     ->  Nested Loop Left Join
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: a
-                                 ->  Nested Loop Left Join
-                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                             Distribute results by H: ((a + b) / 2)
-                                             ->  Seq Scan on prt1_e_p3 t3_2
-                                                   Filter: (c = 0)
-                                       ->  Index Scan using iprt1_p3_a on prt1_p3 t1_2
-                                             Index Cond: (a = ((t3_2.a + t3_2.b) / 2))
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  Index Scan using iprt2_p3_b on prt2_p3 t2_2
-                                             Index Cond: (t1_2.a = b)
-(50 rows)
+                                       Distribute results by H: ((a + b) / 2)
+                                       ->  Result
+                                             ->  Append
+                                                   ->  Seq Scan on prt1_e_p1 t3
+                                                         Filter: (c = 0)
+                                                   ->  Seq Scan on prt1_e_p2 t3_1
+                                                         Filter: (c = 0)
+                                                   ->  Seq Scan on prt1_e_p3 t3_2
+                                                         Filter: (c = 0)
+               ->  Materialize
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: b
+                           ->  Append
+                                 ->  Index Scan using iprt2_p1_b on prt2_p1 t2
+                                       Index Cond: (a = b)
+                                 ->  Index Scan using iprt2_p2_b on prt2_p2 t2_1
+                                       Index Cond: (a = b)
+                                 ->  Index Scan using iprt2_p3_b on prt2_p3 t2_2
+                                       Index Cond: (a = b)
+(35 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b) RIGHT JOIN prt1_e t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t3.c = 0 ORDER BY t1.a, t2.b, t3.a + t3.b;
   a  |  c   |  b  |  c   | ?column? | c 
@@ -793,71 +707,49 @@ SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2
 -- make sure these go to null as expected
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.phv, t2.b, t2.phv, t3.a + t3.b, t3.phv FROM ((SELECT 50 phv, * FROM prt1 WHERE prt1.b = 0) t1 FULL JOIN (SELECT 75 phv, * FROM prt2 WHERE prt2.a = 0) t2 ON (t1.a = t2.b)) FULL JOIN (SELECT 50 phv, * FROM prt1_e WHERE prt1_e.c = 0) t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t1.a = t1.phv OR t2.b = t2.phv OR (t3.a + t3.b)/2 = t3.phv ORDER BY t1.a, t2.b, t3.a + t3.b;
-                                                         QUERY PLAN                                                         
-----------------------------------------------------------------------------------------------------------------------------
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: prt1_p1.a, prt2_p1.b, ((prt1_e_p1.a + prt1_e_p1.b))
-         ->  Result
-               ->  Append
+         Sort Key: a, b, ((a + b))
+         ->  Hash Full Join
+               Hash Cond: (a = (((a + b) / 2)))
+               Filter: ((a = (50)) OR (b = (75)) OR (((a + b) / 2) = (50)))
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: a
                      ->  Hash Full Join
-                           Hash Cond: (prt1_p1.a = (((prt1_e_p1.a + prt1_e_p1.b) / 2)))
-                           Filter: ((prt1_p1.a = (50)) OR (prt2_p1.b = (75)) OR (((prt1_e_p1.a + prt1_e_p1.b) / 2) = (50)))
+                           Hash Cond: (a = b)
                            ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                  Distribute results by H: a
-                                 ->  Hash Full Join
-                                       Hash Cond: (prt1_p1.a = prt2_p1.b)
+                                 ->  Append
                                        ->  Seq Scan on prt1_p1
                                              Filter: (b = 0)
-                                       ->  Hash
-                                             ->  Remote Subquery Scan on all (datanode_2)
-                                                   Distribute results by H: b
-                                                   ->  Seq Scan on prt2_p1
-                                                         Filter: (a = 0)
-                           ->  Hash
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: ((a + b) / 2)
-                                       ->  Seq Scan on prt1_e_p1
-                                             Filter: (c = 0)
-                     ->  Hash Full Join
-                           Hash Cond: (prt1_p2.a = (((prt1_e_p2.a + prt1_e_p2.b) / 2)))
-                           Filter: ((prt1_p2.a = (50)) OR (prt2_p2.b = (75)) OR (((prt1_e_p2.a + prt1_e_p2.b) / 2) = (50)))
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: a
-                                 ->  Hash Full Join
-                                       Hash Cond: (prt1_p2.a = prt2_p2.b)
                                        ->  Seq Scan on prt1_p2
                                              Filter: (b = 0)
-                                       ->  Hash
-                                             ->  Remote Subquery Scan on all (datanode_2)
-                                                   Distribute results by H: b
-                                                   ->  Seq Scan on prt2_p2
-                                                         Filter: (a = 0)
-                           ->  Hash
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: ((a + b) / 2)
-                                       ->  Seq Scan on prt1_e_p2
-                                             Filter: (c = 0)
-                     ->  Hash Full Join
-                           Hash Cond: (prt1_p3.a = (((prt1_e_p3.a + prt1_e_p3.b) / 2)))
-                           Filter: ((prt1_p3.a = (50)) OR (prt2_p3.b = (75)) OR (((prt1_e_p3.a + prt1_e_p3.b) / 2) = (50)))
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: a
-                                 ->  Hash Full Join
-                                       Hash Cond: (prt1_p3.a = prt2_p3.b)
                                        ->  Seq Scan on prt1_p3
                                              Filter: (b = 0)
-                                       ->  Hash
-                                             ->  Remote Subquery Scan on all (datanode_2)
-                                                   Distribute results by H: b
-                                                   ->  Seq Scan on prt2_p3
-                                                         Filter: (a = 0)
                            ->  Hash
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: ((a + b) / 2)
+                                 ->  Remote Subquery Scan on all (datanode_2)
+                                       Distribute results by H: b
+                                       ->  Append
+                                             ->  Seq Scan on prt2_p1
+                                                   Filter: (a = 0)
+                                             ->  Seq Scan on prt2_p2
+                                                   Filter: (a = 0)
+                                             ->  Seq Scan on prt2_p3
+                                                   Filter: (a = 0)
+               ->  Hash
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: ((a + b) / 2)
+                           ->  Result
+                                 ->  Append
+                                       ->  Seq Scan on prt1_e_p1
+                                             Filter: (c = 0)
+                                       ->  Seq Scan on prt1_e_p2
+                                             Filter: (c = 0)
                                        ->  Seq Scan on prt1_e_p3
                                              Filter: (c = 0)
-(62 rows)
+(40 rows)
 
 SELECT t1.a, t1.phv, t2.b, t2.phv, t3.a + t3.b, t3.phv FROM ((SELECT 50 phv, * FROM prt1 WHERE prt1.b = 0) t1 FULL JOIN (SELECT 75 phv, * FROM prt2 WHERE prt2.a = 0) t2 ON (t1.a = t2.b)) FULL JOIN (SELECT 50 phv, * FROM prt1_e WHERE prt1_e.c = 0) t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t1.a = t1.phv OR t2.b = t2.phv OR (t3.a + t3.b)/2 = t3.phv ORDER BY t1.a, t2.b, t3.a + t3.b;
  a  | phv | b  | phv | ?column? | phv 
@@ -873,66 +765,47 @@ SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1, prt1_e t2 WHER
 ---------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a
-         ->  Append
-               ->  Nested Loop
-                     Join Filter: (t1.a = t1_3.b)
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Distribute results by H: b
-                           ->  HashAggregate
-                                 Group Key: t1_3.b
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  HashAggregate
-                                             Group Key: t1_3.b
-                                             ->  Nested Loop
-                                                   ->  Remote Subquery Scan on all (datanode_2)
+         Sort Key: a
+         ->  Nested Loop
+               Join Filter: (a = b)
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: b
+                     ->  HashAggregate
+                           Group Key: b
+                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                 Distribute results by H: b
+                                 ->  HashAggregate
+                                       Group Key: b
+                                       ->  Nested Loop
+                                             ->  Remote Subquery Scan on all (datanode_2)
+                                                   ->  Append
                                                          ->  Seq Scan on prt2_p1 t1_3
                                                                Filter: (a = 0)
-                                                   ->  Index Scan using iprt1_e_p1_ab2 on prt1_e_p1 t2
-                                                         Index Cond: (((a + b) / 2) = t1_3.b)
-                     ->  Index Scan using iprt1_p1_a on prt1_p1 t1
-                           Index Cond: (a = ((t2.a + t2.b) / 2))
-                           Filter: (b = 0)
-               ->  Nested Loop
-                     Join Filter: (t1_1.a = t1_4.b)
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Distribute results by H: b
-                           ->  HashAggregate
-                                 Group Key: t1_4.b
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  HashAggregate
-                                             Group Key: t1_4.b
-                                             ->  Nested Loop
-                                                   ->  Remote Subquery Scan on all (datanode_2)
                                                          ->  Seq Scan on prt2_p2 t1_4
                                                                Filter: (a = 0)
-                                                   ->  Index Scan using iprt1_e_p2_ab2 on prt1_e_p2 t2_1
-                                                         Index Cond: (((a + b) / 2) = t1_4.b)
-                     ->  Index Scan using iprt1_p2_a on prt1_p2 t1_1
-                           Index Cond: (a = ((t2_1.a + t2_1.b) / 2))
-                           Filter: (b = 0)
-               ->  Nested Loop
-                     Join Filter: (t1_2.a = t1_5.b)
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Distribute results by H: b
-                           ->  HashAggregate
-                                 Group Key: t1_5.b
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: b
-                                       ->  HashAggregate
-                                             Group Key: t1_5.b
-                                             ->  Nested Loop
-                                                   ->  Remote Subquery Scan on all (datanode_2)
                                                          ->  Seq Scan on prt2_p3 t1_5
                                                                Filter: (a = 0)
+                                             ->  Append
+                                                   ->  Index Scan using iprt1_e_p1_ab2 on prt1_e_p1 t2
+                                                         Index Cond: (((a + b) / 2) = b)
+                                                   ->  Index Scan using iprt1_e_p2_ab2 on prt1_e_p2 t2_1
+                                                         Index Cond: (((a + b) / 2) = b)
                                                    ->  Index Scan using iprt1_e_p3_ab2 on prt1_e_p3 t2_2
-                                                         Index Cond: (((a + b) / 2) = t1_5.b)
-                     ->  Index Scan using iprt1_p3_a on prt1_p3 t1_2
-                           Index Cond: (a = ((t2_2.a + t2_2.b) / 2))
-                           Filter: (b = 0)
-(61 rows)
+                                                         Index Cond: (((a + b) / 2) = b)
+               ->  Materialize
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: a
+                           ->  Append
+                                 ->  Index Scan using iprt1_p1_a on prt1_p1 t1
+                                       Index Cond: (a = ((a + b) / 2))
+                                       Filter: (b = 0)
+                                 ->  Index Scan using iprt1_p2_a on prt1_p2 t1_1
+                                       Index Cond: (a = ((a + b) / 2))
+                                       Filter: (b = 0)
+                                 ->  Index Scan using iprt1_p3_a on prt1_p3 t1_2
+                                       Index Cond: (a = ((a + b) / 2))
+                                       Filter: (b = 0)
+(42 rows)
 
 SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1, prt1_e t2 WHERE t1.a = 0 AND t1.b = (t2.a + t2.b)/2) AND t1.b = 0 ORDER BY t1.a;
   a  | b |  c   
@@ -945,57 +818,49 @@ SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1, prt1_e t2 WHER
 
 EXPLAIN (COSTS OFF)
 SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1 WHERE t1.b IN (SELECT (t1.a + t1.b)/2 FROM prt1_e t1 WHERE t1.c = 0)) AND t1.b = 0 ORDER BY t1.a;
-                                               QUERY PLAN                                                
----------------------------------------------------------------------------------------------------------
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a
-         ->  Append
-               ->  Nested Loop Semi Join
-                     ->  Seq Scan on prt1_p1 t1
-                           Filter: (b = 0)
-                     ->  Materialize
+         Sort Key: a
+         ->  Nested Loop
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: b
+                     ->  HashAggregate
+                           Group Key: b
                            ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                  Distribute results by H: b
-                                 ->  Nested Loop Semi Join
-                                       ->  Index Only Scan using iprt2_p1_b on prt2_p1 t1_3
-                                             Index Cond: (b = t1.a)
-                                       ->  Materialize
-                                             ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                                   ->  Index Scan using iprt1_e_p1_ab2 on prt1_e_p1 t1_6
-                                                         Index Cond: (((a + b) / 2) = t1_3.b)
-                                                         Filter: (c = 0)
-               ->  Nested Loop Semi Join
-                     ->  Seq Scan on prt1_p2 t1_1
-                           Filter: (b = 0)
-                     ->  Materialize
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: b
-                                 ->  Nested Loop Semi Join
-                                       ->  Index Only Scan using iprt2_p2_b on prt2_p2 t1_4
-                                             Index Cond: (b = t1_1.a)
-                                       ->  Materialize
-                                             ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                                   ->  Index Scan using iprt1_e_p2_ab2 on prt1_e_p2 t1_7
-                                                         Index Cond: (((a + b) / 2) = t1_4.b)
-                                                         Filter: (c = 0)
-               ->  Nested Loop Semi Join
-                     ->  Seq Scan on prt1_p3 t1_2
-                           Filter: (b = 0)
-                     ->  Materialize
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: b
-                                 ->  Nested Loop Semi Join
-                                       ->  Bitmap Heap Scan on prt2_p3 t1_5
-                                             Recheck Cond: (b = t1_2.a)
-                                             ->  Bitmap Index Scan on iprt2_p3_b
-                                                   Index Cond: (b = t1_2.a)
-                                       ->  Materialize
-                                             ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                                   ->  Index Scan using iprt1_e_p3_ab2 on prt1_e_p3 t1_8
-                                                         Index Cond: (((a + b) / 2) = t1_5.b)
-                                                         Filter: (c = 0)
-(48 rows)
+                                 ->  HashAggregate
+                                       Group Key: t1_3.b
+                                       ->  Hash Semi Join
+                                             Hash Cond: (t1_3.b = ((a + b) / 2))
+                                             ->  Append
+                                                   ->  Seq Scan on prt2_p1 t1_3
+                                                   ->  Seq Scan on prt2_p2 t1_4
+                                                   ->  Seq Scan on prt2_p3 t1_5
+                                             ->  Hash
+                                                   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                                         ->  Append
+                                                               ->  Seq Scan on prt1_e_p1 t1_6
+                                                                     Filter: (c = 0)
+                                                               ->  Seq Scan on prt1_e_p2 t1_7
+                                                                     Filter: (c = 0)
+                                                               ->  Seq Scan on prt1_e_p3 t1_8
+                                                                     Filter: (c = 0)
+               ->  Materialize
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: a
+                           ->  Append
+                                 ->  Index Scan using iprt1_p1_a on prt1_p1 t1
+                                       Index Cond: (a = b)
+                                       Filter: (b = 0)
+                                 ->  Index Scan using iprt1_p2_a on prt1_p2 t1_1
+                                       Index Cond: (a = b)
+                                       Filter: (b = 0)
+                                 ->  Index Scan using iprt1_p3_a on prt1_p3 t1_2
+                                       Index Cond: (a = b)
+                                       Filter: (b = 0)
+(40 rows)
 
 SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1 WHERE t1.b IN (SELECT (t1.a + t1.b)/2 FROM prt1_e t1 WHERE t1.c = 0)) AND t1.b = 0 ORDER BY t1.a;
   a  | b |  c   
@@ -1011,67 +876,44 @@ SET enable_hashjoin TO off;
 SET enable_nestloop TO off;
 EXPLAIN (COSTS OFF)
 SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1 WHERE t1.b IN (SELECT (t1.a + t1.b)/2 FROM prt1_e t1 WHERE t1.c = 0)) AND t1.b = 0 ORDER BY t1.a;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Sort
-         Sort Key: t1.a
-         ->  Append
-               ->  Merge Semi Join
-                     Merge Cond: (t1.a = t1_3.b)
-                     ->  Sort
-                           Sort Key: t1.a
+   ->  Merge Semi Join
+         Merge Cond: (a = b)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               Distribute results by H: a
+               ->  Sort
+                     Sort Key: t1.a
+                     ->  Append
                            ->  Seq Scan on prt1_p1 t1
                                  Filter: (b = 0)
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Distribute results by H: b
-                           ->  Merge Semi Join
-                                 Merge Cond: (t1_3.b = (((t1_6.a + t1_6.b) / 2)))
-                                 ->  Sort
-                                       Sort Key: t1_3.b
-                                       ->  Seq Scan on prt2_p1 t1_3
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       ->  Sort
-                                             Sort Key: (((t1_6.a + t1_6.b) / 2))
-                                             ->  Seq Scan on prt1_e_p1 t1_6
-                                                   Filter: (c = 0)
-               ->  Merge Semi Join
-                     Merge Cond: (t1_1.a = t1_4.b)
-                     ->  Sort
-                           Sort Key: t1_1.a
                            ->  Seq Scan on prt1_p2 t1_1
                                  Filter: (b = 0)
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Distribute results by H: b
-                           ->  Merge Semi Join
-                                 Merge Cond: (t1_4.b = (((t1_7.a + t1_7.b) / 2)))
-                                 ->  Sort
-                                       Sort Key: t1_4.b
-                                       ->  Seq Scan on prt2_p2 t1_4
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       ->  Sort
-                                             Sort Key: (((t1_7.a + t1_7.b) / 2))
-                                             ->  Seq Scan on prt1_e_p2 t1_7
-                                                   Filter: (c = 0)
-               ->  Merge Semi Join
-                     Merge Cond: (t1_2.a = t1_5.b)
-                     ->  Sort
-                           Sort Key: t1_2.a
                            ->  Seq Scan on prt1_p3 t1_2
                                  Filter: (b = 0)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               Distribute results by H: b
+               ->  Merge Semi Join
+                     Merge Cond: (t1_3.b = (((a + b) / 2)))
+                     ->  Sort
+                           Sort Key: t1_3.b
+                           ->  Append
+                                 ->  Seq Scan on prt2_p1 t1_3
+                                 ->  Seq Scan on prt2_p2 t1_4
+                                 ->  Seq Scan on prt2_p3 t1_5
                      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Distribute results by H: b
-                           ->  Merge Semi Join
-                                 Merge Cond: (t1_5.b = (((t1_8.a + t1_8.b) / 2)))
-                                 ->  Sort
-                                       Sort Key: t1_5.b
-                                       ->  Seq Scan on prt2_p3 t1_5
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       ->  Sort
-                                             Sort Key: (((t1_8.a + t1_8.b) / 2))
+                           ->  Sort
+                                 Sort Key: (((t1_6.a + t1_6.b) / 2))
+                                 ->  Result
+                                       ->  Append
+                                             ->  Seq Scan on prt1_e_p1 t1_6
+                                                   Filter: (c = 0)
+                                             ->  Seq Scan on prt1_e_p2 t1_7
+                                                   Filter: (c = 0)
                                              ->  Seq Scan on prt1_e_p3 t1_8
                                                    Filter: (c = 0)
-(58 rows)
+(35 rows)
 
 SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1 WHERE t1.b IN (SELECT (t1.a + t1.b)/2 FROM prt1_e t1 WHERE t1.c = 0)) AND t1.b = 0 ORDER BY t1.a;
   a  | b |  c   
@@ -1084,77 +926,50 @@ SELECT t1.* FROM prt1 t1 WHERE t1.a IN (SELECT t1.b FROM prt2 t1 WHERE t1.b IN (
 
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b) RIGHT JOIN prt1_e t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t3.c = 0 ORDER BY t1.a, t2.b, t3.a + t3.b;
-                                                QUERY PLAN                                                 
------------------------------------------------------------------------------------------------------------
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a, t2.b, ((t3.a + t3.b))
-         ->  Result
-               ->  Append
-                     ->  Merge Right Join
-                           Merge Cond: (t1.a = (((t3.a + t3.b) / 2)))
-                           ->  Merge Left Join
-                                 Merge Cond: (t1.a = t2.b)
-                                 ->  Sort
-                                       Sort Key: t1.a
-                                       ->  Seq Scan on prt1_p1 t1
-                                 ->  Materialize
+         Sort Key: a, b, ((a + b))
+         ->  Merge Right Join
+               Merge Cond: (b = a)
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: b
+                     ->  Sort
+                           Sort Key: t2.b
+                           ->  Append
+                                 ->  Seq Scan on prt2_p1 t2
+                                 ->  Seq Scan on prt2_p2 t2_1
+                                 ->  Seq Scan on prt2_p3 t2_2
+               ->  Materialize
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: a
+                           ->  Sort
+                                 Sort Key: a
+                                 ->  Merge Right Join
+                                       Merge Cond: (a = (((a + b) / 2)))
                                        ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                             Distribute results by H: b
+                                             Distribute results by H: a
                                              ->  Sort
-                                                   Sort Key: t2.b
-                                                   ->  Seq Scan on prt2_p1 t2
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: ((a + b) / 2)
-                                       ->  Sort
-                                             Sort Key: (((t3.a + t3.b) / 2))
-                                             ->  Seq Scan on prt1_e_p1 t3
-                                                   Filter: (c = 0)
-                     ->  Merge Right Join
-                           Merge Cond: (t1_1.a = (((t3_1.a + t3_1.b) / 2)))
-                           ->  Merge Left Join
-                                 Merge Cond: (t1_1.a = t2_1.b)
-                                 ->  Sort
-                                       Sort Key: t1_1.a
-                                       ->  Seq Scan on prt1_p2 t1_1
-                                 ->  Materialize
-                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                             Distribute results by H: b
-                                             ->  Sort
-                                                   Sort Key: t2_1.b
-                                                   ->  Seq Scan on prt2_p2 t2_1
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: ((a + b) / 2)
-                                       ->  Sort
-                                             Sort Key: (((t3_1.a + t3_1.b) / 2))
-                                             ->  Seq Scan on prt1_e_p2 t3_1
-                                                   Filter: (c = 0)
-                     ->  Merge Right Join
-                           Merge Cond: (t2_2.b = t1_2.a)
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: b
-                                 ->  Sort
-                                       Sort Key: t2_2.b
-                                       ->  Seq Scan on prt2_p3 t2_2
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: a
-                                       ->  Sort
-                                             Sort Key: t1_2.a
-                                             ->  Merge Left Join
-                                                   Merge Cond: ((((t3_2.a + t3_2.b) / 2)) = t1_2.a)
-                                                   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                                         Distribute results by H: ((a + b) / 2)
-                                                         ->  Sort
-                                                               Sort Key: (((t3_2.a + t3_2.b) / 2))
-                                                               ->  Seq Scan on prt1_e_p3 t3_2
-                                                                     Filter: (c = 0)
-                                                   ->  Sort
-                                                         Sort Key: t1_2.a
+                                                   Sort Key: t1.a
+                                                   ->  Append
+                                                         ->  Seq Scan on prt1_p1 t1
+                                                         ->  Seq Scan on prt1_p2 t1_1
                                                          ->  Seq Scan on prt1_p3 t1_2
-(68 rows)
+                                       ->  Materialize
+                                             ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                                   Distribute results by H: ((a + b) / 2)
+                                                   ->  Sort
+                                                         Sort Key: (((t3.a + t3.b) / 2))
+                                                         ->  Result
+                                                               ->  Append
+                                                                     ->  Seq Scan on prt1_e_p1 t3
+                                                                           Filter: (c = 0)
+                                                                     ->  Seq Scan on prt1_e_p2 t3_1
+                                                                           Filter: (c = 0)
+                                                                     ->  Seq Scan on prt1_e_p3 t3_2
+                                                                           Filter: (c = 0)
+(41 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2 ON t1.a = t2.b) RIGHT JOIN prt1_e t3 ON (t1.a = (t3.a + t3.b)/2) WHERE t3.c = 0 ORDER BY t1.a, t2.b, t3.a + t3.b;
   a  |  c   |  b  |  c   | ?column? | c 
@@ -1176,48 +991,46 @@ SELECT t1.a, t1.c, t2.b, t2.c, t3.a + t3.b, t3.c FROM (prt1 t1 LEFT JOIN prt2 t2
 -- MergeAppend on nullable column
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t2.b FROM (SELECT * FROM prt1 WHERE a < 450) t1 LEFT JOIN (SELECT * FROM prt2 WHERE b > 250) t2 ON t1.a = t2.b WHERE t1.b = 0 ORDER BY t1.a, t2.b;
-                              QUERY PLAN                               
------------------------------------------------------------------------
- Sort
-   Sort Key: prt1_p1.a, b
-   ->  Append
-         ->  Merge Left Join
-               Merge Cond: (prt1_p1.a = b)
-               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                     ->  Sort
-                           Sort Key: prt1_p1.a
-                           ->  Seq Scan on prt1_p1
-                                 Filter: ((a < 450) AND (b = 0))
-               ->  Sort
-                     Sort Key: b
-                     ->  Result
-                           One-Time Filter: false
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   ->  Sort
+         Sort Key: a, b
          ->  Merge Right Join
-               Merge Cond: (prt2_p2.b = prt1_p2.a)
+               Merge Cond: (b = a)
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                      Distribute results by H: b
                      ->  Sort
                            Sort Key: prt2_p2.b
-                           ->  Seq Scan on prt2_p2
-                                 Filter: (b > 250)
-               ->  Sort
-                     Sort Key: prt1_p2.a
-                     ->  Seq Scan on prt1_p2
-                           Filter: ((a < 450) AND (b = 0))
-(26 rows)
+                           ->  Append
+                                 ->  Seq Scan on prt2_p2
+                                       Filter: (b > 250)
+                                 ->  Seq Scan on prt2_p3
+                                       Filter: (b > 250)
+               ->  Materialize
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: a
+                           ->  Sort
+                                 Sort Key: prt1_p1.a
+                                 ->  Append
+                                       ->  Seq Scan on prt1_p1
+                                             Filter: ((a < 450) AND (b = 0))
+                                       ->  Seq Scan on prt1_p2
+                                             Filter: ((a < 450) AND (b = 0))
+(24 rows)
 
 SELECT t1.a, t2.b FROM (SELECT * FROM prt1 WHERE a < 450) t1 LEFT JOIN (SELECT * FROM prt2 WHERE b > 250) t2 ON t1.a = t2.b WHERE t1.b = 0 ORDER BY t1.a, t2.b;
-  a  |  b
+  a  |  b  
 -----+-----
-   0 |
-  50 |
- 100 |
- 150 |
- 200 |
- 250 |
+   0 |    
+  50 |    
+ 100 |    
+ 150 |    
+ 200 |    
+ 250 |    
  300 | 300
- 350 |
- 400 |
+ 350 |    
+ 400 |    
 (9 rows)
 
 RESET enable_hashjoin;
@@ -1239,40 +1052,34 @@ INSERT INTO prt2_m SELECT i, i, i % 25 FROM generate_series(0, 599, 3) i;
 ANALYZE prt2_m;
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1_m WHERE prt1_m.c = 0) t1 FULL JOIN (SELECT * FROM prt2_m WHERE prt2_m.c = 0) t2 ON (t1.a = (t2.b + t2.a)/2 AND t2.b = (t1.a + t1.b)/2) ORDER BY t1.a, t2.b;
-                                                                 QUERY PLAN                                                                 
---------------------------------------------------------------------------------------------------------------------------------------------
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: prt1_m_p1.a, prt2_m_p1.b
-         ->  Append
-               ->  Hash Full Join
-                     Hash Cond: ((prt1_m_p1.a = (((prt2_m_p1.b + prt2_m_p1.a) / 2))) AND (((prt1_m_p1.a + prt1_m_p1.b) / 2) = prt2_m_p1.b))
-                     ->  Seq Scan on prt1_m_p1
-                           Filter: (c = 0)
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: ((b + a) / 2)
-                                 ->  Seq Scan on prt2_m_p1
-                                       Filter: (c = 0)
-               ->  Hash Full Join
-                     Hash Cond: ((prt1_m_p2.a = (((prt2_m_p2.b + prt2_m_p2.a) / 2))) AND (((prt1_m_p2.a + prt1_m_p2.b) / 2) = prt2_m_p2.b))
-                     ->  Seq Scan on prt1_m_p2
-                           Filter: (c = 0)
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: ((b + a) / 2)
-                                 ->  Seq Scan on prt2_m_p2
-                                       Filter: (c = 0)
-               ->  Hash Full Join
-                     Hash Cond: ((prt1_m_p3.a = (((prt2_m_p3.b + prt2_m_p3.a) / 2))) AND (((prt1_m_p3.a + prt1_m_p3.b) / 2) = prt2_m_p3.b))
-                     ->  Seq Scan on prt1_m_p3
-                           Filter: (c = 0)
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: ((b + a) / 2)
-                                 ->  Seq Scan on prt2_m_p3
-                                       Filter: (c = 0)
-(31 rows)
+         Sort Key: a, b
+         ->  Hash Full Join
+               Hash Cond: ((a = (((b + a) / 2))) AND (((a + b) / 2) = b))
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: a
+                     ->  Append
+                           ->  Seq Scan on prt1_m_p1
+                                 Filter: (c = 0)
+                           ->  Seq Scan on prt1_m_p2
+                                 Filter: (c = 0)
+                           ->  Seq Scan on prt1_m_p3
+                                 Filter: (c = 0)
+               ->  Hash
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: ((b + a) / 2)
+                           ->  Result
+                                 ->  Append
+                                       ->  Seq Scan on prt2_m_p1
+                                             Filter: (c = 0)
+                                       ->  Seq Scan on prt2_m_p2
+                                             Filter: (c = 0)
+                                       ->  Seq Scan on prt2_m_p3
+                                             Filter: (c = 0)
+(25 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1_m WHERE prt1_m.c = 0) t1 FULL JOIN (SELECT * FROM prt2_m WHERE prt2_m.c = 0) t2 ON (t1.a = (t2.b + t2.a)/2 AND t2.b = (t1.a + t1.b)/2) ORDER BY t1.a, t2.b;
   a  | c |  b  | c 
@@ -1322,8 +1129,8 @@ ANALYZE plt1_e;
 -- test partition matching with N-way join
 EXPLAIN (COSTS OFF)
 SELECT avg(t1.a), avg(t2.b), avg(t3.a + t3.b), t1.c, t2.c, t3.c FROM plt1 t1, plt2 t2, plt1_e t3 WHERE t1.c = t2.c AND ltrim(t3.c, 'A') = t1.c GROUP BY t1.c, t2.c, t3.c ORDER BY t1.c, t2.c, t3.c;
-                                                   QUERY PLAN                                                    
------------------------------------------------------------------------------------------------------------------
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Finalize GroupAggregate
          Group Key: c, c, c
@@ -1332,43 +1139,28 @@ SELECT avg(t1.a), avg(t2.b), avg(t3.a + t3.b), t1.c, t2.c, t3.c FROM plt1 t1, pl
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                      Distribute results by H: c
                      ->  Partial HashAggregate
-                           Group Key: t1.c, t2.c, t3.c
-                           ->  Result
-                                 ->  Append
-                                       ->  Hash Join
-                                             Hash Cond: (t1.c = t2.c)
+                           Group Key: c, c, t3.c
+                           ->  Hash Join
+                                 Hash Cond: (c = c)
+                                 ->  Hash Join
+                                       Hash Cond: (ltrim(t3.c, 'A'::text) = c)
+                                       ->  Append
+                                             ->  Seq Scan on plt1_e_p1 t3
+                                             ->  Seq Scan on plt1_e_p2 t3_1
+                                             ->  Seq Scan on plt1_e_p3 t3_2
+                                       ->  Hash
                                              ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                                   ->  Append
+                                                         ->  Seq Scan on plt2_p1 t2
+                                                         ->  Seq Scan on plt2_p2 t2_1
+                                                         ->  Seq Scan on plt2_p3 t2_2
+                                 ->  Hash
+                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                             ->  Append
                                                    ->  Seq Scan on plt1_p1 t1
-                                             ->  Hash
-                                                   ->  Hash Join
-                                                         Hash Cond: (t2.c = ltrim(t3.c, 'A'::text))
-                                                         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                                               ->  Seq Scan on plt2_p1 t2
-                                                         ->  Hash
-                                                               ->  Seq Scan on plt1_e_p1 t3
-                                       ->  Hash Join
-                                             Hash Cond: (t1_1.c = t2_1.c)
-                                             ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                                    ->  Seq Scan on plt1_p2 t1_1
-                                             ->  Hash
-                                                   ->  Hash Join
-                                                         Hash Cond: (t2_1.c = ltrim(t3_1.c, 'A'::text))
-                                                         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                                               ->  Seq Scan on plt2_p2 t2_1
-                                                         ->  Hash
-                                                               ->  Seq Scan on plt1_e_p2 t3_1
-                                       ->  Hash Join
-                                             Hash Cond: (t1_2.c = t2_2.c)
-                                             ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                                    ->  Seq Scan on plt1_p3 t1_2
-                                             ->  Hash
-                                                   ->  Hash Join
-                                                         Hash Cond: (t2_2.c = ltrim(t3_2.c, 'A'::text))
-                                                         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                                               ->  Seq Scan on plt2_p3 t2_2
-                                                         ->  Hash
-                                                               ->  Seq Scan on plt1_e_p3 t3_2
-(44 rows)
+(29 rows)
 
 SELECT avg(t1.a), avg(t2.b), avg(t3.a + t3.b), t1.c, t2.c, t3.c FROM plt1 t1, plt2 t2, plt1_e t3 WHERE t1.c = t2.c AND ltrim(t3.c, 'A') = t1.c GROUP BY t1.c, t2.c, t3.c ORDER BY t1.c, t2.c, t3.c;
          avg          |         avg          |          avg          |  c   |  c   |   c   
@@ -1406,36 +1198,27 @@ SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a = 1 AND a = 2) t1
 
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a = 1 AND a = 2) t1 RIGHT JOIN prt2 t2 ON t1.a = t2.b, prt1 t3 WHERE t2.b = t3.a;
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Hash Left Join
    Hash Cond: (b = a)
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-         ->  Append
-               ->  Hash Join
-                     Hash Cond: (t3.a = t2.b)
-                     ->  Seq Scan on prt1_p1 t3
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: b
-                                 ->  Seq Scan on prt2_p1 t2
-               ->  Hash Join
-                     Hash Cond: (t3_1.a = t2_1.b)
-                     ->  Seq Scan on prt1_p2 t3_1
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: b
-                                 ->  Seq Scan on prt2_p2 t2_1
-               ->  Nested Loop
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Distribute results by H: b
+         ->  Hash Join
+               Hash Cond: (a = t2.b)
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     ->  Append
+                           ->  Seq Scan on prt1_p1 t3
+                           ->  Seq Scan on prt1_p2 t3_1
+                           ->  Seq Scan on prt1_p3 t3_2
+               ->  Hash
+                     ->  Append
+                           ->  Seq Scan on prt2_p1 t2
+                           ->  Seq Scan on prt2_p2 t2_1
                            ->  Seq Scan on prt2_p3 t2_2
-                     ->  Index Only Scan using iprt1_p3_a on prt1_p3 t3_2
-                           Index Cond: (a = t2_2.b)
    ->  Hash
          ->  Result
                One-Time Filter: false
-(27 rows)
+(18 rows)
 
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1 WHERE a = 1 AND a = 2) t1 FULL JOIN prt2 t2 ON t1.a = t2.b WHERE t2.a = 0 ORDER BY t1.a, t2.b;
@@ -1485,8 +1268,8 @@ ANALYZE pht1_e;
 -- test partition matching with N-way join
 EXPLAIN (COSTS OFF)
 SELECT avg(t1.a), avg(t2.b), avg(t3.a + t3.b), t1.c, t2.c, t3.c FROM pht1 t1, pht2 t2, pht1_e t3 WHERE t1.c = t2.c AND ltrim(t3.c, 'A') = t1.c GROUP BY t1.c, t2.c, t3.c ORDER BY t1.c, t2.c, t3.c;
-                                                   QUERY PLAN                                                    
------------------------------------------------------------------------------------------------------------------
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Finalize GroupAggregate
          Group Key: c, c, c
@@ -1495,43 +1278,28 @@ SELECT avg(t1.a), avg(t2.b), avg(t3.a + t3.b), t1.c, t2.c, t3.c FROM pht1 t1, ph
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                      Distribute results by H: c
                      ->  Partial HashAggregate
-                           Group Key: t1.c, t2.c, t3.c
-                           ->  Result
-                                 ->  Append
-                                       ->  Hash Join
-                                             Hash Cond: (t1.c = t2.c)
+                           Group Key: c, c, t3.c
+                           ->  Hash Join
+                                 Hash Cond: (c = c)
+                                 ->  Hash Join
+                                       Hash Cond: (ltrim(t3.c, 'A'::text) = c)
+                                       ->  Append
+                                             ->  Seq Scan on pht1_e_p1 t3
+                                             ->  Seq Scan on pht1_e_p2 t3_1
+                                             ->  Seq Scan on pht1_e_p3 t3_2
+                                       ->  Hash
                                              ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                                   ->  Seq Scan on pht1_p1 t1
-                                             ->  Hash
-                                                   ->  Hash Join
-                                                         Hash Cond: (t2.c = ltrim(t3.c, 'A'::text))
-                                                         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                                               ->  Seq Scan on pht2_p1 t2
-                                                         ->  Hash
-                                                               ->  Seq Scan on pht1_e_p1 t3
-                                       ->  Hash Join
-                                             Hash Cond: (t1_1.c = t2_1.c)
-                                             ->  Hash Join
-                                                   Hash Cond: (t1_1.c = ltrim(t3_1.c, 'A'::text))
-                                                   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                                         ->  Seq Scan on pht1_p2 t1_1
-                                                   ->  Hash
-                                                         ->  Seq Scan on pht1_e_p2 t3_1
-                                             ->  Hash
-                                                   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                                   ->  Append
+                                                         ->  Seq Scan on pht2_p1 t2
                                                          ->  Seq Scan on pht2_p2 t2_1
-                                       ->  Hash Join
-                                             Hash Cond: (t1_2.c = t2_2.c)
-                                             ->  Hash Join
-                                                   Hash Cond: (t1_2.c = ltrim(t3_2.c, 'A'::text))
-                                                   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                                         ->  Seq Scan on pht1_p3 t1_2
-                                                   ->  Hash
-                                                         ->  Seq Scan on pht1_e_p3 t3_2
-                                             ->  Hash
-                                                   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                                          ->  Seq Scan on pht2_p3 t2_2
-(44 rows)
+                                 ->  Hash
+                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                             ->  Append
+                                                   ->  Seq Scan on pht1_p1 t1
+                                                   ->  Seq Scan on pht1_p2 t1_1
+                                                   ->  Seq Scan on pht1_p3 t1_2
+(29 rows)
 
 SELECT avg(t1.a), avg(t2.b), avg(t3.a + t3.b), t1.c, t2.c, t3.c FROM pht1 t1, pht2 t2, pht1_e t3 WHERE t1.c = t2.c AND ltrim(t3.c, 'A') = t1.c GROUP BY t1.c, t2.c, t3.c ORDER BY t1.c, t2.c, t3.c;
          avg          |         avg          |          avg          |  c   |  c   |   c   
@@ -1576,42 +1344,31 @@ ANALYZE prt2_l;
 -- inner join, qual covering only top-level partitions
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1, prt2_l t2 WHERE t1.a = t2.b AND t1.b = 0 ORDER BY t1.a, t2.b;
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a
-         ->  Append
-               ->  Hash Join
-                     Hash Cond: (t2.b = t1.a)
+         Sort Key: a
+         ->  Hash Join
+               Hash Cond: (t2.b = a)
+               ->  Append
                      ->  Seq Scan on prt2_l_p1 t2
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     ->  Seq Scan on prt2_l_p2_p1 t2_1
+                     ->  Seq Scan on prt2_l_p2_p2 t2_2
+                     ->  Seq Scan on prt2_l_p3_p1 t2_3
+                     ->  Seq Scan on prt2_l_p3_p2 t2_4
+               ->  Hash
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           ->  Append
                                  ->  Seq Scan on prt1_l_p1 t1
                                        Filter: (b = 0)
-               ->  Hash Join
-                     Hash Cond: (t2_1.b = a)
-                     ->  Append
-                           ->  Seq Scan on prt2_l_p2_p1 t2_1
-                           ->  Seq Scan on prt2_l_p2_p2 t2_2
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 ->  Append
-                                       ->  Seq Scan on prt1_l_p2_p1 t1_1
-                                             Filter: (b = 0)
-                                       ->  Seq Scan on prt1_l_p2_p2 t1_2
-                                             Filter: (b = 0)
-               ->  Nested Loop
-                     Join Filter: (a = t2_3.b)
-                     ->  Append
-                           ->  Seq Scan on prt2_l_p3_p1 t2_3
-                           ->  Seq Scan on prt2_l_p3_p2 t2_4
-                     ->  Materialize
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 ->  Append
-                                       ->  Seq Scan on prt1_l_p3_p1 t1_3
-                                             Filter: (b = 0)
-(33 rows)
+                                 ->  Seq Scan on prt1_l_p2_p1 t1_1
+                                       Filter: (b = 0)
+                                 ->  Seq Scan on prt1_l_p2_p2 t1_2
+                                       Filter: (b = 0)
+                                 ->  Seq Scan on prt1_l_p3_p1 t1_3
+                                       Filter: (b = 0)
+(22 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1, prt2_l t2 WHERE t1.a = t2.b AND t1.b = 0 ORDER BY t1.a, t2.b;
   a  |  c   |  b  |  c   
@@ -1625,50 +1382,34 @@ SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1, prt2_l t2 WHERE t1.a = t2.b AND t1
 -- left join
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1 LEFT JOIN prt2_l t2 ON t1.a = t2.b AND t1.c = t2.c WHERE t1.b = 0 ORDER BY t1.a, t2.b;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a, t2.b
-         ->  Append
-               ->  Hash Right Join
-                     Hash Cond: ((t2.b = t1.a) AND ((t2.c)::text = (t1.c)::text))
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Distribute results by H: b
+         Sort Key: a, b
+         ->  Hash Right Join
+               Hash Cond: ((b = a) AND ((c)::text = (c)::text))
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: b
+                     ->  Append
                            ->  Seq Scan on prt2_l_p1 t2
-                     ->  Hash
-                           ->  Seq Scan on prt1_l_p1 t1
-                                 Filter: (b = 0)
-               ->  Hash Right Join
-                     Hash Cond: ((t2_1.b = t1_1.a) AND ((t2_1.c)::text = (t1_1.c)::text))
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Distribute results by H: b
                            ->  Seq Scan on prt2_l_p2_p1 t2_1
-                     ->  Hash
-                           ->  Seq Scan on prt1_l_p2_p1 t1_1
-                                 Filter: (b = 0)
-               ->  Hash Right Join
-                     Hash Cond: ((t2_2.b = t1_2.a) AND ((t2_2.c)::text = (t1_2.c)::text))
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Distribute results by H: b
                            ->  Seq Scan on prt2_l_p2_p2 t2_2
-                     ->  Hash
-                           ->  Seq Scan on prt1_l_p2_p2 t1_2
-                                 Filter: (b = 0)
-               ->  Nested Loop Left Join
-                     Join Filter: ((a = b) AND ((c)::text = (c)::text))
+                           ->  Seq Scan on prt2_l_p3_p1 t2_3
+                           ->  Seq Scan on prt2_l_p3_p2 t2_4
+               ->  Hash
                      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                            Distribute results by H: a
                            ->  Append
+                                 ->  Seq Scan on prt1_l_p1 t1
+                                       Filter: (b = 0)
+                                 ->  Seq Scan on prt1_l_p2_p1 t1_1
+                                       Filter: (b = 0)
+                                 ->  Seq Scan on prt1_l_p2_p2 t1_2
+                                       Filter: (b = 0)
                                  ->  Seq Scan on prt1_l_p3_p1 t1_3
                                        Filter: (b = 0)
-                     ->  Materialize
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: b
-                                 ->  Append
-                                       ->  Seq Scan on prt2_l_p3_p1 t2_3
-                                       ->  Seq Scan on prt2_l_p3_p2 t2_4
-(41 rows)
+(25 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1 LEFT JOIN prt2_l t2 ON t1.a = t2.b AND t1.c = t2.c WHERE t1.b = 0 ORDER BY t1.a, t2.b;
   a  |  c   |  b  |  c   
@@ -1690,50 +1431,34 @@ SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1 LEFT JOIN prt2_l t2 ON t1.a = t2.b 
 -- right join
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1 RIGHT JOIN prt2_l t2 ON t1.a = t2.b AND t1.c = t2.c WHERE t2.a = 0 ORDER BY t1.a, t2.b;
-                                            QUERY PLAN                                            
---------------------------------------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: t1.a, t2.b
-         ->  Result
-               ->  Append
-                     ->  Hash Right Join
-                           Hash Cond: ((t1.a = t2.b) AND ((t1.c)::text = (t2.c)::text))
+         Sort Key: a, b
+         ->  Hash Right Join
+               Hash Cond: ((a = b) AND ((c)::text = (c)::text))
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: a
+                     ->  Append
                            ->  Seq Scan on prt1_l_p1 t1
-                           ->  Hash
-                                 ->  Remote Subquery Scan on all (datanode_2)
-                                       Distribute results by H: b
-                                       ->  Seq Scan on prt2_l_p1 t2
-                                             Filter: (a = 0)
-                     ->  Nested Loop Left Join
-                           Join Filter: ((t1_1.a = t2_1.b) AND ((t1_1.c)::text = (t2_1.c)::text))
-                           ->  Remote Subquery Scan on all (datanode_2)
-                                 Distribute results by H: b
+                           ->  Seq Scan on prt1_l_p2_p1 t1_1
+                           ->  Seq Scan on prt1_l_p2_p2 t1_2
+                           ->  Seq Scan on prt1_l_p3_p1 t1_3
+                           ->  Seq Scan on prt1_l_p3_p2 t1_4
+               ->  Hash
+                     ->  Remote Subquery Scan on all (datanode_2)
+                           Distribute results by H: b
+                           ->  Append
+                                 ->  Seq Scan on prt2_l_p1 t2
+                                       Filter: (a = 0)
                                  ->  Seq Scan on prt2_l_p2_p1 t2_1
                                        Filter: (a = 0)
-                           ->  Seq Scan on prt1_l_p2_p1 t1_1
-                     ->  Hash Right Join
-                           Hash Cond: ((t1_2.a = t2_2.b) AND ((t1_2.c)::text = (t2_2.c)::text))
-                           ->  Seq Scan on prt1_l_p2_p2 t1_2
-                           ->  Hash
-                                 ->  Remote Subquery Scan on all (datanode_2)
-                                       Distribute results by H: b
-                                       ->  Seq Scan on prt2_l_p2_p2 t2_2
-                                             Filter: (a = 0)
-                     ->  Nested Loop Left Join
-                           Join Filter: ((a = b) AND ((c)::text = (c)::text))
-                           ->  Remote Subquery Scan on all (datanode_2)
-                                 Distribute results by H: b
-                                 ->  Append
-                                       ->  Seq Scan on prt2_l_p3_p1 t2_3
-                                             Filter: (a = 0)
-                           ->  Materialize
-                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                       Distribute results by H: a
-                                       ->  Append
-                                             ->  Seq Scan on prt1_l_p3_p1 t1_3
-                                             ->  Seq Scan on prt1_l_p3_p2 t1_4
-(41 rows)
+                                 ->  Seq Scan on prt2_l_p2_p2 t2_2
+                                       Filter: (a = 0)
+                                 ->  Seq Scan on prt2_l_p3_p1 t2_3
+                                       Filter: (a = 0)
+(25 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1 RIGHT JOIN prt2_l t2 ON t1.a = t2.b AND t1.c = t2.c WHERE t2.a = 0 ORDER BY t1.a, t2.b;
   a  |  c   |  b  |  c   
@@ -1751,53 +1476,37 @@ SELECT t1.a, t1.c, t2.b, t2.c FROM prt1_l t1 RIGHT JOIN prt2_l t2 ON t1.a = t2.b
 -- full join
 EXPLAIN (COSTS OFF)
 SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1_l WHERE prt1_l.b = 0) t1 FULL JOIN (SELECT * FROM prt2_l WHERE prt2_l.a = 0) t2 ON (t1.a = t2.b AND t1.c = t2.c) ORDER BY t1.a, t2.b;
-                                                        QUERY PLAN                                                        
---------------------------------------------------------------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Sort
-         Sort Key: prt1_l_p1.a, prt2_l_p1.b
-         ->  Append
-               ->  Hash Full Join
-                     Hash Cond: ((prt1_l_p1.a = prt2_l_p1.b) AND ((prt1_l_p1.c)::text = (prt2_l_p1.c)::text))
-                     ->  Seq Scan on prt1_l_p1
-                           Filter: (b = 0)
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_2)
-                                 Distribute results by H: b
+         Sort Key: a, b
+         ->  Hash Full Join
+               Hash Cond: ((a = b) AND ((c)::text = (c)::text))
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: a
+                     ->  Append
+                           ->  Seq Scan on prt1_l_p1
+                                 Filter: (b = 0)
+                           ->  Seq Scan on prt1_l_p2_p1
+                                 Filter: (b = 0)
+                           ->  Seq Scan on prt1_l_p2_p2
+                                 Filter: (b = 0)
+                           ->  Seq Scan on prt1_l_p3_p1
+                                 Filter: (b = 0)
+               ->  Hash
+                     ->  Remote Subquery Scan on all (datanode_2)
+                           Distribute results by H: b
+                           ->  Append
                                  ->  Seq Scan on prt2_l_p1
                                        Filter: (a = 0)
-               ->  Hash Full Join
-                     Hash Cond: ((prt1_l_p2_p1.a = prt2_l_p2_p1.b) AND ((prt1_l_p2_p1.c)::text = (prt2_l_p2_p1.c)::text))
-                     ->  Seq Scan on prt1_l_p2_p1
-                           Filter: (b = 0)
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_2)
-                                 Distribute results by H: b
                                  ->  Seq Scan on prt2_l_p2_p1
                                        Filter: (a = 0)
-               ->  Hash Full Join
-                     Hash Cond: ((prt1_l_p2_p2.a = prt2_l_p2_p2.b) AND ((prt1_l_p2_p2.c)::text = (prt2_l_p2_p2.c)::text))
-                     ->  Seq Scan on prt1_l_p2_p2
-                           Filter: (b = 0)
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_2)
-                                 Distribute results by H: b
                                  ->  Seq Scan on prt2_l_p2_p2
                                        Filter: (a = 0)
-               ->  Hash Full Join
-                     Hash Cond: ((a = b) AND ((c)::text = (c)::text))
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Distribute results by H: a
-                           ->  Append
-                                 ->  Seq Scan on prt1_l_p3_p1
-                                       Filter: (b = 0)
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_2)
-                                 Distribute results by H: b
-                                 ->  Append
-                                       ->  Seq Scan on prt2_l_p3_p1
-                                             Filter: (a = 0)
-(44 rows)
+                                 ->  Seq Scan on prt2_l_p3_p1
+                                       Filter: (a = 0)
+(28 rows)
 
 SELECT t1.a, t1.c, t2.b, t2.c FROM (SELECT * FROM prt1_l WHERE prt1_l.b = 0) t1 FULL JOIN (SELECT * FROM prt2_l WHERE prt2_l.a = 0) t2 ON (t1.a = t2.b AND t1.c = t2.c) ORDER BY t1.a, t2.b;
   a  |  c   |  b  |  c   
@@ -1825,24 +1534,66 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM prt1_l t1 LEFT JOIN LATERAL
 			  (SELECT t2.a AS t2a, t2.c AS t2c, t2.b AS t2b, t3.b AS t3b, least(t1.a,t2.a,t3.b) FROM prt1_l t2 JOIN prt2_l t3 ON (t2.a = t3.b AND t2.c = t3.c)) ss
 			  ON t1.a = ss.t2a AND t1.c = ss.t2c WHERE t1.b = 0 ORDER BY t1.a;
-ERROR:  could not devise a query plan for the given query
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   ->  Sort
+         Sort Key: a
+         ->  Nested Loop Left Join
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: a
+                     ->  Append
+                           ->  Seq Scan on prt1_l_p1 t1
+                                 Filter: (b = 0)
+                           ->  Seq Scan on prt1_l_p2_p1 t1_1
+                                 Filter: (b = 0)
+                           ->  Seq Scan on prt1_l_p2_p2 t1_2
+                                 Filter: (b = 0)
+                           ->  Seq Scan on prt1_l_p3_p1 t1_3
+                                 Filter: (b = 0)
+               ->  Materialize
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Distribute results by H: a
+                           ->  Hash Join
+                                 Hash Cond: ((b = t2.a) AND ((c)::text = (t2.c)::text))
+                                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                       ->  Append
+                                             ->  Seq Scan on prt2_l_p1 t3
+                                             ->  Seq Scan on prt2_l_p2_p1 t3_1
+                                             ->  Seq Scan on prt2_l_p2_p2 t3_2
+                                             ->  Seq Scan on prt2_l_p3_p1 t3_3
+                                             ->  Seq Scan on prt2_l_p3_p2 t3_4
+                                 ->  Hash
+                                       ->  Append
+                                             ->  Seq Scan on prt1_l_p1 t2
+                                                   Filter: ((a = a) AND ((c)::text = (c)::text))
+                                             ->  Seq Scan on prt1_l_p2_p1 t2_1
+                                                   Filter: ((a = a) AND ((c)::text = (c)::text))
+                                             ->  Seq Scan on prt1_l_p2_p2 t2_2
+                                                   Filter: ((a = a) AND ((c)::text = (c)::text))
+                                             ->  Seq Scan on prt1_l_p3_p1 t2_3
+                                                   Filter: ((a = a) AND ((c)::text = (c)::text))
+                                             ->  Seq Scan on prt1_l_p3_p2 t2_4
+                                                   Filter: ((a = a) AND ((c)::text = (c)::text))
+(39 rows)
+
 SELECT * FROM prt1_l t1 LEFT JOIN LATERAL
 			  (SELECT t2.a AS t2a, t2.c AS t2c, t2.b AS t2b, t3.b AS t3b, least(t1.a,t2.a,t3.b) FROM prt1_l t2 JOIN prt2_l t3 ON (t2.a = t3.b AND t2.c = t3.c)) ss
 			  ON t1.a = ss.t2a AND t1.c = ss.t2c WHERE t1.b = 0 ORDER BY t1.a;
-  a  | b |  c   | t2a | t2c  | t2b | t3b | least
+  a  | b |  c   | t2a | t2c  | t2b | t3b | least 
 -----+---+------+-----+------+-----+-----+-------
    0 | 0 | 0000 |   0 | 0000 |   0 |   0 |     0
-  50 | 0 | 0002 |     |      |     |     |
- 100 | 0 | 0000 |     |      |     |     |
+  50 | 0 | 0002 |     |      |     |     |      
+ 100 | 0 | 0000 |     |      |     |     |      
  150 | 0 | 0002 | 150 | 0002 |   0 | 150 |   150
- 200 | 0 | 0000 |     |      |     |     |
- 250 | 0 | 0002 |     |      |     |     |
+ 200 | 0 | 0000 |     |      |     |     |      
+ 250 | 0 | 0002 |     |      |     |     |      
  300 | 0 | 0000 | 300 | 0000 |   0 | 300 |   300
- 350 | 0 | 0002 |     |      |     |     |
- 400 | 0 | 0000 |     |      |     |     |
+ 350 | 0 | 0002 |     |      |     |     |      
+ 400 | 0 | 0000 |     |      |     |     |      
  450 | 0 | 0002 | 450 | 0002 |   0 | 450 |   450
- 500 | 0 | 0000 |     |      |     |     |
- 550 | 0 | 0002 |     |      |     |     |
+ 500 | 0 | 0000 |     |      |     |     |      
+ 550 | 0 | 0002 |     |      |     |     |      
 (12 rows)
 
 -- join with one side empty
@@ -1914,34 +1665,25 @@ SELECT t1.a, t1.c, t2.b, t2.c FROM prt1 t1, prt4_n t2, prt2 t3 WHERE t1.a = t2.a
 -----------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Hash Join
-         Hash Cond: (t1.a = t2.a)
+         Hash Cond: (t2.a = t1.a)
          ->  Append
-               ->  Hash Join
-                     Hash Cond: (t1.a = t3.b)
-                     ->  Seq Scan on prt1_p1 t1
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: b
-                                 ->  Seq Scan on prt2_p1 t3
-               ->  Hash Join
-                     Hash Cond: (t1_1.a = t3_1.b)
-                     ->  Seq Scan on prt1_p2 t1_1
-                     ->  Hash
-                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Distribute results by H: b
-                                 ->  Seq Scan on prt2_p2 t3_1
-               ->  Nested Loop
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Distribute results by H: b
-                           ->  Seq Scan on prt2_p3 t3_2
-                     ->  Index Scan using iprt1_p3_a on prt1_p3 t1_2
-                           Index Cond: (a = t3_2.b)
+               ->  Seq Scan on prt4_n_p1 t2
+               ->  Seq Scan on prt4_n_p2 t2_1
+               ->  Seq Scan on prt4_n_p3 t2_2
          ->  Hash
-               ->  Append
-                     ->  Seq Scan on prt4_n_p1 t2
-                     ->  Seq Scan on prt4_n_p2 t2_1
-                     ->  Seq Scan on prt4_n_p3 t2_2
-(29 rows)
+               ->  Hash Join
+                     Hash Cond: (t1.a = b)
+                     ->  Append
+                           ->  Seq Scan on prt1_p1 t1
+                           ->  Seq Scan on prt1_p2 t1_1
+                           ->  Seq Scan on prt1_p3 t1_2
+                     ->  Hash
+                           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                 ->  Append
+                                       ->  Seq Scan on prt2_p1 t3
+                                       ->  Seq Scan on prt2_p2 t3_1
+                                       ->  Seq Scan on prt2_p3 t3_2
+(20 rows)
 
 -- partition-wise join can not be applied if there are no equi-join conditions
 -- between partition keys

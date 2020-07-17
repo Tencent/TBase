@@ -4,7 +4,7 @@
 --
 
 -- Enable partition-wise join, which by default is disabled.
-SET enable_partition_wise_join to true;
+--SET enable_partition_wise_join to true;
 
 --
 -- partitioned by a single column
