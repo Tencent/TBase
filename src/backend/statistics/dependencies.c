@@ -909,159 +909,166 @@ find_strongest_dependency(StatisticExtInfo *stats, MVDependencies *dependencies,
  */
 Selectivity
 dependencies_clauselist_selectivity(PlannerInfo *root,
-                                    List *clauses,
-                                    int varRelid,
-                                    JoinType jointype,
-                                    SpecialJoinInfo *sjinfo,
-                                    RelOptInfo *rel,
-                                    Bitmapset **estimatedclauses)
-{// #lizard forgives
-    Selectivity s1 = 1.0;
-    ListCell   *l;
-    Bitmapset  *clauses_attnums = NULL;
-    StatisticExtInfo *stat;
-    MVDependencies *dependencies;
-    AttrNumber *list_attnums;
-    int            listidx;
+									List *clauses,
+									int varRelid,
+									JoinType jointype,
+									SpecialJoinInfo *sjinfo,
+									RelOptInfo *rel,
+									Bitmapset **estimatedclauses)
+{
+	Selectivity s1 = 1.0;
+	ListCell   *l;
+	Bitmapset  *clauses_attnums = NULL;
+	StatisticExtInfo *stat;
+	MVDependencies *dependencies;
+	AttrNumber *list_attnums;
+	int			listidx;
 
-    /* check if there's any stats that might be useful for us. */
-    if (!has_stats_of_kind(rel->statlist, STATS_EXT_DEPENDENCIES))
-        return 1.0;
+	/* check if there's any stats that might be useful for us. */
+	if (!has_stats_of_kind(rel->statlist, STATS_EXT_DEPENDENCIES))
+		return 1.0;
 
-    list_attnums = (AttrNumber *) palloc(sizeof(AttrNumber) *
-                                         list_length(clauses));
+	list_attnums = (AttrNumber *) palloc(sizeof(AttrNumber) *
+										 list_length(clauses));
 
-    /*
-     * Pre-process the clauses list to extract the attnums seen in each item.
-     * We need to determine if there's any clauses which will be useful for
-     * dependency selectivity estimations. Along the way we'll record all of
-     * the attnums for each clause in a list which we'll reference later so we
-     * don't need to repeat the same work again. We'll also keep track of all
-     * attnums seen.
-     */
-    listidx = 0;
-    foreach(l, clauses)
-    {
-        Node       *clause = (Node *) lfirst(l);
-        AttrNumber    attnum;
+	/*
+	 * Pre-process the clauses list to extract the attnums seen in each item.
+	 * We need to determine if there's any clauses which will be useful for
+	 * dependency selectivity estimations. Along the way we'll record all of
+	 * the attnums for each clause in a list which we'll reference later so we
+	 * don't need to repeat the same work again. We'll also keep track of all
+	 * attnums seen.
+	 */
+	listidx = 0;
+	foreach(l, clauses)
+	{
+		Node	   *clause = (Node *) lfirst(l);
+		AttrNumber	attnum;
 
-        if (dependency_is_compatible_clause(clause, rel->relid, &attnum))
-        {
-            list_attnums[listidx] = attnum;
-            clauses_attnums = bms_add_member(clauses_attnums, attnum);
-        }
-        else
-            list_attnums[listidx] = InvalidAttrNumber;
+#ifdef __TBASE__
+		/* Could eliminated by the prior subset dependency */
+		if (bms_is_member(listidx, *estimatedclauses))
+		{
+			list_attnums[listidx] = InvalidAttrNumber;
+		}
+#endif
+		else if (dependency_is_compatible_clause(clause, rel->relid, &attnum))
+		{
+			list_attnums[listidx] = attnum;
+			clauses_attnums = bms_add_member(clauses_attnums, attnum);
+		}
+		else
+			list_attnums[listidx] = InvalidAttrNumber;
 
-        listidx++;
-    }
+		listidx++;
+	}
 
-    /*
-     * If there's not at least two distinct attnums then reject the whole list
-     * of clauses. We must return 1.0 so the calling function's selectivity is
-     * unaffected.
-     */
-    if (bms_num_members(clauses_attnums) < 2)
-    {
-        pfree(list_attnums);
-        return 1.0;
-    }
+	/*
+	 * If there's not at least two distinct attnums then reject the whole list
+	 * of clauses. We must return 1.0 so the calling function's selectivity is
+	 * unaffected.
+	 */
+	if (bms_num_members(clauses_attnums) < 2)
+	{
+		pfree(list_attnums);
+		return 1.0;
+	}
 
-    /* find the best suited statistics object for these attnums */
-    stat = choose_best_statistics(rel->statlist, clauses_attnums,
-                                  STATS_EXT_DEPENDENCIES);
+	/* find the best suited statistics object for these attnums */
+	stat = choose_best_statistics(rel->statlist, clauses_attnums,
+								  STATS_EXT_DEPENDENCIES);
 
-    /* if no matching stats could be found then we've nothing to do */
-    if (!stat)
-    {
-        pfree(list_attnums);
-        return 1.0;
-    }
+	/* if no matching stats could be found then we've nothing to do */
+	if (!stat)
+	{
+		pfree(list_attnums);
+		return 1.0;
+	}
 
-    /* load the dependency items stored in the statistics object */
-    dependencies = statext_dependencies_load(stat->statOid);
+	/* load the dependency items stored in the statistics object */
+	dependencies = statext_dependencies_load(stat->statOid);
 
-    /*
-     * Apply the dependencies recursively, starting with the widest/strongest
-     * ones, and proceeding to the smaller/weaker ones. At the end of each
-     * round we factor in the selectivity of clauses on the implied attribute,
-     * and remove the clauses from the list.
-     */
-    while (true)
-    {
-        Selectivity s2 = 1.0;
-        MVDependency *dependency;
+	/*
+	 * Apply the dependencies recursively, starting with the widest/strongest
+	 * ones, and proceeding to the smaller/weaker ones. At the end of each
+	 * round we factor in the selectivity of clauses on the implied attribute,
+	 * and remove the clauses from the list.
+	 */
+	while (true)
+	{
+		Selectivity s2 = 1.0;
+		MVDependency *dependency;
 
-        /* the widest/strongest dependency, fully matched by clauses */
-        dependency = find_strongest_dependency(stat, dependencies,
-                                               clauses_attnums);
+		/* the widest/strongest dependency, fully matched by clauses */
+		dependency = find_strongest_dependency(stat, dependencies,
+											   clauses_attnums);
 
-        /* if no suitable dependency was found, we're done */
-        if (!dependency)
-            break;
+		/* if no suitable dependency was found, we're done */
+		if (!dependency)
+			break;
 
-        /*
-         * We found an applicable dependency, so find all the clauses on the
-         * implied attribute - with dependency (a,b => c) we look for clauses
-         * on 'c'.
-         */
-        listidx = -1;
-        foreach(l, clauses)
-        {
-            Node       *clause;
+		/*
+		 * We found an applicable dependency, so find all the clauses on the
+		 * implied attribute - with dependency (a,b => c) we look for clauses
+		 * on 'c'.
+		 */
+		listidx = -1;
+		foreach(l, clauses)
+		{
+			Node	   *clause;
 
-            listidx++;
+			listidx++;
 
-            /*
-             * Skip incompatible clauses, and ones we've already estimated on.
-             */
-            if (list_attnums[listidx] == InvalidAttrNumber ||
-                bms_is_member(listidx, *estimatedclauses))
-                continue;
+			/*
+			 * Skip incompatible clauses, and ones we've already estimated on.
+			 */
+			if (list_attnums[listidx] == InvalidAttrNumber ||
+				bms_is_member(listidx, *estimatedclauses))
+				continue;
 
-            /*
-             * Technically we could find more than one clause for a given
-             * attnum. Since these clauses must be equality clauses, we choose
-             * to only take the selectivity estimate from the final clause in
-             * the list for this attnum. If the attnum happens to be compared
-             * to a different Const in another clause then no rows will match
-             * anyway. If it happens to be compared to the same Const, then
-             * ignoring the additional clause is just the thing to do.
-             */
-            if (dependency_implies_attribute(dependency,
-                                             list_attnums[listidx]))
-            {
-                clause = (Node *) lfirst(l);
+			/*
+			 * Technically we could find more than one clause for a given
+			 * attnum. Since these clauses must be equality clauses, we choose
+			 * to only take the selectivity estimate from the final clause in
+			 * the list for this attnum. If the attnum happens to be compared
+			 * to a different Const in another clause then no rows will match
+			 * anyway. If it happens to be compared to the same Const, then
+			 * ignoring the additional clause is just the thing to do.
+			 */
+			if (dependency_implies_attribute(dependency,
+											 list_attnums[listidx]))
+			{
+				clause = (Node *) lfirst(l);
 
-                s2 = clause_selectivity(root, clause, varRelid, jointype,
-                                        sjinfo);
+				s2 = clause_selectivity(root, clause, varRelid, jointype,
+										sjinfo);
 
-                /* mark this one as done, so we don't touch it again. */
-                *estimatedclauses = bms_add_member(*estimatedclauses, listidx);
+				/* mark this one as done, so we don't touch it again. */
+				*estimatedclauses = bms_add_member(*estimatedclauses, listidx);
 
-                /*
-                 * Mark that we've got and used the dependency on this clause.
-                 * We'll want to ignore this when looking for the next
-                 * strongest dependency above.
-                 */
-                clauses_attnums = bms_del_member(clauses_attnums,
-                                                 list_attnums[listidx]);
-            }
-        }
+				/*
+				 * Mark that we've got and used the dependency on this clause.
+				 * We'll want to ignore this when looking for the next
+				 * strongest dependency above.
+				 */
+				clauses_attnums = bms_del_member(clauses_attnums,
+												 list_attnums[listidx]);
+			}
+		}
 
-        /*
-         * Now factor in the selectivity for all the "implied" clauses into
-         * the final one, using this formula:
-         *
-         * P(a,b) = P(a) * (f + (1-f) * P(b))
-         *
-         * where 'f' is the degree of validity of the dependency.
-         */
-        s1 *= (dependency->degree + (1 - dependency->degree) * s2);
-    }
+		/*
+		 * Now factor in the selectivity for all the "implied" clauses into
+		 * the final one, using this formula:
+		 *
+		 * P(a,b) = P(a) * (f + (1-f) * P(b))
+		 *
+		 * where 'f' is the degree of validity of the dependency.
+		 */
+		s1 *= (dependency->degree + (1 - dependency->degree) * s2);
+	}
 
-    pfree(dependencies);
-    pfree(list_attnums);
+	pfree(dependencies);
+	pfree(list_attnums);
 
-    return s1;
+	return s1;
 }

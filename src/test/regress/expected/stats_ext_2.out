@@ -656,4 +656,99 @@ EXPLAIN (COSTS OFF)
                Index Cond: ((a = 1) AND (b = '1'::text))
 (7 rows)
 
+-- subset relational tests
+CREATE TABLE subset (
+    filler1 TEXT,
+    filler2 NUMERIC,
+    a INT,
+    b TEXT,
+    filler3 DATE,
+    c INT,
+    d TEXT
+);
+-- a => b, b==c
+INSERT INTO subset (a, b, c, filler1)
+     SELECT mod(i,100), 'prefix_'||mod(i,50), mod(i,50), i FROM generate_series(1,5000) s(i);
+ANALYZE subset;
+-- under-estimates when using only per-column statistics
+EXPLAIN 
+ SELECT count(*) FROM subset WHERE b = 'prefix_1' and c = 1;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=255.01..255.02 rows=1 width=8)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=255.00..255.01 rows=1 width=0)
+         ->  Partial Aggregate  (cost=155.00..155.01 rows=1 width=8)
+               ->  Seq Scan on subset  (cost=0.00..155.00 rows=2 width=0)
+                     Filter: ((b = 'prefix_1'::text) AND (c = 1))
+(5 rows)
+
+SELECT count(*) FROM subset WHERE b = 'prefix_1' and c = 1;
+ count 
+-------
+   100
+(1 row)
+
+-- create dependencies
+CREATE STATISTICS deps_stat (dependencies) ON a, b, c FROM subset;
+ANALYZE subset;
+-- the selectivity is corrected by dependencies stats
+EXPLAIN 
+ SELECT count(*) FROM subset WHERE b = 'prefix_1' and c = 1;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=255.01..255.02 rows=1 width=8)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=255.00..255.01 rows=1 width=0)
+         ->  Partial Aggregate  (cost=155.00..155.01 rows=1 width=8)
+               ->  Seq Scan on subset  (cost=0.00..155.00 rows=100 width=0)
+                     Filter: ((b = 'prefix_1'::text) AND (c = 1))
+(5 rows)
+
+SELECT count(*) FROM subset WHERE b = 'prefix_1' and c = 1;
+ count 
+-------
+   100
+(1 row)
+
+-- dependencies stats does not support operator other than '='
+EXPLAIN 
+ SELECT count(*) FROM subset WHERE b like '%_1' and c = 1;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=255.01..255.02 rows=1 width=8)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=255.00..255.01 rows=1 width=0)
+         ->  Partial Aggregate  (cost=155.00..155.01 rows=1 width=8)
+               ->  Seq Scan on subset  (cost=0.00..155.00 rows=10 width=0)
+                     Filter: ((b ~~ '%_1'::text) AND (c = 1))
+(5 rows)
+
+SELECT count(*) FROM subset WHERE b like '%_1' and c = 1;
+ count 
+-------
+   100
+(1 row)
+
+-- wrong definition, subset stat only support two column
+CREATE STATISTICS subset_stat (subset) ON a, b, c FROM subset;
+ERROR:  subset statistics require exactly 2 columns
+-- create subset stats as user defined hint
+CREATE STATISTICS subset_stat (subset) ON c, b FROM subset;
+ANALYZE subset;
+-- the selectivity is corrected by subset stats
+EXPLAIN 
+ SELECT count(*) FROM subset WHERE b like '%_1' and c = 1;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=255.01..255.02 rows=1 width=8)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=255.00..255.01 rows=1 width=0)
+         ->  Partial Aggregate  (cost=155.00..155.01 rows=1 width=8)
+               ->  Seq Scan on subset  (cost=0.00..155.00 rows=100 width=0)
+                     Filter: ((b ~~ '%_1'::text) AND (c = 1))
+(5 rows)
+
+SELECT count(*) FROM subset WHERE b like '%_1' and c = 1;
+ count 
+-------
+   100
+(1 row)
+
 RESET random_page_cost;

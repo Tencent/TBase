@@ -80,18 +80,30 @@ typedef struct MVDependencies
 
 extern MVNDistinct *statext_ndistinct_load(Oid mvoid);
 extern MVDependencies *statext_dependencies_load(Oid mvoid);
+#ifdef __TBASE__
+extern MVDependencies *statext_subset_load(Oid mvoid);
+#endif
 
 extern void BuildRelationExtStatistics(Relation onerel, double totalrows,
                            int numrows, HeapTuple *rows,
                            int natts, VacAttrStats **vacattrstats);
 extern bool statext_is_kind_built(HeapTuple htup, char kind);
 extern Selectivity dependencies_clauselist_selectivity(PlannerInfo *root,
-                                    List *clauses,
-                                    int varRelid,
-                                    JoinType jointype,
-                                    SpecialJoinInfo *sjinfo,
-                                    RelOptInfo *rel,
-                                    Bitmapset **estimatedclauses);
+									List *clauses,
+									int varRelid,
+									JoinType jointype,
+									SpecialJoinInfo *sjinfo,
+									RelOptInfo *rel,
+									Bitmapset **estimatedclauses);
+#ifdef __TBASE__
+extern Selectivity subset_clauselist_selectivity(PlannerInfo *root,
+									List *clauses,
+									int varRelid,
+									JoinType jointype,
+									SpecialJoinInfo *sjinfo,
+									RelOptInfo *rel,
+									Bitmapset **estimatedclauses);
+#endif
 extern bool has_stats_of_kind(List *stats, char requiredkind);
 extern StatisticExtInfo *choose_best_statistics(List *stats,
                        Bitmapset *attnums, char requiredkind);

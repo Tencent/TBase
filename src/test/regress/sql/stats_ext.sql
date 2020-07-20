@@ -297,4 +297,51 @@ ANALYZE functional_dependencies;
 EXPLAIN (COSTS OFF)
  SELECT * FROM functional_dependencies WHERE a = 1 AND b = '1' AND c = 1;
 
+-- subset relational tests
+CREATE TABLE subset (
+    filler1 TEXT,
+    filler2 NUMERIC,
+    a INT,
+    b TEXT,
+    filler3 DATE,
+    c INT,
+    d TEXT
+);
+
+-- a => b, b==c
+INSERT INTO subset (a, b, c, filler1)
+     SELECT mod(i,100), 'prefix_'||mod(i,50), mod(i,50), i FROM generate_series(1,5000) s(i);
+
+ANALYZE subset;
+
+-- under-estimates when using only per-column statistics
+EXPLAIN 
+ SELECT count(*) FROM subset WHERE b = 'prefix_1' and c = 1;
+SELECT count(*) FROM subset WHERE b = 'prefix_1' and c = 1;
+
+-- create dependencies
+CREATE STATISTICS deps_stat (dependencies) ON a, b, c FROM subset;
+ANALYZE subset;
+
+-- the selectivity is corrected by dependencies stats
+EXPLAIN 
+ SELECT count(*) FROM subset WHERE b = 'prefix_1' and c = 1;
+SELECT count(*) FROM subset WHERE b = 'prefix_1' and c = 1;
+
+-- dependencies stats does not support operator other than '='
+EXPLAIN 
+ SELECT count(*) FROM subset WHERE b like '%_1' and c = 1;
+SELECT count(*) FROM subset WHERE b like '%_1' and c = 1;
+
+-- wrong definition, subset stat only support two column
+CREATE STATISTICS subset_stat (subset) ON a, b, c FROM subset;
+-- create subset stats as user defined hint
+CREATE STATISTICS subset_stat (subset) ON c, b FROM subset;
+ANALYZE subset;
+
+-- the selectivity is corrected by subset stats
+EXPLAIN 
+ SELECT count(*) FROM subset WHERE b like '%_1' and c = 1;
+SELECT count(*) FROM subset WHERE b like '%_1' and c = 1;
+
 RESET random_page_cost;

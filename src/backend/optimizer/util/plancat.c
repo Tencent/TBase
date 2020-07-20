@@ -1405,65 +1405,79 @@ get_relation_constraints(PlannerInfo *root,
 static List *
 get_relation_statistics(RelOptInfo *rel, Relation relation)
 {
-    List       *statoidlist;
-    List       *stainfos = NIL;
-    ListCell   *l;
+	List	   *statoidlist;
+	List	   *stainfos = NIL;
+	ListCell   *l;
 
-    statoidlist = RelationGetStatExtList(relation);
+	statoidlist = RelationGetStatExtList(relation);
 
-    foreach(l, statoidlist)
-    {
-        Oid            statOid = lfirst_oid(l);
-        Form_pg_statistic_ext staForm;
-        HeapTuple    htup;
-        Bitmapset  *keys = NULL;
-        int            i;
+	foreach(l, statoidlist)
+	{
+		Oid			statOid = lfirst_oid(l);
+		Form_pg_statistic_ext staForm;
+		HeapTuple	htup;
+		Bitmapset  *keys = NULL;
+		int			i;
 
-        htup = SearchSysCache1(STATEXTOID, ObjectIdGetDatum(statOid));
-        if (!htup)
-            elog(ERROR, "cache lookup failed for statistics object %u", statOid);
-        staForm = (Form_pg_statistic_ext) GETSTRUCT(htup);
+		htup = SearchSysCache1(STATEXTOID, ObjectIdGetDatum(statOid));
+		if (!htup)
+			elog(ERROR, "cache lookup failed for statistics object %u", statOid);
+		staForm = (Form_pg_statistic_ext) GETSTRUCT(htup);
 
-        /*
-         * First, build the array of columns covered.  This is ultimately
-         * wasted if no stats within the object have actually been built, but
-         * it doesn't seem worth troubling over that case.
-         */
-        for (i = 0; i < staForm->stxkeys.dim1; i++)
-            keys = bms_add_member(keys, staForm->stxkeys.values[i]);
+		/*
+		 * First, build the array of columns covered.  This is ultimately
+		 * wasted if no stats within the object have actually been built, but
+		 * it doesn't seem worth troubling over that case.
+		 */
+		for (i = 0; i < staForm->stxkeys.dim1; i++)
+			keys = bms_add_member(keys, staForm->stxkeys.values[i]);
 
-        /* add one StatisticExtInfo for each kind built */
-        if (statext_is_kind_built(htup, STATS_EXT_NDISTINCT))
-        {
-            StatisticExtInfo *info = makeNode(StatisticExtInfo);
+		/* add one StatisticExtInfo for each kind built */
+		if (statext_is_kind_built(htup, STATS_EXT_NDISTINCT))
+		{
+			StatisticExtInfo *info = makeNode(StatisticExtInfo);
 
-            info->statOid = statOid;
-            info->rel = rel;
-            info->kind = STATS_EXT_NDISTINCT;
-            info->keys = bms_copy(keys);
+			info->statOid = statOid;
+			info->rel = rel;
+			info->kind = STATS_EXT_NDISTINCT;
+			info->keys = bms_copy(keys);
 
-            stainfos = lcons(info, stainfos);
-        }
+			stainfos = lcons(info, stainfos);
+		}
 
-        if (statext_is_kind_built(htup, STATS_EXT_DEPENDENCIES))
-        {
-            StatisticExtInfo *info = makeNode(StatisticExtInfo);
+		if (statext_is_kind_built(htup, STATS_EXT_DEPENDENCIES))
+		{
+			StatisticExtInfo *info = makeNode(StatisticExtInfo);
 
-            info->statOid = statOid;
-            info->rel = rel;
-            info->kind = STATS_EXT_DEPENDENCIES;
-            info->keys = bms_copy(keys);
+			info->statOid = statOid;
+			info->rel = rel;
+			info->kind = STATS_EXT_DEPENDENCIES;
+			info->keys = bms_copy(keys);
 
-            stainfos = lcons(info, stainfos);
-        }
+			stainfos = lcons(info, stainfos);
+		}
 
-        ReleaseSysCache(htup);
-        bms_free(keys);
-    }
+#ifdef __TBASE__
+		if (statext_is_kind_built(htup, STATS_EXT_SUBSET))
+		{
+			StatisticExtInfo *info = makeNode(StatisticExtInfo);
 
-    list_free(statoidlist);
+			info->statOid = statOid;
+			info->rel = rel;
+			info->kind = STATS_EXT_SUBSET;
+			info->keys = bms_copy(keys);
 
-    return stainfos;
+			stainfos = lcons(info, stainfos);
+		}
+#endif
+
+		ReleaseSysCache(htup);
+		bms_free(keys);
+	}
+
+	list_free(statoidlist);
+
+	return stainfos;
 }
 
 /*

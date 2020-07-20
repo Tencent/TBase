@@ -45,10 +45,13 @@ CATALOG(pg_statistic_ext,3381)
     int2vector    stxkeys;        /* array of column keys */
 
 #ifdef CATALOG_VARLEN
-    char        stxkind[1] BKI_FORCE_NOT_NULL;    /* statistic types requested
-                                                 * to build */
-    pg_ndistinct stxndistinct;    /* ndistinct coefficients (serialized) */
-    pg_dependencies stxdependencies;    /* dependencies (serialized) */
+	char		stxkind[1] BKI_FORCE_NOT_NULL;	/* statistic types requested
+												 * to build */
+	pg_ndistinct stxndistinct;	/* ndistinct coefficients (serialized) */
+	pg_dependencies stxdependencies;	/* dependencies (serialized) */
+#ifdef __TBASE__
+	pg_dependencies stxsubset;	/* subset (serialized) */
+#endif
 #endif
 
 } FormData_pg_statistic_ext;
@@ -64,17 +67,27 @@ typedef FormData_pg_statistic_ext *Form_pg_statistic_ext;
  *        compiler constants for pg_statistic_ext
  * ----------------
  */
-#define Natts_pg_statistic_ext                    8
-#define Anum_pg_statistic_ext_stxrelid            1
-#define Anum_pg_statistic_ext_stxname            2
-#define Anum_pg_statistic_ext_stxnamespace        3
-#define Anum_pg_statistic_ext_stxowner            4
-#define Anum_pg_statistic_ext_stxkeys            5
-#define Anum_pg_statistic_ext_stxkind            6
-#define Anum_pg_statistic_ext_stxndistinct        7
-#define Anum_pg_statistic_ext_stxdependencies    8
+#ifdef __TBASE__
+#define Natts_pg_statistic_ext					9
+#else
+#define Natts_pg_statistic_ext					8
+#endif
+#define Anum_pg_statistic_ext_stxrelid			1
+#define Anum_pg_statistic_ext_stxname			2
+#define Anum_pg_statistic_ext_stxnamespace		3
+#define Anum_pg_statistic_ext_stxowner			4
+#define Anum_pg_statistic_ext_stxkeys			5
+#define Anum_pg_statistic_ext_stxkind			6
+#define Anum_pg_statistic_ext_stxndistinct		7
+#define Anum_pg_statistic_ext_stxdependencies	8
+#ifdef __TBASE__
+#define Anum_pg_statistic_ext_stxsubset			9
+#endif
 
-#define STATS_EXT_NDISTINCT            'd'
-#define STATS_EXT_DEPENDENCIES        'f'
+#define STATS_EXT_NDISTINCT			'd'
+#define STATS_EXT_DEPENDENCIES		'f'
+#ifdef __TBASE__
+#define STATS_EXT_SUBSET			's'
+#endif
 
 #endif                            /* PG_STATISTIC_EXT_H */

@@ -40,11 +40,14 @@
  */
 typedef struct StatExtEntry
 {
-    Oid            statOid;        /* OID of pg_statistic_ext entry */
-    char       *schema;            /* statistics object's schema */
-    char       *name;            /* statistics object's name */
-    Bitmapset  *columns;        /* attribute numbers covered by the object */
-    List       *types;            /* 'char' list of enabled statistic kinds */
+	Oid			statOid;		/* OID of pg_statistic_ext entry */
+	char	   *schema;			/* statistics object's schema */
+	char	   *name;			/* statistics object's name */
+	Bitmapset  *columns;		/* attribute numbers covered by the object */
+	List	   *types;			/* 'char' list of enabled statistic kinds */
+#ifdef __TBASE__
+	List	   *orderedColumns;	/* attribute numbers in order of dependency */
+#endif
 } StatExtEntry;
 
 
@@ -52,8 +55,11 @@ static List *fetch_statentries_for_relation(Relation pg_statext, Oid relid);
 static VacAttrStats **lookup_var_attr_stats(Relation rel, Bitmapset *attrs,
                       int nvacatts, VacAttrStats **vacatts);
 static void statext_store(Relation pg_stext, Oid relid,
-              MVNDistinct *ndistinct, MVDependencies *dependencies,
-              VacAttrStats **stats);
+			  MVNDistinct *ndistinct, MVDependencies *dependencies,
+#ifdef __TBASE__
+			  MVDependencies *subset,
+#endif
+			  VacAttrStats **stats);
 
 
 /*
@@ -68,70 +74,83 @@ BuildRelationExtStatistics(Relation onerel, double totalrows,
                            int numrows, HeapTuple *rows,
                            int natts, VacAttrStats **vacattrstats)
 {
-    Relation    pg_stext;
-    ListCell   *lc;
-    List       *stats;
-    MemoryContext cxt;
-    MemoryContext oldcxt;
+	Relation	pg_stext;
+	ListCell   *lc;
+	List	   *stats;
+	MemoryContext cxt;
+	MemoryContext oldcxt;
 
-    cxt = AllocSetContextCreate(CurrentMemoryContext, "stats ext",
-                                ALLOCSET_DEFAULT_SIZES);
-    oldcxt = MemoryContextSwitchTo(cxt);
+	cxt = AllocSetContextCreate(CurrentMemoryContext, "stats ext",
+								ALLOCSET_DEFAULT_SIZES);
+	oldcxt = MemoryContextSwitchTo(cxt);
 
-    pg_stext = heap_open(StatisticExtRelationId, RowExclusiveLock);
-    stats = fetch_statentries_for_relation(pg_stext, RelationGetRelid(onerel));
+	pg_stext = heap_open(StatisticExtRelationId, RowExclusiveLock);
+	stats = fetch_statentries_for_relation(pg_stext, RelationGetRelid(onerel));
 
-    foreach(lc, stats)
-    {
-        StatExtEntry *stat = (StatExtEntry *) lfirst(lc);
-        MVNDistinct *ndistinct = NULL;
-        MVDependencies *dependencies = NULL;
-        VacAttrStats **stats;
-        ListCell   *lc2;
+	foreach(lc, stats)
+	{
+		StatExtEntry *stat = (StatExtEntry *) lfirst(lc);
+		MVNDistinct *ndistinct = NULL;
+		MVDependencies *dependencies = NULL;
+#ifdef __TBASE__
+		MVDependencies *subset = NULL;
+#endif
+		VacAttrStats **stats;
+		ListCell   *lc2;
 
-        /*
-         * Check if we can build these stats based on the column analyzed. If
-         * not, report this fact (except in autovacuum) and move on.
-         */
-        stats = lookup_var_attr_stats(onerel, stat->columns,
-                                      natts, vacattrstats);
-        if (!stats && !IsAutoVacuumWorkerProcess())
-        {
-            ereport(WARNING,
-                    (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                     errmsg("statistics object \"%s.%s\" could not be computed for relation \"%s.%s\"",
-                            stat->schema, stat->name,
-                            get_namespace_name(onerel->rd_rel->relnamespace),
-                            RelationGetRelationName(onerel)),
-                     errtable(onerel)));
-            continue;
-        }
+		/*
+		 * Check if we can build these stats based on the column analyzed. If
+		 * not, report this fact (except in autovacuum) and move on.
+		 */
+		stats = lookup_var_attr_stats(onerel, stat->columns,
+									  natts, vacattrstats);
+		if (!stats && !IsAutoVacuumWorkerProcess())
+		{
+			ereport(WARNING,
+					(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+					 errmsg("statistics object \"%s.%s\" could not be computed for relation \"%s.%s\"",
+							stat->schema, stat->name,
+							get_namespace_name(onerel->rd_rel->relnamespace),
+							RelationGetRelationName(onerel)),
+					 errtable(onerel)));
+			continue;
+		}
 
-        /* check allowed number of dimensions */
-        Assert(bms_num_members(stat->columns) >= 2 &&
-               bms_num_members(stat->columns) <= STATS_MAX_DIMENSIONS);
+		/* check allowed number of dimensions */
+		Assert(bms_num_members(stat->columns) >= 2 &&
+			   bms_num_members(stat->columns) <= STATS_MAX_DIMENSIONS);
 
-        /* compute statistic of each requested type */
-        foreach(lc2, stat->types)
-        {
-            char        t = (char) lfirst_int(lc2);
+		/* compute statistic of each requested type */
+		foreach(lc2, stat->types)
+		{
+			char		t = (char) lfirst_int(lc2);
 
-            if (t == STATS_EXT_NDISTINCT)
-                ndistinct = statext_ndistinct_build(totalrows, numrows, rows,
-                                                    stat->columns, stats);
-            else if (t == STATS_EXT_DEPENDENCIES)
-                dependencies = statext_dependencies_build(numrows, rows,
-                                                          stat->columns, stats);
-        }
+			if (t == STATS_EXT_NDISTINCT)
+				ndistinct = statext_ndistinct_build(totalrows, numrows, rows,
+													stat->columns, stats);
+			else if (t == STATS_EXT_DEPENDENCIES)
+				dependencies = statext_dependencies_build(numrows, rows,
+														  stat->columns, stats);
+#ifdef __TBASE__
+			else if (t == STATS_EXT_SUBSET)
+				subset = statext_subset_build(numrows, stat->orderedColumns);
+#endif
+		}
 
-        /* store the statistics in the catalog */
-        statext_store(pg_stext, stat->statOid, ndistinct, dependencies, stats);
-    }
+		/* store the statistics in the catalog */
+#ifdef __TBASE__
+		statext_store(pg_stext, stat->statOid,
+					  ndistinct, dependencies,
+					  subset, stats);
+#else
+		statext_store(pg_stext, stat->statOid, ndistinct, dependencies, stats);
+#endif
+	}
 
-    heap_close(pg_stext, RowExclusiveLock);
+	heap_close(pg_stext, RowExclusiveLock);
 
-    MemoryContextSwitchTo(oldcxt);
-    MemoryContextDelete(cxt);
+	MemoryContextSwitchTo(oldcxt);
+	MemoryContextDelete(cxt);
 }
 
 /*
@@ -153,9 +172,15 @@ statext_is_kind_built(HeapTuple htup, char type)
             attnum = Anum_pg_statistic_ext_stxdependencies;
             break;
 
-        default:
-            elog(ERROR, "unexpected statistics type requested: %d", type);
-    }
+#ifdef __TBASE__
+		case STATS_EXT_SUBSET:
+			attnum = Anum_pg_statistic_ext_stxsubset;
+			break;
+#endif
+
+		default:
+			elog(ERROR, "unexpected statistics type requested: %d", type);
+	}
 
     return !heap_attisnull(htup, attnum, NULL);
 }
@@ -165,68 +190,93 @@ statext_is_kind_built(HeapTuple htup, char type)
  */
 static List *
 fetch_statentries_for_relation(Relation pg_statext, Oid relid)
-{// #lizard forgives
-    SysScanDesc scan;
-    ScanKeyData skey;
-    HeapTuple    htup;
-    List       *result = NIL;
+{
+	SysScanDesc scan;
+	ScanKeyData skey;
+	HeapTuple	htup;
+	List	   *result = NIL;
 
-    /*
-     * Prepare to scan pg_statistic_ext for entries having stxrelid = this
-     * rel.
-     */
-    ScanKeyInit(&skey,
-                Anum_pg_statistic_ext_stxrelid,
-                BTEqualStrategyNumber, F_OIDEQ,
-                ObjectIdGetDatum(relid));
+	/*
+	 * Prepare to scan pg_statistic_ext for entries having stxrelid = this
+	 * rel.
+	 */
+	ScanKeyInit(&skey,
+				Anum_pg_statistic_ext_stxrelid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(relid));
 
-    scan = systable_beginscan(pg_statext, StatisticExtRelidIndexId, true,
-                              NULL, 1, &skey);
+	scan = systable_beginscan(pg_statext, StatisticExtRelidIndexId, true,
+							  NULL, 1, &skey);
 
-    while (HeapTupleIsValid(htup = systable_getnext(scan)))
-    {
-        StatExtEntry *entry;
-        Datum        datum;
-        bool        isnull;
-        int            i;
-        ArrayType  *arr;
-        char       *enabled;
-        Form_pg_statistic_ext staForm;
+	while (HeapTupleIsValid(htup = systable_getnext(scan)))
+	{
+		StatExtEntry *entry;
+		Datum		datum;
+		bool		isnull;
+		int			i;
+		ArrayType  *arr;
+		char	   *enabled;
+		Form_pg_statistic_ext staForm;
+#ifdef __TBASE__
+		bool		need_column_order = false;
+#endif
 
-        entry = palloc0(sizeof(StatExtEntry));
-        entry->statOid = HeapTupleGetOid(htup);
-        staForm = (Form_pg_statistic_ext) GETSTRUCT(htup);
-        entry->schema = get_namespace_name(staForm->stxnamespace);
-        entry->name = pstrdup(NameStr(staForm->stxname));
-        for (i = 0; i < staForm->stxkeys.dim1; i++)
-        {
-            entry->columns = bms_add_member(entry->columns,
-                                            staForm->stxkeys.values[i]);
-        }
+		entry = palloc0(sizeof(StatExtEntry));
+		entry->statOid = HeapTupleGetOid(htup);
+		staForm = (Form_pg_statistic_ext) GETSTRUCT(htup);
+		entry->schema = get_namespace_name(staForm->stxnamespace);
+		entry->name = pstrdup(NameStr(staForm->stxname));
+		for (i = 0; i < staForm->stxkeys.dim1; i++)
+		{
+			entry->columns = bms_add_member(entry->columns,
+											staForm->stxkeys.values[i]);
+		}
 
-        /* decode the stxkind char array into a list of chars */
-        datum = SysCacheGetAttr(STATEXTOID, htup,
-                                Anum_pg_statistic_ext_stxkind, &isnull);
-        Assert(!isnull);
-        arr = DatumGetArrayTypeP(datum);
-        if (ARR_NDIM(arr) != 1 ||
-            ARR_HASNULL(arr) ||
-            ARR_ELEMTYPE(arr) != CHAROID)
-            elog(ERROR, "stxkind is not a 1-D char array");
-        enabled = (char *) ARR_DATA_PTR(arr);
-        for (i = 0; i < ARR_DIMS(arr)[0]; i++)
-        {
-            Assert((enabled[i] == STATS_EXT_NDISTINCT) ||
-                   (enabled[i] == STATS_EXT_DEPENDENCIES));
-            entry->types = lappend_int(entry->types, (int) enabled[i]);
-        }
+		/* decode the stxkind char array into a list of chars */
+		datum = SysCacheGetAttr(STATEXTOID, htup,
+								Anum_pg_statistic_ext_stxkind, &isnull);
+		Assert(!isnull);
+		arr = DatumGetArrayTypeP(datum);
+		if (ARR_NDIM(arr) != 1 ||
+			ARR_HASNULL(arr) ||
+			ARR_ELEMTYPE(arr) != CHAROID)
+			elog(ERROR, "stxkind is not a 1-D char array");
+		enabled = (char *) ARR_DATA_PTR(arr);
+		for (i = 0; i < ARR_DIMS(arr)[0]; i++)
+		{
+			Assert((enabled[i] == STATS_EXT_NDISTINCT) ||
+				   (enabled[i] == STATS_EXT_DEPENDENCIES) ||
+				   (enabled[i] == STATS_EXT_SUBSET));
+			entry->types = lappend_int(entry->types, (int) enabled[i]);
+#ifdef __TBASE__
 
-        result = lappend(result, entry);
-    }
+			if (enabled[i] == STATS_EXT_SUBSET)
+			{
+				/* Currently we only support subset of two columns */
+				Assert(staForm->stxkeys.dim1 == 2);
 
-    systable_endscan(scan);
+				/* Order of column defined indicates the subset relation */
+				need_column_order = true;
+			}
+		}
 
-    return result;
+		/* Build the list of columns with the original order */
+		if (need_column_order)
+		{
+			for (i = 0; i < staForm->stxkeys.dim1; i++)
+			{
+				entry->orderedColumns = lappend_int(entry->orderedColumns,
+													staForm->stxkeys.values[i]);
+			}
+#endif
+		}
+
+		result = lappend(result, entry);
+	}
+
+	systable_endscan(scan);
+
+	return result;
 }
 
 /*
@@ -291,57 +341,73 @@ lookup_var_attr_stats(Relation rel, Bitmapset *attrs,
  */
 static void
 statext_store(Relation pg_stext, Oid statOid,
-              MVNDistinct *ndistinct, MVDependencies *dependencies,
-              VacAttrStats **stats)
+			  MVNDistinct *ndistinct, MVDependencies *dependencies,
+#ifdef __TBASE__
+			  MVDependencies *subset,
+#endif
+			  VacAttrStats **stats)
 {
-    HeapTuple    stup,
-                oldtup;
-    Datum        values[Natts_pg_statistic_ext];
-    bool        nulls[Natts_pg_statistic_ext];
-    bool        replaces[Natts_pg_statistic_ext];
+	HeapTuple	stup,
+				oldtup;
+	Datum		values[Natts_pg_statistic_ext];
+	bool		nulls[Natts_pg_statistic_ext];
+	bool		replaces[Natts_pg_statistic_ext];
 
-    memset(nulls, 1, Natts_pg_statistic_ext * sizeof(bool));
-    memset(replaces, 0, Natts_pg_statistic_ext * sizeof(bool));
-    memset(values, 0, Natts_pg_statistic_ext * sizeof(Datum));
+	memset(nulls, 1, Natts_pg_statistic_ext * sizeof(bool));
+	memset(replaces, 0, Natts_pg_statistic_ext * sizeof(bool));
+	memset(values, 0, Natts_pg_statistic_ext * sizeof(Datum));
 
-    /*
-     * Construct a new pg_statistic_ext tuple, replacing the calculated stats.
-     */
-    if (ndistinct != NULL)
-    {
-        bytea       *data = statext_ndistinct_serialize(ndistinct);
+	/*
+	 * Construct a new pg_statistic_ext tuple, replacing the calculated stats.
+	 */
+	if (ndistinct != NULL)
+	{
+		bytea	   *data = statext_ndistinct_serialize(ndistinct);
 
-        nulls[Anum_pg_statistic_ext_stxndistinct - 1] = (data == NULL);
-        values[Anum_pg_statistic_ext_stxndistinct - 1] = PointerGetDatum(data);
-    }
+		nulls[Anum_pg_statistic_ext_stxndistinct - 1] = (data == NULL);
+		values[Anum_pg_statistic_ext_stxndistinct - 1] = PointerGetDatum(data);
+	}
 
-    if (dependencies != NULL)
-    {
-        bytea       *data = statext_dependencies_serialize(dependencies);
+	if (dependencies != NULL)
+	{
+		bytea	   *data = statext_dependencies_serialize(dependencies);
 
-        nulls[Anum_pg_statistic_ext_stxdependencies - 1] = (data == NULL);
-        values[Anum_pg_statistic_ext_stxdependencies - 1] = PointerGetDatum(data);
-    }
+		nulls[Anum_pg_statistic_ext_stxdependencies - 1] = (data == NULL);
+		values[Anum_pg_statistic_ext_stxdependencies - 1] = PointerGetDatum(data);
+	}
 
-    /* always replace the value (either by bytea or NULL) */
-    replaces[Anum_pg_statistic_ext_stxndistinct - 1] = true;
-    replaces[Anum_pg_statistic_ext_stxdependencies - 1] = true;
+#ifdef __TBASE__
+	if (subset != NULL)
+	{
+		bytea	   *data = statext_dependencies_serialize(subset);
 
-    /* there should already be a pg_statistic_ext tuple */
-    oldtup = SearchSysCache1(STATEXTOID, ObjectIdGetDatum(statOid));
-    if (!HeapTupleIsValid(oldtup))
-        elog(ERROR, "cache lookup failed for statistics object %u", statOid);
+		nulls[Anum_pg_statistic_ext_stxsubset - 1] = (data == NULL);
+		values[Anum_pg_statistic_ext_stxsubset - 1] = PointerGetDatum(data);
+	}
+#endif
 
-    /* replace it */
-    stup = heap_modify_tuple(oldtup,
-                             RelationGetDescr(pg_stext),
-                             values,
-                             nulls,
-                             replaces);
-    ReleaseSysCache(oldtup);
-    CatalogTupleUpdate(pg_stext, &stup->t_self, stup);
+	/* always replace the value (either by bytea or NULL) */
+	replaces[Anum_pg_statistic_ext_stxndistinct - 1] = true;
+	replaces[Anum_pg_statistic_ext_stxdependencies - 1] = true;
+#ifdef __TBASE__
+	replaces[Anum_pg_statistic_ext_stxsubset - 1] = true;
+#endif
 
-    heap_freetuple(stup);
+	/* there should already be a pg_statistic_ext tuple */
+	oldtup = SearchSysCache1(STATEXTOID, ObjectIdGetDatum(statOid));
+	if (!HeapTupleIsValid(oldtup))
+		elog(ERROR, "cache lookup failed for statistics object %u", statOid);
+
+	/* replace it */
+	stup = heap_modify_tuple(oldtup,
+							 RelationGetDescr(pg_stext),
+							 values,
+							 nulls,
+							 replaces);
+	ReleaseSysCache(oldtup);
+	CatalogTupleUpdate(pg_stext, &stup->t_self, stup);
+
+	heap_freetuple(stup);
 }
 
 /* initialize multi-dimensional sort */
