@@ -1766,301 +1766,328 @@ BaseBackup(void)
 				maxServerMajor;
 	int			serverVersion,
 				serverMajor;
-
-    Assert(conn != NULL);
-
-    /*
-     * Check server version. BASE_BACKUP command was introduced in 9.1, so we
-     * can't work with servers older than 9.1.
-     */
-    minServerMajor = 901;
-    maxServerMajor = PG_VERSION_NUM / 100;
-    serverVersion = PQserverVersion(conn);
-    serverMajor = serverVersion / 100;
-    if (serverMajor < minServerMajor || serverMajor > maxServerMajor)
-    {
-        const char *serverver = PQparameterStatus(conn, "server_version");
-
-        fprintf(stderr, _("%s: incompatible server version %s\n"),
-                progname, serverver ? serverver : "'unknown'");
-        disconnect_and_exit(1);
-    }
-
-    /*
-     * If WAL streaming was requested, also check that the server is new
-     * enough for that.
-     */
-    if (includewal == STREAM_WAL && !CheckServerVersionForStreaming(conn))
-    {
-        /*
-         * Error message already written in CheckServerVersionForStreaming(),
-         * but add a hint about using -X none.
-         */
-        fprintf(stderr, _("HINT: use -X none or -X fetch to disable log streaming\n"));
-        disconnect_and_exit(1);
-    }
-
-    /*
-     * Build contents of recovery.conf if requested
-     */
-    if (writerecoveryconf)
-        GenerateRecoveryConf(conn);
-
-    /*
-     * Run IDENTIFY_SYSTEM so we can get the timeline
-     */
-    if (!RunIdentifySystem(conn, &sysidentifier, &latesttli, NULL, NULL))
-        disconnect_and_exit(1);
-
-    /*
-     * Start the actual backup
-     */
-    PQescapeStringConn(conn, escaped_label, label, sizeof(escaped_label), &i);
-
-    if (maxrate > 0)
-        maxrate_clause = psprintf("MAX_RATE %u", maxrate);
-
-    if (verbose)
-        fprintf(stderr,
-                _("%s: initiating base backup, waiting for checkpoint to complete\n"),
-                progname);
-
-    if (showprogress && !verbose)
-        fprintf(stderr, "waiting for checkpoint\r");
-
-    basebkp =
-        psprintf("BASE_BACKUP LABEL '%s' %s %s %s %s %s %s",
-                 escaped_label,
-                 showprogress ? "PROGRESS" : "",
-                 includewal == FETCH_WAL ? "WAL" : "",
-                 fastcheckpoint ? "FAST" : "",
-                 includewal == NO_WAL ? "" : "NOWAIT",
-                 maxrate_clause ? maxrate_clause : "",
-                 format == 't' ? "TABLESPACE_MAP" : "");
-
-    if (PQsendQuery(conn, basebkp) == 0)
-    {
-        fprintf(stderr, _("%s: could not send replication command \"%s\": %s"),
-                progname, "BASE_BACKUP", PQerrorMessage(conn));
-        disconnect_and_exit(1);
-    }
-
-    /*
-     * Get the starting WAL location
-     */
-    res = PQgetResult(conn);
-    if (PQresultStatus(res) != PGRES_TUPLES_OK)
-    {
-        fprintf(stderr, _("%s: could not initiate base backup: %s"),
-                progname, PQerrorMessage(conn));
-        disconnect_and_exit(1);
-    }
-    if (PQntuples(res) != 1)
-    {
-        fprintf(stderr,
-                _("%s: server returned unexpected response to BASE_BACKUP command; got %d rows and %d fields, expected %d rows and %d fields\n"),
-                progname, PQntuples(res), PQnfields(res), 1, 2);
-        disconnect_and_exit(1);
-    }
-
-    /* start_point: get last checkpoint point position from master */
-    strlcpy(xlogstart, PQgetvalue(res, 0, 0), sizeof(xlogstart));
-    
-    /*
-     * If we're streaming WAL, start the streaming session before we start
-     * receiving the actual data chunks.
-     */
-    if (includewal == STREAM_WAL)
-    {
-        if (verbose)
-            fprintf(stderr, _("%s: starting background WAL receiver\n"),
-                    progname);
-        StartLogStreamer(xlogstart, starttli, sysidentifier);
-    }
-
-    /*
-     * Start receiving chunks
-     */
-    for (i = 0; i < PQntuples(res); i++)
-    {
-        if (format == 't')
-            ReceiveTarFile(conn, res, i);
-        else
-            ReceiveAndUnpackTarFile(conn, res, i);
-    }                            /* Loop over all tablespaces */
-
-    if (showprogress)
-    {
-        progress_report(PQntuples(res), NULL, true);
-        fprintf(stderr, "\n");    /* Need to move to next line */
-    }
-
-    PQclear(res);
-
-    /*
-     * Get the stop position
-     */
-    res = PQgetResult(conn);
-    if (PQresultStatus(res) != PGRES_TUPLES_OK)
-    {
-        fprintf(stderr,
-                _("%s: could not get write-ahead log end position from server: %s"),
-                progname, PQerrorMessage(conn));
-        disconnect_and_exit(1);
-    }
-    if (PQntuples(res) != 1)
-    {
-        fprintf(stderr,
-                _("%s: no write-ahead log end position returned from server\n"),
-                progname);
-        disconnect_and_exit(1);
-    }
-    strlcpy(xlogend, PQgetvalue(res, 0, 0), sizeof(xlogend));
-    if (verbose && includewal != NO_WAL)
-        fprintf(stderr, _("%s: write-ahead log end point: %s\n"), progname, xlogend);
-    PQclear(res);
-
-    res = PQgetResult(conn);
-    if (PQresultStatus(res) != PGRES_COMMAND_OK)
-    {
-        fprintf(stderr, _("%s: final receive failed: %s"),
-                progname, PQerrorMessage(conn));
-        disconnect_and_exit(1);
-    }
-
-    if (bgchild > 0)
-    {
+	Assert(conn != NULL);
+	/*
+	 * Check server version. BASE_BACKUP command was introduced in 9.1, so we
+	 * can't work with servers older than 9.1.
+	 */
+	minServerMajor = 901;
+	maxServerMajor = PG_VERSION_NUM / 100;
+	serverVersion = PQserverVersion(conn);
+	serverMajor = serverVersion / 100;
+	if (serverMajor < minServerMajor || serverMajor > maxServerMajor)
+	{
+		const char *serverver = PQparameterStatus(conn, "server_version");
+		fprintf(stderr, _("%s: incompatible server version %s\n"),
+				progname, serverver ? serverver : "'unknown'");
+		disconnect_and_exit(1);
+	}
+	/*
+	 * If WAL streaming was requested, also check that the server is new
+	 * enough for that.
+	 */
+	if (includewal == STREAM_WAL && !CheckServerVersionForStreaming(conn))
+	{
+		/*
+		 * Error message already written in CheckServerVersionForStreaming(),
+		 * but add a hint about using -X none.
+		 */
+		fprintf(stderr, _("HINT: use -X none or -X fetch to disable log streaming\n"));
+		disconnect_and_exit(1);
+	}
+	/*
+	 * Build contents of recovery.conf if requested
+	 */
+	if (writerecoveryconf)
+		GenerateRecoveryConf(conn);
+	/*
+	 * Run IDENTIFY_SYSTEM so we can get the timeline
+	 */
+	if (!RunIdentifySystem(conn, &sysidentifier, &latesttli, NULL, NULL))
+		disconnect_and_exit(1);
+	/*
+	 * Start the actual backup
+	 */
+	PQescapeStringConn(conn, escaped_label, label, sizeof(escaped_label), &i);
+	if (maxrate > 0)
+		maxrate_clause = psprintf("MAX_RATE %u", maxrate);
+	if (verbose)
+		fprintf(stderr,
+				_("%s: initiating base backup, waiting for checkpoint to complete\n"),
+				progname);
+	if (showprogress && !verbose)
+		fprintf(stderr, "waiting for checkpoint\r");
+	basebkp =
+		psprintf("BASE_BACKUP LABEL '%s' %s %s %s %s %s %s",
+				 escaped_label,
+				 showprogress ? "PROGRESS" : "",
+				 includewal == FETCH_WAL ? "WAL" : "",
+				 fastcheckpoint ? "FAST" : "",
+				 includewal == NO_WAL ? "" : "NOWAIT",
+				 maxrate_clause ? maxrate_clause : "",
+				 format == 't' ? "TABLESPACE_MAP" : "");
+	if (PQsendQuery(conn, basebkp) == 0)
+	{
+		fprintf(stderr, _("%s: could not send replication command \"%s\": %s"),
+				progname, "BASE_BACKUP", PQerrorMessage(conn));
+		disconnect_and_exit(1);
+	}
+	/*
+	 * Get the starting WAL location
+	 */
+	res = PQgetResult(conn);
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		fprintf(stderr, _("%s: could not initiate base backup: %s"),
+				progname, PQerrorMessage(conn));
+		disconnect_and_exit(1);
+	}
+	if (PQntuples(res) != 1)
+	{
+		fprintf(stderr,
+				_("%s: server returned unexpected response to BASE_BACKUP command; got %d rows and %d fields, expected %d rows and %d fields\n"),
+				progname, PQntuples(res), PQnfields(res), 1, 2);
+		disconnect_and_exit(1);
+	}
+	strlcpy(xlogstart, PQgetvalue(res, 0, 0), sizeof(xlogstart));
+	if (verbose)
+		fprintf(stderr, _("%s: checkpoint completed\n"), progname);
+	/*
+	 * 9.3 and later sends the TLI of the starting point. With older servers,
+	 * assume it's the same as the latest timeline reported by
+	 * IDENTIFY_SYSTEM.
+	 */
+	if (PQnfields(res) >= 2)
+		starttli = atoi(PQgetvalue(res, 0, 1));
+	else
+		starttli = latesttli;
+	PQclear(res);
+	MemSet(xlogend, 0, sizeof(xlogend));
+	if (verbose && includewal != NO_WAL)
+		fprintf(stderr, _("%s: write-ahead log start point: %s on timeline %u\n"),
+				progname, xlogstart, starttli);
+	/*
+	 * Get the header
+	 */
+	res = PQgetResult(conn);
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		fprintf(stderr, _("%s: could not get backup header: %s"),
+				progname, PQerrorMessage(conn));
+		disconnect_and_exit(1);
+	}
+	if (PQntuples(res) < 1)
+	{
+		fprintf(stderr, _("%s: no data returned from server\n"), progname);
+		disconnect_and_exit(1);
+	}
+	/*
+	 * Sum up the total size, for progress reporting
+	 */
+	totalsize = totaldone = 0;
+	tablespacecount = PQntuples(res);
+	for (i = 0; i < PQntuples(res); i++)
+	{
+		totalsize += atol(PQgetvalue(res, i, 2));
+		/*
+		 * Verify tablespace directories are empty. Don't bother with the
+		 * first once since it can be relocated, and it will be checked before
+		 * we do anything anyway.
+		 */
+		if (format == 'p' && !PQgetisnull(res, i, 1))
+		{
+			char	   *path = (char *) get_tablespace_mapping(PQgetvalue(res, i, 1));
+			verify_dir_is_empty_or_create(path, &made_tablespace_dirs, &found_tablespace_dirs);
+		}
+	}
+	/*
+	 * When writing to stdout, require a single tablespace
+	 */
+	if (format == 't' && strcmp(basedir, "-") == 0 && PQntuples(res) > 1)
+	{
+		fprintf(stderr,
+				_("%s: can only write single tablespace to stdout, database has %d\n"),
+				progname, PQntuples(res));
+		disconnect_and_exit(1);
+	}
+	/*
+	 * If we're streaming WAL, start the streaming session before we start
+	 * receiving the actual data chunks.
+	 */
+	if (includewal == STREAM_WAL)
+	{
+		if (verbose)
+			fprintf(stderr, _("%s: starting background WAL receiver\n"),
+					progname);
+		StartLogStreamer(xlogstart, starttli, sysidentifier);
+	}
+	/*
+	 * Start receiving chunks
+	 */
+	for (i = 0; i < PQntuples(res); i++)
+	{
+		if (format == 't')
+			ReceiveTarFile(conn, res, i);
+		else
+			ReceiveAndUnpackTarFile(conn, res, i);
+	}							/* Loop over all tablespaces */
+	if (showprogress)
+	{
+		progress_report(PQntuples(res), NULL, true);
+		fprintf(stderr, "\n");	/* Need to move to next line */
+	}
+	PQclear(res);
+	/*
+	 * Get the stop position
+	 */
+	res = PQgetResult(conn);
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		fprintf(stderr,
+				_("%s: could not get write-ahead log end position from server: %s"),
+				progname, PQerrorMessage(conn));
+		disconnect_and_exit(1);
+	}
+	if (PQntuples(res) != 1)
+	{
+		fprintf(stderr,
+				_("%s: no write-ahead log end position returned from server\n"),
+				progname);
+		disconnect_and_exit(1);
+	}
+	strlcpy(xlogend, PQgetvalue(res, 0, 0), sizeof(xlogend));
+	if (verbose && includewal != NO_WAL)
+		fprintf(stderr, _("%s: write-ahead log end point: %s\n"), progname, xlogend);
+	PQclear(res);
+	res = PQgetResult(conn);
+	if (PQresultStatus(res) != PGRES_COMMAND_OK)
+	{
+		fprintf(stderr, _("%s: final receive failed: %s"),
+				progname, PQerrorMessage(conn));
+		disconnect_and_exit(1);
+	}
+	if (bgchild > 0)
+	{
 #ifndef WIN32
         int            status;
         int            r;
 #else
-        DWORD        status;
-
-        /*
-         * get a pointer sized version of bgchild to avoid warnings about
-         * casting to a different size on WIN64.
-         */
-        intptr_t    bgchild_handle = bgchild;
-        uint32        hi,
-                    lo;
+		DWORD		status;
+		/*
+		 * get a pointer sized version of bgchild to avoid warnings about
+		 * casting to a different size on WIN64.
+		 */
+		intptr_t	bgchild_handle = bgchild;
+		uint32		hi,
+					lo;
 #endif
-
-        if (verbose)
-            fprintf(stderr,
-                    _("%s: waiting for background process to finish streaming ...\n"), progname);
-
+		if (verbose)
+			fprintf(stderr,
+					_("%s: waiting for background process to finish streaming ...\n"), progname);
 #ifndef WIN32
-        if (write(bgpipe[1], xlogend, strlen(xlogend)) != strlen(xlogend))
-        {
-            fprintf(stderr,
-                    _("%s: could not send command to background pipe: %s\n"),
-                    progname, strerror(errno));
-            disconnect_and_exit(1);
-        }
-
-        /* Just wait for the background process to exit */
-        r = waitpid(bgchild, &status, 0);
-        if (r == -1)
-        {
-            fprintf(stderr, _("%s: could not wait for child process: %s\n"),
-                    progname, strerror(errno));
-            disconnect_and_exit(1);
-        }
-        if (r != bgchild)
-        {
-            fprintf(stderr, _("%s: child %d died, expected %d\n"),
-                    progname, r, (int) bgchild);
-            disconnect_and_exit(1);
-        }
-        if (!WIFEXITED(status))
-        {
-            fprintf(stderr, _("%s: child process did not exit normally\n"),
-                    progname);
-            disconnect_and_exit(1);
-        }
-        if (WEXITSTATUS(status) != 0)
-        {
-            fprintf(stderr, _("%s: child process exited with error %d\n"),
-                    progname, WEXITSTATUS(status));
-            disconnect_and_exit(1);
-        }
-        /* Exited normally, we're happy! */
-#else                            /* WIN32 */
-
-        /*
-         * On Windows, since we are in the same process, we can just store the
-         * value directly in the variable, and then set the flag that says
-         * it's there.
-         */
-        if (sscanf(xlogend, "%X/%X", &hi, &lo) != 2)
-        {
-            fprintf(stderr,
-                    _("%s: could not parse write-ahead log location \"%s\"\n"),
-                    progname, xlogend);
-            disconnect_and_exit(1);
-        }
-        xlogendptr = ((uint64) hi) << 32 | lo;
-        InterlockedIncrement(&has_xlogendptr);
-
-        /* First wait for the thread to exit */
-        if (WaitForSingleObjectEx((HANDLE) bgchild_handle, INFINITE, FALSE) !=
-            WAIT_OBJECT_0)
-        {
-            _dosmaperr(GetLastError());
-            fprintf(stderr, _("%s: could not wait for child thread: %s\n"),
-                    progname, strerror(errno));
-            disconnect_and_exit(1);
-        }
-        if (GetExitCodeThread((HANDLE) bgchild_handle, &status) == 0)
-        {
-            _dosmaperr(GetLastError());
-            fprintf(stderr, _("%s: could not get child thread exit status: %s\n"),
-                    progname, strerror(errno));
-            disconnect_and_exit(1);
-        }
-        if (status != 0)
-        {
-            fprintf(stderr, _("%s: child thread exited with error %u\n"),
-                    progname, (unsigned int) status);
-            disconnect_and_exit(1);
-        }
-        /* Exited normally, we're happy */
+		if (write(bgpipe[1], xlogend, strlen(xlogend)) != strlen(xlogend))
+		{
+			fprintf(stderr,
+					_("%s: could not send command to background pipe: %s\n"),
+					progname, strerror(errno));
+			disconnect_and_exit(1);
+		}
+		/* Just wait for the background process to exit */
+		r = waitpid(bgchild, &status, 0);
+		if (r == -1)
+		{
+			fprintf(stderr, _("%s: could not wait for child process: %s\n"),
+					progname, strerror(errno));
+			disconnect_and_exit(1);
+		}
+		if (r != bgchild)
+		{
+			fprintf(stderr, _("%s: child %d died, expected %d\n"),
+					progname, r, (int) bgchild);
+			disconnect_and_exit(1);
+		}
+		if (!WIFEXITED(status))
+		{
+			fprintf(stderr, _("%s: child process did not exit normally\n"),
+					progname);
+			disconnect_and_exit(1);
+		}
+		if (WEXITSTATUS(status) != 0)
+		{
+			fprintf(stderr, _("%s: child process exited with error %d\n"),
+					progname, WEXITSTATUS(status));
+			disconnect_and_exit(1);
+		}
+		/* Exited normally, we're happy! */
+#else							/* WIN32 */
+		/*
+		 * On Windows, since we are in the same process, we can just store the
+		 * value directly in the variable, and then set the flag that says
+		 * it's there.
+		 */
+		if (sscanf(xlogend, "%X/%X", &hi, &lo) != 2)
+		{
+			fprintf(stderr,
+					_("%s: could not parse write-ahead log location \"%s\"\n"),
+					progname, xlogend);
+			disconnect_and_exit(1);
+		}
+		xlogendptr = ((uint64) hi) << 32 | lo;
+		InterlockedIncrement(&has_xlogendptr);
+		/* First wait for the thread to exit */
+		if (WaitForSingleObjectEx((HANDLE) bgchild_handle, INFINITE, FALSE) !=
+			WAIT_OBJECT_0)
+		{
+			_dosmaperr(GetLastError());
+			fprintf(stderr, _("%s: could not wait for child thread: %s\n"),
+					progname, strerror(errno));
+			disconnect_and_exit(1);
+		}
+		if (GetExitCodeThread((HANDLE) bgchild_handle, &status) == 0)
+		{
+			_dosmaperr(GetLastError());
+			fprintf(stderr, _("%s: could not get child thread exit status: %s\n"),
+					progname, strerror(errno));
+			disconnect_and_exit(1);
+		}
+		if (status != 0)
+		{
+			fprintf(stderr, _("%s: child thread exited with error %u\n"),
+					progname, (unsigned int) status);
+			disconnect_and_exit(1);
+		}
+		/* Exited normally, we're happy */
 #endif
-    }
-
-    /* Free the recovery.conf contents */
-    destroyPQExpBuffer(recoveryconfcontents);
-
-    /*
-     * End of copy data. Final result is already checked inside the loop.
-     */
-    PQclear(res);
-    PQfinish(conn);
-
-    /*
-     * Make data persistent on disk once backup is completed. For tar format
-     * once syncing the parent directory is fine, each tar file created per
-     * tablespace has been already synced. In plain format, all the data of
-     * the base directory is synced, taking into account all the tablespaces.
-     * Errors are not considered fatal.
-     */
-    if (do_sync)
-    {
-        if (format == 't')
-        {
-            if (strcmp(basedir, "-") != 0)
-                (void) fsync_fname(basedir, true, progname);
-        }
-        else
-        {
-            (void) fsync_pgdata(basedir, progname, serverVersion);
-        }
-    }
-
-    if (verbose)
-        fprintf(stderr, _("%s: base backup completed\n"), progname);
+	}
+	/* Free the recovery.conf contents */
+	destroyPQExpBuffer(recoveryconfcontents);
+	/*
+	 * End of copy data. Final result is already checked inside the loop.
+	 */
+	PQclear(res);
+	PQfinish(conn);
+	/*
+	 * Make data persistent on disk once backup is completed. For tar format
+	 * once syncing the parent directory is fine, each tar file created per
+	 * tablespace has been already synced. In plain format, all the data of
+	 * the base directory is synced, taking into account all the tablespaces.
+	 * Errors are not considered fatal.
+	 */
+	if (do_sync)
+	{
+		if (format == 't')
+		{
+			if (strcmp(basedir, "-") != 0)
+				(void) fsync_fname(basedir, true, progname);
+		}
+		else
+		{
+			(void) fsync_pgdata(basedir, progname, serverVersion);
+		}
+	}
+	if (verbose)
+		fprintf(stderr, _("%s: base backup completed\n"), progname);
 }
-
 
 int
 main(int argc, char **argv)
