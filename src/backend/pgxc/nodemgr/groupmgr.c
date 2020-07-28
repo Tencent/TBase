@@ -538,44 +538,46 @@ Oid RemoveNodeFromGroup(Oid nodeoid)
 
 Oid GetGroupOidByNode(Oid nodeoid)
 {
-    Relation    relation;
-    SysScanDesc scan;
-    HeapTuple    tup;
-    Form_pgxc_group group;
-    int i;
-    Oid         groupoid   = InvalidOid;
-    
-    relation = heap_open(PgxcGroupRelationId, AccessShareLock);
-        
-    scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
+	Relation	relation;
+	SysScanDesc scan;
+	HeapTuple	tup;
+	Form_pgxc_group group;
+	int i;
+	Oid         groupoid   = InvalidOid;
 
-    tup = systable_getnext(scan);
+    nodeoid = PGXCGetMainNodeOid(nodeoid);
 
-    while(HeapTupleIsValid(tup))
-    {
-        group = (Form_pgxc_group)GETSTRUCT(tup);
+	relation = heap_open(PgxcGroupRelationId, AccessShareLock);
+		
+	scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
 
-        for (i = 0; i < group->group_members.dim1; i++)
-        {
-            if (group->group_members.values[i] == nodeoid)
-            {
-                groupoid = HeapTupleGetOid(tup);
-                break;
-            }
-        }
+	tup = systable_getnext(scan);
 
-        if (OidIsValid(groupoid))
-        {
-            break;
-        }
-        
-        tup = systable_getnext(scan);
-    }
+	while(HeapTupleIsValid(tup))
+	{
+		group = (Form_pgxc_group)GETSTRUCT(tup);
 
-    systable_endscan(scan);
-    heap_close(relation, AccessShareLock);
-    
-    return groupoid;
+		for (i = 0; i < group->group_members.dim1; i++)
+		{
+			if (group->group_members.values[i] == nodeoid)
+			{
+				groupoid = HeapTupleGetOid(tup);
+				break;
+			}
+		}
+
+		if (OidIsValid(groupoid))
+		{
+			break;
+		}
+		
+		tup = systable_getnext(scan);
+	}
+
+	systable_endscan(scan);
+	heap_close(relation, AccessShareLock);
+	
+	return groupoid;
 }
 
 List *
