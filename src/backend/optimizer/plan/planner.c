@@ -2313,9 +2313,9 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
 
 #ifdef __TBASE__
             /*
-              * unshippable triggers found on target relation, we have to do DML
-              * on coordinator.
-                        */
+             * unshippable triggers found on target relation, we have to do DML
+             * on coordinator.
+             */
             if (parse->hasUnshippableTriggers)
             {
                 if (path->distribution)

@@ -3026,14 +3026,14 @@ create_modifytable_plan(PlannerInfo *root, ModifyTablePath *best_path)
     copy_generic_path_info(&plan->plan, &best_path->path);
 
 #ifdef __TBASE__
-    /*
-      * If we have unshippable triggers, we have to do DML on coordinators,
-      * generate remote_dml plan now.
-         */
-    if (root->parse->hasUnshippableTriggers)
-    {
-        create_remotedml_plan(root, (Plan *)plan, plan->operation);
-    }
+	/*
+	 * If we have unshippable triggers, we have to do DML on coordinators,
+	 * generate remote_dml plan now.
+     */
+	if (root->parse->hasUnshippableTriggers)
+	{
+		create_remotedml_plan(root, (Plan *)plan, plan->operation);
+	}
 #endif
     return plan;
 }

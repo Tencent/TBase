@@ -3204,30 +3204,27 @@ ExecEndModifyTable(ModifyTableState *node)
     }
 
 #ifdef __TBASE__
-    if (IS_PGXC_COORDINATOR)
-    {
-        EState *state = NULL;
-        ResponseCombiner   *combiner;
-        ModifyTable *plan = (ModifyTable *)node->ps.plan;
+	if (IS_PGXC_COORDINATOR)
+	{
+		ResponseCombiner   *combiner;
+		ModifyTable *plan = (ModifyTable *)node->ps.plan;
 
-        if (plan->remote_plans)
-        {
-            int nremote_plans = list_length(plan->remote_plans);
-            
-            for (i = 0; i < nremote_plans; i++)
-            {
-                RemoteQuery *rq = (RemoteQuery *)list_nth(plan->remote_plans, i);
-                
-                combiner = (ResponseCombiner *) node->mt_remoterels[i];
-                state = combiner->ss.ps.state;
-                ExecEndNode(node->mt_remoterels[i]);
+		if (plan->remote_plans)
+		{
+			int nremote_plans = list_length(plan->remote_plans);
 
-                DropRemoteDMLStatement(rq->statement, rq->update_cursor);
-            }
+			for (i = 0; i < nremote_plans; i++)
+			{
+				RemoteQuery *rq = (RemoteQuery *)list_nth(plan->remote_plans, i);
 
-            FreeExecutorState(state);
-        }
-    }
+				combiner = (ResponseCombiner *) node->mt_remoterels[i];
+
+				ExecEndNode(node->mt_remoterels[i]);
+
+				DropRemoteDMLStatement(rq->statement, rq->update_cursor);
+			}
+		}
+	}
 #endif
 
     /*
