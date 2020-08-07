@@ -398,10 +398,14 @@ UPDATE price
     SET active = true, price = input_prices.price
     FROM unnest(ARRAY[(10, 123.00), (11, 99.99)]::price_input[]) input_prices
     WHERE price_key_from_table(price.*) = price_key_from_input(input_prices.*);
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 select * from price;
-ERROR:  current transaction is aborted, commands ignored until end of transaction block
+ id | active | price  
+----+--------+--------
+  1 | f      |     42
+ 10 | t      | 123.00
+ 11 | t      |  99.99
+(3 rows)
+
 rollback;
 --
 -- Test case derived from bug #9085: check * qualification of composite

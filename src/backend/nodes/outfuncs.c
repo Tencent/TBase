@@ -3604,10 +3604,11 @@ _outRelOptInfo(StringInfo str, const RelOptInfo *node)
     WRITE_BOOL_FIELD(has_eclass_joins);
     WRITE_BITMAPSET_FIELD(top_parent_relids);
 #ifdef __TBASE__
-    WRITE_BOOL_FIELD(intervalparent);
-    WRITE_BOOL_FIELD(isdefault);
-    WRITE_BITMAPSET_FIELD(childs);
-    WRITE_INT_FIELD(estimate_partidx);
+	WRITE_BOOL_FIELD(intervalparent);
+	WRITE_BOOL_FIELD(isdefault);
+	WRITE_BITMAPSET_FIELD(childs);
+	WRITE_INT_FIELD(estimate_partidx);
+    WRITE_ENUM_FIELD(resultRelLoc, ResultRelLocation);
 #endif
 }
 

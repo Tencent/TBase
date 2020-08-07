@@ -32,9 +32,10 @@
 #endif
 #ifdef __TBASE__
 #include "access/heapam.h"
-#include "utils/rel.h"
-#include "utils/lsyscache.h"
 #include "access/sysattr.h"
+#include "optimizer/distribution.h"
+#include "utils/lsyscache.h"
+#include "utils/rel.h"
 #endif
 typedef struct JoinHashEntry
 {
@@ -155,10 +156,11 @@ build_simple_rel(PlannerInfo *root, int relid, RelOptInfo *parent)
     rel->joininfo = NIL;
     rel->has_eclass_joins = false;
 #ifdef __TBASE__
-    rel->intervalparent = false;
-    rel->isdefault      = rte->isdefault;
-    rel->estimate_partidx = -1;
-    rel->childs = NULL;
+	rel->intervalparent = false;
+	rel->isdefault      = rte->isdefault;
+	rel->estimate_partidx = -1;
+	rel->childs = NULL;
+	rel->resultRelLoc = RESULT_REL_NONE;
 #endif
 
     /*
@@ -497,177 +499,183 @@ add_join_rel(PlannerInfo *root, RelOptInfo *joinrel)
  */
 RelOptInfo *
 build_join_rel(PlannerInfo *root,
-               Relids joinrelids,
-               RelOptInfo *outer_rel,
-               RelOptInfo *inner_rel,
-               SpecialJoinInfo *sjinfo,
-               List **restrictlist_ptr)
-{// #lizard forgives
-    RelOptInfo *joinrel;
-    List       *restrictlist;
+			   Relids joinrelids,
+			   RelOptInfo *outer_rel,
+			   RelOptInfo *inner_rel,
+			   SpecialJoinInfo *sjinfo,
+			   List **restrictlist_ptr)
+{
+	RelOptInfo *joinrel;
+	List	   *restrictlist;
+#ifdef __TBASE__
+	PlannerInfo *top_root = root;
+#endif
 
-    /*
-     * See if we already have a joinrel for this set of base rels.
-     */
-    joinrel = find_join_rel(root, joinrelids);
+	/*
+	 * See if we already have a joinrel for this set of base rels.
+	 */
+	joinrel = find_join_rel(root, joinrelids);
 
-    if (joinrel)
-    {
-        /*
-         * Yes, so we only need to figure the restrictlist for this particular
-         * pair of component relations.
-         */
-        if (restrictlist_ptr)
-            *restrictlist_ptr = build_joinrel_restrictlist(root,
-                                                           joinrel,
-                                                           outer_rel,
-                                                           inner_rel);
-        return joinrel;
-    }
+	if (joinrel)
+	{
+		/*
+		 * Yes, so we only need to figure the restrictlist for this particular
+		 * pair of component relations.
+		 */
+		if (restrictlist_ptr)
+			*restrictlist_ptr = build_joinrel_restrictlist(root,
+														   joinrel,
+														   outer_rel,
+														   inner_rel);
+		return joinrel;
+	}
 
-    /*
-     * Nope, so make one.
-     */
-    joinrel = makeNode(RelOptInfo);
-    joinrel->reloptkind = RELOPT_JOINREL;
-    joinrel->relids = bms_copy(joinrelids);
-    joinrel->rows = 0;
-    /* cheap startup cost is interesting iff not all tuples to be retrieved */
-    joinrel->consider_startup = (root->tuple_fraction > 0);
-    joinrel->consider_param_startup = false;
-    joinrel->consider_parallel = false;
-    joinrel->reltarget = create_empty_pathtarget();
-    joinrel->pathlist = NIL;
-    joinrel->ppilist = NIL;
-    joinrel->partial_pathlist = NIL;
-    joinrel->cheapest_startup_path = NULL;
-    joinrel->cheapest_total_path = NULL;
-    joinrel->cheapest_unique_path = NULL;
-    joinrel->cheapest_parameterized_paths = NIL;
-    /* init direct_lateral_relids from children; we'll finish it up below */
-    joinrel->direct_lateral_relids =
-        bms_union(outer_rel->direct_lateral_relids,
-                  inner_rel->direct_lateral_relids);
-    joinrel->lateral_relids = min_join_parameterization(root, joinrel->relids,
-                                                        outer_rel, inner_rel);
-    joinrel->relid = 0;            /* indicates not a baserel */
-    joinrel->rtekind = RTE_JOIN;
-    joinrel->min_attr = 0;
-    joinrel->max_attr = 0;
-    joinrel->attr_needed = NULL;
-    joinrel->attr_widths = NULL;
-    joinrel->lateral_vars = NIL;
-    joinrel->lateral_referencers = NULL;
-    joinrel->indexlist = NIL;
-    joinrel->statlist = NIL;
-    joinrel->pages = 0;
-    joinrel->tuples = 0;
-    joinrel->allvisfrac = 0;
-    joinrel->subroot = NULL;
-    joinrel->subplan_params = NIL;
-    joinrel->rel_parallel_workers = -1;
-    joinrel->serverid = InvalidOid;
-    joinrel->userid = InvalidOid;
-    joinrel->useridiscurrent = false;
-    joinrel->fdwroutine = NULL;
-    joinrel->fdw_private = NULL;
-    joinrel->unique_for_rels = NIL;
-    joinrel->non_unique_for_rels = NIL;
-    joinrel->baserestrictinfo = NIL;
-    joinrel->baserestrictcost.startup = 0;
-    joinrel->baserestrictcost.per_tuple = 0;
-    joinrel->baserestrict_min_security = UINT_MAX;
-    joinrel->joininfo = NIL;
-    joinrel->has_eclass_joins = false;
-    joinrel->top_parent_relids = NULL;
+	/*
+	 * Nope, so make one.
+	 */
+	joinrel = makeNode(RelOptInfo);
+	joinrel->reloptkind = RELOPT_JOINREL;
+	joinrel->relids = bms_copy(joinrelids);
+	joinrel->rows = 0;
+	/* cheap startup cost is interesting iff not all tuples to be retrieved */
+	joinrel->consider_startup = (root->tuple_fraction > 0);
+	joinrel->consider_param_startup = false;
+	joinrel->consider_parallel = false;
+	joinrel->reltarget = create_empty_pathtarget();
+	joinrel->pathlist = NIL;
+	joinrel->ppilist = NIL;
+	joinrel->partial_pathlist = NIL;
+	joinrel->cheapest_startup_path = NULL;
+	joinrel->cheapest_total_path = NULL;
+	joinrel->cheapest_unique_path = NULL;
+	joinrel->cheapest_parameterized_paths = NIL;
+	/* init direct_lateral_relids from children; we'll finish it up below */
+	joinrel->direct_lateral_relids =
+		bms_union(outer_rel->direct_lateral_relids,
+				  inner_rel->direct_lateral_relids);
+	joinrel->lateral_relids = min_join_parameterization(root, joinrel->relids,
+														outer_rel, inner_rel);
+	joinrel->relid = 0;			/* indicates not a baserel */
+	joinrel->rtekind = RTE_JOIN;
+	joinrel->min_attr = 0;
+	joinrel->max_attr = 0;
+	joinrel->attr_needed = NULL;
+	joinrel->attr_widths = NULL;
+	joinrel->lateral_vars = NIL;
+	joinrel->lateral_referencers = NULL;
+	joinrel->indexlist = NIL;
+	joinrel->statlist = NIL;
+	joinrel->pages = 0;
+	joinrel->tuples = 0;
+	joinrel->allvisfrac = 0;
+	joinrel->subroot = NULL;
+	joinrel->subplan_params = NIL;
+	joinrel->rel_parallel_workers = -1;
+	joinrel->serverid = InvalidOid;
+	joinrel->userid = InvalidOid;
+	joinrel->useridiscurrent = false;
+	joinrel->fdwroutine = NULL;
+	joinrel->fdw_private = NULL;
+	joinrel->unique_for_rels = NIL;
+	joinrel->non_unique_for_rels = NIL;
+	joinrel->baserestrictinfo = NIL;
+	joinrel->baserestrictcost.startup = 0;
+	joinrel->baserestrictcost.per_tuple = 0;
+	joinrel->baserestrict_min_security = UINT_MAX;
+	joinrel->joininfo = NIL;
+	joinrel->has_eclass_joins = false;
+	joinrel->top_parent_relids = NULL;
+#ifdef __TBASE__
+	joinrel->resultRelLoc = RESULT_REL_NONE;
+#endif
 
-    /* Compute information relevant to the foreign relations. */
-    set_foreign_rel_properties(joinrel, outer_rel, inner_rel);
+	/* Compute information relevant to the foreign relations. */
+	set_foreign_rel_properties(joinrel, outer_rel, inner_rel);
 
-    /*
-     * Create a new tlist containing just the vars that need to be output from
-     * this join (ie, are needed for higher joinclauses or final output).
-     *
-     * NOTE: the tlist order for a join rel will depend on which pair of outer
-     * and inner rels we first try to build it from.  But the contents should
-     * be the same regardless.
-     */
-    build_joinrel_tlist(root, joinrel, outer_rel);
-    build_joinrel_tlist(root, joinrel, inner_rel);
-    add_placeholders_to_joinrel(root, joinrel, outer_rel, inner_rel);
+	/*
+	 * Create a new tlist containing just the vars that need to be output from
+	 * this join (ie, are needed for higher joinclauses or final output).
+	 *
+	 * NOTE: the tlist order for a join rel will depend on which pair of outer
+	 * and inner rels we first try to build it from.  But the contents should
+	 * be the same regardless.
+	 */
+	build_joinrel_tlist(root, joinrel, outer_rel);
+	build_joinrel_tlist(root, joinrel, inner_rel);
+	add_placeholders_to_joinrel(root, joinrel, outer_rel, inner_rel);
 
-    /*
-     * add_placeholders_to_joinrel also took care of adding the ph_lateral
-     * sets of any PlaceHolderVars computed here to direct_lateral_relids, so
-     * now we can finish computing that.  This is much like the computation of
-     * the transitively-closed lateral_relids in min_join_parameterization,
-     * except that here we *do* have to consider the added PHVs.
-     */
-    joinrel->direct_lateral_relids =
-        bms_del_members(joinrel->direct_lateral_relids, joinrel->relids);
-    if (bms_is_empty(joinrel->direct_lateral_relids))
-        joinrel->direct_lateral_relids = NULL;
+	/*
+	 * add_placeholders_to_joinrel also took care of adding the ph_lateral
+	 * sets of any PlaceHolderVars computed here to direct_lateral_relids, so
+	 * now we can finish computing that.  This is much like the computation of
+	 * the transitively-closed lateral_relids in min_join_parameterization,
+	 * except that here we *do* have to consider the added PHVs.
+	 */
+	joinrel->direct_lateral_relids =
+		bms_del_members(joinrel->direct_lateral_relids, joinrel->relids);
+	if (bms_is_empty(joinrel->direct_lateral_relids))
+		joinrel->direct_lateral_relids = NULL;
 
-    /*
-     * Construct restrict and join clause lists for the new joinrel. (The
-     * caller might or might not need the restrictlist, but I need it anyway
-     * for set_joinrel_size_estimates().)
-     */
-    restrictlist = build_joinrel_restrictlist(root, joinrel,
-                                              outer_rel, inner_rel);
-    if (restrictlist_ptr)
-        *restrictlist_ptr = restrictlist;
-    build_joinrel_joinlist(joinrel, outer_rel, inner_rel);
+	/*
+	 * Construct restrict and join clause lists for the new joinrel. (The
+	 * caller might or might not need the restrictlist, but I need it anyway
+	 * for set_joinrel_size_estimates().)
+	 */
+	restrictlist = build_joinrel_restrictlist(root, joinrel,
+											  outer_rel, inner_rel);
+	if (restrictlist_ptr)
+		*restrictlist_ptr = restrictlist;
+	build_joinrel_joinlist(joinrel, outer_rel, inner_rel);
 
-    /*
-     * This is also the right place to check whether the joinrel has any
-     * pending EquivalenceClass joins.
-     */
-    joinrel->has_eclass_joins = has_relevant_eclass_joinclause(root, joinrel);
+	/*
+	 * This is also the right place to check whether the joinrel has any
+	 * pending EquivalenceClass joins.
+	 */
+	joinrel->has_eclass_joins = has_relevant_eclass_joinclause(root, joinrel);
 
-    /*
-     * Set estimates of the joinrel's size.
-     */
-    set_joinrel_size_estimates(root, joinrel, outer_rel, inner_rel,
-                               sjinfo, restrictlist);
+	/*
+	 * Set estimates of the joinrel's size.
+	 */
+	set_joinrel_size_estimates(root, joinrel, outer_rel, inner_rel,
+							   sjinfo, restrictlist);
 
-    /*
-     * Set the consider_parallel flag if this joinrel could potentially be
-     * scanned within a parallel worker.  If this flag is false for either
-     * inner_rel or outer_rel, then it must be false for the joinrel also.
-     * Even if both are true, there might be parallel-restricted expressions
-     * in the targetlist or quals.
-     *
-     * Note that if there are more than two rels in this relation, they could
-     * be divided between inner_rel and outer_rel in any arbitrary way.  We
-     * assume this doesn't matter, because we should hit all the same baserels
-     * and joinclauses while building up to this joinrel no matter which we
-     * take; therefore, we should make the same decision here however we get
-     * here.
-     */
-    if (inner_rel->consider_parallel && outer_rel->consider_parallel &&
-        is_parallel_safe(root, (Node *) restrictlist) &&
-        is_parallel_safe(root, (Node *) joinrel->reltarget->exprs))
-        joinrel->consider_parallel = true;
+	/*
+	 * Set the consider_parallel flag if this joinrel could potentially be
+	 * scanned within a parallel worker.  If this flag is false for either
+	 * inner_rel or outer_rel, then it must be false for the joinrel also.
+	 * Even if both are true, there might be parallel-restricted expressions
+	 * in the targetlist or quals.
+	 *
+	 * Note that if there are more than two rels in this relation, they could
+	 * be divided between inner_rel and outer_rel in any arbitrary way.  We
+	 * assume this doesn't matter, because we should hit all the same baserels
+	 * and joinclauses while building up to this joinrel no matter which we
+	 * take; therefore, we should make the same decision here however we get
+	 * here.
+	 */
+	if (inner_rel->consider_parallel && outer_rel->consider_parallel &&
+		is_parallel_safe(root, (Node *) restrictlist) &&
+		is_parallel_safe(root, (Node *) joinrel->reltarget->exprs))
+		joinrel->consider_parallel = true;
 
-    /* Add the joinrel to the PlannerInfo. */
-    add_join_rel(root, joinrel);
+	/* Add the joinrel to the PlannerInfo. */
+	add_join_rel(root, joinrel);
 
-    /*
-     * Also, if dynamic-programming join search is active, add the new joinrel
-     * to the appropriate sublist.  Note: you might think the Assert on number
-     * of members should be for equality, but some of the level 1 rels might
-     * have been joinrels already, so we can only assert <=.
-     */
-    if (root->join_rel_level)
-    {
-        Assert(root->join_cur_level > 0);
-        Assert(root->join_cur_level <= bms_num_members(joinrel->relids));
-        root->join_rel_level[root->join_cur_level] =
-            lappend(root->join_rel_level[root->join_cur_level], joinrel);
-    }
+	/*
+	 * Also, if dynamic-programming join search is active, add the new joinrel
+	 * to the appropriate sublist.  Note: you might think the Assert on number
+	 * of members should be for equality, but some of the level 1 rels might
+	 * have been joinrels already, so we can only assert <=.
+	 */
+	if (root->join_rel_level)
+	{
+		Assert(root->join_cur_level > 0);
+		Assert(root->join_cur_level <= bms_num_members(joinrel->relids));
+		root->join_rel_level[root->join_cur_level] =
+			lappend(root->join_rel_level[root->join_cur_level], joinrel);
+	}
 
-    return joinrel;
+	return joinrel;
 }
 
 /*

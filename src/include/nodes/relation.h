@@ -100,6 +100,16 @@ typedef struct Distribution
 } Distribution;
 #endif
 
+#ifdef __TBASE__
+/*
+ * The location of DML result relation in JOINREL
+ */
+typedef enum ResultRelLocation {
+	RESULT_REL_NONE,		/* Not found */
+	RESULT_REL_INNER,		/* Appears in inner subpath */
+	RESULT_REL_OUTER		/* Appears in outer subpath */
+} ResultRelLocation;
+#endif
 
 /*
  * Relids
@@ -697,11 +707,14 @@ typedef struct RelOptInfo
     /* used by "other" relations */
     Relids        top_parent_relids;    /* Relids of topmost parents */
 #ifdef __TBASE__
-    /* used for interval partition */
-    bool        intervalparent;     /* is interval partition */
-    bool        isdefault;            /* is default partition table */
-    Bitmapset    *childs;            /* child tables to query */
-    int         estimate_partidx;   /* */
+	/* used for interval partition */
+	bool		intervalparent;     /* is interval partition */
+	bool		isdefault;			/* is default partition table */
+	Bitmapset	*childs;            /* child tables to query */
+	int 		estimate_partidx;   /* */
+
+	/* used for complex delete */
+	ResultRelLocation resultRelLoc;
 #endif
 
 } RelOptInfo;

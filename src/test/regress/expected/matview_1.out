@@ -542,8 +542,8 @@ drop materialized view mvtest_error;
 CREATE TABLE mvtest_v AS SELECT generate_series(1,10) AS a;
 CREATE MATERIALIZED VIEW mvtest_mv_v AS SELECT a FROM mvtest_v WHERE a <= 5;
 DELETE FROM mvtest_v WHERE EXISTS ( SELECT * FROM mvtest_mv_v WHERE mvtest_mv_v.a = mvtest_v.a );
-ERROR:  could not plan this distributed delete
-DETAIL:  correlated or complex DELETE is currently not supported in Postgres-XL.
+ERROR:  materialized view "mvtest_mv_v" has not been populated
+HINT:  Use the REFRESH MATERIALIZED VIEW command.
 SELECT * FROM mvtest_v order by 1;
  a  
 ----

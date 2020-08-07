@@ -313,8 +313,8 @@ CREATE RULE joinview_u AS ON UPDATE TO joinview DO INSTEAD
     FROM joinme WHERE f2 = f2j AND f2 = old.f2
     RETURNING foo.*, other;
 UPDATE joinview SET f1 = f1 + 1 WHERE f3 = 57 RETURNING *, other + 1;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
+ERROR:  could not plan this distributed UPDATE/DELETE
+DETAIL:  correlated or complex UPDATE/DELETE is currently not supported in Postgres-XL.
 SELECT * FROM joinview ORDER BY f1;
  f1 |  f2  | f3 | f4  | other 
 ----+------+----+-----+-------

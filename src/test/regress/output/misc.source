@@ -29,15 +29,11 @@ UPDATE tmp
    FROM onek
    WHERE onek.stringu1 = 'JBAAAA' and
 	  onek.stringu1 = tmp.stringu1;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 UPDATE tmp
    SET stringu1 = reverse_name(onek2.stringu1)
    FROM onek2
    WHERE onek2.stringu1 = 'JCAAAA' and
 	  onek2.stringu1 = tmp.stringu1;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 DROP TABLE tmp;
 --UPDATE person*
 --   SET age = age + 1;

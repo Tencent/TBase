@@ -530,12 +530,10 @@ update shipped_view set value = 11
     from int4_tbl a join int4_tbl b
       on (a.f1 = (select f1 from int4_tbl c where c.f1=b.f1))
     where ordnum = a.f1;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 select * from shipped_view;
- ttype | ordnum | partnum |  value  
--------+--------+---------+---------
- wt    |      0 | 1       | 1234.56
+ ttype | ordnum | partnum | value 
+-------+--------+---------+-------
+ wt    |      0 | 1       |    11
 (1 row)
 
 select f1, ss1 as relabel from

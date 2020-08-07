@@ -63,7 +63,9 @@
 #include "utils/selfuncs.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
-
+#ifdef __TBASE__
+#include "optimizer/distribution.h"
+#endif
 
 /* GUC parameters */
 double        cursor_tuple_fraction = DEFAULT_CURSOR_TUPLE_FRACTION;
@@ -189,10 +191,8 @@ static PathTarget *make_window_input_target(PlannerInfo *root,
 static List *make_pathkeys_for_window(PlannerInfo *root, WindowClause *wc,
                          List *tlist);
 static PathTarget *make_sort_input_target(PlannerInfo *root,
-                       PathTarget *final_target,
-                       bool *have_postponed_srfs);
-static bool equal_distributions(PlannerInfo *root, Distribution *dst1,
-                    Distribution *dst2);
+					   PathTarget *final_target,
+					   bool *have_postponed_srfs);
 static bool grouping_distribution_match(PlannerInfo *root, Query *parse,
                       Path *path, List *clauses);
 static bool groupingsets_distribution_match(PlannerInfo *root, Query *parse,
@@ -7853,55 +7853,6 @@ groupingsets_distribution_match(PlannerInfo *root, Query *parse, Path *path)
         IsLocatorReplicated(distribution->distributionType))
         return true;
 
-    return false;
-}
-
-/*
- * equal_distributions
- *     Check that two distributions are equal.
- *
- * Distributions are considered equal if they are of the same type, on the
- * same set of nodes, and if the distribution expressions are known to be equal
- * (either the same expressions or members of the same equivalence class).
- */
-static bool
-equal_distributions(PlannerInfo *root, Distribution *dst1,
-                    Distribution *dst2)
-{// #lizard forgives
-    /* fast path */
-    if (dst1 == dst2)
-        return true;
-
-    if (dst1 == NULL || dst2 == NULL)
-        return false;
-
-    /* conditions easier to check go first */
-    if (dst1->distributionType != dst2->distributionType)
-        return false;
-
-    if (!bms_equal(dst1->nodes, dst2->nodes))
-        return false;
-
-    if (equal(dst1->distributionExpr, dst2->distributionExpr))
-        return true;
-
-    /*
-     * For more thorough expression check we need to ensure they both are
-     * defined
-     */
-    if (dst1->distributionExpr == NULL || dst2->distributionExpr == NULL)
-        return false;
-
-    /*
-     * More thorough check, but allows some important cases, like if
-     * distribution column is not updated (implicit set distcol=distcol) or
-     * set distcol = CONST, ... WHERE distcol = CONST - pattern used by many
-     * applications.
-     */
-    if (exprs_known_equal(root, dst1->distributionExpr, dst2->distributionExpr))
-        return true;
-
-    /* The restrictNodes field does not matter for distribution equality */
     return false;
 }
 

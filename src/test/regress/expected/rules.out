@@ -291,8 +291,8 @@ select * from rtest_v1 order by a, b;
 
 -- updates in a mergejoin
 update rtest_v1 set b = rtest_t2.b from rtest_t2 where rtest_v1.a = rtest_t2.a;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
+ERROR:  could not plan this distributed UPDATE/DELETE
+DETAIL:  correlated or complex UPDATE/DELETE is currently not supported in Postgres-XL.
 select * from rtest_v1 order by a, b;
  a | b  
 ---+----
@@ -330,8 +330,8 @@ select * from rtest_v1 order by a, b;
 (8 rows)
 
 update rtest_v1 set a = rtest_t3.a + 20 from rtest_t3 where rtest_v1.b = rtest_t3.b;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
+ERROR:  could not plan this distributed UPDATE/DELETE
+DETAIL:  correlated or complex UPDATE/DELETE is currently not supported in Postgres-XL.
 select * from rtest_v1 order by a, b;
  a  | b  
 ----+----
@@ -361,58 +361,49 @@ insert into rtest_admin values ('jw', 'orion');
 insert into rtest_admin values ('jw', 'notjw');
 insert into rtest_admin values ('bm', 'neptun');
 update rtest_system set sysname = 'pluto' where sysname = 'neptun';
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 select * from rtest_interface order by sysname, ifname;
  sysname | ifname 
 ---------+--------
- neptun  | eth0
  notjw   | eth0
  orion   | eth0
  orion   | eth1
+ pluto   | eth0
 (4 rows)
 
 select * from rtest_admin order by pname, sysname;
  pname | sysname 
 -------+---------
- bm    | neptun
+ bm    | pluto
  jw    | notjw
  jw    | orion
 (3 rows)
 
 update rtest_person set pname = 'jwieck' where pdesc = 'Jan Wieck';
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 -- Note: use ORDER BY here to ensure consistent output across all systems.
 -- The above UPDATE affects two rows with equal keys, so they could be
 -- updated in either order depending on the whim of the local qsort().
 select * from rtest_admin order by pname, sysname;
- pname | sysname 
--------+---------
- bm    | neptun
- jw    | notjw
- jw    | orion
+ pname  | sysname 
+--------+---------
+ bm     | pluto
+ jwieck | notjw
+ jwieck | orion
 (3 rows)
 
 delete from rtest_system where sysname = 'orion';
-ERROR:  could not plan this distributed delete
-DETAIL:  correlated or complex DELETE is currently not supported in Postgres-XL.
 select * from rtest_interface order by sysname, ifname;
  sysname | ifname 
 ---------+--------
- neptun  | eth0
  notjw   | eth0
- orion   | eth0
- orion   | eth1
-(4 rows)
+ pluto   | eth0
+(2 rows)
 
 select * from rtest_admin order by pname, sysname;
- pname | sysname 
--------+---------
- bm    | neptun
- jw    | notjw
- jw    | orion
-(3 rows)
+ pname  | sysname 
+--------+---------
+ bm     | pluto
+ jwieck | notjw
+(2 rows)
 
 --
 -- Rule qualification test
@@ -452,36 +443,41 @@ select ename, who = current_user as "matches user", action, newsal, oldsal from 
 
 update rtest_empmass set salary = salary + '1000.00';
 update rtest_emp set salary = rtest_empmass.salary from rtest_empmass where rtest_emp.ename = rtest_empmass.ename;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 select ename, who = current_user as "matches user", action, newsal, oldsal from rtest_emplog order by ename, action, newsal;
         ename         | matches user |   action   |   newsal   |   oldsal   
 ----------------------+--------------+------------+------------+------------
  gates                | t            | fired      |      $0.00 | $80,000.00
  gates                | t            | hired      | $80,000.00 |      $0.00
  maier                | t            | hired      |  $5,000.00 |      $0.00
+ maier                | t            | honored    |  $6,000.00 |  $5,000.00
  mayr                 | t            | hired      |  $6,000.00 |      $0.00
+ mayr                 | t            | honored    |  $7,000.00 |  $6,000.00
  meyer                | t            | hired      |  $4,000.00 |      $0.00
+ meyer                | t            | honored    |  $5,000.00 |  $4,000.00
  wiecc                | t            | hired      |  $5,000.00 |      $0.00
  wieck                | t            | honored    |  $6,000.00 |  $5,000.00
  wieck                | t            | honored    |  $7,000.00 |  $6,000.00
-(8 rows)
+(11 rows)
 
 delete from rtest_emp using rtest_empmass where rtest_emp.ename = rtest_empmass.ename;
-ERROR:  could not plan this distributed delete
-DETAIL:  correlated or complex DELETE is currently not supported in Postgres-XL.
 select ename, who = current_user as "matches user", action, newsal, oldsal from rtest_emplog order by ename, action, newsal;
         ename         | matches user |   action   |   newsal   |   oldsal   
 ----------------------+--------------+------------+------------+------------
  gates                | t            | fired      |      $0.00 | $80,000.00
  gates                | t            | hired      | $80,000.00 |      $0.00
+ maier                | t            | fired      |      $0.00 |  $6,000.00
  maier                | t            | hired      |  $5,000.00 |      $0.00
+ maier                | t            | honored    |  $6,000.00 |  $5,000.00
+ mayr                 | t            | fired      |      $0.00 |  $7,000.00
  mayr                 | t            | hired      |  $6,000.00 |      $0.00
+ mayr                 | t            | honored    |  $7,000.00 |  $6,000.00
+ meyer                | t            | fired      |      $0.00 |  $5,000.00
  meyer                | t            | hired      |  $4,000.00 |      $0.00
+ meyer                | t            | honored    |  $5,000.00 |  $4,000.00
  wiecc                | t            | hired      |  $5,000.00 |      $0.00
  wieck                | t            | honored    |  $6,000.00 |  $5,000.00
  wieck                | t            | honored    |  $7,000.00 |  $6,000.00
-(8 rows)
+(14 rows)
 
 --
 -- Multiple cascaded qualified instead rule test
@@ -1103,26 +1099,27 @@ SELECT * FROM shoelace ORDER BY sl_name;
 (8 rows)
 
 insert into shoelace_ok select * from shoelace_arrive;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 SELECT * FROM shoelace ORDER BY sl_name;
   sl_name   | sl_avail |  sl_color  | sl_len | sl_unit  | sl_len_cm 
 ------------+----------+------------+--------+----------+-----------
  sl1        |        5 | black      |     80 | cm       |        80
  sl2        |        6 | black      |    100 | cm       |       100
- sl3        |        0 | black      |     35 | inch     |      88.9
+ sl3        |       10 | black      |     35 | inch     |      88.9
  sl4        |        8 | black      |     40 | inch     |     101.6
  sl5        |        4 | brown      |      1 | m        |       100
- sl6        |        0 | brown      |    0.9 | m        |        90
+ sl6        |       20 | brown      |    0.9 | m        |        90
  sl7        |        6 | brown      |     60 | cm       |        60
- sl8        |        1 | brown      |     40 | inch     |     101.6
+ sl8        |       21 | brown      |     40 | inch     |     101.6
 (8 rows)
 
 SELECT * FROM shoelace_log ORDER BY sl_name;
   sl_name   | sl_avail | log_who  |         log_when         
 ------------+----------+----------+--------------------------
+ sl3        |       10 | Al Bundy | Thu Jan 01 00:00:00 1970
+ sl6        |       20 | Al Bundy | Thu Jan 01 00:00:00 1970
  sl7        |        6 | Al Bundy | Thu Jan 01 00:00:00 1970
-(1 row)
+ sl8        |       21 | Al Bundy | Thu Jan 01 00:00:00 1970
+(4 rows)
 
     CREATE VIEW shoelace_obsolete AS
 	SELECT * FROM shoelace WHERE NOT EXISTS
@@ -1151,22 +1148,19 @@ SELECT * FROM shoelace_candelete;
 DELETE FROM shoelace WHERE EXISTS
     (SELECT * FROM shoelace_candelete
              WHERE sl_name = shoelace.sl_name);
-ERROR:  could not plan this distributed delete
-DETAIL:  correlated or complex DELETE is currently not supported in Postgres-XL.
 SELECT * FROM shoelace ORDER BY sl_name;
   sl_name   | sl_avail |  sl_color  | sl_len | sl_unit  | sl_len_cm 
 ------------+----------+------------+--------+----------+-----------
  sl1        |        5 | black      |     80 | cm       |        80
  sl10       |     1000 | magenta    |     40 | inch     |     101.6
  sl2        |        6 | black      |    100 | cm       |       100
- sl3        |        0 | black      |     35 | inch     |      88.9
+ sl3        |       10 | black      |     35 | inch     |      88.9
  sl4        |        8 | black      |     40 | inch     |     101.6
  sl5        |        4 | brown      |      1 | m        |       100
- sl6        |        0 | brown      |    0.9 | m        |        90
+ sl6        |       20 | brown      |    0.9 | m        |        90
  sl7        |        6 | brown      |     60 | cm       |        60
- sl8        |        1 | brown      |     40 | inch     |     101.6
- sl9        |        0 | pink       |     35 | inch     |      88.9
-(10 rows)
+ sl8        |       21 | brown      |     40 | inch     |     101.6
+(9 rows)
 
 SELECT * FROM shoe ORDER BY shoename;
   shoename  | sh_avail |  slcolor   | slminlen | slminlen_cm | slmaxlen | slmaxlen_cm |  slunit  
@@ -1254,40 +1248,35 @@ select * from vview order by pid;
 (2 rows)
 
 update vview set descrip='test1' where pid=1;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 select * from vview order by pid;
- pid |   txt   | descrip  
------+---------+----------
-   1 | parent1 | descrip1
+ pid |   txt   | descrip 
+-----+---------+---------
+   1 | parent1 | test1
    2 | parent2 | 
 (2 rows)
 
 update vview set descrip='test2' where pid=2;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 select * from vview order by pid;
- pid |   txt   | descrip  
------+---------+----------
-   1 | parent1 | descrip1
-   2 | parent2 | 
+ pid |   txt   | descrip 
+-----+---------+---------
+   1 | parent1 | test1
+   2 | parent2 | test2
 (2 rows)
 
 update vview set descrip='test3' where pid=3;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 select * from vview order by pid;
- pid |   txt   | descrip  
------+---------+----------
-   1 | parent1 | descrip1
-   2 | parent2 | 
+ pid |   txt   | descrip 
+-----+---------+---------
+   1 | parent1 | test1
+   2 | parent2 | test2
 (2 rows)
 
 select * from cchild order by pid;
- pid | descrip  
------+----------
-   1 | descrip1
-(1 row)
+ pid | descrip 
+-----+---------
+   1 | test1
+   2 | test2
+(2 rows)
 
 drop rule rrule on vview;
 drop view vview;
@@ -2678,14 +2667,11 @@ select * from id_ordered order by id;
 (6 rows)
 
 update id_ordered set name = 'update 2' where id = 2;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
+ERROR:  input of anonymous composite types is not implemented
 update id_ordered set name = 'update 4' where id = 4;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
+ERROR:  input of anonymous composite types is not implemented
 update id_ordered set name = 'update 5' where id = 5;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
+ERROR:  input of anonymous composite types is not implemented
 select * from id_ordered order by id;
  id |  name  
 ----+--------
