@@ -2312,6 +2312,7 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
             path = adjust_path_distribution(root, parse, path);
 
 #ifdef __TBASE__
+<<<<<<< HEAD
             /*
               * unshippable triggers found on target relation, we have to do DML
               * on coordinator.
@@ -2324,6 +2325,43 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
                 }
             }
 #endif
+=======
+			/*
+			 * unshippable triggers found on target relation, we have to do DML
+			 * on coordinator.
+             */
+			if (parse->hasUnshippableTriggers)
+			{
+				if (path->distribution)
+				{
+					path = adjust_modifytable_subpath(root, parse, path);
+				}
+			}
+#endif
+
+			path = (Path *)
+				create_modifytable_path(root, final_rel,
+										parse->commandType,
+										parse->canSetTag,
+										parse->resultRelation,
+										NIL,
+										list_make1_int(parse->resultRelation),
+										list_make1(path),
+										list_make1(root),
+										withCheckOptionLists,
+										returningLists,
+										rowMarks,
+										parse->onConflict,
+										SS_assign_special_param(root));
+		}
+		else
+			/* Adjust path by injecting a remote subplan, if appropriate. */
+			path = adjust_path_distribution(root, parse, path);
+
+		/* And shove it into final_rel */
+		add_path(final_rel, path);
+	}
+>>>>>>> d1855902... Remove the duplicate estate free in ExecEndModifyTable
 
             path = (Path *)
                 create_modifytable_path(root, final_rel,
