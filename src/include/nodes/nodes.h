@@ -765,37 +765,42 @@ typedef enum CmdType
  */
 typedef enum JoinType
 {
-    /*
-     * The canonical kinds of joins according to the SQL JOIN syntax. Only
-     * these codes can appear in parser output (e.g., JoinExpr nodes).
-     */
-    JOIN_INNER,                    /* matching tuple pairs only */
-    JOIN_LEFT,                    /* pairs + unmatched LHS tuples */
-    JOIN_FULL,                    /* pairs + unmatched LHS + unmatched RHS */
-    JOIN_RIGHT,                    /* pairs + unmatched RHS tuples */
+	/*
+	 * The canonical kinds of joins according to the SQL JOIN syntax. Only
+	 * these codes can appear in parser output (e.g., JoinExpr nodes).
+	 */
+	JOIN_INNER,					/* matching tuple pairs only */
+	JOIN_LEFT,					/* pairs + unmatched LHS tuples */
+	JOIN_FULL,					/* pairs + unmatched LHS + unmatched RHS */
+	JOIN_RIGHT,					/* pairs + unmatched RHS tuples */
 
-    /*
-     * Semijoins and anti-semijoins (as defined in relational theory) do not
-     * appear in the SQL JOIN syntax, but there are standard idioms for
-     * representing them (e.g., using EXISTS).  The planner recognizes these
-     * cases and converts them to joins.  So the planner and executor must
-     * support these codes.  NOTE: in JOIN_SEMI output, it is unspecified
-     * which matching RHS row is joined to.  In JOIN_ANTI output, the row is
-     * guaranteed to be null-extended.
-     */
-    JOIN_SEMI,                    /* 1 copy of each LHS row that has match(es) */
-    JOIN_ANTI,                    /* 1 copy of each LHS row that has no match */
+	/*
+	 * Semijoins and anti-semijoins (as defined in relational theory) do not
+	 * appear in the SQL JOIN syntax, but there are standard idioms for
+	 * representing them (e.g., using EXISTS).  The planner recognizes these
+	 * cases and converts them to joins.  So the planner and executor must
+	 * support these codes.  NOTE: in JOIN_SEMI output, it is unspecified
+	 * which matching RHS row is joined to.  In JOIN_ANTI output, the row is
+	 * guaranteed to be null-extended.
+	 */
+	JOIN_SEMI,					/* 1 copy of each LHS row that has match(es) */
+	JOIN_ANTI,					/* 1 copy of each LHS row that has no match */
 
-    /*
-     * These codes are used internally in the planner, but are not supported
-     * by the executor (nor, indeed, by most of the planner).
-     */
-    JOIN_UNIQUE_OUTER,            /* LHS path must be made unique */
-    JOIN_UNIQUE_INNER            /* RHS path must be made unique */
+	/*
+	 * These codes are used internally in the planner, but are not supported
+	 * by the executor (nor, indeed, by most of the planner).
+	 */
+	JOIN_UNIQUE_OUTER,			/* LHS path must be made unique */
+	JOIN_UNIQUE_INNER,			/* RHS path must be made unique */
 
-    /*
-     * We might need additional join types someday.
-     */
+#ifdef __TBASE__
+	JOIN_LEFT_SCALAR            /* pairs + unmatched LHS tuples */
+	                            /* only 1 copy of echo LHS row else report error. */
+#endif
+
+	/*
+	 * We might need additional join types someday.
+	 */
 } JoinType;
 
 /*
@@ -812,12 +817,22 @@ typedef enum JoinType
  * pushed-down quals.  This is convenient because for almost all purposes,
  * quals attached to a semijoin can be treated the same as innerjoin quals.
  */
+#ifdef __TBASE__
 #define IS_OUTER_JOIN(jointype) \
-    (((1 << (jointype)) & \
-      ((1 << JOIN_LEFT) | \
-       (1 << JOIN_FULL) | \
-       (1 << JOIN_RIGHT) | \
-       (1 << JOIN_ANTI))) != 0)
+	(((1 << (jointype)) & \
+	  ((1 << JOIN_LEFT) | \
+	   (1 << JOIN_LEFT_SCALAR) | \
+	   (1 << JOIN_FULL) | \
+	   (1 << JOIN_RIGHT) | \
+	   (1 << JOIN_ANTI))) != 0)
+#else
+#define IS_OUTER_JOIN(jointype) \
+	(((1 << (jointype)) & \
+	  ((1 << JOIN_LEFT) | \
+	   (1 << JOIN_FULL) | \
+	   (1 << JOIN_RIGHT) | \
+	   (1 << JOIN_ANTI))) != 0)
+#endif
 
 /*
  * AggStrategy -

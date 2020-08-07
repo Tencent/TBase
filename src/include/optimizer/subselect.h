@@ -99,8 +99,9 @@ extern JoinExpr *convert_ALL_sublink_to_join(PlannerInfo *root, SubLink *sublink
                                Relids available_rels);
 extern bool check_or_exist_sublink_pullupable(PlannerInfo *root,Node *node);
 extern bool check_or_exist_qual_pullupable(PlannerInfo *root, Node *node);
-extern List * convert_OR_EXIST_sublink_to_join_recurse(PlannerInfo *root, Node *node, 
+extern List *convert_OR_EXIST_sublink_to_join_recurse(PlannerInfo *root, Node *node,
 									Node **jtlink);
+extern TargetEntry *convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry);
 #endif
 extern Node *SS_replace_correlation_vars(PlannerInfo *root, Node *expr);
 extern Node *SS_process_sublinks(PlannerInfo *root, Node *expr, bool isQual);

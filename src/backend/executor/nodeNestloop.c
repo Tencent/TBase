@@ -167,102 +167,114 @@ ExecNestLoop(PlanState *pstate)
 #ifdef __TBASE__
         node->nl_InnerInited = true;
 #endif
-        innerTupleSlot = ExecProcNode(innerPlan);
-        econtext->ecxt_innertuple = innerTupleSlot;
+		innerTupleSlot = ExecProcNode(innerPlan);
+		econtext->ecxt_innertuple = innerTupleSlot;
 
-        if (TupIsNull(innerTupleSlot))
-        {
-            ENL1_printf("no inner tuple, need new outer tuple");
+		if (TupIsNull(innerTupleSlot))
+		{
+			ENL1_printf("no inner tuple, need new outer tuple");
 
-            node->nl_NeedNewOuter = true;
-
+			node->nl_NeedNewOuter = true;
+#ifdef __TBASE__
             if (!node->nl_MatchedOuter &&
                 (node->js.jointype == JOIN_LEFT ||
-                 node->js.jointype == JOIN_ANTI))
-            {
-                /*
-                 * We are doing an outer join and there were no join matches
-                 * for this outer tuple.  Generate a fake join tuple with
-                 * nulls for the inner tuple, and return it if it passes the
-                 * non-join quals.
-                 */
-                econtext->ecxt_innertuple = node->nl_NullInnerTupleSlot;
+                 node->js.jointype == JOIN_ANTI ||
+                 node->js.jointype == JOIN_LEFT_SCALAR))
+#else
+			if (!node->nl_MatchedOuter &&
+				(node->js.jointype == JOIN_LEFT ||
+				 node->js.jointype == JOIN_ANTI))
+#endif
+			{
+				/*
+				 * We are doing an outer join and there were no join matches
+				 * for this outer tuple.  Generate a fake join tuple with
+				 * nulls for the inner tuple, and return it if it passes the
+				 * non-join quals.
+				 */
+				econtext->ecxt_innertuple = node->nl_NullInnerTupleSlot;
 
-                ENL1_printf("testing qualification for outer-join tuple");
+				ENL1_printf("testing qualification for outer-join tuple");
 
-                if (otherqual == NULL || ExecQual(otherqual, econtext))
-                {
-                    /*
-                     * qualification was satisfied so we project and return
-                     * the slot containing the result tuple using
-                     * ExecProject().
-                     */
-                    ENL1_printf("qualification succeeded, projecting tuple");
+				if (otherqual == NULL || ExecQual(otherqual, econtext))
+				{
+					/*
+					 * qualification was satisfied so we project and return
+					 * the slot containing the result tuple using
+					 * ExecProject().
+					 */
+					ENL1_printf("qualification succeeded, projecting tuple");
 
-                    return ExecProject(node->js.ps.ps_ProjInfo);
-                }
-                else
-                    InstrCountFiltered2(node, 1);
-            }
+					return ExecProject(node->js.ps.ps_ProjInfo);
+				}
+				else
+					InstrCountFiltered2(node, 1);
+			}
 
-            /*
-             * Otherwise just return to top of loop for a new outer tuple.
-             */
-            continue;
-        }
+			/*
+			 * Otherwise just return to top of loop for a new outer tuple.
+			 */
+			continue;
+		}
 
-        /*
-         * at this point we have a new pair of inner and outer tuples so we
-         * test the inner and outer tuples to see if they satisfy the node's
-         * qualification.
-         *
-         * Only the joinquals determine MatchedOuter status, but all quals
-         * must pass to actually return the tuple.
-         */
-        ENL1_printf("testing qualification");
+		/*
+		 * at this point we have a new pair of inner and outer tuples so we
+		 * test the inner and outer tuples to see if they satisfy the node's
+		 * qualification.
+		 *
+		 * Only the joinquals determine MatchedOuter status, but all quals
+		 * must pass to actually return the tuple.
+		 */
+		ENL1_printf("testing qualification");
 
-        if (ExecQual(joinqual, econtext))
-        {
-            node->nl_MatchedOuter = true;
+		if (ExecQual(joinqual, econtext))
+		{
+#ifdef __TBASE__
+            if (node->js.jointype == JOIN_LEFT_SCALAR && node->nl_MatchedOuter)
+                ereport(ERROR,
+                        (errcode(ERRCODE_CARDINALITY_VIOLATION),
+                                errmsg("more than one row returned by a subquery used as an expression")));
+#endif
+			node->nl_MatchedOuter = true;
 
-            /* In an antijoin, we never return a matched tuple */
-            if (node->js.jointype == JOIN_ANTI)
-            {
-                node->nl_NeedNewOuter = true;
-                continue;        /* return to top of loop */
-            }
+			/* In an antijoin, we never return a matched tuple */
+			if (node->js.jointype == JOIN_ANTI)
+			{
+				node->nl_NeedNewOuter = true;
+				continue;		/* return to top of loop */
+			}
 
-            /*
-             * If we only need to join to the first matching inner tuple, then
-             * consider returning this one, but after that continue with next
-             * outer tuple.
-             */
-            if (node->js.single_match)
-                node->nl_NeedNewOuter = true;
+			/*
+			 * If we only need to join to the first matching inner tuple, then
+			 * consider returning this one, but after that continue with next
+			 * outer tuple.
+			 */
+			if (node->js.single_match)
+				node->nl_NeedNewOuter = true;
 
-            if (otherqual == NULL || ExecQual(otherqual, econtext))
-            {
-                /*
-                 * qualification was satisfied so we project and return the
-                 * slot containing the result tuple using ExecProject().
-                 */
-                ENL1_printf("qualification succeeded, projecting tuple");
+			if (otherqual == NULL || ExecQual(otherqual, econtext))
+			{
+				/*
+				 * qualification was satisfied so we project and return the
+				 * slot containing the result tuple using ExecProject().
+				 */
+				ENL1_printf("qualification succeeded, projecting tuple");
 
-                return ExecProject(node->js.ps.ps_ProjInfo);
-            }
-            else
-                InstrCountFiltered2(node, 1);
-        }
-        else
-            InstrCountFiltered1(node, 1);
+				return ExecProject(node->js.ps.ps_ProjInfo);
+			}
+			else
+				InstrCountFiltered2(node, 1);
+		}
+		else
+			InstrCountFiltered1(node, 1);
 
-        /*
-         * Tuple fails qual, so free per-tuple memory and try again.
-         */
-        ResetExprContext(econtext);
+		/*
+		 * Tuple fails qual, so free per-tuple memory and try again.
+		 */
+		ResetExprContext(econtext);
 
-        ENL1_printf("qualification failed, looping");
-    }
+		ENL1_printf("qualification failed, looping");
+	}
 }
 
 /* ----------------------------------------------------------------
@@ -271,94 +283,101 @@ ExecNestLoop(PlanState *pstate)
  */
 NestLoopState *
 ExecInitNestLoop(NestLoop *node, EState *estate, int eflags)
-{// #lizard forgives
-    NestLoopState *nlstate;
+{
+	NestLoopState *nlstate;
 
-    /* check for unsupported flags */
-    Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
+	/* check for unsupported flags */
+	Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
 
-    NL1_printf("ExecInitNestLoop: %s\n",
-               "initializing node");
+	NL1_printf("ExecInitNestLoop: %s\n",
+			   "initializing node");
 
-    /*
-     * create state structure
-     */
-    nlstate = makeNode(NestLoopState);
-    nlstate->js.ps.plan = (Plan *) node;
-    nlstate->js.ps.state = estate;
-    nlstate->js.ps.ExecProcNode = ExecNestLoop;
+	/*
+	 * create state structure
+	 */
+	nlstate = makeNode(NestLoopState);
+	nlstate->js.ps.plan = (Plan *) node;
+	nlstate->js.ps.state = estate;
+	nlstate->js.ps.ExecProcNode = ExecNestLoop;
 
-    /*
-     * Miscellaneous initialization
-     *
-     * create expression context for node
-     */
-    ExecAssignExprContext(estate, &nlstate->js.ps);
+	/*
+	 * Miscellaneous initialization
+	 *
+	 * create expression context for node
+	 */
+	ExecAssignExprContext(estate, &nlstate->js.ps);
 
-    /*
-     * initialize child expressions
-     */
-    nlstate->js.ps.qual =
-        ExecInitQual(node->join.plan.qual, (PlanState *) nlstate);
-    nlstate->js.jointype = node->join.jointype;
-    nlstate->js.joinqual =
-        ExecInitQual(node->join.joinqual, (PlanState *) nlstate);
+	/*
+	 * initialize child expressions
+	 */
+	nlstate->js.ps.qual =
+		ExecInitQual(node->join.plan.qual, (PlanState *) nlstate);
+	nlstate->js.jointype = node->join.jointype;
+	nlstate->js.joinqual =
+		ExecInitQual(node->join.joinqual, (PlanState *) nlstate);
 
-    /*
-     * initialize child nodes
-     *
-     * If we have no parameters to pass into the inner rel from the outer,
-     * tell the inner child that cheap rescans would be good.  If we do have
-     * such parameters, then there is no point in REWIND support at all in the
-     * inner child, because it will always be rescanned with fresh parameter
-     * values.
-     */
-    outerPlanState(nlstate) = ExecInitNode(outerPlan(node), estate, eflags);
-    if (node->nestParams == NIL)
-        eflags |= EXEC_FLAG_REWIND;
-    else
-        eflags &= ~EXEC_FLAG_REWIND;
-    innerPlanState(nlstate) = ExecInitNode(innerPlan(node), estate, eflags);
+	/*
+	 * initialize child nodes
+	 *
+	 * If we have no parameters to pass into the inner rel from the outer,
+	 * tell the inner child that cheap rescans would be good.  If we do have
+	 * such parameters, then there is no point in REWIND support at all in the
+	 * inner child, because it will always be rescanned with fresh parameter
+	 * values.
+	 */
+	outerPlanState(nlstate) = ExecInitNode(outerPlan(node), estate, eflags);
+	if (node->nestParams == NIL)
+		eflags |= EXEC_FLAG_REWIND;
+	else
+		eflags &= ~EXEC_FLAG_REWIND;
+	innerPlanState(nlstate) = ExecInitNode(innerPlan(node), estate, eflags);
 
-    /*
-     * tuple table initialization
-     */
-    ExecInitResultTupleSlot(estate, &nlstate->js.ps);
+	/*
+	 * tuple table initialization
+	 */
+	ExecInitResultTupleSlot(estate, &nlstate->js.ps);
 
-    /*
-     * detect whether we need only consider the first matching inner tuple
-     */
-    nlstate->js.single_match = (node->join.inner_unique ||
-                                node->join.jointype == JOIN_SEMI);
+	/*
+	 * detect whether we need only consider the first matching inner tuple
+	 */
+	nlstate->js.single_match = (node->join.inner_unique ||
+								node->join.jointype == JOIN_SEMI);
 
-    /* set up null tuples for outer joins, if needed */
-    switch (node->join.jointype)
-    {
-        case JOIN_INNER:
+	/* set up null tuples for outer joins, if needed */
+	switch (node->join.jointype)
+	{
+		case JOIN_INNER:
         case JOIN_SEMI:
             break;
-        case JOIN_LEFT:
-        case JOIN_ANTI:
+#ifdef __TBASE__
+		case JOIN_LEFT_SCALAR:
             nlstate->nl_NullInnerTupleSlot =
-                ExecInitNullTupleSlot(estate,
-                                      ExecGetResultType(innerPlanState(nlstate)));
-            break;
-        default:
-            elog(ERROR, "unrecognized join type: %d",
-                 (int) node->join.jointype);
-    }
+                    ExecInitNullTupleSlot(estate,
+                                          ExecGetResultType(innerPlanState(nlstate)));
+			break;
+#endif
+		case JOIN_LEFT:
+		case JOIN_ANTI:
+			nlstate->nl_NullInnerTupleSlot =
+				ExecInitNullTupleSlot(estate,
+									  ExecGetResultType(innerPlanState(nlstate)));
+			break;
+		default:
+			elog(ERROR, "unrecognized join type: %d",
+				 (int) node->join.jointype);
+	}
 
-    /*
-     * initialize tuple type and projection info
-     */
-    ExecAssignResultTypeFromTL(&nlstate->js.ps);
-    ExecAssignProjectionInfo(&nlstate->js.ps, NULL);
+	/*
+	 * initialize tuple type and projection info
+	 */
+	ExecAssignResultTypeFromTL(&nlstate->js.ps);
+	ExecAssignProjectionInfo(&nlstate->js.ps, NULL);
 
-    /*
-     * finally, wipe the current outer tuple clean.
-     */
-    nlstate->nl_NeedNewOuter = true;
-    nlstate->nl_MatchedOuter = false;
+	/*
+	 * finally, wipe the current outer tuple clean.
+	 */
+	nlstate->nl_NeedNewOuter = true;
+	nlstate->nl_MatchedOuter = false;
 #ifdef __TBASE__
     nlstate->nl_InnerInited  = false;
 #endif

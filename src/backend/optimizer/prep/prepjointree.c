@@ -216,22 +216,48 @@ static bool check_pull_up_sublinks_qual_or_recurse(PlannerInfo *root, Node *node
 void
 pull_up_sublinks(PlannerInfo *root)
 {
-    Node       *jtnode;
-    Relids        relids;
+	Node	   *jtnode;
+	Relids		relids;
 
-    /* Begin recursion through the jointree */
-    jtnode = pull_up_sublinks_jointree_recurse(root,
-                                               (Node *) root->parse->jointree,
-                                               &relids);
-
+#ifdef __TBASE__
     /*
-     * root->parse->jointree must always be a FromExpr, so insert a dummy one
-     * if we got a bare RangeTblRef or JoinExpr out of the recursion.
+     * Look for SubLinks in targetlist, and try to transform them into joins.
      */
-    if (IsA(jtnode, FromExpr))
-        root->parse->jointree = (FromExpr *) jtnode;
-    else
-        root->parse->jointree = makeFromExpr(list_make1(jtnode), NULL);
+    if(enable_pullup_subquery)
+    {
+        List *new_targetList = NIL;
+        ListCell *lc = NULL;
+        TargetEntry *entry = NULL;
+        TargetEntry *new_entry = NULL;
+
+        foreach(lc, root->parse->targetList)
+        {
+            entry = (TargetEntry *) lfirst(lc);
+
+            new_entry = convert_TargetList_sublink_to_join(root, entry);
+            if (new_entry)
+                new_targetList = lappend(new_targetList, new_entry);
+            else
+                new_targetList = lappend(new_targetList, entry);
+        }
+
+        root->parse->targetList = new_targetList;
+    }
+#endif
+
+	/* Begin recursion through the jointree */
+	jtnode = pull_up_sublinks_jointree_recurse(root,
+											   (Node *) root->parse->jointree,
+											   &relids);
+
+	/*
+	 * root->parse->jointree must always be a FromExpr, so insert a dummy one
+	 * if we got a bare RangeTblRef or JoinExpr out of the recursion.
+	 */
+	if (IsA(jtnode, FromExpr))
+		root->parse->jointree = (FromExpr *) jtnode;
+	else
+		root->parse->jointree = makeFromExpr(list_make1(jtnode), NULL);
 }
 
 /*
@@ -296,98 +322,101 @@ pull_up_sublinks_jointree_recurse(PlannerInfo *root, Node *jtnode,
 		}
 #endif
 
-        /*
-         * Note that the result will be either newf, or a stack of JoinExprs
-         * with newf at the base.  We rely on subsequent optimization steps to
-         * flatten this and rearrange the joins as needed.
-         *
-         * Although we could include the pulled-up subqueries in the returned
-         * relids, there's no need since upper quals couldn't refer to their
-         * outputs anyway.
-         */
-        *relids = frelids;
-        jtnode = jtlink;
-    }
-    else if (IsA(jtnode, JoinExpr))
-    {
-        JoinExpr   *j;
-        Relids        leftrelids;
-        Relids        rightrelids;
-        Node       *jtlink;
+		/*
+		 * Note that the result will be either newf, or a stack of JoinExprs
+		 * with newf at the base.  We rely on subsequent optimization steps to
+		 * flatten this and rearrange the joins as needed.
+		 *
+		 * Although we could include the pulled-up subqueries in the returned
+		 * relids, there's no need since upper quals couldn't refer to their
+		 * outputs anyway.
+		 */
+		*relids = frelids;
+		jtnode = jtlink;
+	}
+	else if (IsA(jtnode, JoinExpr))
+	{
+		JoinExpr   *j;
+		Relids		leftrelids;
+		Relids		rightrelids;
+		Node	   *jtlink;
 
-        /*
-         * Make a modifiable copy of join node, but don't bother copying its
-         * subnodes (yet).
-         */
-        j = (JoinExpr *) palloc(sizeof(JoinExpr));
-        memcpy(j, jtnode, sizeof(JoinExpr));
-        jtlink = (Node *) j;
+		/*
+		 * Make a modifiable copy of join node, but don't bother copying its
+		 * subnodes (yet).
+		 */
+		j = (JoinExpr *) palloc(sizeof(JoinExpr));
+		memcpy(j, jtnode, sizeof(JoinExpr));
+		jtlink = (Node *) j;
 
-        /* Recurse to process children and collect their relids */
-        j->larg = pull_up_sublinks_jointree_recurse(root, j->larg,
-                                                    &leftrelids);
-        j->rarg = pull_up_sublinks_jointree_recurse(root, j->rarg,
-                                                    &rightrelids);
+		/* Recurse to process children and collect their relids */
+		j->larg = pull_up_sublinks_jointree_recurse(root, j->larg,
+													&leftrelids);
+		j->rarg = pull_up_sublinks_jointree_recurse(root, j->rarg,
+													&rightrelids);
 
-        /*
-         * Now process qual, showing appropriate child relids as available,
-         * and attach any pulled-up jointree items at the right place. In the
-         * inner-join case we put new JoinExprs above the existing one (much
-         * as for a FromExpr-style join).  In outer-join cases the new
-         * JoinExprs must go into the nullable side of the outer join. The
-         * point of the available_rels machinations is to ensure that we only
-         * pull up quals for which that's okay.
-         *
-         * We don't expect to see any pre-existing JOIN_SEMI or JOIN_ANTI
-         * nodes here.
-         */
-        switch (j->jointype)
-        {
-            case JOIN_INNER:
-                j->quals = pull_up_sublinks_qual_recurse(root, j->quals,
-                                                         &jtlink,
-                                                         bms_union(leftrelids,
-                                                                   rightrelids),
-                                                         NULL, NULL);
-                break;
-            case JOIN_LEFT:
-                j->quals = pull_up_sublinks_qual_recurse(root, j->quals,
-                                                         &j->rarg,
-                                                         rightrelids,
-                                                         NULL, NULL);
-                break;
-            case JOIN_FULL:
-                /* can't do anything with full-join quals */
-                break;
-            case JOIN_RIGHT:
-                j->quals = pull_up_sublinks_qual_recurse(root, j->quals,
-                                                         &j->larg,
-                                                         leftrelids,
-                                                         NULL, NULL);
-                break;
-            default:
-                elog(ERROR, "unrecognized join type: %d",
-                     (int) j->jointype);
-                break;
-        }
+		/*
+		 * Now process qual, showing appropriate child relids as available,
+		 * and attach any pulled-up jointree items at the right place. In the
+		 * inner-join case we put new JoinExprs above the existing one (much
+		 * as for a FromExpr-style join).  In outer-join cases the new
+		 * JoinExprs must go into the nullable side of the outer join. The
+		 * point of the available_rels machinations is to ensure that we only
+		 * pull up quals for which that's okay.
+		 *
+		 * We don't expect to see any pre-existing JOIN_SEMI or JOIN_ANTI
+		 * nodes here.
+		 */
+		switch (j->jointype)
+		{
+			case JOIN_INNER:
+				j->quals = pull_up_sublinks_qual_recurse(root, j->quals,
+														 &jtlink,
+														 bms_union(leftrelids,
+																   rightrelids),
+														 NULL, NULL);
+				break;
+			case JOIN_LEFT:
+#ifdef __TBASE__
+            case JOIN_LEFT_SCALAR:
+#endif
+				j->quals = pull_up_sublinks_qual_recurse(root, j->quals,
+														 &j->rarg,
+														 rightrelids,
+														 NULL, NULL);
+				break;
+			case JOIN_FULL:
+				/* can't do anything with full-join quals */
+				break;
+			case JOIN_RIGHT:
+				j->quals = pull_up_sublinks_qual_recurse(root, j->quals,
+														 &j->larg,
+														 leftrelids,
+														 NULL, NULL);
+				break;
+			default:
+				elog(ERROR, "unrecognized join type: %d",
+					 (int) j->jointype);
+				break;
+		}
 
-        /*
-         * Although we could include the pulled-up subqueries in the returned
-         * relids, there's no need since upper quals couldn't refer to their
-         * outputs anyway.  But we *do* need to include the join's own rtindex
-         * because we haven't yet collapsed join alias variables, so upper
-         * levels would mistakenly think they couldn't use references to this
-         * join.
-         */
-        *relids = bms_join(leftrelids, rightrelids);
-        if (j->rtindex)
-            *relids = bms_add_member(*relids, j->rtindex);
-        jtnode = jtlink;
-    }
-    else
-        elog(ERROR, "unrecognized node type: %d",
-             (int) nodeTag(jtnode));
-    return jtnode;
+		/*
+		 * Although we could include the pulled-up subqueries in the returned
+		 * relids, there's no need since upper quals couldn't refer to their
+		 * outputs anyway.  But we *do* need to include the join's own rtindex
+		 * because we haven't yet collapsed join alias variables, so upper
+		 * levels would mistakenly think they couldn't use references to this
+		 * join.
+		 */
+		*relids = bms_join(leftrelids, rightrelids);
+		if (j->rtindex)
+			*relids = bms_add_member(*relids, j->rtindex);
+		jtnode = jtlink;
+	}
+	else
+		elog(ERROR, "unrecognized node type: %d",
+			 (int) nodeTag(jtnode));
+	return jtnode;
 }
 #ifdef __TBASE__
 
@@ -1073,185 +1102,188 @@ pull_up_subqueries(PlannerInfo *root)
  */
 static Node *
 pull_up_subqueries_recurse(PlannerInfo *root, Node *jtnode,
-                           JoinExpr *lowest_outer_join,
-                           JoinExpr *lowest_nulling_outer_join,
-                           AppendRelInfo *containing_appendrel,
-                           bool deletion_ok)
-{// #lizard forgives
-    Assert(jtnode != NULL);
-    if (IsA(jtnode, RangeTblRef))
-    {
-        int            varno = ((RangeTblRef *) jtnode)->rtindex;
-        RangeTblEntry *rte = rt_fetch(varno, root->parse->rtable);
+						   JoinExpr *lowest_outer_join,
+						   JoinExpr *lowest_nulling_outer_join,
+						   AppendRelInfo *containing_appendrel,
+						   bool deletion_ok)
+{
+	Assert(jtnode != NULL);
+	if (IsA(jtnode, RangeTblRef))
+	{
+		int			varno = ((RangeTblRef *) jtnode)->rtindex;
+		RangeTblEntry *rte = rt_fetch(varno, root->parse->rtable);
 
-        /*
-         * Is this a subquery RTE, and if so, is the subquery simple enough to
-         * pull up?
-         *
-         * If we are looking at an append-relation member, we can't pull it up
-         * unless is_safe_append_member says so.
-         */
-        if (rte->rtekind == RTE_SUBQUERY &&
-            is_simple_subquery(rte->subquery, rte,
-                               lowest_outer_join, deletion_ok) &&
-            (containing_appendrel == NULL ||
-             is_safe_append_member(rte->subquery)))
-            return pull_up_simple_subquery(root, jtnode, rte,
-                                           lowest_outer_join,
-                                           lowest_nulling_outer_join,
-                                           containing_appendrel,
-                                           deletion_ok);
+		/*
+		 * Is this a subquery RTE, and if so, is the subquery simple enough to
+		 * pull up?
+		 *
+		 * If we are looking at an append-relation member, we can't pull it up
+		 * unless is_safe_append_member says so.
+		 */
+		if (rte->rtekind == RTE_SUBQUERY &&
+			is_simple_subquery(rte->subquery, rte,
+							   lowest_outer_join, deletion_ok) &&
+			(containing_appendrel == NULL ||
+			 is_safe_append_member(rte->subquery)))
+			return pull_up_simple_subquery(root, jtnode, rte,
+										   lowest_outer_join,
+										   lowest_nulling_outer_join,
+										   containing_appendrel,
+										   deletion_ok);
 
-        /*
-         * Alternatively, is it a simple UNION ALL subquery?  If so, flatten
-         * into an "append relation".
-         *
-         * It's safe to do this regardless of whether this query is itself an
-         * appendrel member.  (If you're thinking we should try to flatten the
-         * two levels of appendrel together, you're right; but we handle that
-         * in set_append_rel_pathlist, not here.)
-         */
-        if (rte->rtekind == RTE_SUBQUERY &&
-            is_simple_union_all(rte->subquery))
-            return pull_up_simple_union_all(root, jtnode, rte);
+		/*
+		 * Alternatively, is it a simple UNION ALL subquery?  If so, flatten
+		 * into an "append relation".
+		 *
+		 * It's safe to do this regardless of whether this query is itself an
+		 * appendrel member.  (If you're thinking we should try to flatten the
+		 * two levels of appendrel together, you're right; but we handle that
+		 * in set_append_rel_pathlist, not here.)
+		 */
+		if (rte->rtekind == RTE_SUBQUERY &&
+			is_simple_union_all(rte->subquery))
+			return pull_up_simple_union_all(root, jtnode, rte);
 
-        /*
-         * Or perhaps it's a simple VALUES RTE?
-         *
-         * We don't allow VALUES pullup below an outer join nor into an
-         * appendrel (such cases are impossible anyway at the moment).
-         */
-        if (rte->rtekind == RTE_VALUES &&
-            lowest_outer_join == NULL &&
-            containing_appendrel == NULL &&
-            is_simple_values(root, rte, deletion_ok))
-            return pull_up_simple_values(root, jtnode, rte);
+		/*
+		 * Or perhaps it's a simple VALUES RTE?
+		 *
+		 * We don't allow VALUES pullup below an outer join nor into an
+		 * appendrel (such cases are impossible anyway at the moment).
+		 */
+		if (rte->rtekind == RTE_VALUES &&
+			lowest_outer_join == NULL &&
+			containing_appendrel == NULL &&
+			is_simple_values(root, rte, deletion_ok))
+			return pull_up_simple_values(root, jtnode, rte);
 
-        /* Otherwise, do nothing at this node. */
-    }
-    else if (IsA(jtnode, FromExpr))
-    {
-        FromExpr   *f = (FromExpr *) jtnode;
-        bool        have_undeleted_child = false;
-        ListCell   *l;
+		/* Otherwise, do nothing at this node. */
+	}
+	else if (IsA(jtnode, FromExpr))
+	{
+		FromExpr   *f = (FromExpr *) jtnode;
+		bool		have_undeleted_child = false;
+		ListCell   *l;
 
-        Assert(containing_appendrel == NULL);
+		Assert(containing_appendrel == NULL);
 
-        /*
-         * If the FromExpr has quals, it's not deletable even if its parent
-         * would allow deletion.
-         */
-        if (f->quals)
-            deletion_ok = false;
+		/*
+		 * If the FromExpr has quals, it's not deletable even if its parent
+		 * would allow deletion.
+		 */
+		if (f->quals)
+			deletion_ok = false;
 
-        foreach(l, f->fromlist)
-        {
-            /*
-             * In a non-deletable FromExpr, we can allow deletion of child
-             * nodes so long as at least one child remains; so it's okay
-             * either if any previous child survives, or if there's more to
-             * come.  If all children are deletable in themselves, we'll force
-             * the last one to remain unflattened.
-             *
-             * As a separate matter, we can allow deletion of all children of
-             * the top-level FromExpr in a query, since that's a special case
-             * anyway.
-             */
-            bool        sub_deletion_ok = (deletion_ok ||
-                                           have_undeleted_child ||
-                                           lnext(l) != NULL ||
-                                           f == root->parse->jointree);
+		foreach(l, f->fromlist)
+		{
+			/*
+			 * In a non-deletable FromExpr, we can allow deletion of child
+			 * nodes so long as at least one child remains; so it's okay
+			 * either if any previous child survives, or if there's more to
+			 * come.  If all children are deletable in themselves, we'll force
+			 * the last one to remain unflattened.
+			 *
+			 * As a separate matter, we can allow deletion of all children of
+			 * the top-level FromExpr in a query, since that's a special case
+			 * anyway.
+			 */
+			bool		sub_deletion_ok = (deletion_ok ||
+										   have_undeleted_child ||
+										   lnext(l) != NULL ||
+										   f == root->parse->jointree);
 
-            lfirst(l) = pull_up_subqueries_recurse(root, lfirst(l),
-                                                   lowest_outer_join,
-                                                   lowest_nulling_outer_join,
-                                                   NULL,
-                                                   sub_deletion_ok);
-            if (lfirst(l) != NULL)
-                have_undeleted_child = true;
-        }
+			lfirst(l) = pull_up_subqueries_recurse(root, lfirst(l),
+												   lowest_outer_join,
+												   lowest_nulling_outer_join,
+												   NULL,
+												   sub_deletion_ok);
+			if (lfirst(l) != NULL)
+				have_undeleted_child = true;
+		}
 
-        if (deletion_ok && !have_undeleted_child)
-        {
-            /* OK to delete this FromExpr entirely */
-            root->hasDeletedRTEs = true;    /* probably is set already */
-            return NULL;
-        }
-    }
-    else if (IsA(jtnode, JoinExpr))
-    {
-        JoinExpr   *j = (JoinExpr *) jtnode;
+		if (deletion_ok && !have_undeleted_child)
+		{
+			/* OK to delete this FromExpr entirely */
+			root->hasDeletedRTEs = true;	/* probably is set already */
+			return NULL;
+		}
+	}
+	else if (IsA(jtnode, JoinExpr))
+	{
+		JoinExpr   *j = (JoinExpr *) jtnode;
 
-        Assert(containing_appendrel == NULL);
-        /* Recurse, being careful to tell myself when inside outer join */
-        switch (j->jointype)
-        {
-            case JOIN_INNER:
+		Assert(containing_appendrel == NULL);
+		/* Recurse, being careful to tell myself when inside outer join */
+		switch (j->jointype)
+		{
+			case JOIN_INNER:
 
-                /*
-                 * INNER JOIN can allow deletion of either child node, but not
-                 * both.  So right child gets permission to delete only if
-                 * left child didn't get removed.
-                 */
-                j->larg = pull_up_subqueries_recurse(root, j->larg,
-                                                     lowest_outer_join,
-                                                     lowest_nulling_outer_join,
-                                                     NULL,
-                                                     true);
-                j->rarg = pull_up_subqueries_recurse(root, j->rarg,
-                                                     lowest_outer_join,
-                                                     lowest_nulling_outer_join,
-                                                     NULL,
-                                                     j->larg != NULL);
-                break;
-            case JOIN_LEFT:
-            case JOIN_SEMI:
-            case JOIN_ANTI:
-                j->larg = pull_up_subqueries_recurse(root, j->larg,
-                                                     j,
-                                                     lowest_nulling_outer_join,
-                                                     NULL,
-                                                     false);
-                j->rarg = pull_up_subqueries_recurse(root, j->rarg,
-                                                     j,
-                                                     j,
-                                                     NULL,
-                                                     false);
-                break;
-            case JOIN_FULL:
-                j->larg = pull_up_subqueries_recurse(root, j->larg,
-                                                     j,
-                                                     j,
-                                                     NULL,
-                                                     false);
-                j->rarg = pull_up_subqueries_recurse(root, j->rarg,
-                                                     j,
-                                                     j,
-                                                     NULL,
-                                                     false);
-                break;
-            case JOIN_RIGHT:
-                j->larg = pull_up_subqueries_recurse(root, j->larg,
-                                                     j,
-                                                     j,
-                                                     NULL,
-                                                     false);
-                j->rarg = pull_up_subqueries_recurse(root, j->rarg,
-                                                     j,
-                                                     lowest_nulling_outer_join,
-                                                     NULL,
-                                                     false);
-                break;
-            default:
-                elog(ERROR, "unrecognized join type: %d",
-                     (int) j->jointype);
-                break;
-        }
-    }
-    else
-        elog(ERROR, "unrecognized node type: %d",
-             (int) nodeTag(jtnode));
-    return jtnode;
+				/*
+				 * INNER JOIN can allow deletion of either child node, but not
+				 * both.  So right child gets permission to delete only if
+				 * left child didn't get removed.
+				 */
+				j->larg = pull_up_subqueries_recurse(root, j->larg,
+													 lowest_outer_join,
+													 lowest_nulling_outer_join,
+													 NULL,
+													 true);
+				j->rarg = pull_up_subqueries_recurse(root, j->rarg,
+													 lowest_outer_join,
+													 lowest_nulling_outer_join,
+													 NULL,
+													 j->larg != NULL);
+				break;
+			case JOIN_LEFT:
+			case JOIN_SEMI:
+#ifdef __TBASE__
+            case JOIN_LEFT_SCALAR:
+#endif
+			case JOIN_ANTI:
+				j->larg = pull_up_subqueries_recurse(root, j->larg,
+													 j,
+													 lowest_nulling_outer_join,
+													 NULL,
+													 false);
+				j->rarg = pull_up_subqueries_recurse(root, j->rarg,
+													 j,
+													 j,
+													 NULL,
+													 false);
+				break;
+			case JOIN_FULL:
+				j->larg = pull_up_subqueries_recurse(root, j->larg,
+													 j,
+													 j,
+													 NULL,
+													 false);
+				j->rarg = pull_up_subqueries_recurse(root, j->rarg,
+													 j,
+													 j,
+													 NULL,
+													 false);
+				break;
+			case JOIN_RIGHT:
+				j->larg = pull_up_subqueries_recurse(root, j->larg,
+													 j,
+													 j,
+													 NULL,
+													 false);
+				j->rarg = pull_up_subqueries_recurse(root, j->rarg,
+													 j,
+													 lowest_nulling_outer_join,
+													 NULL,
+													 false);
+				break;
+			default:
+				elog(ERROR, "unrecognized join type: %d",
+					 (int) j->jointype);
+				break;
+		}
+	}
+	else
+		elog(ERROR, "unrecognized node type: %d",
+			 (int) nodeTag(jtnode));
+	return jtnode;
 }
 
 /*
@@ -2957,277 +2989,281 @@ reduce_outer_joins_pass1(Node *jtnode)
  */
 static void
 reduce_outer_joins_pass2(Node *jtnode,
-                         reduce_outer_joins_state *state,
-                         PlannerInfo *root,
-                         Relids nonnullable_rels,
-                         List *nonnullable_vars,
-                         List *forced_null_vars)
-{// #lizard forgives
-    /*
-     * pass 2 should never descend as far as an empty subnode or base rel,
-     * because it's only called on subtrees marked as contains_outer.
-     */
-    if (jtnode == NULL)
-        elog(ERROR, "reached empty jointree");
-    if (IsA(jtnode, RangeTblRef))
-        elog(ERROR, "reached base rel");
-    else if (IsA(jtnode, FromExpr))
-    {
-        FromExpr   *f = (FromExpr *) jtnode;
-        ListCell   *l;
-        ListCell   *s;
-        Relids        pass_nonnullable_rels;
-        List       *pass_nonnullable_vars;
-        List       *pass_forced_null_vars;
+						 reduce_outer_joins_state *state,
+						 PlannerInfo *root,
+						 Relids nonnullable_rels,
+						 List *nonnullable_vars,
+						 List *forced_null_vars)
+{
+	/*
+	 * pass 2 should never descend as far as an empty subnode or base rel,
+	 * because it's only called on subtrees marked as contains_outer.
+	 */
+	if (jtnode == NULL)
+		elog(ERROR, "reached empty jointree");
+	if (IsA(jtnode, RangeTblRef))
+		elog(ERROR, "reached base rel");
+	else if (IsA(jtnode, FromExpr))
+	{
+		FromExpr   *f = (FromExpr *) jtnode;
+		ListCell   *l;
+		ListCell   *s;
+		Relids		pass_nonnullable_rels;
+		List	   *pass_nonnullable_vars;
+		List	   *pass_forced_null_vars;
 
-        /* Scan quals to see if we can add any constraints */
-        pass_nonnullable_rels = find_nonnullable_rels(f->quals);
-        pass_nonnullable_rels = bms_add_members(pass_nonnullable_rels,
-                                                nonnullable_rels);
-        /* NB: we rely on list_concat to not damage its second argument */
-        pass_nonnullable_vars = find_nonnullable_vars(f->quals);
-        pass_nonnullable_vars = list_concat(pass_nonnullable_vars,
-                                            nonnullable_vars);
-        pass_forced_null_vars = find_forced_null_vars(f->quals);
-        pass_forced_null_vars = list_concat(pass_forced_null_vars,
-                                            forced_null_vars);
-        /* And recurse --- but only into interesting subtrees */
-        Assert(list_length(f->fromlist) == list_length(state->sub_states));
-        forboth(l, f->fromlist, s, state->sub_states)
-        {
-            reduce_outer_joins_state *sub_state = lfirst(s);
+		/* Scan quals to see if we can add any constraints */
+		pass_nonnullable_rels = find_nonnullable_rels(f->quals);
+		pass_nonnullable_rels = bms_add_members(pass_nonnullable_rels,
+												nonnullable_rels);
+		/* NB: we rely on list_concat to not damage its second argument */
+		pass_nonnullable_vars = find_nonnullable_vars(f->quals);
+		pass_nonnullable_vars = list_concat(pass_nonnullable_vars,
+											nonnullable_vars);
+		pass_forced_null_vars = find_forced_null_vars(f->quals);
+		pass_forced_null_vars = list_concat(pass_forced_null_vars,
+											forced_null_vars);
+		/* And recurse --- but only into interesting subtrees */
+		Assert(list_length(f->fromlist) == list_length(state->sub_states));
+		forboth(l, f->fromlist, s, state->sub_states)
+		{
+			reduce_outer_joins_state *sub_state = lfirst(s);
 
-            if (sub_state->contains_outer)
-                reduce_outer_joins_pass2(lfirst(l), sub_state, root,
-                                         pass_nonnullable_rels,
-                                         pass_nonnullable_vars,
-                                         pass_forced_null_vars);
-        }
-        bms_free(pass_nonnullable_rels);
-        /* can't so easily clean up var lists, unfortunately */
-    }
-    else if (IsA(jtnode, JoinExpr))
-    {
-        JoinExpr   *j = (JoinExpr *) jtnode;
-        int            rtindex = j->rtindex;
-        JoinType    jointype = j->jointype;
-        reduce_outer_joins_state *left_state = linitial(state->sub_states);
-        reduce_outer_joins_state *right_state = lsecond(state->sub_states);
-        List       *local_nonnullable_vars = NIL;
-        bool        computed_local_nonnullable_vars = false;
+			if (sub_state->contains_outer)
+				reduce_outer_joins_pass2(lfirst(l), sub_state, root,
+										 pass_nonnullable_rels,
+										 pass_nonnullable_vars,
+										 pass_forced_null_vars);
+		}
+		bms_free(pass_nonnullable_rels);
+		/* can't so easily clean up var lists, unfortunately */
+	}
+	else if (IsA(jtnode, JoinExpr))
+	{
+		JoinExpr   *j = (JoinExpr *) jtnode;
+		int			rtindex = j->rtindex;
+		JoinType	jointype = j->jointype;
+		reduce_outer_joins_state *left_state = linitial(state->sub_states);
+		reduce_outer_joins_state *right_state = lsecond(state->sub_states);
+		List	   *local_nonnullable_vars = NIL;
+		bool		computed_local_nonnullable_vars = false;
 
-        /* Can we simplify this join? */
-        switch (jointype)
-        {
-            case JOIN_INNER:
-                break;
-            case JOIN_LEFT:
-                if (bms_overlap(nonnullable_rels, right_state->relids))
-                    jointype = JOIN_INNER;
-                break;
-            case JOIN_RIGHT:
-                if (bms_overlap(nonnullable_rels, left_state->relids))
-                    jointype = JOIN_INNER;
-                break;
-            case JOIN_FULL:
-                if (bms_overlap(nonnullable_rels, left_state->relids))
-                {
-                    if (bms_overlap(nonnullable_rels, right_state->relids))
-                        jointype = JOIN_INNER;
-                    else
-                        jointype = JOIN_LEFT;
-                }
-                else
-                {
-                    if (bms_overlap(nonnullable_rels, right_state->relids))
-                        jointype = JOIN_RIGHT;
-                }
-                break;
-            case JOIN_SEMI:
-            case JOIN_ANTI:
+		/* Can we simplify this join? */
+		switch (jointype)
+		{
+			case JOIN_INNER:
+				break;
+			case JOIN_LEFT:
+				if (bms_overlap(nonnullable_rels, right_state->relids))
+					jointype = JOIN_INNER;
+				break;
+			case JOIN_RIGHT:
+				if (bms_overlap(nonnullable_rels, left_state->relids))
+					jointype = JOIN_INNER;
+				break;
+			case JOIN_FULL:
+				if (bms_overlap(nonnullable_rels, left_state->relids))
+				{
+					if (bms_overlap(nonnullable_rels, right_state->relids))
+						jointype = JOIN_INNER;
+					else
+						jointype = JOIN_LEFT;
+				}
+				else
+				{
+					if (bms_overlap(nonnullable_rels, right_state->relids))
+						jointype = JOIN_RIGHT;
+				}
+				break;
+			case JOIN_SEMI:
+			case JOIN_ANTI:
 
-                /*
-                 * These could only have been introduced by pull_up_sublinks,
-                 * so there's no way that upper quals could refer to their
-                 * righthand sides, and no point in checking.
-                 */
-                break;
-            default:
-                elog(ERROR, "unrecognized join type: %d",
-                     (int) jointype);
-                break;
-        }
+				/*
+				 * These could only have been introduced by pull_up_sublinks,
+				 * so there's no way that upper quals could refer to their
+				 * righthand sides, and no point in checking.
+				 */
+				break;
+			default:
+				elog(ERROR, "unrecognized join type: %d",
+					 (int) jointype);
+				break;
+		}
 
-        /*
-         * Convert JOIN_RIGHT to JOIN_LEFT.  Note that in the case where we
-         * reduced JOIN_FULL to JOIN_RIGHT, this will mean the JoinExpr no
-         * longer matches the internal ordering of any CoalesceExpr's built to
-         * represent merged join variables.  We don't care about that at
-         * present, but be wary of it ...
-         */
-        if (jointype == JOIN_RIGHT)
-        {
-            Node       *tmparg;
+		/*
+		 * Convert JOIN_RIGHT to JOIN_LEFT.  Note that in the case where we
+		 * reduced JOIN_FULL to JOIN_RIGHT, this will mean the JoinExpr no
+		 * longer matches the internal ordering of any CoalesceExpr's built to
+		 * represent merged join variables.  We don't care about that at
+		 * present, but be wary of it ...
+		 */
+		if (jointype == JOIN_RIGHT)
+		{
+			Node	   *tmparg;
 
-            tmparg = j->larg;
-            j->larg = j->rarg;
-            j->rarg = tmparg;
-            jointype = JOIN_LEFT;
-            right_state = linitial(state->sub_states);
-            left_state = lsecond(state->sub_states);
-        }
+			tmparg = j->larg;
+			j->larg = j->rarg;
+			j->rarg = tmparg;
+			jointype = JOIN_LEFT;
+			right_state = linitial(state->sub_states);
+			left_state = lsecond(state->sub_states);
+		}
 
-        /*
-         * See if we can reduce JOIN_LEFT to JOIN_ANTI.  This is the case if
-         * the join's own quals are strict for any var that was forced null by
-         * higher qual levels.  NOTE: there are other ways that we could
-         * detect an anti-join, in particular if we were to check whether Vars
-         * coming from the RHS must be non-null because of table constraints.
-         * That seems complicated and expensive though (in particular, one
-         * would have to be wary of lower outer joins). For the moment this
-         * seems sufficient.
-         */
-        if (jointype == JOIN_LEFT)
-        {
-            List       *overlap;
+		/*
+		 * See if we can reduce JOIN_LEFT to JOIN_ANTI.  This is the case if
+		 * the join's own quals are strict for any var that was forced null by
+		 * higher qual levels.  NOTE: there are other ways that we could
+		 * detect an anti-join, in particular if we were to check whether Vars
+		 * coming from the RHS must be non-null because of table constraints.
+		 * That seems complicated and expensive though (in particular, one
+		 * would have to be wary of lower outer joins). For the moment this
+		 * seems sufficient.
+		 */
+		if (jointype == JOIN_LEFT)
+		{
+			List	   *overlap;
 
-            local_nonnullable_vars = find_nonnullable_vars(j->quals);
-            computed_local_nonnullable_vars = true;
+			local_nonnullable_vars = find_nonnullable_vars(j->quals);
+			computed_local_nonnullable_vars = true;
 
-            /*
-             * It's not sufficient to check whether local_nonnullable_vars and
-             * forced_null_vars overlap: we need to know if the overlap
-             * includes any RHS variables.
-             */
-            overlap = list_intersection(local_nonnullable_vars,
-                                        forced_null_vars);
-            if (overlap != NIL &&
-                bms_overlap(pull_varnos((Node *) overlap),
-                            right_state->relids))
-                jointype = JOIN_ANTI;
-        }
+			/*
+			 * It's not sufficient to check whether local_nonnullable_vars and
+			 * forced_null_vars overlap: we need to know if the overlap
+			 * includes any RHS variables.
+			 */
+			overlap = list_intersection(local_nonnullable_vars,
+										forced_null_vars);
+			if (overlap != NIL &&
+				bms_overlap(pull_varnos((Node *) overlap),
+							right_state->relids))
+				jointype = JOIN_ANTI;
+		}
 
-        /* Apply the jointype change, if any, to both jointree node and RTE */
-        if (rtindex && jointype != j->jointype)
-        {
-            RangeTblEntry *rte = rt_fetch(rtindex, root->parse->rtable);
+		/* Apply the jointype change, if any, to both jointree node and RTE */
+		if (rtindex && jointype != j->jointype)
+		{
+			RangeTblEntry *rte = rt_fetch(rtindex, root->parse->rtable);
 
-            Assert(rte->rtekind == RTE_JOIN);
-            Assert(rte->jointype == j->jointype);
-            rte->jointype = jointype;
-        }
-        j->jointype = jointype;
+			Assert(rte->rtekind == RTE_JOIN);
+			Assert(rte->jointype == j->jointype);
+			rte->jointype = jointype;
+		}
+		j->jointype = jointype;
 
-        /* Only recurse if there's more to do below here */
-        if (left_state->contains_outer || right_state->contains_outer)
-        {
-            Relids        local_nonnullable_rels;
-            List       *local_forced_null_vars;
-            Relids        pass_nonnullable_rels;
-            List       *pass_nonnullable_vars;
-            List       *pass_forced_null_vars;
+		/* Only recurse if there's more to do below here */
+		if (left_state->contains_outer || right_state->contains_outer)
+		{
+			Relids		local_nonnullable_rels;
+			List	   *local_forced_null_vars;
+			Relids		pass_nonnullable_rels;
+			List	   *pass_nonnullable_vars;
+			List	   *pass_forced_null_vars;
 
-            /*
-             * If this join is (now) inner, we can add any constraints its
-             * quals provide to those we got from above.  But if it is outer,
-             * we can pass down the local constraints only into the nullable
-             * side, because an outer join never eliminates any rows from its
-             * non-nullable side.  Also, there is no point in passing upper
-             * constraints into the nullable side, since if there were any
-             * we'd have been able to reduce the join.  (In the case of upper
-             * forced-null constraints, we *must not* pass them into the
-             * nullable side --- they either applied here, or not.) The upshot
-             * is that we pass either the local or the upper constraints,
-             * never both, to the children of an outer join.
-             *
-             * Note that a SEMI join works like an inner join here: it's okay
-             * to pass down both local and upper constraints.  (There can't be
-             * any upper constraints affecting its inner side, but it's not
-             * worth having a separate code path to avoid passing them.)
-             *
-             * At a FULL join we just punt and pass nothing down --- is it
-             * possible to be smarter?
-             */
-            if (jointype != JOIN_FULL)
-            {
-                local_nonnullable_rels = find_nonnullable_rels(j->quals);
-                if (!computed_local_nonnullable_vars)
-                    local_nonnullable_vars = find_nonnullable_vars(j->quals);
-                local_forced_null_vars = find_forced_null_vars(j->quals);
-                if (jointype == JOIN_INNER || jointype == JOIN_SEMI)
-                {
-                    /* OK to merge upper and local constraints */
-                    local_nonnullable_rels = bms_add_members(local_nonnullable_rels,
-                                                             nonnullable_rels);
-                    local_nonnullable_vars = list_concat(local_nonnullable_vars,
-                                                         nonnullable_vars);
-                    local_forced_null_vars = list_concat(local_forced_null_vars,
-                                                         forced_null_vars);
-                }
-            }
-            else
-            {
-                /* no use in calculating these */
-                local_nonnullable_rels = NULL;
-                local_forced_null_vars = NIL;
-            }
+			/*
+			 * If this join is (now) inner, we can add any constraints its
+			 * quals provide to those we got from above.  But if it is outer,
+			 * we can pass down the local constraints only into the nullable
+			 * side, because an outer join never eliminates any rows from its
+			 * non-nullable side.  Also, there is no point in passing upper
+			 * constraints into the nullable side, since if there were any
+			 * we'd have been able to reduce the join.  (In the case of upper
+			 * forced-null constraints, we *must not* pass them into the
+			 * nullable side --- they either applied here, or not.) The upshot
+			 * is that we pass either the local or the upper constraints,
+			 * never both, to the children of an outer join.
+			 *
+			 * Note that a SEMI join works like an inner join here: it's okay
+			 * to pass down both local and upper constraints.  (There can't be
+			 * any upper constraints affecting its inner side, but it's not
+			 * worth having a separate code path to avoid passing them.)
+			 *
+			 * At a FULL join we just punt and pass nothing down --- is it
+			 * possible to be smarter?
+			 */
+			if (jointype != JOIN_FULL)
+			{
+				local_nonnullable_rels = find_nonnullable_rels(j->quals);
+				if (!computed_local_nonnullable_vars)
+					local_nonnullable_vars = find_nonnullable_vars(j->quals);
+				local_forced_null_vars = find_forced_null_vars(j->quals);
+#ifdef __TBASE__
+                if (jointype == JOIN_INNER || jointype == JOIN_SEMI || jointype == JOIN_LEFT_SCALAR)
+#else
+				if (jointype == JOIN_INNER || jointype == JOIN_SEMI)
+#endif
+				{
+					/* OK to merge upper and local constraints */
+					local_nonnullable_rels = bms_add_members(local_nonnullable_rels,
+															 nonnullable_rels);
+					local_nonnullable_vars = list_concat(local_nonnullable_vars,
+														 nonnullable_vars);
+					local_forced_null_vars = list_concat(local_forced_null_vars,
+														 forced_null_vars);
+				}
+			}
+			else
+			{
+				/* no use in calculating these */
+				local_nonnullable_rels = NULL;
+				local_forced_null_vars = NIL;
+			}
 
-            if (left_state->contains_outer)
-            {
-                if (jointype == JOIN_INNER || jointype == JOIN_SEMI)
-                {
-                    /* pass union of local and upper constraints */
-                    pass_nonnullable_rels = local_nonnullable_rels;
-                    pass_nonnullable_vars = local_nonnullable_vars;
-                    pass_forced_null_vars = local_forced_null_vars;
-                }
-                else if (jointype != JOIN_FULL) /* ie, LEFT or ANTI */
-                {
-                    /* can't pass local constraints to non-nullable side */
-                    pass_nonnullable_rels = nonnullable_rels;
-                    pass_nonnullable_vars = nonnullable_vars;
-                    pass_forced_null_vars = forced_null_vars;
-                }
-                else
-                {
-                    /* no constraints pass through JOIN_FULL */
-                    pass_nonnullable_rels = NULL;
-                    pass_nonnullable_vars = NIL;
-                    pass_forced_null_vars = NIL;
-                }
-                reduce_outer_joins_pass2(j->larg, left_state, root,
-                                         pass_nonnullable_rels,
-                                         pass_nonnullable_vars,
-                                         pass_forced_null_vars);
-            }
+			if (left_state->contains_outer)
+			{
+				if (jointype == JOIN_INNER || jointype == JOIN_SEMI)
+				{
+					/* pass union of local and upper constraints */
+					pass_nonnullable_rels = local_nonnullable_rels;
+					pass_nonnullable_vars = local_nonnullable_vars;
+					pass_forced_null_vars = local_forced_null_vars;
+				}
+				else if (jointype != JOIN_FULL) /* ie, LEFT or ANTI */
+				{
+					/* can't pass local constraints to non-nullable side */
+					pass_nonnullable_rels = nonnullable_rels;
+					pass_nonnullable_vars = nonnullable_vars;
+					pass_forced_null_vars = forced_null_vars;
+				}
+				else
+				{
+					/* no constraints pass through JOIN_FULL */
+					pass_nonnullable_rels = NULL;
+					pass_nonnullable_vars = NIL;
+					pass_forced_null_vars = NIL;
+				}
+				reduce_outer_joins_pass2(j->larg, left_state, root,
+										 pass_nonnullable_rels,
+										 pass_nonnullable_vars,
+										 pass_forced_null_vars);
+			}
 
-            if (right_state->contains_outer)
-            {
-                if (jointype != JOIN_FULL)    /* ie, INNER/LEFT/SEMI/ANTI */
-                {
-                    /* pass appropriate constraints, per comment above */
-                    pass_nonnullable_rels = local_nonnullable_rels;
-                    pass_nonnullable_vars = local_nonnullable_vars;
-                    pass_forced_null_vars = local_forced_null_vars;
-                }
-                else
-                {
-                    /* no constraints pass through JOIN_FULL */
-                    pass_nonnullable_rels = NULL;
-                    pass_nonnullable_vars = NIL;
-                    pass_forced_null_vars = NIL;
-                }
-                reduce_outer_joins_pass2(j->rarg, right_state, root,
-                                         pass_nonnullable_rels,
-                                         pass_nonnullable_vars,
-                                         pass_forced_null_vars);
-            }
-            bms_free(local_nonnullable_rels);
-        }
-    }
-    else
-        elog(ERROR, "unrecognized node type: %d",
-             (int) nodeTag(jtnode));
+			if (right_state->contains_outer)
+			{
+				if (jointype != JOIN_FULL)	/* ie, INNER/LEFT/SEMI/ANTI */
+				{
+					/* pass appropriate constraints, per comment above */
+					pass_nonnullable_rels = local_nonnullable_rels;
+					pass_nonnullable_vars = local_nonnullable_vars;
+					pass_forced_null_vars = local_forced_null_vars;
+				}
+				else
+				{
+					/* no constraints pass through JOIN_FULL */
+					pass_nonnullable_rels = NULL;
+					pass_nonnullable_vars = NIL;
+					pass_forced_null_vars = NIL;
+				}
+				reduce_outer_joins_pass2(j->rarg, right_state, root,
+										 pass_nonnullable_rels,
+										 pass_nonnullable_vars,
+										 pass_forced_null_vars);
+			}
+			bms_free(local_nonnullable_rels);
+		}
+	}
+	else
+		elog(ERROR, "unrecognized node type: %d",
+			 (int) nodeTag(jtnode));
 }
 
 /*

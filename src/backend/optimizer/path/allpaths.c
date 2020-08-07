@@ -210,34 +210,40 @@ make_one_rel(PlannerInfo *root, List *joinlist)
 static void
 set_base_rel_consider_startup(PlannerInfo *root)
 {
-    /*
-     * Since parameterized paths can only be used on the inside of a nestloop
-     * join plan, there is usually little value in considering fast-start
-     * plans for them.  However, for relations that are on the RHS of a SEMI
-     * or ANTI join, a fast-start plan can be useful because we're only going
-     * to care about fetching one tuple anyway.
-     *
-     * To minimize growth of planning time, we currently restrict this to
-     * cases where the RHS is a single base relation, not a join; there is no
-     * provision for consider_param_startup to get set at all on joinrels.
-     * Also we don't worry about appendrels.  costsize.c's costing rules for
-     * nestloop semi/antijoins don't consider such cases either.
-     */
-    ListCell   *lc;
+	/*
+	 * Since parameterized paths can only be used on the inside of a nestloop
+	 * join plan, there is usually little value in considering fast-start
+	 * plans for them.  However, for relations that are on the RHS of a SEMI
+	 * or ANTI join, a fast-start plan can be useful because we're only going
+	 * to care about fetching one tuple anyway.
+	 *
+	 * To minimize growth of planning time, we currently restrict this to
+	 * cases where the RHS is a single base relation, not a join; there is no
+	 * provision for consider_param_startup to get set at all on joinrels.
+	 * Also we don't worry about appendrels.  costsize.c's costing rules for
+	 * nestloop semi/antijoins don't consider such cases either.
+	 */
+	ListCell   *lc;
 
-    foreach(lc, root->join_info_list)
-    {
-        SpecialJoinInfo *sjinfo = (SpecialJoinInfo *) lfirst(lc);
-        int            varno;
+	foreach(lc, root->join_info_list)
+	{
+		SpecialJoinInfo *sjinfo = (SpecialJoinInfo *) lfirst(lc);
+		int			varno;
 
-        if ((sjinfo->jointype == JOIN_SEMI || sjinfo->jointype == JOIN_ANTI) &&
-            bms_get_singleton_member(sjinfo->syn_righthand, &varno))
-        {
-            RelOptInfo *rel = find_base_rel(root, varno);
+#ifdef __TBASE__
+        if ((sjinfo->jointype == JOIN_SEMI || sjinfo->jointype == JOIN_ANTI ||
+             sjinfo->jointype == JOIN_LEFT_SCALAR) &&
+			bms_get_singleton_member(sjinfo->syn_righthand, &varno))
+#else
+		if ((sjinfo->jointype == JOIN_SEMI || sjinfo->jointype == JOIN_ANTI) &&
+			bms_get_singleton_member(sjinfo->syn_righthand, &varno))
+#endif
+		{
+			RelOptInfo *rel = find_base_rel(root, varno);
 
-            rel->consider_param_startup = true;
-        }
-    }
+			rel->consider_param_startup = true;
+		}
+	}
 }
 
 /*

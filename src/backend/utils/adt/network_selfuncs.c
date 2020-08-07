@@ -200,50 +200,53 @@ networkjoinsel(PG_FUNCTION_ARGS)
 #ifdef NOT_USED
     JoinType    jointype = (JoinType) PG_GETARG_INT16(3);
 #endif
-    SpecialJoinInfo *sjinfo = (SpecialJoinInfo *) PG_GETARG_POINTER(4);
-    double        selec;
-    VariableStatData vardata1;
-    VariableStatData vardata2;
-    bool        join_is_reversed;
+	SpecialJoinInfo *sjinfo = (SpecialJoinInfo *) PG_GETARG_POINTER(4);
+	double		selec;
+	VariableStatData vardata1;
+	VariableStatData vardata2;
+	bool		join_is_reversed;
 
-    get_join_variables(root, args, sjinfo,
-                       &vardata1, &vardata2, &join_is_reversed);
+	get_join_variables(root, args, sjinfo,
+					   &vardata1, &vardata2, &join_is_reversed);
 
-    switch (sjinfo->jointype)
-    {
-        case JOIN_INNER:
-        case JOIN_LEFT:
-        case JOIN_FULL:
+	switch (sjinfo->jointype)
+	{
+		case JOIN_INNER:
+		case JOIN_LEFT:
+		case JOIN_FULL:
 
-            /*
-             * Selectivity for left/full join is not exactly the same as inner
-             * join, but we neglect the difference, as eqjoinsel does.
-             */
-            selec = networkjoinsel_inner(operator, &vardata1, &vardata2);
-            break;
-        case JOIN_SEMI:
-        case JOIN_ANTI:
-            /* Here, it's important that we pass the outer var on the left. */
-            if (!join_is_reversed)
-                selec = networkjoinsel_semi(operator, &vardata1, &vardata2);
-            else
-                selec = networkjoinsel_semi(get_commutator(operator),
-                                            &vardata2, &vardata1);
-            break;
-        default:
-            /* other values not expected here */
-            elog(ERROR, "unrecognized join type: %d",
-                 (int) sjinfo->jointype);
-            selec = 0;            /* keep compiler quiet */
-            break;
-    }
+			/*
+			 * Selectivity for left/full join is not exactly the same as inner
+			 * join, but we neglect the difference, as eqjoinsel does.
+			 */
+			selec = networkjoinsel_inner(operator, &vardata1, &vardata2);
+			break;
+		case JOIN_SEMI:
+		case JOIN_ANTI:
+#ifdef __TBASE__
+        case JOIN_LEFT_SCALAR:
+#endif
+			/* Here, it's important that we pass the outer var on the left. */
+			if (!join_is_reversed)
+				selec = networkjoinsel_semi(operator, &vardata1, &vardata2);
+			else
+				selec = networkjoinsel_semi(get_commutator(operator),
+											&vardata2, &vardata1);
+			break;
+		default:
+			/* other values not expected here */
+			elog(ERROR, "unrecognized join type: %d",
+				 (int) sjinfo->jointype);
+			selec = 0;			/* keep compiler quiet */
+			break;
+	}
 
-    ReleaseVariableStats(vardata1);
-    ReleaseVariableStats(vardata2);
+	ReleaseVariableStats(vardata1);
+	ReleaseVariableStats(vardata2);
 
-    CLAMP_PROBABILITY(selec);
+	CLAMP_PROBABILITY(selec);
 
-    PG_RETURN_FLOAT8((float8) selec);
+	PG_RETURN_FLOAT8((float8) selec);
 }
 
 /*

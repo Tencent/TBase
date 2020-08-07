@@ -691,3 +691,83 @@ select * from (with x as (select 2 as y) select * from x) ss;
 explain (verbose, costs off)
 with x as (select * from subselect_tbl)
 select * from x for update;
+
+--
+-- Tests for pulling up more sublinks
+--
+
+set enable_pullup_subquery to true;
+create table tbl_a(a int,b int);
+create table tbl_b(a int,b int);
+insert into tbl_a select generate_series(1,10),1 ;
+insert into tbl_b select generate_series(2,11),1 ;
+
+-- check targetlist subquery scenario.
+set enable_nestloop to true;
+set enable_hashjoin to false;
+set enable_mergejoin to false;
+explain select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+
+set enable_nestloop to false;
+set enable_hashjoin to true;
+set enable_mergejoin to false;
+explain (costs off) select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+
+set enable_nestloop to false;
+set enable_hashjoin to false;
+set enable_mergejoin to true;
+explain (costs off) select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+
+-- check non-scalar scenario.
+insert into tbl_b values(2,2);
+
+set enable_nestloop to true;
+set enable_hashjoin to false;
+set enable_mergejoin to false;
+explain (costs off) select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+
+set enable_nestloop to false;
+set enable_hashjoin to true;
+set enable_mergejoin to false;
+explain (costs off) select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+
+set enable_nestloop to false;
+set enable_hashjoin to false;
+set enable_mergejoin to true;
+explain (costs off) select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+
+explain (costs off) select a.a,(select b.a from tbl_b b where b.a = a.a and b.a = 5) q from tbl_a a order by 1,2;
+select a.a,(select b.a from tbl_b b where b.a = a.a and b.a = 5) q from tbl_a a order by 1,2;
+
+-- check distinct scenario.
+set enable_nestloop to true;
+set enable_hashjoin to false;
+set enable_mergejoin to false;
+explain (costs  off) select a.a,(select distinct b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+select a.a,(select distinct b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+
+set enable_nestloop to false;
+set enable_hashjoin to true;
+set enable_mergejoin to false;
+explain (costs off) select a.a,(select distinct b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+select a.a,(select distinct b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+
+set enable_nestloop to false;
+set enable_hashjoin to false;
+set enable_mergejoin to true;
+explain (costs  off) select a.a,(select distinct b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+select a.a,(select distinct b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
+
+set enable_nestloop to true;
+set enable_hashjoin to true;
+set enable_mergejoin to true;
+
+drop table tbl_a;
+drop table tbl_b;
+set enable_pullup_subquery to false;

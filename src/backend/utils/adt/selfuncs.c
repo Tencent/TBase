@@ -2265,56 +2265,59 @@ eqjoinsel(PG_FUNCTION_ARGS)
 #ifdef NOT_USED
     JoinType    jointype = (JoinType) PG_GETARG_INT16(3);
 #endif
-    SpecialJoinInfo *sjinfo = (SpecialJoinInfo *) PG_GETARG_POINTER(4);
-    double        selec;
-    VariableStatData vardata1;
-    VariableStatData vardata2;
-    bool        join_is_reversed;
-    RelOptInfo *inner_rel;
+	SpecialJoinInfo *sjinfo = (SpecialJoinInfo *) PG_GETARG_POINTER(4);
+	double		selec;
+	VariableStatData vardata1;
+	VariableStatData vardata2;
+	bool		join_is_reversed;
+	RelOptInfo *inner_rel;
 
-    get_join_variables(root, args, sjinfo,
-                       &vardata1, &vardata2, &join_is_reversed);
+	get_join_variables(root, args, sjinfo,
+					   &vardata1, &vardata2, &join_is_reversed);
 
-    switch (sjinfo->jointype)
-    {
-        case JOIN_INNER:
-        case JOIN_LEFT:
-        case JOIN_FULL:
-            selec = eqjoinsel_inner(operator, &vardata1, &vardata2);
-            break;
-        case JOIN_SEMI:
-        case JOIN_ANTI:
+	switch (sjinfo->jointype)
+	{
+		case JOIN_INNER:
+		case JOIN_LEFT:
+		case JOIN_FULL:
+			selec = eqjoinsel_inner(operator, &vardata1, &vardata2);
+			break;
+		case JOIN_SEMI:
+		case JOIN_ANTI:
+#ifdef __TBASE__
+        case JOIN_LEFT_SCALAR:
+#endif
 
-            /*
-             * Look up the join's inner relation.  min_righthand is sufficient
-             * information because neither SEMI nor ANTI joins permit any
-             * reassociation into or out of their RHS, so the righthand will
-             * always be exactly that set of rels.
-             */
-            inner_rel = find_join_input_rel(root, sjinfo->min_righthand);
+			/*
+			 * Look up the join's inner relation.  min_righthand is sufficient
+			 * information because neither SEMI nor ANTI joins permit any
+			 * reassociation into or out of their RHS, so the righthand will
+			 * always be exactly that set of rels.
+			 */
+			inner_rel = find_join_input_rel(root, sjinfo->min_righthand);
 
-            if (!join_is_reversed)
-                selec = eqjoinsel_semi(operator, &vardata1, &vardata2,
-                                       inner_rel);
-            else
-                selec = eqjoinsel_semi(get_commutator(operator),
-                                       &vardata2, &vardata1,
-                                       inner_rel);
-            break;
-        default:
-            /* other values not expected here */
-            elog(ERROR, "unrecognized join type: %d",
-                 (int) sjinfo->jointype);
-            selec = 0;            /* keep compiler quiet */
-            break;
-    }
+			if (!join_is_reversed)
+				selec = eqjoinsel_semi(operator, &vardata1, &vardata2,
+									   inner_rel);
+			else
+				selec = eqjoinsel_semi(get_commutator(operator),
+									   &vardata2, &vardata1,
+									   inner_rel);
+			break;
+		default:
+			/* other values not expected here */
+			elog(ERROR, "unrecognized join type: %d",
+				 (int) sjinfo->jointype);
+			selec = 0;			/* keep compiler quiet */
+			break;
+	}
 
-    ReleaseVariableStats(vardata1);
-    ReleaseVariableStats(vardata2);
+	ReleaseVariableStats(vardata1);
+	ReleaseVariableStats(vardata2);
 
-    CLAMP_PROBABILITY(selec);
+	CLAMP_PROBABILITY(selec);
 
-    PG_RETURN_FLOAT8((float8) selec);
+	PG_RETURN_FLOAT8((float8) selec);
 }
 
 /*

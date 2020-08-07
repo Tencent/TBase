@@ -775,318 +775,321 @@ deconstruct_recurse(PlannerInfo *root, Node *jtnode, bool below_outer_join,
         }
 #endif
         
-        /* A single baserel does not create an inner join */
-        *inner_join_rels = NULL;
-        joinlist = list_make1(jtnode);
-    }
-    else if (IsA(jtnode, FromExpr))
-    {
-        FromExpr   *f = (FromExpr *) jtnode;
-        List       *child_postponed_quals = NIL;
-        int            remaining;
-        ListCell   *l;
+		/* A single baserel does not create an inner join */
+		*inner_join_rels = NULL;
+		joinlist = list_make1(jtnode);
+	}
+	else if (IsA(jtnode, FromExpr))
+	{
+		FromExpr   *f = (FromExpr *) jtnode;
+		List	   *child_postponed_quals = NIL;
+		int			remaining;
+		ListCell   *l;
 
-        /*
-         * First, recurse to handle child joins.  We collapse subproblems into
-         * a single joinlist whenever the resulting joinlist wouldn't exceed
-         * from_collapse_limit members.  Also, always collapse one-element
-         * subproblems, since that won't lengthen the joinlist anyway.
-         */
-        *qualscope = NULL;
-        *inner_join_rels = NULL;
-        joinlist = NIL;
-        remaining = list_length(f->fromlist);
-        foreach(l, f->fromlist)
-        {
-            Relids        sub_qualscope;
-            List       *sub_joinlist;
-            int            sub_members;
+		/*
+		 * First, recurse to handle child joins.  We collapse subproblems into
+		 * a single joinlist whenever the resulting joinlist wouldn't exceed
+		 * from_collapse_limit members.  Also, always collapse one-element
+		 * subproblems, since that won't lengthen the joinlist anyway.
+		 */
+		*qualscope = NULL;
+		*inner_join_rels = NULL;
+		joinlist = NIL;
+		remaining = list_length(f->fromlist);
+		foreach(l, f->fromlist)
+		{
+			Relids		sub_qualscope;
+			List	   *sub_joinlist;
+			int			sub_members;
 
-            sub_joinlist = deconstruct_recurse(root, lfirst(l),
-                                               below_outer_join,
-                                               &sub_qualscope,
-                                               inner_join_rels,
-                                               &child_postponed_quals);
-            *qualscope = bms_add_members(*qualscope, sub_qualscope);
-            sub_members = list_length(sub_joinlist);
-            remaining--;
-            if (sub_members <= 1 ||
-                list_length(joinlist) + sub_members + remaining <= from_collapse_limit)
-                joinlist = list_concat(joinlist, sub_joinlist);
-            else
-                joinlist = lappend(joinlist, sub_joinlist);
-        }
+			sub_joinlist = deconstruct_recurse(root, lfirst(l),
+											   below_outer_join,
+											   &sub_qualscope,
+											   inner_join_rels,
+											   &child_postponed_quals);
+			*qualscope = bms_add_members(*qualscope, sub_qualscope);
+			sub_members = list_length(sub_joinlist);
+			remaining--;
+			if (sub_members <= 1 ||
+				list_length(joinlist) + sub_members + remaining <= from_collapse_limit)
+				joinlist = list_concat(joinlist, sub_joinlist);
+			else
+				joinlist = lappend(joinlist, sub_joinlist);
+		}
 
-        /*
-         * A FROM with more than one list element is an inner join subsuming
-         * all below it, so we should report inner_join_rels = qualscope. If
-         * there was exactly one element, we should (and already did) report
-         * whatever its inner_join_rels were.  If there were no elements (is
-         * that possible?) the initialization before the loop fixed it.
-         */
-        if (list_length(f->fromlist) > 1)
-            *inner_join_rels = *qualscope;
+		/*
+		 * A FROM with more than one list element is an inner join subsuming
+		 * all below it, so we should report inner_join_rels = qualscope. If
+		 * there was exactly one element, we should (and already did) report
+		 * whatever its inner_join_rels were.  If there were no elements (is
+		 * that possible?) the initialization before the loop fixed it.
+		 */
+		if (list_length(f->fromlist) > 1)
+			*inner_join_rels = *qualscope;
 
-        /*
-         * Try to process any quals postponed by children.  If they need
-         * further postponement, add them to my output postponed_qual_list.
-         */
-        foreach(l, child_postponed_quals)
-        {
-            PostponedQual *pq = (PostponedQual *) lfirst(l);
+		/*
+		 * Try to process any quals postponed by children.  If they need
+		 * further postponement, add them to my output postponed_qual_list.
+		 */
+		foreach(l, child_postponed_quals)
+		{
+			PostponedQual *pq = (PostponedQual *) lfirst(l);
 
-            if (bms_is_subset(pq->relids, *qualscope))
-                distribute_qual_to_rels(root, pq->qual,
-                                        false, below_outer_join, JOIN_INNER,
-                                        root->qual_security_level,
-                                        *qualscope, NULL, NULL, NULL,
-                                        NULL);
-            else
-                *postponed_qual_list = lappend(*postponed_qual_list, pq);
-        }
+			if (bms_is_subset(pq->relids, *qualscope))
+				distribute_qual_to_rels(root, pq->qual,
+										false, below_outer_join, JOIN_INNER,
+										root->qual_security_level,
+										*qualscope, NULL, NULL, NULL,
+										NULL);
+			else
+				*postponed_qual_list = lappend(*postponed_qual_list, pq);
+		}
 
-        /*
-         * Now process the top-level quals.
-         */
-        foreach(l, (List *) f->quals)
-        {
-            Node       *qual = (Node *) lfirst(l);
+		/*
+		 * Now process the top-level quals.
+		 */
+		foreach(l, (List *) f->quals)
+		{
+			Node	   *qual = (Node *) lfirst(l);
 
-            distribute_qual_to_rels(root, qual,
-                                    false, below_outer_join, JOIN_INNER,
-                                    root->qual_security_level,
-                                    *qualscope, NULL, NULL, NULL,
-                                    postponed_qual_list);
-        }
-    }
-    else if (IsA(jtnode, JoinExpr))
-    {
-        JoinExpr   *j = (JoinExpr *) jtnode;
-        List       *child_postponed_quals = NIL;
-        Relids        leftids,
-                    rightids,
-                    left_inners,
-                    right_inners,
-                    nonnullable_rels,
-                    nullable_rels,
-                    ojscope;
-        List       *leftjoinlist,
-                   *rightjoinlist;
-        List       *my_quals;
-        SpecialJoinInfo *sjinfo;
-        ListCell   *l;
+			distribute_qual_to_rels(root, qual,
+									false, below_outer_join, JOIN_INNER,
+									root->qual_security_level,
+									*qualscope, NULL, NULL, NULL,
+									postponed_qual_list);
+		}
+	}
+	else if (IsA(jtnode, JoinExpr))
+	{
+		JoinExpr   *j = (JoinExpr *) jtnode;
+		List	   *child_postponed_quals = NIL;
+		Relids		leftids,
+					rightids,
+					left_inners,
+					right_inners,
+					nonnullable_rels,
+					nullable_rels,
+					ojscope;
+		List	   *leftjoinlist,
+				   *rightjoinlist;
+		List	   *my_quals;
+		SpecialJoinInfo *sjinfo;
+		ListCell   *l;
 
-        /*
-         * Order of operations here is subtle and critical.  First we recurse
-         * to handle sub-JOINs.  Their join quals will be placed without
-         * regard for whether this level is an outer join, which is correct.
-         * Then we place our own join quals, which are restricted by lower
-         * outer joins in any case, and are forced to this level if this is an
-         * outer join and they mention the outer side.  Finally, if this is an
-         * outer join, we create a join_info_list entry for the join.  This
-         * will prevent quals above us in the join tree that use those rels
-         * from being pushed down below this level.  (It's okay for upper
-         * quals to be pushed down to the outer side, however.)
-         */
-        switch (j->jointype)
-        {
-            case JOIN_INNER:
-                leftjoinlist = deconstruct_recurse(root, j->larg,
-                                                   below_outer_join,
-                                                   &leftids, &left_inners,
-                                                   &child_postponed_quals);
-                rightjoinlist = deconstruct_recurse(root, j->rarg,
-                                                    below_outer_join,
-                                                    &rightids, &right_inners,
-                                                    &child_postponed_quals);
-                *qualscope = bms_union(leftids, rightids);
-                *inner_join_rels = *qualscope;
-                /* Inner join adds no restrictions for quals */
-                nonnullable_rels = NULL;
-                /* and it doesn't force anything to null, either */
-                nullable_rels = NULL;
-                break;
-            case JOIN_LEFT:
-            case JOIN_ANTI:
-                leftjoinlist = deconstruct_recurse(root, j->larg,
-                                                   below_outer_join,
-                                                   &leftids, &left_inners,
-                                                   &child_postponed_quals);
-                rightjoinlist = deconstruct_recurse(root, j->rarg,
-                                                    true,
-                                                    &rightids, &right_inners,
-                                                    &child_postponed_quals);
-                *qualscope = bms_union(leftids, rightids);
-                *inner_join_rels = bms_union(left_inners, right_inners);
-                nonnullable_rels = leftids;
-                nullable_rels = rightids;
-                break;
-            case JOIN_SEMI:
-                leftjoinlist = deconstruct_recurse(root, j->larg,
-                                                   below_outer_join,
-                                                   &leftids, &left_inners,
-                                                   &child_postponed_quals);
-                rightjoinlist = deconstruct_recurse(root, j->rarg,
-                                                    below_outer_join,
-                                                    &rightids, &right_inners,
-                                                    &child_postponed_quals);
-                *qualscope = bms_union(leftids, rightids);
-                *inner_join_rels = bms_union(left_inners, right_inners);
-                /* Semi join adds no restrictions for quals */
-                nonnullable_rels = NULL;
+		/*
+		 * Order of operations here is subtle and critical.  First we recurse
+		 * to handle sub-JOINs.  Their join quals will be placed without
+		 * regard for whether this level is an outer join, which is correct.
+		 * Then we place our own join quals, which are restricted by lower
+		 * outer joins in any case, and are forced to this level if this is an
+		 * outer join and they mention the outer side.  Finally, if this is an
+		 * outer join, we create a join_info_list entry for the join.  This
+		 * will prevent quals above us in the join tree that use those rels
+		 * from being pushed down below this level.  (It's okay for upper
+		 * quals to be pushed down to the outer side, however.)
+		 */
+		switch (j->jointype)
+		{
+			case JOIN_INNER:
+				leftjoinlist = deconstruct_recurse(root, j->larg,
+												   below_outer_join,
+												   &leftids, &left_inners,
+												   &child_postponed_quals);
+				rightjoinlist = deconstruct_recurse(root, j->rarg,
+													below_outer_join,
+													&rightids, &right_inners,
+													&child_postponed_quals);
+				*qualscope = bms_union(leftids, rightids);
+				*inner_join_rels = *qualscope;
+				/* Inner join adds no restrictions for quals */
+				nonnullable_rels = NULL;
+				/* and it doesn't force anything to null, either */
+				nullable_rels = NULL;
+				break;
+			case JOIN_LEFT:
+			case JOIN_ANTI:
+#ifdef __TBASE__
+            case JOIN_LEFT_SCALAR:
+#endif
+				leftjoinlist = deconstruct_recurse(root, j->larg,
+												   below_outer_join,
+												   &leftids, &left_inners,
+												   &child_postponed_quals);
+				rightjoinlist = deconstruct_recurse(root, j->rarg,
+													true,
+													&rightids, &right_inners,
+													&child_postponed_quals);
+				*qualscope = bms_union(leftids, rightids);
+				*inner_join_rels = bms_union(left_inners, right_inners);
+				nonnullable_rels = leftids;
+				nullable_rels = rightids;
+				break;
+			case JOIN_SEMI:
+				leftjoinlist = deconstruct_recurse(root, j->larg,
+												   below_outer_join,
+												   &leftids, &left_inners,
+												   &child_postponed_quals);
+				rightjoinlist = deconstruct_recurse(root, j->rarg,
+													below_outer_join,
+													&rightids, &right_inners,
+													&child_postponed_quals);
+				*qualscope = bms_union(leftids, rightids);
+				*inner_join_rels = bms_union(left_inners, right_inners);
+				/* Semi join adds no restrictions for quals */
+				nonnullable_rels = NULL;
 
-                /*
-                 * Theoretically, a semijoin would null the RHS; but since the
-                 * RHS can't be accessed above the join, this is immaterial
-                 * and we needn't account for it.
-                 */
-                nullable_rels = NULL;
-                break;
-            case JOIN_FULL:
-                leftjoinlist = deconstruct_recurse(root, j->larg,
-                                                   true,
-                                                   &leftids, &left_inners,
-                                                   &child_postponed_quals);
-                rightjoinlist = deconstruct_recurse(root, j->rarg,
-                                                    true,
-                                                    &rightids, &right_inners,
-                                                    &child_postponed_quals);
-                *qualscope = bms_union(leftids, rightids);
-                *inner_join_rels = bms_union(left_inners, right_inners);
-                /* each side is both outer and inner */
-                nonnullable_rels = *qualscope;
-                nullable_rels = *qualscope;
-                break;
-            default:
-                /* JOIN_RIGHT was eliminated during reduce_outer_joins() */
-                elog(ERROR, "unrecognized join type: %d",
-                     (int) j->jointype);
-                nonnullable_rels = NULL;    /* keep compiler quiet */
-                nullable_rels = NULL;
-                leftjoinlist = rightjoinlist = NIL;
-                break;
-        }
+				/*
+				 * Theoretically, a semijoin would null the RHS; but since the
+				 * RHS can't be accessed above the join, this is immaterial
+				 * and we needn't account for it.
+				 */
+				nullable_rels = NULL;
+				break;
+			case JOIN_FULL:
+				leftjoinlist = deconstruct_recurse(root, j->larg,
+												   true,
+												   &leftids, &left_inners,
+												   &child_postponed_quals);
+				rightjoinlist = deconstruct_recurse(root, j->rarg,
+													true,
+													&rightids, &right_inners,
+													&child_postponed_quals);
+				*qualscope = bms_union(leftids, rightids);
+				*inner_join_rels = bms_union(left_inners, right_inners);
+				/* each side is both outer and inner */
+				nonnullable_rels = *qualscope;
+				nullable_rels = *qualscope;
+				break;
+			default:
+				/* JOIN_RIGHT was eliminated during reduce_outer_joins() */
+				elog(ERROR, "unrecognized join type: %d",
+					 (int) j->jointype);
+				nonnullable_rels = NULL;	/* keep compiler quiet */
+				nullable_rels = NULL;
+				leftjoinlist = rightjoinlist = NIL;
+				break;
+		}
 
-        /* Report all rels that will be nulled anywhere in the jointree */
-        root->nullable_baserels = bms_add_members(root->nullable_baserels,
-                                                  nullable_rels);
+		/* Report all rels that will be nulled anywhere in the jointree */
+		root->nullable_baserels = bms_add_members(root->nullable_baserels,
+												  nullable_rels);
 
-        /*
-         * Try to process any quals postponed by children.  If they need
-         * further postponement, add them to my output postponed_qual_list.
-         * Quals that can be processed now must be included in my_quals, so
-         * that they'll be handled properly in make_outerjoininfo.
-         */
-        my_quals = NIL;
-        foreach(l, child_postponed_quals)
-        {
-            PostponedQual *pq = (PostponedQual *) lfirst(l);
+		/*
+		 * Try to process any quals postponed by children.  If they need
+		 * further postponement, add them to my output postponed_qual_list.
+		 * Quals that can be processed now must be included in my_quals, so
+		 * that they'll be handled properly in make_outerjoininfo.
+		 */
+		my_quals = NIL;
+		foreach(l, child_postponed_quals)
+		{
+			PostponedQual *pq = (PostponedQual *) lfirst(l);
 
-            if (bms_is_subset(pq->relids, *qualscope))
-                my_quals = lappend(my_quals, pq->qual);
-            else
-            {
-                /*
-                 * We should not be postponing any quals past an outer join.
-                 * If this Assert fires, pull_up_subqueries() messed up.
-                 */
-                Assert(j->jointype == JOIN_INNER);
-                *postponed_qual_list = lappend(*postponed_qual_list, pq);
-            }
-        }
-        /* list_concat is nondestructive of its second argument */
-        my_quals = list_concat(my_quals, (List *) j->quals);
+			if (bms_is_subset(pq->relids, *qualscope))
+				my_quals = lappend(my_quals, pq->qual);
+			else
+			{
+				/*
+				 * We should not be postponing any quals past an outer join.
+				 * If this Assert fires, pull_up_subqueries() messed up.
+				 */
+				Assert(j->jointype == JOIN_INNER);
+				*postponed_qual_list = lappend(*postponed_qual_list, pq);
+			}
+		}
+		/* list_concat is nondestructive of its second argument */
+		my_quals = list_concat(my_quals, (List *) j->quals);
 
-        /*
-         * For an OJ, form the SpecialJoinInfo now, because we need the OJ's
-         * semantic scope (ojscope) to pass to distribute_qual_to_rels.  But
-         * we mustn't add it to join_info_list just yet, because we don't want
-         * distribute_qual_to_rels to think it is an outer join below us.
-         *
-         * Semijoins are a bit of a hybrid: we build a SpecialJoinInfo, but we
-         * want ojscope = NULL for distribute_qual_to_rels.
-         */
-        if (j->jointype != JOIN_INNER)
-        {
-            sjinfo = make_outerjoininfo(root,
-                                        leftids, rightids,
-                                        *inner_join_rels,
-                                        j->jointype,
-                                        my_quals);
-            if (j->jointype == JOIN_SEMI)
-                ojscope = NULL;
-            else
-                ojscope = bms_union(sjinfo->min_lefthand,
-                                    sjinfo->min_righthand);
-        }
-        else
-        {
-            sjinfo = NULL;
-            ojscope = NULL;
-        }
+		/*
+		 * For an OJ, form the SpecialJoinInfo now, because we need the OJ's
+		 * semantic scope (ojscope) to pass to distribute_qual_to_rels.  But
+		 * we mustn't add it to join_info_list just yet, because we don't want
+		 * distribute_qual_to_rels to think it is an outer join below us.
+		 *
+		 * Semijoins are a bit of a hybrid: we build a SpecialJoinInfo, but we
+		 * want ojscope = NULL for distribute_qual_to_rels.
+		 */
+		if (j->jointype != JOIN_INNER)
+		{
+			sjinfo = make_outerjoininfo(root,
+										leftids, rightids,
+										*inner_join_rels,
+										j->jointype,
+										my_quals);
+			if (j->jointype == JOIN_SEMI)
+				ojscope = NULL;
+			else
+				ojscope = bms_union(sjinfo->min_lefthand,
+									sjinfo->min_righthand);
+		}
+		else
+		{
+			sjinfo = NULL;
+			ojscope = NULL;
+		}
 
-        /* Process the JOIN's qual clauses */
-        foreach(l, my_quals)
-        {
-            Node       *qual = (Node *) lfirst(l);
+		/* Process the JOIN's qual clauses */
+		foreach(l, my_quals)
+		{
+			Node	   *qual = (Node *) lfirst(l);
 
-            distribute_qual_to_rels(root, qual,
-                                    false, below_outer_join, j->jointype,
-                                    root->qual_security_level,
-                                    *qualscope,
-                                    ojscope, nonnullable_rels, NULL,
-                                    postponed_qual_list);
-        }
+			distribute_qual_to_rels(root, qual,
+									false, below_outer_join, j->jointype,
+									root->qual_security_level,
+									*qualscope,
+									ojscope, nonnullable_rels, NULL,
+									postponed_qual_list);
+		}
 
-        /* Now we can add the SpecialJoinInfo to join_info_list */
-        if (sjinfo)
-        {
-            root->join_info_list = lappend(root->join_info_list, sjinfo);
-            /* Each time we do that, recheck placeholder eval levels */
-            update_placeholder_eval_levels(root, sjinfo);
-        }
+		/* Now we can add the SpecialJoinInfo to join_info_list */
+		if (sjinfo)
+		{
+			root->join_info_list = lappend(root->join_info_list, sjinfo);
+			/* Each time we do that, recheck placeholder eval levels */
+			update_placeholder_eval_levels(root, sjinfo);
+		}
 
-        /*
-         * Finally, compute the output joinlist.  We fold subproblems together
-         * except at a FULL JOIN or where join_collapse_limit would be
-         * exceeded.
-         */
-        if (j->jointype == JOIN_FULL)
-        {
-            /* force the join order exactly at this node */
-            joinlist = list_make1(list_make2(leftjoinlist, rightjoinlist));
-        }
-        else if (list_length(leftjoinlist) + list_length(rightjoinlist) <=
-                 join_collapse_limit)
-        {
-            /* OK to combine subproblems */
-            joinlist = list_concat(leftjoinlist, rightjoinlist);
-        }
-        else
-        {
-            /* can't combine, but needn't force join order above here */
-            Node       *leftpart,
-                       *rightpart;
+		/*
+		 * Finally, compute the output joinlist.  We fold subproblems together
+		 * except at a FULL JOIN or where join_collapse_limit would be
+		 * exceeded.
+		 */
+		if (j->jointype == JOIN_FULL)
+		{
+			/* force the join order exactly at this node */
+			joinlist = list_make1(list_make2(leftjoinlist, rightjoinlist));
+		}
+		else if (list_length(leftjoinlist) + list_length(rightjoinlist) <=
+				 join_collapse_limit)
+		{
+			/* OK to combine subproblems */
+			joinlist = list_concat(leftjoinlist, rightjoinlist);
+		}
+		else
+		{
+			/* can't combine, but needn't force join order above here */
+			Node	   *leftpart,
+					   *rightpart;
 
-            /* avoid creating useless 1-element sublists */
-            if (list_length(leftjoinlist) == 1)
-                leftpart = (Node *) linitial(leftjoinlist);
-            else
-                leftpart = (Node *) leftjoinlist;
-            if (list_length(rightjoinlist) == 1)
-                rightpart = (Node *) linitial(rightjoinlist);
-            else
-                rightpart = (Node *) rightjoinlist;
-            joinlist = list_make2(leftpart, rightpart);
-        }
-    }
-    else
-    {
-        elog(ERROR, "unrecognized node type: %d",
-             (int) nodeTag(jtnode));
-        joinlist = NIL;            /* keep compiler quiet */
-    }
-    return joinlist;
+			/* avoid creating useless 1-element sublists */
+			if (list_length(leftjoinlist) == 1)
+				leftpart = (Node *) linitial(leftjoinlist);
+			else
+				leftpart = (Node *) leftjoinlist;
+			if (list_length(rightjoinlist) == 1)
+				rightpart = (Node *) linitial(rightjoinlist);
+			else
+				rightpart = (Node *) rightjoinlist;
+			joinlist = list_make2(leftpart, rightpart);
+		}
+	}
+	else
+	{
+		elog(ERROR, "unrecognized node type: %d",
+			 (int) nodeTag(jtnode));
+		joinlist = NIL;			/* keep compiler quiet */
+	}
+	return joinlist;
 }
 
 /*
@@ -1205,243 +1208,263 @@ static void mls_process_cls_quals(PlannerInfo *root,
  */
 static SpecialJoinInfo *
 make_outerjoininfo(PlannerInfo *root,
-                   Relids left_rels, Relids right_rels,
-                   Relids inner_join_rels,
-                   JoinType jointype, List *clause)
-{// #lizard forgives
-    SpecialJoinInfo *sjinfo = makeNode(SpecialJoinInfo);
-    Relids        clause_relids;
-    Relids        strict_relids;
-    Relids        min_lefthand;
-    Relids        min_righthand;
-    ListCell   *l;
+				   Relids left_rels, Relids right_rels,
+				   Relids inner_join_rels,
+				   JoinType jointype, List *clause)
+{
+	SpecialJoinInfo *sjinfo = makeNode(SpecialJoinInfo);
+	Relids		clause_relids;
+	Relids		strict_relids;
+	Relids		min_lefthand;
+	Relids		min_righthand;
+	ListCell   *l;
 
-    /*
-     * We should not see RIGHT JOIN here because left/right were switched
-     * earlier
-     */
-    Assert(jointype != JOIN_INNER);
-    Assert(jointype != JOIN_RIGHT);
+	/*
+	 * We should not see RIGHT JOIN here because left/right were switched
+	 * earlier
+	 */
+	Assert(jointype != JOIN_INNER);
+	Assert(jointype != JOIN_RIGHT);
 
-    /*
-     * Presently the executor cannot support FOR [KEY] UPDATE/SHARE marking of
-     * rels appearing on the nullable side of an outer join. (It's somewhat
-     * unclear what that would mean, anyway: what should we mark when a result
-     * row is generated from no element of the nullable relation?)    So,
-     * complain if any nullable rel is FOR [KEY] UPDATE/SHARE.
-     *
-     * You might be wondering why this test isn't made far upstream in the
-     * parser.  It's because the parser hasn't got enough info --- consider
-     * FOR UPDATE applied to a view.  Only after rewriting and flattening do
-     * we know whether the view contains an outer join.
-     *
-     * We use the original RowMarkClause list here; the PlanRowMark list would
-     * list everything.
-     */
-    foreach(l, root->parse->rowMarks)
-    {
-        RowMarkClause *rc = (RowMarkClause *) lfirst(l);
+	/*
+	 * Presently the executor cannot support FOR [KEY] UPDATE/SHARE marking of
+	 * rels appearing on the nullable side of an outer join. (It's somewhat
+	 * unclear what that would mean, anyway: what should we mark when a result
+	 * row is generated from no element of the nullable relation?)	So,
+	 * complain if any nullable rel is FOR [KEY] UPDATE/SHARE.
+	 *
+	 * You might be wondering why this test isn't made far upstream in the
+	 * parser.  It's because the parser hasn't got enough info --- consider
+	 * FOR UPDATE applied to a view.  Only after rewriting and flattening do
+	 * we know whether the view contains an outer join.
+	 *
+	 * We use the original RowMarkClause list here; the PlanRowMark list would
+	 * list everything.
+	 */
+	foreach(l, root->parse->rowMarks)
+	{
+		RowMarkClause *rc = (RowMarkClause *) lfirst(l);
 
-        if (bms_is_member(rc->rti, right_rels) ||
-            (jointype == JOIN_FULL && bms_is_member(rc->rti, left_rels)))
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            /*------
-             translator: %s is a SQL row locking clause such as FOR UPDATE */
-                     errmsg("%s cannot be applied to the nullable side of an outer join",
-                            LCS_asString(rc->strength))));
-    }
+		if (bms_is_member(rc->rti, right_rels) ||
+			(jointype == JOIN_FULL && bms_is_member(rc->rti, left_rels)))
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			/*------
+			 translator: %s is a SQL row locking clause such as FOR UPDATE */
+					 errmsg("%s cannot be applied to the nullable side of an outer join",
+							LCS_asString(rc->strength))));
+	}
 
-    sjinfo->syn_lefthand = left_rels;
-    sjinfo->syn_righthand = right_rels;
-    sjinfo->jointype = jointype;
-    /* this always starts out false */
-    sjinfo->delay_upper_joins = false;
+	sjinfo->syn_lefthand = left_rels;
+	sjinfo->syn_righthand = right_rels;
+	sjinfo->jointype = jointype;
+	/* this always starts out false */
+	sjinfo->delay_upper_joins = false;
 
-    compute_semijoin_info(sjinfo, clause);
+	compute_semijoin_info(sjinfo, clause);
 
-    /* If it's a full join, no need to be very smart */
-    if (jointype == JOIN_FULL)
-    {
-        sjinfo->min_lefthand = bms_copy(left_rels);
-        sjinfo->min_righthand = bms_copy(right_rels);
-        sjinfo->lhs_strict = false; /* don't care about this */
-        return sjinfo;
-    }
+	/* If it's a full join, no need to be very smart */
+	if (jointype == JOIN_FULL)
+	{
+		sjinfo->min_lefthand = bms_copy(left_rels);
+		sjinfo->min_righthand = bms_copy(right_rels);
+		sjinfo->lhs_strict = false; /* don't care about this */
+		return sjinfo;
+	}
 
-    /*
-     * Retrieve all relids mentioned within the join clause.
-     */
-    clause_relids = pull_varnos((Node *) clause);
+	/*
+	 * Retrieve all relids mentioned within the join clause.
+	 */
+	clause_relids = pull_varnos((Node *) clause);
 
-    /*
-     * For which relids is the clause strict, ie, it cannot succeed if the
-     * rel's columns are all NULL?
-     */
-    strict_relids = find_nonnullable_rels((Node *) clause);
+	/*
+	 * For which relids is the clause strict, ie, it cannot succeed if the
+	 * rel's columns are all NULL?
+	 */
+	strict_relids = find_nonnullable_rels((Node *) clause);
 
-    /* Remember whether the clause is strict for any LHS relations */
-    sjinfo->lhs_strict = bms_overlap(strict_relids, left_rels);
+	/* Remember whether the clause is strict for any LHS relations */
+	sjinfo->lhs_strict = bms_overlap(strict_relids, left_rels);
 
-    /*
-     * Required LHS always includes the LHS rels mentioned in the clause. We
-     * may have to add more rels based on lower outer joins; see below.
-     */
-    min_lefthand = bms_intersect(clause_relids, left_rels);
+	/*
+	 * Required LHS always includes the LHS rels mentioned in the clause. We
+	 * may have to add more rels based on lower outer joins; see below.
+	 */
+	min_lefthand = bms_intersect(clause_relids, left_rels);
 
-    /*
-     * Similarly for required RHS.  But here, we must also include any lower
-     * inner joins, to ensure we don't try to commute with any of them.
-     */
-    min_righthand = bms_int_members(bms_union(clause_relids, inner_join_rels),
-                                    right_rels);
+	/*
+	 * Similarly for required RHS.  But here, we must also include any lower
+	 * inner joins, to ensure we don't try to commute with any of them.
+	 */
+	min_righthand = bms_int_members(bms_union(clause_relids, inner_join_rels),
+									right_rels);
 
-    /*
-     * Now check previous outer joins for ordering restrictions.
-     */
-    foreach(l, root->join_info_list)
-    {
-        SpecialJoinInfo *otherinfo = (SpecialJoinInfo *) lfirst(l);
+	/*
+	 * Now check previous outer joins for ordering restrictions.
+	 */
+	foreach(l, root->join_info_list)
+	{
+		SpecialJoinInfo *otherinfo = (SpecialJoinInfo *) lfirst(l);
 
-        /*
-         * A full join is an optimization barrier: we can't associate into or
-         * out of it.  Hence, if it overlaps either LHS or RHS of the current
-         * rel, expand that side's min relset to cover the whole full join.
-         */
-        if (otherinfo->jointype == JOIN_FULL)
-        {
-            if (bms_overlap(left_rels, otherinfo->syn_lefthand) ||
-                bms_overlap(left_rels, otherinfo->syn_righthand))
-            {
-                min_lefthand = bms_add_members(min_lefthand,
-                                               otherinfo->syn_lefthand);
-                min_lefthand = bms_add_members(min_lefthand,
-                                               otherinfo->syn_righthand);
-            }
-            if (bms_overlap(right_rels, otherinfo->syn_lefthand) ||
-                bms_overlap(right_rels, otherinfo->syn_righthand))
-            {
-                min_righthand = bms_add_members(min_righthand,
-                                                otherinfo->syn_lefthand);
-                min_righthand = bms_add_members(min_righthand,
-                                                otherinfo->syn_righthand);
-            }
-            /* Needn't do anything else with the full join */
-            continue;
-        }
+		/*
+		 * A full join is an optimization barrier: we can't associate into or
+		 * out of it.  Hence, if it overlaps either LHS or RHS of the current
+		 * rel, expand that side's min relset to cover the whole full join.
+		 */
+		if (otherinfo->jointype == JOIN_FULL)
+		{
+			if (bms_overlap(left_rels, otherinfo->syn_lefthand) ||
+				bms_overlap(left_rels, otherinfo->syn_righthand))
+			{
+				min_lefthand = bms_add_members(min_lefthand,
+											   otherinfo->syn_lefthand);
+				min_lefthand = bms_add_members(min_lefthand,
+											   otherinfo->syn_righthand);
+			}
+			if (bms_overlap(right_rels, otherinfo->syn_lefthand) ||
+				bms_overlap(right_rels, otherinfo->syn_righthand))
+			{
+				min_righthand = bms_add_members(min_righthand,
+												otherinfo->syn_lefthand);
+				min_righthand = bms_add_members(min_righthand,
+												otherinfo->syn_righthand);
+			}
+			/* Needn't do anything else with the full join */
+			continue;
+		}
 
-        /*
-         * For a lower OJ in our LHS, if our join condition uses the lower
-         * join's RHS and is not strict for that rel, we must preserve the
-         * ordering of the two OJs, so add lower OJ's full syntactic relset to
-         * min_lefthand.  (We must use its full syntactic relset, not just its
-         * min_lefthand + min_righthand.  This is because there might be other
-         * OJs below this one that this one can commute with, but we cannot
-         * commute with them if we don't with this one.)  Also, if the current
-         * join is a semijoin or antijoin, we must preserve ordering
-         * regardless of strictness.
-         *
-         * Note: I believe we have to insist on being strict for at least one
-         * rel in the lower OJ's min_righthand, not its whole syn_righthand.
-         */
-        if (bms_overlap(left_rels, otherinfo->syn_righthand))
-        {
+		/*
+		 * For a lower OJ in our LHS, if our join condition uses the lower
+		 * join's RHS and is not strict for that rel, we must preserve the
+		 * ordering of the two OJs, so add lower OJ's full syntactic relset to
+		 * min_lefthand.  (We must use its full syntactic relset, not just its
+		 * min_lefthand + min_righthand.  This is because there might be other
+		 * OJs below this one that this one can commute with, but we cannot
+		 * commute with them if we don't with this one.)  Also, if the current
+		 * join is a semijoin or antijoin, we must preserve ordering
+		 * regardless of strictness.
+		 *
+		 * Note: I believe we have to insist on being strict for at least one
+		 * rel in the lower OJ's min_righthand, not its whole syn_righthand.
+		 */
+		if (bms_overlap(left_rels, otherinfo->syn_righthand))
+		{
+#ifdef __TBASE__
             if (bms_overlap(clause_relids, otherinfo->syn_righthand) &&
-                (jointype == JOIN_SEMI || jointype == JOIN_ANTI ||
+                (jointype == JOIN_SEMI ||
+                 jointype == JOIN_ANTI ||
+                 jointype == JOIN_LEFT_SCALAR ||
                  !bms_overlap(strict_relids, otherinfo->min_righthand)))
-            {
-                min_lefthand = bms_add_members(min_lefthand,
-                                               otherinfo->syn_lefthand);
-                min_lefthand = bms_add_members(min_lefthand,
-                                               otherinfo->syn_righthand);
-            }
-        }
+#else
+			if (bms_overlap(clause_relids, otherinfo->syn_righthand) &&
+				(jointype == JOIN_SEMI || jointype == JOIN_ANTI ||
+				 !bms_overlap(strict_relids, otherinfo->min_righthand)))
+#endif
+			{
+				min_lefthand = bms_add_members(min_lefthand,
+											   otherinfo->syn_lefthand);
+				min_lefthand = bms_add_members(min_lefthand,
+											   otherinfo->syn_righthand);
+			}
+		}
 
-        /*
-         * For a lower OJ in our RHS, if our join condition does not use the
-         * lower join's RHS and the lower OJ's join condition is strict, we
-         * can interchange the ordering of the two OJs; otherwise we must add
-         * the lower OJ's full syntactic relset to min_righthand.
-         *
-         * Also, if our join condition does not use the lower join's LHS
-         * either, force the ordering to be preserved.  Otherwise we can end
-         * up with SpecialJoinInfos with identical min_righthands, which can
-         * confuse join_is_legal (see discussion in backend/optimizer/README).
-         *
-         * Also, we must preserve ordering anyway if either the current join
-         * or the lower OJ is either a semijoin or an antijoin.
-         *
-         * Here, we have to consider that "our join condition" includes any
-         * clauses that syntactically appeared above the lower OJ and below
-         * ours; those are equivalent to degenerate clauses in our OJ and must
-         * be treated as such.  Such clauses obviously can't reference our
-         * LHS, and they must be non-strict for the lower OJ's RHS (else
-         * reduce_outer_joins would have reduced the lower OJ to a plain
-         * join).  Hence the other ways in which we handle clauses within our
-         * join condition are not affected by them.  The net effect is
-         * therefore sufficiently represented by the delay_upper_joins flag
-         * saved for us by check_outerjoin_delay.
-         */
-        if (bms_overlap(right_rels, otherinfo->syn_righthand))
-        {
-            if (bms_overlap(clause_relids, otherinfo->syn_righthand) ||
-                !bms_overlap(clause_relids, otherinfo->min_lefthand) ||
-                jointype == JOIN_SEMI ||
-                jointype == JOIN_ANTI ||
-                otherinfo->jointype == JOIN_SEMI ||
-                otherinfo->jointype == JOIN_ANTI ||
-                !otherinfo->lhs_strict || otherinfo->delay_upper_joins)
-            {
-                min_righthand = bms_add_members(min_righthand,
-                                                otherinfo->syn_lefthand);
-                min_righthand = bms_add_members(min_righthand,
-                                                otherinfo->syn_righthand);
-            }
-        }
-    }
+		/*
+		 * For a lower OJ in our RHS, if our join condition does not use the
+		 * lower join's RHS and the lower OJ's join condition is strict, we
+		 * can interchange the ordering of the two OJs; otherwise we must add
+		 * the lower OJ's full syntactic relset to min_righthand.
+		 *
+		 * Also, if our join condition does not use the lower join's LHS
+		 * either, force the ordering to be preserved.  Otherwise we can end
+		 * up with SpecialJoinInfos with identical min_righthands, which can
+		 * confuse join_is_legal (see discussion in backend/optimizer/README).
+		 *
+		 * Also, we must preserve ordering anyway if either the current join
+		 * or the lower OJ is either a semijoin or an antijoin.
+		 *
+		 * Here, we have to consider that "our join condition" includes any
+		 * clauses that syntactically appeared above the lower OJ and below
+		 * ours; those are equivalent to degenerate clauses in our OJ and must
+		 * be treated as such.  Such clauses obviously can't reference our
+		 * LHS, and they must be non-strict for the lower OJ's RHS (else
+		 * reduce_outer_joins would have reduced the lower OJ to a plain
+		 * join).  Hence the other ways in which we handle clauses within our
+		 * join condition are not affected by them.  The net effect is
+		 * therefore sufficiently represented by the delay_upper_joins flag
+		 * saved for us by check_outerjoin_delay.
+		 */
+		if (bms_overlap(right_rels, otherinfo->syn_righthand))
+		{
+#ifdef __TBASE__
+			if (bms_overlap(clause_relids, otherinfo->syn_righthand) ||
+				!bms_overlap(clause_relids, otherinfo->min_lefthand) ||
+				jointype == JOIN_SEMI ||
+				jointype == JOIN_ANTI ||
+				jointype == JOIN_LEFT_SCALAR ||
+				otherinfo->jointype == JOIN_SEMI ||
+				otherinfo->jointype == JOIN_ANTI ||
+                otherinfo->jointype == JOIN_LEFT_SCALAR ||
+				!otherinfo->lhs_strict || otherinfo->delay_upper_joins)
+#else
+			if (bms_overlap(clause_relids, otherinfo->syn_righthand) ||
+				!bms_overlap(clause_relids, otherinfo->min_lefthand) ||
+				jointype == JOIN_SEMI ||
+				jointype == JOIN_ANTI ||
+				otherinfo->jointype == JOIN_SEMI ||
+				otherinfo->jointype == JOIN_ANTI ||
+				!otherinfo->lhs_strict || otherinfo->delay_upper_joins)
+#endif
+			{
+				min_righthand = bms_add_members(min_righthand,
+												otherinfo->syn_lefthand);
+				min_righthand = bms_add_members(min_righthand,
+												otherinfo->syn_righthand);
+			}
+		}
+	}
 
-    /*
-     * Examine PlaceHolderVars.  If a PHV is supposed to be evaluated within
-     * this join's nullable side, then ensure that min_righthand contains the
-     * full eval_at set of the PHV.  This ensures that the PHV actually can be
-     * evaluated within the RHS.  Note that this works only because we should
-     * already have determined the final eval_at level for any PHV
-     * syntactically within this join.
-     */
-    foreach(l, root->placeholder_list)
-    {
-        PlaceHolderInfo *phinfo = (PlaceHolderInfo *) lfirst(l);
-        Relids        ph_syn_level = phinfo->ph_var->phrels;
+	/*
+	 * Examine PlaceHolderVars.  If a PHV is supposed to be evaluated within
+	 * this join's nullable side, then ensure that min_righthand contains the
+	 * full eval_at set of the PHV.  This ensures that the PHV actually can be
+	 * evaluated within the RHS.  Note that this works only because we should
+	 * already have determined the final eval_at level for any PHV
+	 * syntactically within this join.
+	 */
+	foreach(l, root->placeholder_list)
+	{
+		PlaceHolderInfo *phinfo = (PlaceHolderInfo *) lfirst(l);
+		Relids		ph_syn_level = phinfo->ph_var->phrels;
 
-        /* Ignore placeholder if it didn't syntactically come from RHS */
-        if (!bms_is_subset(ph_syn_level, right_rels))
-            continue;
+		/* Ignore placeholder if it didn't syntactically come from RHS */
+		if (!bms_is_subset(ph_syn_level, right_rels))
+			continue;
 
-        /* Else, prevent join from being formed before we eval the PHV */
-        min_righthand = bms_add_members(min_righthand, phinfo->ph_eval_at);
-    }
+		/* Else, prevent join from being formed before we eval the PHV */
+		min_righthand = bms_add_members(min_righthand, phinfo->ph_eval_at);
+	}
 
-    /*
-     * If we found nothing to put in min_lefthand, punt and make it the full
-     * LHS, to avoid having an empty min_lefthand which will confuse later
-     * processing. (We don't try to be smart about such cases, just correct.)
-     * Likewise for min_righthand.
-     */
-    if (bms_is_empty(min_lefthand))
-        min_lefthand = bms_copy(left_rels);
-    if (bms_is_empty(min_righthand))
-        min_righthand = bms_copy(right_rels);
+	/*
+	 * If we found nothing to put in min_lefthand, punt and make it the full
+	 * LHS, to avoid having an empty min_lefthand which will confuse later
+	 * processing. (We don't try to be smart about such cases, just correct.)
+	 * Likewise for min_righthand.
+	 */
+	if (bms_is_empty(min_lefthand))
+		min_lefthand = bms_copy(left_rels);
+	if (bms_is_empty(min_righthand))
+		min_righthand = bms_copy(right_rels);
 
-    /* Now they'd better be nonempty */
-    Assert(!bms_is_empty(min_lefthand));
-    Assert(!bms_is_empty(min_righthand));
-    /* Shouldn't overlap either */
-    Assert(!bms_overlap(min_lefthand, min_righthand));
+	/* Now they'd better be nonempty */
+	Assert(!bms_is_empty(min_lefthand));
+	Assert(!bms_is_empty(min_righthand));
+	/* Shouldn't overlap either */
+	Assert(!bms_overlap(min_lefthand, min_righthand));
 
-    sjinfo->min_lefthand = min_lefthand;
-    sjinfo->min_righthand = min_righthand;
+	sjinfo->min_lefthand = min_lefthand;
+	sjinfo->min_righthand = min_righthand;
 
-    return sjinfo;
+	return sjinfo;
 }
 
 /*
@@ -1453,171 +1476,175 @@ make_outerjoininfo(PlannerInfo *root,
  */
 static void
 compute_semijoin_info(SpecialJoinInfo *sjinfo, List *clause)
-{// #lizard forgives
-    List       *semi_operators;
-    List       *semi_rhs_exprs;
-    bool        all_btree;
-    bool        all_hash;
-    ListCell   *lc;
+{
+	List	   *semi_operators;
+	List	   *semi_rhs_exprs;
+	bool		all_btree;
+	bool		all_hash;
+	ListCell   *lc;
 
-    /* Initialize semijoin-related fields in case we can't unique-ify */
-    sjinfo->semi_can_btree = false;
-    sjinfo->semi_can_hash = false;
-    sjinfo->semi_operators = NIL;
-    sjinfo->semi_rhs_exprs = NIL;
+	/* Initialize semijoin-related fields in case we can't unique-ify */
+	sjinfo->semi_can_btree = false;
+	sjinfo->semi_can_hash = false;
+	sjinfo->semi_operators = NIL;
+	sjinfo->semi_rhs_exprs = NIL;
 
-    /* Nothing more to do if it's not a semijoin */
-    if (sjinfo->jointype != JOIN_SEMI)
-        return;
+	/* Nothing more to do if it's not a semijoin */
+#ifdef __TBASE__
+	if (sjinfo->jointype != JOIN_SEMI && sjinfo->jointype != JOIN_LEFT_SCALAR)
+#else
+	if (sjinfo->jointype != JOIN_SEMI)
+#endif
+		return;
 
-    /*
-     * Look to see whether the semijoin's join quals consist of AND'ed
-     * equality operators, with (only) RHS variables on only one side of each
-     * one.  If so, we can figure out how to enforce uniqueness for the RHS.
-     *
-     * Note that the input clause list is the list of quals that are
-     * *syntactically* associated with the semijoin, which in practice means
-     * the synthesized comparison list for an IN or the WHERE of an EXISTS.
-     * Particularly in the latter case, it might contain clauses that aren't
-     * *semantically* associated with the join, but refer to just one side or
-     * the other.  We can ignore such clauses here, as they will just drop
-     * down to be processed within one side or the other.  (It is okay to
-     * consider only the syntactically-associated clauses here because for a
-     * semijoin, no higher-level quals could refer to the RHS, and so there
-     * can be no other quals that are semantically associated with this join.
-     * We do things this way because it is useful to have the set of potential
-     * unique-ification expressions before we can extract the list of quals
-     * that are actually semantically associated with the particular join.)
-     *
-     * Note that the semi_operators list consists of the joinqual operators
-     * themselves (but commuted if needed to put the RHS value on the right).
-     * These could be cross-type operators, in which case the operator
-     * actually needed for uniqueness is a related single-type operator. We
-     * assume here that that operator will be available from the btree or hash
-     * opclass when the time comes ... if not, create_unique_plan() will fail.
-     */
-    semi_operators = NIL;
-    semi_rhs_exprs = NIL;
-    all_btree = true;
-    all_hash = enable_hashagg;    /* don't consider hash if not enabled */
-    foreach(lc, clause)
-    {
-        OpExpr       *op = (OpExpr *) lfirst(lc);
-        Oid            opno;
-        Node       *left_expr;
-        Node       *right_expr;
-        Relids        left_varnos;
-        Relids        right_varnos;
-        Relids        all_varnos;
-        Oid            opinputtype;
+	/*
+	 * Look to see whether the semijoin's join quals consist of AND'ed
+	 * equality operators, with (only) RHS variables on only one side of each
+	 * one.  If so, we can figure out how to enforce uniqueness for the RHS.
+	 *
+	 * Note that the input clause list is the list of quals that are
+	 * *syntactically* associated with the semijoin, which in practice means
+	 * the synthesized comparison list for an IN or the WHERE of an EXISTS.
+	 * Particularly in the latter case, it might contain clauses that aren't
+	 * *semantically* associated with the join, but refer to just one side or
+	 * the other.  We can ignore such clauses here, as they will just drop
+	 * down to be processed within one side or the other.  (It is okay to
+	 * consider only the syntactically-associated clauses here because for a
+	 * semijoin, no higher-level quals could refer to the RHS, and so there
+	 * can be no other quals that are semantically associated with this join.
+	 * We do things this way because it is useful to have the set of potential
+	 * unique-ification expressions before we can extract the list of quals
+	 * that are actually semantically associated with the particular join.)
+	 *
+	 * Note that the semi_operators list consists of the joinqual operators
+	 * themselves (but commuted if needed to put the RHS value on the right).
+	 * These could be cross-type operators, in which case the operator
+	 * actually needed for uniqueness is a related single-type operator. We
+	 * assume here that that operator will be available from the btree or hash
+	 * opclass when the time comes ... if not, create_unique_plan() will fail.
+	 */
+	semi_operators = NIL;
+	semi_rhs_exprs = NIL;
+	all_btree = true;
+	all_hash = enable_hashagg;	/* don't consider hash if not enabled */
+	foreach(lc, clause)
+	{
+		OpExpr	   *op = (OpExpr *) lfirst(lc);
+		Oid			opno;
+		Node	   *left_expr;
+		Node	   *right_expr;
+		Relids		left_varnos;
+		Relids		right_varnos;
+		Relids		all_varnos;
+		Oid			opinputtype;
 
-        /* Is it a binary opclause? */
-        if (!IsA(op, OpExpr) ||
-            list_length(op->args) != 2)
-        {
-            /* No, but does it reference both sides? */
-            all_varnos = pull_varnos((Node *) op);
-            if (!bms_overlap(all_varnos, sjinfo->syn_righthand) ||
-                bms_is_subset(all_varnos, sjinfo->syn_righthand))
-            {
-                /*
-                 * Clause refers to only one rel, so ignore it --- unless it
-                 * contains volatile functions, in which case we'd better
-                 * punt.
-                 */
-                if (contain_volatile_functions((Node *) op))
-                    return;
-                continue;
-            }
-            /* Non-operator clause referencing both sides, must punt */
-            return;
-        }
+		/* Is it a binary opclause? */
+		if (!IsA(op, OpExpr) ||
+			list_length(op->args) != 2)
+		{
+			/* No, but does it reference both sides? */
+			all_varnos = pull_varnos((Node *) op);
+			if (!bms_overlap(all_varnos, sjinfo->syn_righthand) ||
+				bms_is_subset(all_varnos, sjinfo->syn_righthand))
+			{
+				/*
+				 * Clause refers to only one rel, so ignore it --- unless it
+				 * contains volatile functions, in which case we'd better
+				 * punt.
+				 */
+				if (contain_volatile_functions((Node *) op))
+					return;
+				continue;
+			}
+			/* Non-operator clause referencing both sides, must punt */
+			return;
+		}
 
-        /* Extract data from binary opclause */
-        opno = op->opno;
-        left_expr = linitial(op->args);
-        right_expr = lsecond(op->args);
-        left_varnos = pull_varnos(left_expr);
-        right_varnos = pull_varnos(right_expr);
-        all_varnos = bms_union(left_varnos, right_varnos);
-        opinputtype = exprType(left_expr);
+		/* Extract data from binary opclause */
+		opno = op->opno;
+		left_expr = linitial(op->args);
+		right_expr = lsecond(op->args);
+		left_varnos = pull_varnos(left_expr);
+		right_varnos = pull_varnos(right_expr);
+		all_varnos = bms_union(left_varnos, right_varnos);
+		opinputtype = exprType(left_expr);
 
-        /* Does it reference both sides? */
-        if (!bms_overlap(all_varnos, sjinfo->syn_righthand) ||
-            bms_is_subset(all_varnos, sjinfo->syn_righthand))
-        {
-            /*
-             * Clause refers to only one rel, so ignore it --- unless it
-             * contains volatile functions, in which case we'd better punt.
-             */
-            if (contain_volatile_functions((Node *) op))
-                return;
-            continue;
-        }
+		/* Does it reference both sides? */
+		if (!bms_overlap(all_varnos, sjinfo->syn_righthand) ||
+			bms_is_subset(all_varnos, sjinfo->syn_righthand))
+		{
+			/*
+			 * Clause refers to only one rel, so ignore it --- unless it
+			 * contains volatile functions, in which case we'd better punt.
+			 */
+			if (contain_volatile_functions((Node *) op))
+				return;
+			continue;
+		}
 
-        /* check rel membership of arguments */
-        if (!bms_is_empty(right_varnos) &&
-            bms_is_subset(right_varnos, sjinfo->syn_righthand) &&
-            !bms_overlap(left_varnos, sjinfo->syn_righthand))
-        {
-            /* typical case, right_expr is RHS variable */
-        }
-        else if (!bms_is_empty(left_varnos) &&
-                 bms_is_subset(left_varnos, sjinfo->syn_righthand) &&
-                 !bms_overlap(right_varnos, sjinfo->syn_righthand))
-        {
-            /* flipped case, left_expr is RHS variable */
-            opno = get_commutator(opno);
-            if (!OidIsValid(opno))
-                return;
-            right_expr = left_expr;
-        }
-        else
-        {
-            /* mixed membership of args, punt */
-            return;
-        }
+		/* check rel membership of arguments */
+		if (!bms_is_empty(right_varnos) &&
+			bms_is_subset(right_varnos, sjinfo->syn_righthand) &&
+			!bms_overlap(left_varnos, sjinfo->syn_righthand))
+		{
+			/* typical case, right_expr is RHS variable */
+		}
+		else if (!bms_is_empty(left_varnos) &&
+				 bms_is_subset(left_varnos, sjinfo->syn_righthand) &&
+				 !bms_overlap(right_varnos, sjinfo->syn_righthand))
+		{
+			/* flipped case, left_expr is RHS variable */
+			opno = get_commutator(opno);
+			if (!OidIsValid(opno))
+				return;
+			right_expr = left_expr;
+		}
+		else
+		{
+			/* mixed membership of args, punt */
+			return;
+		}
 
-        /* all operators must be btree equality or hash equality */
-        if (all_btree)
-        {
-            /* oprcanmerge is considered a hint... */
-            if (!op_mergejoinable(opno, opinputtype) ||
-                get_mergejoin_opfamilies(opno) == NIL)
-                all_btree = false;
-        }
-        if (all_hash)
-        {
-            /* ... but oprcanhash had better be correct */
-            if (!op_hashjoinable(opno, opinputtype))
-                all_hash = false;
-        }
-        if (!(all_btree || all_hash))
-            return;
+		/* all operators must be btree equality or hash equality */
+		if (all_btree)
+		{
+			/* oprcanmerge is considered a hint... */
+			if (!op_mergejoinable(opno, opinputtype) ||
+				get_mergejoin_opfamilies(opno) == NIL)
+				all_btree = false;
+		}
+		if (all_hash)
+		{
+			/* ... but oprcanhash had better be correct */
+			if (!op_hashjoinable(opno, opinputtype))
+				all_hash = false;
+		}
+		if (!(all_btree || all_hash))
+			return;
 
-        /* so far so good, keep building lists */
-        semi_operators = lappend_oid(semi_operators, opno);
-        semi_rhs_exprs = lappend(semi_rhs_exprs, copyObject(right_expr));
-    }
+		/* so far so good, keep building lists */
+		semi_operators = lappend_oid(semi_operators, opno);
+		semi_rhs_exprs = lappend(semi_rhs_exprs, copyObject(right_expr));
+	}
 
-    /* Punt if we didn't find at least one column to unique-ify */
-    if (semi_rhs_exprs == NIL)
-        return;
+	/* Punt if we didn't find at least one column to unique-ify */
+	if (semi_rhs_exprs == NIL)
+		return;
 
-    /*
-     * The expressions we'd need to unique-ify mustn't be volatile.
-     */
-    if (contain_volatile_functions((Node *) semi_rhs_exprs))
-        return;
+	/*
+	 * The expressions we'd need to unique-ify mustn't be volatile.
+	 */
+	if (contain_volatile_functions((Node *) semi_rhs_exprs))
+		return;
 
-    /*
-     * If we get here, we can unique-ify the semijoin's RHS using at least one
-     * of sorting and hashing.  Save the information about how to do that.
-     */
-    sjinfo->semi_can_btree = all_btree;
-    sjinfo->semi_can_hash = all_hash;
-    sjinfo->semi_operators = semi_operators;
-    sjinfo->semi_rhs_exprs = semi_rhs_exprs;
+	/*
+	 * If we get here, we can unique-ify the semijoin's RHS using at least one
+	 * of sorting and hashing.  Save the information about how to do that.
+	 */
+	sjinfo->semi_can_btree = all_btree;
+	sjinfo->semi_can_hash = all_hash;
+	sjinfo->semi_operators = semi_operators;
+	sjinfo->semi_rhs_exprs = semi_rhs_exprs;
 }
 
 

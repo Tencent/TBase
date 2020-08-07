@@ -1721,32 +1721,41 @@ set_joinpath_distribution(PlannerInfo *root, JoinPath *pathnode)
         return alternate;
     }
 
-    /*
-     * Check if we have inner replicated
-     * The "both replicated" case is already checked, so if innerd
-     * is replicated, then outerd is not replicated and it is not NULL.
-     * This case is not acceptable for some join types. If outer relation is
-     * nullable data nodes will produce joined rows with NULLs for cases when
-     * matching row exists, but on other data node.
-     */
-    if ((innerd && IsLocatorReplicated(innerd->distributionType)) &&
-            (pathnode->jointype == JOIN_INNER ||
-             pathnode->jointype == JOIN_LEFT ||
-             pathnode->jointype == JOIN_SEMI ||
-             pathnode->jointype == JOIN_ANTI))
-    {
-        /* We need inner relation is defined on all nodes where outer is */
-        if (!outerd || !bms_is_subset(outerd->nodes, innerd->nodes))
-            goto not_allowed_join;
+	/*
+	 * Check if we have inner replicated
+	 * The "both replicated" case is already checked, so if innerd
+	 * is replicated, then outerd is not replicated and it is not NULL.
+	 * This case is not acceptable for some join types. If outer relation is
+	 * nullable data nodes will produce joined rows with NULLs for cases when
+	 * matching row exists, but on other data node.
+	 */
+#ifdef __TBASE__
+	if ((innerd && IsLocatorReplicated(innerd->distributionType)) &&
+			(pathnode->jointype == JOIN_INNER ||
+			 pathnode->jointype == JOIN_LEFT ||
+			 pathnode->jointype == JOIN_SEMI ||
+             pathnode->jointype == JOIN_LEFT_SCALAR ||
+			 pathnode->jointype == JOIN_ANTI))
+#else
+	if ((innerd && IsLocatorReplicated(innerd->distributionType)) &&
+			(pathnode->jointype == JOIN_INNER ||
+			 pathnode->jointype == JOIN_LEFT ||
+			 pathnode->jointype == JOIN_SEMI ||
+			 pathnode->jointype == JOIN_ANTI))
+#endif
+	{
+		/* We need inner relation is defined on all nodes where outer is */
+		if (!outerd || !bms_is_subset(outerd->nodes, innerd->nodes))
+			goto not_allowed_join;
 
-        targetd = makeNode(Distribution);
-        targetd->distributionType = outerd->distributionType;
-        targetd->nodes = bms_copy(outerd->nodes);
-        targetd->restrictNodes = bms_copy(outerd->restrictNodes);
-        targetd->distributionExpr = outerd->distributionExpr;
-        pathnode->path.distribution = targetd;
-        return alternate;
-    }
+		targetd = makeNode(Distribution);
+		targetd->distributionType = outerd->distributionType;
+		targetd->nodes = bms_copy(outerd->nodes);
+		targetd->restrictNodes = bms_copy(outerd->restrictNodes);
+		targetd->distributionExpr = outerd->distributionExpr;
+		pathnode->path.distribution = targetd;
+		return alternate;
+	}
 
 
     /*
@@ -2046,43 +2055,52 @@ set_joinpath_distribution(PlannerInfo *root, JoinPath *pathnode)
      * If we could not determine the distribution redistribute the subpathes.
      */
 not_allowed_join:
-    /*
-     * If redistribution is required, sometimes the cheapest path would be if
-     * one of the subplan is replicated. If replication of any or all subplans
-     * is possible, return resulting plans as alternates. Try to distribute all
-     * by has as main variant.
-     */
+	/*
+	 * If redistribution is required, sometimes the cheapest path would be if
+	 * one of the subplan is replicated. If replication of any or all subplans
+	 * is possible, return resulting plans as alternates. Try to distribute all
+	 * by has as main variant.
+	 */
 
-#ifdef NOT_USED    
-    /* These join types allow replicated inner */
-    if (outerd &&
-            (pathnode->jointype == JOIN_INNER ||
-             pathnode->jointype == JOIN_LEFT ||
-             pathnode->jointype == JOIN_SEMI ||
-             pathnode->jointype == JOIN_ANTI))
-    {
-        /*
-         * Since we discard all alternate pathes except one it is OK if all they
-         * reference the same objects
-         */
-        JoinPath *altpath = flatCopyJoinPath(pathnode);
-        /* Redistribute inner subquery */
-        altpath->innerjoinpath = redistribute_path(
-                root,
-                altpath->innerjoinpath,
-                innerpathkeys,
-                LOCATOR_TYPE_REPLICATED,
-                NULL,
-                bms_copy(outerd->nodes),
-                bms_copy(outerd->restrictNodes));
-        targetd = makeNode(Distribution);
-        targetd->distributionType = outerd->distributionType;
-        targetd->nodes = bms_copy(outerd->nodes);
-        targetd->restrictNodes = bms_copy(outerd->restrictNodes);
-        targetd->distributionExpr = outerd->distributionExpr;
-        altpath->path.distribution = targetd;
-        alternate = lappend(alternate, altpath);
-    }
+#ifdef NOT_USED	
+	/* These join types allow replicated inner */
+#ifdef __TBASE__
+	if (outerd &&
+			(pathnode->jointype == JOIN_INNER ||
+			 pathnode->jointype == JOIN_LEFT ||
+			 pathnode->jointype == JOIN_SEMI ||
+			 pathnode->jointype == JOIN_LEFT_SCALAR ||
+			 pathnode->jointype == JOIN_ANTI))
+#else
+	if (outerd &&
+			(pathnode->jointype == JOIN_INNER ||
+			 pathnode->jointype == JOIN_LEFT ||
+			 pathnode->jointype == JOIN_SEMI ||
+			 pathnode->jointype == JOIN_ANTI))
+#endif
+	{
+		/*
+		 * Since we discard all alternate pathes except one it is OK if all they
+		 * reference the same objects
+		 */
+		JoinPath *altpath = flatCopyJoinPath(pathnode);
+		/* Redistribute inner subquery */
+		altpath->innerjoinpath = redistribute_path(
+				root,
+				altpath->innerjoinpath,
+				innerpathkeys,
+				LOCATOR_TYPE_REPLICATED,
+				NULL,
+				bms_copy(outerd->nodes),
+				bms_copy(outerd->restrictNodes));
+		targetd = makeNode(Distribution);
+		targetd->distributionType = outerd->distributionType;
+		targetd->nodes = bms_copy(outerd->nodes);
+		targetd->restrictNodes = bms_copy(outerd->restrictNodes);
+		targetd->distributionExpr = outerd->distributionExpr;
+		altpath->path.distribution = targetd;
+		alternate = lappend(alternate, altpath);
+	}
 
     /* These join types allow replicated outer */
     if (innerd &&
@@ -2161,7 +2179,9 @@ not_allowed_join:
                     Expr *right_expr = right;
 #endif
                     Oid leftType PG_USED_FOR_ASSERTS_ONLY = exprType((Node *) left);
-                    Oid rightType PG_USED_FOR_ASSERTS_ONLY = exprType((Node *) right);
+#ifndef __TBASE__
+					Oid rightType PG_USED_FOR_ASSERTS_ONLY = exprType((Node *) right);
+#endif
                     Relids inner_rels = pathnode->innerjoinpath->parent->relids;
                     Relids outer_rels = pathnode->outerjoinpath->parent->relids;
                     QualCost cost;
@@ -2456,17 +2476,21 @@ not_allowed_join:
                     nodes = bms_copy(outerd->nodes);
                 }
 
-                if(outer_size * inner_nodes < inner_size + outer_size &&
-                    (pathnode->jointype != JOIN_LEFT && pathnode->jointype != JOIN_FULL &&
-                     pathnode->jointype != JOIN_SEMI && pathnode->jointype != JOIN_ANTI) &&
-                     innerd->distributionType != LOCATOR_TYPE_REPLICATED && !redistribute_outer &&
-                     get_num_connections(inner_nodes, nRemotePlans_outer + 1) < MaxConnections * REPLICATION_FACTOR &&
+				if(outer_size * inner_nodes < inner_size + outer_size &&
+					(pathnode->jointype != JOIN_LEFT &&
+					 pathnode->jointype != JOIN_FULL &&
+					 pathnode->jointype != JOIN_SEMI &&
+					 pathnode->jointype != JOIN_LEFT_SCALAR &&
+					 pathnode->jointype != JOIN_LEFT_SEMI &&
+					 pathnode->jointype != JOIN_ANTI) &&
+					 innerd->distributionType != LOCATOR_TYPE_REPLICATED && !redistribute_outer &&
+					 get_num_connections(inner_nodes, nRemotePlans_outer + 1) < MaxConnections * REPLICATION_FACTOR &&
 					 !replicate_inner && !dml && nRemotePlans_outer < replication_level && !pathnode->inner_unique)
-                {
-                    replicate_outer = true;
+				{
+					replicate_outer = true;
 
-                    nodes = bms_copy(innerd->nodes);
-                }
+					nodes = bms_copy(innerd->nodes);
+				}
 #endif
             }
             /*
@@ -2483,8 +2507,12 @@ not_allowed_join:
 				 * replicate outer as an optimization to save network costs.
                  */
 				if(inner_size > outer_size * inner_nodes &&
-					(pathnode->jointype != JOIN_LEFT && pathnode->jointype != JOIN_FULL &&
-					 pathnode->jointype != JOIN_SEMI && pathnode->jointype != JOIN_ANTI) &&
+					(pathnode->jointype != JOIN_LEFT &&
+					 pathnode->jointype != JOIN_FULL &&
+					 pathnode->jointype != JOIN_SEMI &&
+					 pathnode->jointype != JOIN_LEFT_SCALAR &&
+					 pathnode->jointype != JOIN_LEFT_SEMI &&
+					 pathnode->jointype != JOIN_ANTI) &&
 					 innerd->distributionType != LOCATOR_TYPE_REPLICATED && !redistribute_outer &&
 					 get_num_connections(inner_nodes, nRemotePlans_outer + 1) < MaxConnections * REPLICATION_FACTOR &&
 					 !dml && nRemotePlans_outer < replication_level && !pathnode->inner_unique)

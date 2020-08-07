@@ -1641,7 +1641,9 @@ append_var_to_subquery_targetlist(Var *var, List *targetList, TargetEntry **targ
 
 	ent->resno = varno;
 	var->varattno = var->varoattno = varno;
-	*target = ent;
+
+	if(target != NULL)
+        *target = ent;
 	return targetList;
 }
 
@@ -2605,8 +2607,6 @@ convert_EXPR_sublink_to_join(PlannerInfo *root, OpExpr *expr,
 
 		ent->resno = varno;
 
-		//var->varattno = var->varoattno = varno;
-
 		/* determine the eqop and optional sortop */
 		get_sort_group_operators(restype,
 								 false, true, false,
@@ -2771,6 +2771,123 @@ get_or_exist_subquery_targetlist(PlannerInfo *root, Node *node, List **targetLis
 	return node;
 }
 
+#ifdef __TBASE__
+/*
+ * convert_TargetList_sublink_to_join :
+ *          try to convert an EXISTS SubLink in targetlist to a join
+ * On success, it returns not NULL.
+ */
+TargetEntry *
+convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
+{
+    Query *parse = root->parse;
+    Node  *whereClause = NULL;
+    Query   *subselect = NULL;
+    JoinExpr *joinExpr = NULL;
+    ParseState *pstate = NULL;
+    SubLink   *sublink = NULL;
+    RangeTblRef   *rtr = NULL;
+    RangeTblEntry *rte = NULL;
+    Var *var = NULL;
+
+    /* Sanity check */
+    if (!IsA(entry->expr, SubLink))
+        return NULL;
+
+    sublink = (SubLink *) entry->expr;
+    if (sublink->subLinkType != EXPR_SUBLINK)
+        return NULL;
+
+    /*
+     * Copy object so that we can modify it.
+     */
+    subselect = copyObject((Query *) sublink->subselect);
+    whereClause = subselect->jointree->quals;
+
+    /*
+     * Only one targetEntry can be handled.
+     */
+    if (list_length(subselect->targetList) > 1)
+        return NULL;
+
+    /*
+     * The subquery must have a nonempty jointree, else we won't have a join.
+     */
+    if (subselect->jointree->fromlist == NIL)
+        return NULL;
+
+    /*
+     * What we can not optimize.
+     */
+    if (subselect->commandType != CMD_SELECT ||
+        subselect->hasAggs || subselect->hasDistinctOn ||
+        subselect->setOperations || subselect->groupingSets ||
+        subselect->groupClause || subselect->hasWindowFuncs ||
+        subselect->hasTargetSRFs || subselect->hasModifyingCTE ||
+        subselect->havingQual || subselect->limitOffset ||
+        subselect->limitCount || subselect->rowMarks ||
+        subselect->cteList || subselect->sortClause)
+    {
+        return NULL;
+    }
+
+    /*
+     * On one hand, the WHERE clause must contain some Vars of the
+     * parent query, else it's not gonna be a join.
+     */
+    if (!contain_vars_of_level(whereClause, 1))
+        return NULL;
+
+    /*
+     * We don't risk optimizing if the WHERE clause is volatile, either.
+     */
+    if (contain_volatile_functions(whereClause))
+        return NULL;
+
+    /*
+     * The rest of the sub-select must not refer to any Vars of the parent
+     * query.  (Vars of higher levels should be okay, though.)
+     */
+    if (contain_vars_of_level((Node *) subselect, 1))
+        return NULL;
+
+    /*
+     * Move sub-select to the parent query.
+     */
+    pstate = make_parsestate(NULL);
+    rte = addRangeTableEntryForSubquery(pstate,
+                                        subselect,
+                                        makeAlias("TARGETLIST_subquery", NIL),
+                                        true,
+                                        false);
+    parse->rtable = lappend(parse->rtable, rte);
+
+    rtr = makeNode(RangeTblRef);
+    rtr->rtindex = list_length(parse->rtable);
+
+    /*
+     * Form join node.
+     */
+    joinExpr = makeNode(JoinExpr);
+    joinExpr->jointype = JOIN_LEFT_SCALAR;
+    joinExpr->isNatural = false;
+    joinExpr->larg = (Node *) root->parse->jointree;
+    joinExpr->rarg = (Node *) rtr;
+    joinExpr->usingClause = NIL;
+    joinExpr->alias   = NULL;
+    joinExpr->rtindex = 0; /* we don't need an RTE for it */
+    joinExpr->quals   = NULL;
+
+    /* Wrap join node in FromExpr as required. */
+    parse->jointree = makeFromExpr(list_make1(joinExpr), NULL);
+
+    /* Replace sublink node with Var. */
+    var = makeVarFromTargetEntry(rtr->rtindex, linitial(subselect->targetList));
+    entry->expr = (Expr *) var;
+    return entry;
+}
+#endif
+
 static Expr *
 convert_OR_EXIST_sublink_to_join(PlannerInfo *root, SubLink *sublink, Node **jtlink)
 {
@@ -2825,7 +2942,9 @@ convert_OR_EXIST_sublink_to_join(PlannerInfo *root, SubLink *sublink, Node **jtl
 		Oid restype;
 		SortGroupClause *grpcl;
 		TargetEntry *entry;
-		subselect->targetList = append_var_to_subquery_targetlist((Var *)lfirst(cell), subselect->targetList, &entry);
+
+        subselect->targetList = append_var_to_subquery_targetlist((Var *)lfirst(cell),
+                                                                  subselect->targetList, &entry);
 		restype = exprType((Node *)entry->expr);
 		get_sort_group_operators(restype,
 								 false, true, false,

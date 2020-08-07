@@ -2018,30 +2018,36 @@ adjust_rowcount_for_semijoins(PlannerInfo *root,
                               Index outer_relid,
                               double rowcount)
 {
-    ListCell   *lc;
+	ListCell   *lc;
 
-    foreach(lc, root->join_info_list)
-    {
-        SpecialJoinInfo *sjinfo = (SpecialJoinInfo *) lfirst(lc);
+	foreach(lc, root->join_info_list)
+	{
+		SpecialJoinInfo *sjinfo = (SpecialJoinInfo *) lfirst(lc);
 
-        if (sjinfo->jointype == JOIN_SEMI &&
+#ifdef __TBASE__
+        if ((sjinfo->jointype == JOIN_SEMI || sjinfo->jointype == JOIN_LEFT_SCALAR ) &&
             bms_is_member(cur_relid, sjinfo->syn_lefthand) &&
             bms_is_member(outer_relid, sjinfo->syn_righthand))
-        {
-            /* Estimate number of unique-ified rows */
-            double        nraw;
-            double        nunique;
+#else
+		if (sjinfo->jointype == JOIN_SEMI &&
+			bms_is_member(cur_relid, sjinfo->syn_lefthand) &&
+			bms_is_member(outer_relid, sjinfo->syn_righthand))
+#endif
+		{
+			/* Estimate number of unique-ified rows */
+			double		nraw;
+			double		nunique;
 
-            nraw = approximate_joinrel_size(root, sjinfo->syn_righthand);
-            nunique = estimate_num_groups(root,
-                                          sjinfo->semi_rhs_exprs,
-                                          nraw,
-                                          NULL);
-            if (rowcount > nunique)
-                rowcount = nunique;
-        }
-    }
-    return rowcount;
+			nraw = approximate_joinrel_size(root, sjinfo->syn_righthand);
+			nunique = estimate_num_groups(root,
+										  sjinfo->semi_rhs_exprs,
+										  nraw,
+										  NULL);
+			if (rowcount > nunique)
+				rowcount = nunique;
+		}
+	}
+	return rowcount;
 }
 
 /*

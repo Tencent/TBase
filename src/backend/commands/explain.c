@@ -1312,255 +1312,260 @@ ExplainNode(PlanState *planstate, List *ancestors,
             }
             break;
 #endif /* XCP */
-        case T_IndexScan:
-            {
-                IndexScan  *indexscan = (IndexScan *) plan;
+		case T_IndexScan:
+			{
+				IndexScan  *indexscan = (IndexScan *) plan;
 
-                ExplainIndexScanDetails(indexscan->indexid,
-                                        indexscan->indexorderdir,
-                                        es);
-                ExplainScanTarget((Scan *) indexscan, es);
-            }
-            break;
-        case T_IndexOnlyScan:
-            {
-                IndexOnlyScan *indexonlyscan = (IndexOnlyScan *) plan;
+				ExplainIndexScanDetails(indexscan->indexid,
+										indexscan->indexorderdir,
+										es);
+				ExplainScanTarget((Scan *) indexscan, es);
+			}
+			break;
+		case T_IndexOnlyScan:
+			{
+				IndexOnlyScan *indexonlyscan = (IndexOnlyScan *) plan;
 
-                ExplainIndexScanDetails(indexonlyscan->indexid,
-                                        indexonlyscan->indexorderdir,
-                                        es);
-                ExplainScanTarget((Scan *) indexonlyscan, es);
-            }
-            break;
-        case T_BitmapIndexScan:
-            {
-                BitmapIndexScan *bitmapindexscan = (BitmapIndexScan *) plan;
-                const char *indexname =
-                explain_get_index_name(bitmapindexscan->indexid);
+				ExplainIndexScanDetails(indexonlyscan->indexid,
+										indexonlyscan->indexorderdir,
+										es);
+				ExplainScanTarget((Scan *) indexonlyscan, es);
+			}
+			break;
+		case T_BitmapIndexScan:
+			{
+				BitmapIndexScan *bitmapindexscan = (BitmapIndexScan *) plan;
+				const char *indexname =
+				explain_get_index_name(bitmapindexscan->indexid);
 
-                if (es->format == EXPLAIN_FORMAT_TEXT)
-                    appendStringInfo(es->str, " on %s", indexname);
-                else
-                    ExplainPropertyText("Index Name", indexname, es);
-            }
-            break;
-        case T_ModifyTable:
-            ExplainModifyTarget((ModifyTable *) plan, es);
-            break;
-        case T_NestLoop:
-        case T_MergeJoin:
-        case T_HashJoin:
-            {
-                const char *jointype;
+				if (es->format == EXPLAIN_FORMAT_TEXT)
+					appendStringInfo(es->str, " on %s", indexname);
+				else
+					ExplainPropertyText("Index Name", indexname, es);
+			}
+			break;
+		case T_ModifyTable:
+			ExplainModifyTarget((ModifyTable *) plan, es);
+			break;
+		case T_NestLoop:
+		case T_MergeJoin:
+		case T_HashJoin:
+			{
+				const char *jointype;
 
-                switch (((Join *) plan)->jointype)
-                {
-                    case JOIN_INNER:
-                        jointype = "Inner";
+				switch (((Join *) plan)->jointype)
+				{
+					case JOIN_INNER:
+						jointype = "Inner";
+						break;
+					case JOIN_LEFT:
+						jointype = "Left";
+						break;
+					case JOIN_FULL:
+						jointype = "Full";
+						break;
+					case JOIN_RIGHT:
+						jointype = "Right";
+						break;
+					case JOIN_SEMI:
+						jointype = "Semi";
+						break;
+					case JOIN_ANTI:
+						jointype = "Anti";
+						break;
+#ifdef __TBASE__
+                    case JOIN_LEFT_SCALAR:
+                        jointype = "Left Scalar";
                         break;
-                    case JOIN_LEFT:
-                        jointype = "Left";
-                        break;
-                    case JOIN_FULL:
-                        jointype = "Full";
-                        break;
-                    case JOIN_RIGHT:
-                        jointype = "Right";
-                        break;
-                    case JOIN_SEMI:
-                        jointype = "Semi";
-                        break;
-                    case JOIN_ANTI:
-                        jointype = "Anti";
-                        break;
-                    default:
-                        jointype = "???";
-                        break;
-                }
-                if (es->format == EXPLAIN_FORMAT_TEXT)
-                {
-                    /*
-                     * For historical reasons, the join type is interpolated
-                     * into the node type name...
-                     */
-                    if (((Join *) plan)->jointype != JOIN_INNER)
-                        appendStringInfo(es->str, " %s Join", jointype);
-                    else if (!IsA(plan, NestLoop))
-                        appendStringInfoString(es->str, " Join");
-                }
-                else
-                    ExplainPropertyText("Join Type", jointype, es);
-            }
-            break;
-        case T_SetOp:
-            {
-                const char *setopcmd;
+#endif
+					default:
+						jointype = "???";
+						break;
+				}
+				if (es->format == EXPLAIN_FORMAT_TEXT)
+				{
+					/*
+					 * For historical reasons, the join type is interpolated
+					 * into the node type name...
+					 */
+					if (((Join *) plan)->jointype != JOIN_INNER)
+						appendStringInfo(es->str, " %s Join", jointype);
+					else if (!IsA(plan, NestLoop))
+						appendStringInfoString(es->str, " Join");
+				}
+				else
+					ExplainPropertyText("Join Type", jointype, es);
+			}
+			break;
+		case T_SetOp:
+			{
+				const char *setopcmd;
 
-                switch (((SetOp *) plan)->cmd)
-                {
-                    case SETOPCMD_INTERSECT:
-                        setopcmd = "Intersect";
-                        break;
-                    case SETOPCMD_INTERSECT_ALL:
-                        setopcmd = "Intersect All";
-                        break;
-                    case SETOPCMD_EXCEPT:
-                        setopcmd = "Except";
-                        break;
-                    case SETOPCMD_EXCEPT_ALL:
-                        setopcmd = "Except All";
-                        break;
-                    default:
-                        setopcmd = "???";
-                        break;
-                }
-                if (es->format == EXPLAIN_FORMAT_TEXT)
-                    appendStringInfo(es->str, " %s", setopcmd);
-                else
-                    ExplainPropertyText("Command", setopcmd, es);
-            }
-            break;
-        default:
-            break;
-    }
+				switch (((SetOp *) plan)->cmd)
+				{
+					case SETOPCMD_INTERSECT:
+						setopcmd = "Intersect";
+						break;
+					case SETOPCMD_INTERSECT_ALL:
+						setopcmd = "Intersect All";
+						break;
+					case SETOPCMD_EXCEPT:
+						setopcmd = "Except";
+						break;
+					case SETOPCMD_EXCEPT_ALL:
+						setopcmd = "Except All";
+						break;
+					default:
+						setopcmd = "???";
+						break;
+				}
+				if (es->format == EXPLAIN_FORMAT_TEXT)
+					appendStringInfo(es->str, " %s", setopcmd);
+				else
+					ExplainPropertyText("Command", setopcmd, es);
+			}
+			break;
+		default:
+			break;
+	}
 
-    if (es->costs)
-    {
-        if (es->format == EXPLAIN_FORMAT_TEXT)
-        {
-            appendStringInfo(es->str, "  (cost=%.2f..%.2f rows=%.0f width=%d)",
-                             plan->startup_cost, plan->total_cost,
-                             plan->plan_rows, plan->plan_width);
-        }
-        else
-        {
-            ExplainPropertyFloat("Startup Cost", plan->startup_cost, 2, es);
-            ExplainPropertyFloat("Total Cost", plan->total_cost, 2, es);
-            ExplainPropertyFloat("Plan Rows", plan->plan_rows, 0, es);
-            ExplainPropertyInteger("Plan Width", plan->plan_width, es);
-        }
-    }
+	if (es->costs)
+	{
+		if (es->format == EXPLAIN_FORMAT_TEXT)
+		{
+			appendStringInfo(es->str, "  (cost=%.2f..%.2f rows=%.0f width=%d)",
+							 plan->startup_cost, plan->total_cost,
+							 plan->plan_rows, plan->plan_width);
+		}
+		else
+		{
+			ExplainPropertyFloat("Startup Cost", plan->startup_cost, 2, es);
+			ExplainPropertyFloat("Total Cost", plan->total_cost, 2, es);
+			ExplainPropertyFloat("Plan Rows", plan->plan_rows, 0, es);
+			ExplainPropertyInteger("Plan Width", plan->plan_width, es);
+		}
+	}
 
-    /*
-     * We have to forcibly clean up the instrumentation state because we
-     * haven't done ExecutorEnd yet.  This is pretty grotty ...
-     *
-     * Note: contrib/auto_explain could cause instrumentation to be set up
-     * even though we didn't ask for it here.  Be careful not to print any
-     * instrumentation results the user didn't ask for.  But we do the
-     * InstrEndLoop call anyway, if possible, to reduce the number of cases
-     * auto_explain has to contend with.
-     */
-    if (planstate->instrument)
-        InstrEndLoop(planstate->instrument);
+	/*
+	 * We have to forcibly clean up the instrumentation state because we
+	 * haven't done ExecutorEnd yet.  This is pretty grotty ...
+	 *
+	 * Note: contrib/auto_explain could cause instrumentation to be set up
+	 * even though we didn't ask for it here.  Be careful not to print any
+	 * instrumentation results the user didn't ask for.  But we do the
+	 * InstrEndLoop call anyway, if possible, to reduce the number of cases
+	 * auto_explain has to contend with.
+	 */
+	if (planstate->instrument)
+		InstrEndLoop(planstate->instrument);
 
-    if (es->analyze &&
-        planstate->instrument && planstate->instrument->nloops > 0)
-    {
-        double        nloops = planstate->instrument->nloops;
-        double        startup_sec = 1000.0 * planstate->instrument->startup / nloops;
-        double        total_sec = 1000.0 * planstate->instrument->total / nloops;
-        double        rows = planstate->instrument->ntuples / nloops;
+	if (es->analyze &&
+		planstate->instrument && planstate->instrument->nloops > 0)
+	{
+		double		nloops = planstate->instrument->nloops;
+		double		startup_sec = 1000.0 * planstate->instrument->startup / nloops;
+		double		total_sec = 1000.0 * planstate->instrument->total / nloops;
+		double		rows = planstate->instrument->ntuples / nloops;
 
-        if (es->format == EXPLAIN_FORMAT_TEXT)
-        {
-            if (es->timing)
-                appendStringInfo(es->str,
-                                 " (actual time=%.3f..%.3f rows=%.0f loops=%.0f)",
-                                 startup_sec, total_sec, rows, nloops);
-            else
-                appendStringInfo(es->str,
-                                 " (actual rows=%.0f loops=%.0f)",
-                                 rows, nloops);
-        }
-        else
-        {
-            if (es->timing)
-            {
-                ExplainPropertyFloat("Actual Startup Time", startup_sec, 3, es);
-                ExplainPropertyFloat("Actual Total Time", total_sec, 3, es);
-            }
-            ExplainPropertyFloat("Actual Rows", rows, 0, es);
-            ExplainPropertyFloat("Actual Loops", nloops, 0, es);
-        }
-    }
-    else if (es->analyze)
-    {
-        if (es->format == EXPLAIN_FORMAT_TEXT)
-            appendStringInfoString(es->str, " (never executed)");
-        else
-        {
-            if (es->timing)
-            {
-                ExplainPropertyFloat("Actual Startup Time", 0.0, 3, es);
-                ExplainPropertyFloat("Actual Total Time", 0.0, 3, es);
-            }
-            ExplainPropertyFloat("Actual Rows", 0.0, 0, es);
-            ExplainPropertyFloat("Actual Loops", 0.0, 0, es);
-        }
-    }
+		if (es->format == EXPLAIN_FORMAT_TEXT)
+		{
+			if (es->timing)
+				appendStringInfo(es->str,
+								 " (actual time=%.3f..%.3f rows=%.0f loops=%.0f)",
+								 startup_sec, total_sec, rows, nloops);
+			else
+				appendStringInfo(es->str,
+								 " (actual rows=%.0f loops=%.0f)",
+								 rows, nloops);
+		}
+		else
+		{
+			if (es->timing)
+			{
+				ExplainPropertyFloat("Actual Startup Time", startup_sec, 3, es);
+				ExplainPropertyFloat("Actual Total Time", total_sec, 3, es);
+			}
+			ExplainPropertyFloat("Actual Rows", rows, 0, es);
+			ExplainPropertyFloat("Actual Loops", nloops, 0, es);
+		}
+	}
+	else if (es->analyze)
+	{
+		if (es->format == EXPLAIN_FORMAT_TEXT)
+			appendStringInfoString(es->str, " (never executed)");
+		else
+		{
+			if (es->timing)
+			{
+				ExplainPropertyFloat("Actual Startup Time", 0.0, 3, es);
+				ExplainPropertyFloat("Actual Total Time", 0.0, 3, es);
+			}
+			ExplainPropertyFloat("Actual Rows", 0.0, 0, es);
+			ExplainPropertyFloat("Actual Loops", 0.0, 0, es);
+		}
+	}
 
-    /* in text format, first line ends here */
-    if (es->format == EXPLAIN_FORMAT_TEXT)
-        appendStringInfoChar(es->str, '\n');
+	/* in text format, first line ends here */
+	if (es->format == EXPLAIN_FORMAT_TEXT)
+		appendStringInfoChar(es->str, '\n');
 
-    /* target list */
-    if (es->verbose)
-        show_plan_tlist(planstate, ancestors, es);
+	/* target list */
+	if (es->verbose)
+		show_plan_tlist(planstate, ancestors, es);
 
-    /* unique join */
-    switch (nodeTag(plan))
-    {
-        case T_NestLoop:
-        case T_MergeJoin:
-        case T_HashJoin:
-            /* try not to be too chatty about this in text mode */
-            if (es->format != EXPLAIN_FORMAT_TEXT ||
-                (es->verbose && ((Join *) plan)->inner_unique))
-                ExplainPropertyBool("Inner Unique",
-                                    ((Join *) plan)->inner_unique,
-                                    es);
-            break;
-        default:
-            break;
-    }
+	/* unique join */
+	switch (nodeTag(plan))
+	{
+		case T_NestLoop:
+		case T_MergeJoin:
+		case T_HashJoin:
+			/* try not to be too chatty about this in text mode */
+			if (es->format != EXPLAIN_FORMAT_TEXT ||
+				(es->verbose && ((Join *) plan)->inner_unique))
+				ExplainPropertyBool("Inner Unique",
+									((Join *) plan)->inner_unique,
+									es);
+			break;
+		default:
+			break;
+	}
 
-    /* quals, sort keys, etc */
-    switch (nodeTag(plan))
-    {
-        case T_IndexScan:
-            show_scan_qual(((IndexScan *) plan)->indexqualorig,
-                           "Index Cond", planstate, ancestors, es);
-            if (((IndexScan *) plan)->indexqualorig)
-                show_instrumentation_count("Rows Removed by Index Recheck", 2,
-                                           planstate, es);
-            show_scan_qual(((IndexScan *) plan)->indexorderbyorig,
-                           "Order By", planstate, ancestors, es);
-            show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
-            if (plan->qual)
-                show_instrumentation_count("Rows Removed by Filter", 1,
-                                           planstate, es);
-            break;
-        case T_IndexOnlyScan:
-            show_scan_qual(((IndexOnlyScan *) plan)->indexqual,
-                           "Index Cond", planstate, ancestors, es);
-            if (((IndexOnlyScan *) plan)->indexqual)
-                show_instrumentation_count("Rows Removed by Index Recheck", 2,
-                                           planstate, es);
-            show_scan_qual(((IndexOnlyScan *) plan)->indexorderby,
-                           "Order By", planstate, ancestors, es);
-            show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
-            if (plan->qual)
-                show_instrumentation_count("Rows Removed by Filter", 1,
-                                           planstate, es);
-            if (es->analyze)
-                ExplainPropertyLong("Heap Fetches",
-                                    ((IndexOnlyScanState *) planstate)->ioss_HeapFetches, es);
-            break;
-        case T_BitmapIndexScan:
-            show_scan_qual(((BitmapIndexScan *) plan)->indexqualorig,
-                           "Index Cond", planstate, ancestors, es);
-            break;
+	/* quals, sort keys, etc */
+	switch (nodeTag(plan))
+	{
+		case T_IndexScan:
+			show_scan_qual(((IndexScan *) plan)->indexqualorig,
+						   "Index Cond", planstate, ancestors, es);
+			if (((IndexScan *) plan)->indexqualorig)
+				show_instrumentation_count("Rows Removed by Index Recheck", 2,
+										   planstate, es);
+			show_scan_qual(((IndexScan *) plan)->indexorderbyorig,
+						   "Order By", planstate, ancestors, es);
+			show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
+			if (plan->qual)
+				show_instrumentation_count("Rows Removed by Filter", 1,
+										   planstate, es);
+			break;
+		case T_IndexOnlyScan:
+			show_scan_qual(((IndexOnlyScan *) plan)->indexqual,
+						   "Index Cond", planstate, ancestors, es);
+			if (((IndexOnlyScan *) plan)->indexqual)
+				show_instrumentation_count("Rows Removed by Index Recheck", 2,
+										   planstate, es);
+			show_scan_qual(((IndexOnlyScan *) plan)->indexorderby,
+						   "Order By", planstate, ancestors, es);
+			show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
+			if (plan->qual)
+				show_instrumentation_count("Rows Removed by Filter", 1,
+										   planstate, es);
+			if (es->analyze)
+				ExplainPropertyLong("Heap Fetches",
+									((IndexOnlyScanState *) planstate)->ioss_HeapFetches, es);
+			break;
+		case T_BitmapIndexScan:
+			show_scan_qual(((BitmapIndexScan *) plan)->indexqualorig,
+						   "Index Cond", planstate, ancestors, es);
+			break;
 #ifdef PGXC
         case T_RemoteQuery:
             /* Remote query */
