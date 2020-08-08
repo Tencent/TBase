@@ -586,43 +586,55 @@ StorePreparedStatement(const char *stmt_name,
                        bool from_sql,
                        bool use_resowner)
 {
-    PreparedStatement *entry;
-    TimestampTz cur_ts = GetCurrentStatementStartTimestamp();
-    bool        found;
+	PreparedStatement *entry;
+	TimestampTz cur_ts = GetCurrentStatementStartTimestamp();
+	bool		found;
 
-    /* Initialize the hash table, if necessary */
-    if (!prepared_queries)
-        InitQueryHashTable();
+	/* Initialize the hash table, if necessary */
+	if (!prepared_queries)
+		InitQueryHashTable();
 
-    /* Add entry to hash table */
-    entry = (PreparedStatement *) hash_search(prepared_queries,
-                                              stmt_name,
-                                              HASH_ENTER,
-                                              &found);
+	/* Add entry to hash table */
+	entry = (PreparedStatement *) hash_search(prepared_queries,
+											  stmt_name,
+											  HASH_ENTER,
+											  &found);
 
-    /* Shouldn't get a duplicate entry */
-    if (found)
-        ereport(ERROR,
-                (errcode(ERRCODE_DUPLICATE_PSTATEMENT),
-                 errmsg("prepared statement \"%s\" already exists",
-                        stmt_name)));
+	/* Shouldn't get a duplicate entry */
+	if (found)
+	{
+		if (!(plansource->commandTag == entry->plansource->commandTag &&
+				strcmp(plansource->query_string, entry->plansource->query_string) == 0))
+		{
+			ereport(ERROR,
+				(errcode(ERRCODE_DUPLICATE_PSTATEMENT),
+					errmsg("prepared statement \"%s\" already exists, and plansource is not the same.",
+					stmt_name)));
+		}
+		else
+		{
+			elog(LOG, " \"%s\" already exists in prepared_queries, skip it.", stmt_name);
+			return ;
+		}
+	}
 
-    /* Fill in the hash table entry */
-    entry->plansource = plansource;
-    entry->from_sql = from_sql;
-    entry->prepare_time = cur_ts;
-    entry->use_resowner = use_resowner;
+	/* Fill in the hash table entry */
+	entry->plansource = plansource;
+	entry->from_sql = from_sql;
+	entry->prepare_time = cur_ts;
+	entry->use_resowner = use_resowner;
 
-    /* Now it's safe to move the CachedPlanSource to permanent memory */
-    SaveCachedPlan(plansource);
-#ifdef XCP    
-    if (use_resowner)
-    {
-        ResourceOwnerEnlargePreparedStmts(CurTransactionResourceOwner);
-        ResourceOwnerRememberPreparedStmt(CurTransactionResourceOwner,
-                entry->stmt_name);
-    }
-#endif        
+	/* Now it's safe to move the CachedPlanSource to permanent memory */
+	SaveCachedPlan(plansource);
+
+#ifdef XCP	
+	if (use_resowner)
+	{
+		ResourceOwnerEnlargePreparedStmts(CurTransactionResourceOwner);
+		ResourceOwnerRememberPreparedStmt(CurTransactionResourceOwner,
+				entry->stmt_name);
+	}
+#endif		
 }
 
 /*

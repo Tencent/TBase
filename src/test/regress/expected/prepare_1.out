@@ -21,7 +21,7 @@ SELECT name, statement, parameter_types FROM pg_prepared_statements;
 
 -- should fail
 PREPARE q1 AS SELECT 2;
-ERROR:  prepared statement "q1" already exists
+ERROR:  prepared statement "q1" already exists, and plansource is not the same.
 -- should succeed
 DEALLOCATE q1;
 PREPARE q1 AS SELECT 2;
