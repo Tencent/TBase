@@ -2258,7 +2258,7 @@ expression_tree_walker(Node *node,
  * Some callers want to suppress visitation of certain items in the sub-Query,
  * typically because they need to process them specially, or don't actually
  * want to recurse into subqueries.  This is supported by the flags argument,
- * which is the bitwise OR of flag values to suppress visitation of
+ * which is the bitwise OR of flag values to add or suppress visitation of
  * indicated items.  (More flag bits may be added as needed.)
  */
 bool
@@ -2320,53 +2320,57 @@ query_tree_walker(Query *query,
  */
 bool
 range_table_walker(List *rtable,
-                   bool (*walker) (),
-                   void *context,
-                   int flags)
-{// #lizard forgives
-    ListCell   *rt;
+				   bool (*walker) (),
+				   void *context,
+				   int flags)
+{
+	ListCell   *rt;
 
-    foreach(rt, rtable)
-    {
-        RangeTblEntry *rte = (RangeTblEntry *) lfirst(rt);
+	foreach(rt, rtable)
+	{
+		RangeTblEntry *rte = (RangeTblEntry *) lfirst(rt);
 
-        /* For historical reasons, visiting RTEs is not the default */
-        if (flags & QTW_EXAMINE_RTES)
-            if (walker(rte, context))
-                return true;
+		/*
+		 * Walkers might need to examine the RTE node itself either before or
+		 * after visiting its contents (or, conceivably, both).  Note that if
+		 * you specify neither flag, the walker won't visit the RTE at all.
+		 */
+		if (flags & QTW_EXAMINE_RTES_BEFORE)
+			if (walker(rte, context))
+				return true;
 
-        switch (rte->rtekind)
-        {
-            case RTE_RELATION:
-                if (walker(rte->tablesample, context))
-                    return true;
-                break;
-            case RTE_CTE:
-            case RTE_NAMEDTUPLESTORE:
-                /* nothing to do */
-                break;
-            case RTE_SUBQUERY:
-                if (!(flags & QTW_IGNORE_RT_SUBQUERIES))
-                    if (walker(rte->subquery, context))
-                        return true;
-                break;
-            case RTE_JOIN:
-                if (!(flags & QTW_IGNORE_JOINALIASES))
-                    if (walker(rte->joinaliasvars, context))
-                        return true;
-                break;
-            case RTE_FUNCTION:
-                if (walker(rte->functions, context))
-                    return true;
-                break;
-            case RTE_TABLEFUNC:
-                if (walker(rte->tablefunc, context))
-                    return true;
-                break;
-            case RTE_VALUES:
-                if (walker(rte->values_lists, context))
-                    return true;
-                break;
+		switch (rte->rtekind)
+		{
+			case RTE_RELATION:
+				if (walker(rte->tablesample, context))
+					return true;
+				break;
+			case RTE_CTE:
+			case RTE_NAMEDTUPLESTORE:
+				/* nothing to do */
+				break;
+			case RTE_SUBQUERY:
+				if (!(flags & QTW_IGNORE_RT_SUBQUERIES))
+					if (walker(rte->subquery, context))
+						return true;
+				break;
+			case RTE_JOIN:
+				if (!(flags & QTW_IGNORE_JOINALIASES))
+					if (walker(rte->joinaliasvars, context))
+						return true;
+				break;
+			case RTE_FUNCTION:
+				if (walker(rte->functions, context))
+					return true;
+				break;
+			case RTE_TABLEFUNC:
+				if (walker(rte->tablefunc, context))
+					return true;
+				break;
+			case RTE_VALUES:
+				if (walker(rte->values_lists, context))
+					return true;
+				break;
 #ifdef PGXC
             case RTE_REMOTE_DUMMY:
                 elog(ERROR, "Invalid RTE found.");
@@ -2374,10 +2378,14 @@ range_table_walker(List *rtable,
 #endif /* PGXC */
         }
 
-        if (walker(rte->securityQuals, context))
-            return true;
-    }
-    return false;
+		if (walker(rte->securityQuals, context))
+			return true;
+
+		if (flags & QTW_EXAMINE_RTES_AFTER)
+			if (walker(rte, context))
+				return true;
+	}
+	return false;
 }
 
 

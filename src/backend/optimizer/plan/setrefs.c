@@ -352,37 +352,37 @@ add_rtes_to_flat_rtable(PlannerInfo *root, bool recursing)
 static void
 flatten_unplanned_rtes(PlannerGlobal *glob, RangeTblEntry *rte)
 {
-    /* Use query_tree_walker to find all RTEs in the parse tree */
-    (void) query_tree_walker(rte->subquery,
-                             flatten_rtes_walker,
-                             (void *) glob,
-                             QTW_EXAMINE_RTES);
+	/* Use query_tree_walker to find all RTEs in the parse tree */
+	(void) query_tree_walker(rte->subquery,
+							 flatten_rtes_walker,
+							 (void *) glob,
+							 QTW_EXAMINE_RTES_BEFORE);
 }
 
 static bool
 flatten_rtes_walker(Node *node, PlannerGlobal *glob)
 {
-    if (node == NULL)
-        return false;
-    if (IsA(node, RangeTblEntry))
-    {
-        RangeTblEntry *rte = (RangeTblEntry *) node;
+	if (node == NULL)
+		return false;
+	if (IsA(node, RangeTblEntry))
+	{
+		RangeTblEntry *rte = (RangeTblEntry *) node;
 
-        /* As above, we need only save relation RTEs */
-        if (rte->rtekind == RTE_RELATION)
-            add_rte_to_flat_rtable(glob, rte);
-        return false;
-    }
-    if (IsA(node, Query))
-    {
-        /* Recurse into subselects */
-        return query_tree_walker((Query *) node,
-                                 flatten_rtes_walker,
-                                 (void *) glob,
-                                 QTW_EXAMINE_RTES);
-    }
-    return expression_tree_walker(node, flatten_rtes_walker,
-                                  (void *) glob);
+		/* As above, we need only save relation RTEs */
+		if (rte->rtekind == RTE_RELATION)
+			add_rte_to_flat_rtable(glob, rte);
+		return false;
+	}
+	if (IsA(node, Query))
+	{
+		/* Recurse into subselects */
+		return query_tree_walker((Query *) node,
+								 flatten_rtes_walker,
+								 (void *) glob,
+								 QTW_EXAMINE_RTES_BEFORE);
+	}
+	return expression_tree_walker(node, flatten_rtes_walker,
+								  (void *) glob);
 }
 
 /*

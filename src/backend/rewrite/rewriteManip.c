@@ -698,94 +698,94 @@ typedef struct
 
 static bool
 IncrementVarSublevelsUp_walker(Node *node,
-                               IncrementVarSublevelsUp_context *context)
-{// #lizard forgives
-    if (node == NULL)
-        return false;
-    if (IsA(node, Var))
-    {
-        Var           *var = (Var *) node;
+							   IncrementVarSublevelsUp_context *context)
+{
+	if (node == NULL)
+		return false;
+	if (IsA(node, Var))
+	{
+		Var		   *var = (Var *) node;
 
-        if (var->varlevelsup >= context->min_sublevels_up)
-            var->varlevelsup += context->delta_sublevels_up;
-        return false;            /* done here */
-    }
-    if (IsA(node, CurrentOfExpr))
-    {
-        /* this should not happen */
-        if (context->min_sublevels_up == 0)
-            elog(ERROR, "cannot push down CurrentOfExpr");
-        return false;
-    }
-    if (IsA(node, Aggref))
-    {
-        Aggref       *agg = (Aggref *) node;
+		if (var->varlevelsup >= context->min_sublevels_up)
+			var->varlevelsup += context->delta_sublevels_up;
+		return false;			/* done here */
+	}
+	if (IsA(node, CurrentOfExpr))
+	{
+		/* this should not happen */
+		if (context->min_sublevels_up == 0)
+			elog(ERROR, "cannot push down CurrentOfExpr");
+		return false;
+	}
+	if (IsA(node, Aggref))
+	{
+		Aggref	   *agg = (Aggref *) node;
 
-        if (agg->agglevelsup >= context->min_sublevels_up)
-            agg->agglevelsup += context->delta_sublevels_up;
-        /* fall through to recurse into argument */
-    }
-    if (IsA(node, GroupingFunc))
-    {
-        GroupingFunc *grp = (GroupingFunc *) node;
+		if (agg->agglevelsup >= context->min_sublevels_up)
+			agg->agglevelsup += context->delta_sublevels_up;
+		/* fall through to recurse into argument */
+	}
+	if (IsA(node, GroupingFunc))
+	{
+		GroupingFunc *grp = (GroupingFunc *) node;
 
-        if (grp->agglevelsup >= context->min_sublevels_up)
-            grp->agglevelsup += context->delta_sublevels_up;
-        /* fall through to recurse into argument */
-    }
-    if (IsA(node, PlaceHolderVar))
-    {
-        PlaceHolderVar *phv = (PlaceHolderVar *) node;
+		if (grp->agglevelsup >= context->min_sublevels_up)
+			grp->agglevelsup += context->delta_sublevels_up;
+		/* fall through to recurse into argument */
+	}
+	if (IsA(node, PlaceHolderVar))
+	{
+		PlaceHolderVar *phv = (PlaceHolderVar *) node;
 
-        if (phv->phlevelsup >= context->min_sublevels_up)
-            phv->phlevelsup += context->delta_sublevels_up;
-        /* fall through to recurse into argument */
-    }
-    if (IsA(node, RangeTblEntry))
-    {
-        RangeTblEntry *rte = (RangeTblEntry *) node;
+		if (phv->phlevelsup >= context->min_sublevels_up)
+			phv->phlevelsup += context->delta_sublevels_up;
+		/* fall through to recurse into argument */
+	}
+	if (IsA(node, RangeTblEntry))
+	{
+		RangeTblEntry *rte = (RangeTblEntry *) node;
 
-        if (rte->rtekind == RTE_CTE)
-        {
-            if (rte->ctelevelsup >= context->min_sublevels_up)
-                rte->ctelevelsup += context->delta_sublevels_up;
-        }
-        return false;            /* allow range_table_walker to continue */
-    }
-    if (IsA(node, Query))
-    {
-        /* Recurse into subselects */
-        bool        result;
+		if (rte->rtekind == RTE_CTE)
+		{
+			if (rte->ctelevelsup >= context->min_sublevels_up)
+				rte->ctelevelsup += context->delta_sublevels_up;
+		}
+		return false;			/* allow range_table_walker to continue */
+	}
+	if (IsA(node, Query))
+	{
+		/* Recurse into subselects */
+		bool		result;
 
-        context->min_sublevels_up++;
-        result = query_tree_walker((Query *) node,
-                                   IncrementVarSublevelsUp_walker,
-                                   (void *) context,
-                                   QTW_EXAMINE_RTES);
-        context->min_sublevels_up--;
-        return result;
-    }
-    return expression_tree_walker(node, IncrementVarSublevelsUp_walker,
-                                  (void *) context);
+		context->min_sublevels_up++;
+		result = query_tree_walker((Query *) node,
+								   IncrementVarSublevelsUp_walker,
+								   (void *) context,
+								   QTW_EXAMINE_RTES_BEFORE);
+		context->min_sublevels_up--;
+		return result;
+	}
+	return expression_tree_walker(node, IncrementVarSublevelsUp_walker,
+								  (void *) context);
 }
 
 void
 IncrementVarSublevelsUp(Node *node, int delta_sublevels_up,
                         int min_sublevels_up)
 {
-    IncrementVarSublevelsUp_context context;
+	IncrementVarSublevelsUp_context context;
 
-    context.delta_sublevels_up = delta_sublevels_up;
-    context.min_sublevels_up = min_sublevels_up;
+	context.delta_sublevels_up = delta_sublevels_up;
+	context.min_sublevels_up = min_sublevels_up;
 
-    /*
-     * Must be prepared to start with a Query or a bare expression tree; if
-     * it's a Query, we don't want to increment sublevels_up.
-     */
-    query_or_expression_tree_walker(node,
-                                    IncrementVarSublevelsUp_walker,
-                                    (void *) &context,
-                                    QTW_EXAMINE_RTES);
+	/*
+	 * Must be prepared to start with a Query or a bare expression tree; if
+	 * it's a Query, we don't want to increment sublevels_up.
+	 */
+	query_or_expression_tree_walker(node,
+									IncrementVarSublevelsUp_walker,
+									(void *) &context,
+									QTW_EXAMINE_RTES_BEFORE);
 }
 
 /*
@@ -801,10 +801,10 @@ IncrementVarSublevelsUp_rtable(List *rtable, int delta_sublevels_up,
     context.delta_sublevels_up = delta_sublevels_up;
     context.min_sublevels_up = min_sublevels_up;
 
-    range_table_walker(rtable,
-                       IncrementVarSublevelsUp_walker,
-                       (void *) &context,
-                       QTW_EXAMINE_RTES);
+	range_table_walker(rtable,
+					   IncrementVarSublevelsUp_walker,
+					   (void *) &context,
+					   QTW_EXAMINE_RTES_BEFORE);
 }
 
 

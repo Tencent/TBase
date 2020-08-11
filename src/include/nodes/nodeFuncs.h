@@ -77,16 +77,19 @@
 
 
 /* flags bits for query_tree_walker and query_tree_mutator */
-#define QTW_IGNORE_RT_SUBQUERIES    0x01    /* subqueries in rtable */
-#define QTW_IGNORE_CTE_SUBQUERIES    0x02    /* subqueries in cteList */
-#define QTW_IGNORE_RC_SUBQUERIES    0x03    /* both of above */
-#define QTW_IGNORE_JOINALIASES        0x04    /* JOIN alias var lists */
-#define QTW_IGNORE_RANGE_TABLE        0x08    /* skip rangetable entirely */
-#define QTW_EXAMINE_RTES            0x10    /* examine RTEs */
-#define QTW_DONT_COPY_QUERY            0x20    /* do not copy top Query */
+#define QTW_IGNORE_RT_SUBQUERIES	0x01	/* subqueries in rtable */
+#define QTW_IGNORE_CTE_SUBQUERIES	0x02	/* subqueries in cteList */
+#define QTW_IGNORE_RC_SUBQUERIES	0x03	/* both of above */
+#define QTW_IGNORE_JOINALIASES		0x04	/* JOIN alias var lists */
+#define QTW_IGNORE_RANGE_TABLE		0x08	/* skip rangetable entirely */
+#define QTW_EXAMINE_RTES_BEFORE		0x10	/* examine RTE nodes before their
+											 * contents */
+#define QTW_EXAMINE_RTES_AFTER		0x20	/* examine RTE nodes after their
+											 * contents */
+#define QTW_DONT_COPY_QUERY			0x40	/* do not copy top Query */
 #ifdef _MLS_
-#define QTW_IGNORE_TARGET_LIST      0x40    /* skip target list */
-#define QTW_IGNORE_RETURNING_LIST   0x80    /* skip returning list */
+#define QTW_IGNORE_TARGET_LIST      0x0100	/* skip target list */
+#define QTW_IGNORE_RETURNING_LIST   0x0200	/* skip returning list */
 #endif
 
 
