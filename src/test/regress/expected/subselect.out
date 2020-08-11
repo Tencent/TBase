@@ -1299,8 +1299,8 @@ with recursive x(a) as
     select z.a || z1.a as a from z cross join z as z1
     where length(z.a || z1.a) < 5))
 select * from x;
-                         QUERY PLAN                          
--------------------------------------------------------------
+                        QUERY PLAN                        
+----------------------------------------------------------
  CTE Scan on x
    Output: x.a
    CTE x
@@ -1308,13 +1308,18 @@ select * from x;
            ->  Values Scan on "*VALUES*"
                  Output: "*VALUES*".column1
            ->  Nested Loop
-                 Output: (x_1.a || x_2.a)
-                 Join Filter: (length((x_1.a || x_2.a)) < 5)
-                 ->  WorkTable Scan on x x_1
-                       Output: x_1.a
-                 ->  WorkTable Scan on x x_2
-                       Output: x_2.a
-(13 rows)
+                 Output: (z.a || z1.a)
+                 Join Filter: (length((z.a || z1.a)) < 5)
+                 CTE z
+                   ->  WorkTable Scan on x x_1
+                         Output: x_1.a
+                 ->  CTE Scan on z
+                       Output: z.a
+                 ->  Materialize
+                       Output: z1.a
+                       ->  CTE Scan on z z1
+                             Output: z1.a
+(18 rows)
 
 with recursive x(a) as
   ((values ('a'), ('b'))
@@ -1327,9 +1332,27 @@ select * from x;
 ------
  a
  b
+ aa
  ab
+ ba
+ bb
+ aaaa
+ aaab
+ aaba
+ aabb
+ abaa
  abab
-(4 rows)
+ abba
+ abbb
+ baaa
+ baab
+ baba
+ babb
+ bbaa
+ bbab
+ bbba
+ bbbb
+(22 rows)
 
 explain (verbose, costs off)
 with recursive x(a) as
