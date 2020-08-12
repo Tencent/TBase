@@ -2707,7 +2707,7 @@ not_allowed_join:
 			if (resultRelLoc == RESULT_REL_INNER &&
 				pathnode->jointype != JOIN_LEFT && pathnode->jointype != JOIN_FULL &&
 				pathnode->jointype != JOIN_SEMI && pathnode->jointype != JOIN_ANTI &&
-				!pathnode->inner_unique)
+				pathnode->jointype != JOIN_LEFT_SCALAR && !pathnode->inner_unique)
 			{
 				/* Replicate outer */
 				pathnode->outerjoinpath = redistribute_path(
@@ -2755,7 +2755,7 @@ not_allowed_join:
 		if (innerd &&resultRelLoc == RESULT_REL_INNER &&
 			pathnode->jointype != JOIN_LEFT && pathnode->jointype != JOIN_FULL &&
 			pathnode->jointype != JOIN_SEMI && pathnode->jointype != JOIN_ANTI &&
-			!pathnode->inner_unique)
+			pathnode->jointype != JOIN_LEFT_SCALAR && !pathnode->inner_unique)
 		{
 			pathnode->path.distribution = innerd;
 			return alternate;
