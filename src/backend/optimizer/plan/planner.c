@@ -626,173 +626,173 @@ subquery_planner(PlannerGlobal *glob, Query *parse,
 #ifdef _MLS_
     root->hasClsPolicy = false;
 #endif
-    root->hasInheritedTarget = false;
-    root->hasRecursion = hasRecursion;
-    if (hasRecursion)
-        root->wt_param_id = SS_assign_special_param(root);
-    else
-        root->wt_param_id = -1;
-    root->non_recursive_path = NULL;
+	root->hasInheritedTarget = false;
+	root->hasRecursion = hasRecursion;
+	if (hasRecursion)
+		root->wt_param_id = SS_assign_special_param(root);
+	else
+		root->wt_param_id = -1;
+	root->non_recursive_path = NULL;
 
-    /*
-     * If there is a WITH list, process each WITH query and build an initplan
-     * SubPlan structure for it.
-     */
-    if (parse->cteList)
-        SS_process_ctes(root);
+	/*
+	 * If there is a WITH list, process each WITH query and either convert it
+	 * to RTE_SUBQUERY RTE(s) or build an initplan SubPlan structure for it.
+	 */
+	if (parse->cteList)
+		SS_process_ctes(root);
 
-    /*
-     * Look for ANY and EXISTS SubLinks in WHERE and JOIN/ON clauses, and try
-     * to transform them into joins.  Note that this step does not descend
-     * into subqueries; if we pull up any subqueries below, their SubLinks are
-     * processed just before pulling them up.
-     */
-    if (parse->hasSubLinks)
-        pull_up_sublinks(root);
+	/*
+	 * Look for ANY and EXISTS SubLinks in WHERE and JOIN/ON clauses, and try
+	 * to transform them into joins.  Note that this step does not descend
+	 * into subqueries; if we pull up any subqueries below, their SubLinks are
+	 * processed just before pulling them up.
+	 */
+	if (parse->hasSubLinks)
+		pull_up_sublinks(root);
 
-    /*
-     * Scan the rangetable for set-returning functions, and inline them if
-     * possible (producing subqueries that might get pulled up next).
-     * Recursion issues here are handled in the same way as for SubLinks.
-     */
-    inline_set_returning_functions(root);
+	/*
+	 * Scan the rangetable for set-returning functions, and inline them if
+	 * possible (producing subqueries that might get pulled up next).
+	 * Recursion issues here are handled in the same way as for SubLinks.
+	 */
+	inline_set_returning_functions(root);
 
-    /*
-     * Check to see if any subqueries in the jointree can be merged into this
-     * query.
-     */
-    pull_up_subqueries(root);
+	/*
+	 * Check to see if any subqueries in the jointree can be merged into this
+	 * query.
+	 */
+	pull_up_subqueries(root);
 
-    /*
-     * If this is a simple UNION ALL query, flatten it into an appendrel. We
-     * do this now because it requires applying pull_up_subqueries to the leaf
-     * queries of the UNION ALL, which weren't touched above because they
-     * weren't referenced by the jointree (they will be after we do this).
-     */
-    if (parse->setOperations)
-        flatten_simple_union_all(root);
+	/*
+	 * If this is a simple UNION ALL query, flatten it into an appendrel. We
+	 * do this now because it requires applying pull_up_subqueries to the leaf
+	 * queries of the UNION ALL, which weren't touched above because they
+	 * weren't referenced by the jointree (they will be after we do this).
+	 */
+	if (parse->setOperations)
+		flatten_simple_union_all(root);
 
-    /*
-     * Detect whether any rangetable entries are RTE_JOIN kind; if not, we can
-     * avoid the expense of doing flatten_join_alias_vars().  Also check for
-     * outer joins --- if none, we can skip reduce_outer_joins().  And check
-     * for LATERAL RTEs, too.  This must be done after we have done
-     * pull_up_subqueries(), of course.
-     */
-    root->hasJoinRTEs = false;
-    root->hasLateralRTEs = false;
-    hasOuterJoins = false;
-    foreach(l, parse->rtable)
-    {
-        RangeTblEntry *rte = (RangeTblEntry *) lfirst(l);
+	/*
+	 * Detect whether any rangetable entries are RTE_JOIN kind; if not, we can
+	 * avoid the expense of doing flatten_join_alias_vars().  Also check for
+	 * outer joins --- if none, we can skip reduce_outer_joins().  And check
+	 * for LATERAL RTEs, too.  This must be done after we have done
+	 * pull_up_subqueries(), of course.
+	 */
+	root->hasJoinRTEs = false;
+	root->hasLateralRTEs = false;
+	hasOuterJoins = false;
+	foreach(l, parse->rtable)
+	{
+		RangeTblEntry *rte = (RangeTblEntry *) lfirst(l);
 
-        if (rte->rtekind == RTE_JOIN)
-        {
-            root->hasJoinRTEs = true;
-            if (IS_OUTER_JOIN(rte->jointype))
-                hasOuterJoins = true;
-        }
-        if (rte->lateral)
-            root->hasLateralRTEs = true;
-    }
+		if (rte->rtekind == RTE_JOIN)
+		{
+			root->hasJoinRTEs = true;
+			if (IS_OUTER_JOIN(rte->jointype))
+				hasOuterJoins = true;
+		}
+		if (rte->lateral)
+			root->hasLateralRTEs = true;
+	}
 
-    /*
-     * Preprocess RowMark information.  We need to do this after subquery
-     * pullup (so that all non-inherited RTEs are present) and before
-     * inheritance expansion (so that the info is available for
-     * expand_inherited_tables to examine and modify).
-     */
-    preprocess_rowmarks(root);
+	/*
+	 * Preprocess RowMark information.  We need to do this after subquery
+	 * pullup (so that all non-inherited RTEs are present) and before
+	 * inheritance expansion (so that the info is available for
+	 * expand_inherited_tables to examine and modify).
+	 */
+	preprocess_rowmarks(root);
 
-    /*
-     * Expand any rangetable entries that are inheritance sets into "append
-     * relations".  This can add entries to the rangetable, but they must be
-     * plain base relations not joins, so it's OK (and marginally more
-     * efficient) to do it after checking for join RTEs.  We must do it after
-     * pulling up subqueries, else we'd fail to handle inherited tables in
-     * subqueries.
-     */
-    expand_inherited_tables(root);
+	/*
+	 * Expand any rangetable entries that are inheritance sets into "append
+	 * relations".  This can add entries to the rangetable, but they must be
+	 * plain base relations not joins, so it's OK (and marginally more
+	 * efficient) to do it after checking for join RTEs.  We must do it after
+	 * pulling up subqueries, else we'd fail to handle inherited tables in
+	 * subqueries.
+	 */
+	expand_inherited_tables(root);
 
-    /*
-     * Set hasHavingQual to remember if HAVING clause is present.  Needed
-     * because preprocess_expression will reduce a constant-true condition to
-     * an empty qual list ... but "HAVING TRUE" is not a semantic no-op.
-     */
-    root->hasHavingQual = (parse->havingQual != NULL);
+	/*
+	 * Set hasHavingQual to remember if HAVING clause is present.  Needed
+	 * because preprocess_expression will reduce a constant-true condition to
+	 * an empty qual list ... but "HAVING TRUE" is not a semantic no-op.
+	 */
+	root->hasHavingQual = (parse->havingQual != NULL);
 
-    /* Clear this flag; might get set in distribute_qual_to_rels */
-    root->hasPseudoConstantQuals = false;
+	/* Clear this flag; might get set in distribute_qual_to_rels */
+	root->hasPseudoConstantQuals = false;
 
-    /*
-     * Do expression preprocessing on targetlist and quals, as well as other
-     * random expressions in the querytree.  Note that we do not need to
-     * handle sort/group expressions explicitly, because they are actually
-     * part of the targetlist.
-     */
-    parse->targetList = (List *)
-        preprocess_expression(root, (Node *) parse->targetList,
-                              EXPRKIND_TARGET);
+	/*
+	 * Do expression preprocessing on targetlist and quals, as well as other
+	 * random expressions in the querytree.  Note that we do not need to
+	 * handle sort/group expressions explicitly, because they are actually
+	 * part of the targetlist.
+	 */
+	parse->targetList = (List *)
+		preprocess_expression(root, (Node *) parse->targetList,
+							  EXPRKIND_TARGET);
 
-    /* Constant-folding might have removed all set-returning functions */
-    if (parse->hasTargetSRFs)
-        parse->hasTargetSRFs = expression_returns_set((Node *) parse->targetList);
+	/* Constant-folding might have removed all set-returning functions */
+	if (parse->hasTargetSRFs)
+		parse->hasTargetSRFs = expression_returns_set((Node *) parse->targetList);
 
-    newWithCheckOptions = NIL;
-    foreach(l, parse->withCheckOptions)
-    {
-        WithCheckOption *wco = (WithCheckOption *) lfirst(l);
+	newWithCheckOptions = NIL;
+	foreach(l, parse->withCheckOptions)
+	{
+		WithCheckOption *wco = (WithCheckOption *) lfirst(l);
 
-        wco->qual = preprocess_expression(root, wco->qual,
-                                          EXPRKIND_QUAL);
-        if (wco->qual != NULL)
-            newWithCheckOptions = lappend(newWithCheckOptions, wco);
-    }
-    parse->withCheckOptions = newWithCheckOptions;
+		wco->qual = preprocess_expression(root, wco->qual,
+										  EXPRKIND_QUAL);
+		if (wco->qual != NULL)
+			newWithCheckOptions = lappend(newWithCheckOptions, wco);
+	}
+	parse->withCheckOptions = newWithCheckOptions;
 
-    parse->returningList = (List *)
-        preprocess_expression(root, (Node *) parse->returningList,
-                              EXPRKIND_TARGET);
+	parse->returningList = (List *)
+		preprocess_expression(root, (Node *) parse->returningList,
+							  EXPRKIND_TARGET);
 
-    preprocess_qual_conditions(root, (Node *) parse->jointree);
+	preprocess_qual_conditions(root, (Node *) parse->jointree);
 
-    parse->havingQual = preprocess_expression(root, parse->havingQual,
-                                              EXPRKIND_QUAL);
+	parse->havingQual = preprocess_expression(root, parse->havingQual,
+											  EXPRKIND_QUAL);
 
-    foreach(l, parse->windowClause)
-    {
-        WindowClause *wc = (WindowClause *) lfirst(l);
+	foreach(l, parse->windowClause)
+	{
+		WindowClause *wc = (WindowClause *) lfirst(l);
 
-        /* partitionClause/orderClause are sort/group expressions */
-        wc->startOffset = preprocess_expression(root, wc->startOffset,
-                                                EXPRKIND_LIMIT);
-        wc->endOffset = preprocess_expression(root, wc->endOffset,
-                                              EXPRKIND_LIMIT);
-    }
+		/* partitionClause/orderClause are sort/group expressions */
+		wc->startOffset = preprocess_expression(root, wc->startOffset,
+												EXPRKIND_LIMIT);
+		wc->endOffset = preprocess_expression(root, wc->endOffset,
+											  EXPRKIND_LIMIT);
+	}
 
-    parse->limitOffset = preprocess_expression(root, parse->limitOffset,
-                                               EXPRKIND_LIMIT);
-    parse->limitCount = preprocess_expression(root, parse->limitCount,
-                                              EXPRKIND_LIMIT);
+	parse->limitOffset = preprocess_expression(root, parse->limitOffset,
+											   EXPRKIND_LIMIT);
+	parse->limitCount = preprocess_expression(root, parse->limitCount,
+											  EXPRKIND_LIMIT);
 
-    if (parse->onConflict)
-    {
-        parse->onConflict->arbiterElems = (List *)
-            preprocess_expression(root,
-                                  (Node *) parse->onConflict->arbiterElems,
-                                  EXPRKIND_ARBITER_ELEM);
-        parse->onConflict->arbiterWhere =
-            preprocess_expression(root,
-                                  parse->onConflict->arbiterWhere,
-                                  EXPRKIND_QUAL);
-        parse->onConflict->onConflictSet = (List *)
-            preprocess_expression(root,
-                                  (Node *) parse->onConflict->onConflictSet,
-                                  EXPRKIND_TARGET);
-        parse->onConflict->onConflictWhere =
-            preprocess_expression(root,
-                                  parse->onConflict->onConflictWhere,
-                                  EXPRKIND_QUAL);
+	if (parse->onConflict)
+	{
+		parse->onConflict->arbiterElems = (List *)
+			preprocess_expression(root,
+								  (Node *) parse->onConflict->arbiterElems,
+								  EXPRKIND_ARBITER_ELEM);
+		parse->onConflict->arbiterWhere =
+			preprocess_expression(root,
+								  parse->onConflict->arbiterWhere,
+								  EXPRKIND_QUAL);
+		parse->onConflict->onConflictSet = (List *)
+			preprocess_expression(root,
+								  (Node *) parse->onConflict->onConflictSet,
+								  EXPRKIND_TARGET);
+		parse->onConflict->onConflictWhere =
+			preprocess_expression(root,
+								  parse->onConflict->onConflictWhere,
+								  EXPRKIND_QUAL);
 #ifdef _MLS_
         {   
             int             rt_index;

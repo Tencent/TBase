@@ -1456,22 +1456,30 @@ typedef struct OnConflictClause
  *
  * We don't currently support the SEARCH or CYCLE clause.
  */
+typedef enum CTEMaterialize
+{
+	CTEMaterializeDefault,		/* no option specified */
+	CTEMaterializeAlways,		/* MATERIALIZED */
+	CTEMaterializeNever			/* NOT MATERIALIZED */
+} CTEMaterialize;
+
 typedef struct CommonTableExpr
 {
-    NodeTag        type;
-    char       *ctename;        /* query name (never qualified) */
-    List       *aliascolnames;    /* optional list of column names */
-    /* SelectStmt/InsertStmt/etc before parse analysis, Query afterwards: */
-    Node       *ctequery;        /* the CTE's subquery */
-    int            location;        /* token location, or -1 if unknown */
-    /* These fields are set during parse analysis: */
-    bool        cterecursive;    /* is this CTE actually recursive? */
-    int            cterefcount;    /* number of RTEs referencing this CTE
-                                  * (excluding internal self-references) */
-    List       *ctecolnames;    /* list of output column names */
-    List       *ctecoltypes;    /* OID list of output column type OIDs */
-    List       *ctecoltypmods;    /* integer list of output column typmods */
-    List       *ctecolcollations;    /* OID list of column collation OIDs */
+	NodeTag		type;
+	char	   *ctename;		/* query name (never qualified) */
+	List	   *aliascolnames;	/* optional list of column names */
+	CTEMaterialize ctematerialized; /* is this an optimization fence? */
+	/* SelectStmt/InsertStmt/etc before parse analysis, Query afterwards: */
+	Node	   *ctequery;		/* the CTE's subquery */
+	int			location;		/* token location, or -1 if unknown */
+	/* These fields are set during parse analysis: */
+	bool		cterecursive;	/* is this CTE actually recursive? */
+	int			cterefcount;	/* number of RTEs referencing this CTE
+								 * (excluding internal self-references) */
+	List	   *ctecolnames;	/* list of output column names */
+	List	   *ctecoltypes;	/* OID list of output column type OIDs */
+	List	   *ctecoltypmods;	/* integer list of output column typmods */
+	List	   *ctecolcollations;	/* OID list of column collation OIDs */
 } CommonTableExpr;
 
 /* Convenience macro to get the output tlist of a CTE's query */

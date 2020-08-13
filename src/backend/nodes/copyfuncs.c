@@ -2747,16 +2747,17 @@ _copyCommonTableExpr(const CommonTableExpr *from)
 {
     CommonTableExpr *newnode = makeNode(CommonTableExpr);
 
-    COPY_STRING_FIELD(ctename);
-    COPY_NODE_FIELD(aliascolnames);
-    COPY_NODE_FIELD(ctequery);
-    COPY_LOCATION_FIELD(location);
-    COPY_SCALAR_FIELD(cterecursive);
-    COPY_SCALAR_FIELD(cterefcount);
-    COPY_NODE_FIELD(ctecolnames);
-    COPY_NODE_FIELD(ctecoltypes);
-    COPY_NODE_FIELD(ctecoltypmods);
-    COPY_NODE_FIELD(ctecolcollations);
+	COPY_STRING_FIELD(ctename);
+	COPY_NODE_FIELD(aliascolnames);
+	COPY_SCALAR_FIELD(ctematerialized);
+	COPY_NODE_FIELD(ctequery);
+	COPY_LOCATION_FIELD(location);
+	COPY_SCALAR_FIELD(cterecursive);
+	COPY_SCALAR_FIELD(cterefcount);
+	COPY_NODE_FIELD(ctecolnames);
+	COPY_NODE_FIELD(ctecoltypes);
+	COPY_NODE_FIELD(ctecoltypmods);
+	COPY_NODE_FIELD(ctecolcollations);
 
     return newnode;
 }

@@ -390,29 +390,23 @@ ERROR:  FOR SHARE is not allowed with joins
 explain (costs off, num_nodes off, nodes off, verbose on)  WITH q1 AS (SELECT * from t1 FOR UPDATE) SELECT * FROM q1,t2 FOR UPDATE;
 ERROR:  FOR UPDATE is not allowed with joins
 explain (costs off, num_nodes off, nodes off, verbose on)  WITH q1 AS (SELECT * from t1) SELECT * FROM q1;
-               QUERY PLAN                
------------------------------------------
- CTE Scan on q1
-   Output: q1.val, q1.val2
-   CTE q1
-     ->  Remote Subquery Scan on all
-           Output: t1.val, t1.val2
-           ->  Seq Scan on public.t1
-                 Output: t1.val, t1.val2
-(7 rows)
+           QUERY PLAN            
+---------------------------------
+ Remote Subquery Scan on all
+   Output: t1.val, t1.val2
+   ->  Seq Scan on public.t1
+         Output: t1.val, t1.val2
+(4 rows)
 
 -- make sure row marks are no ops for queries on WITH tables
 explain (costs off, num_nodes off, nodes off, verbose on)  WITH q1 AS (SELECT * from t1) SELECT * FROM q1 FOR UPDATE;
-               QUERY PLAN                
------------------------------------------
- CTE Scan on q1
-   Output: q1.val, q1.val2
-   CTE q1
-     ->  Remote Subquery Scan on all
-           Output: t1.val, t1.val2
-           ->  Seq Scan on public.t1
-                 Output: t1.val, t1.val2
-(7 rows)
+           QUERY PLAN            
+---------------------------------
+ Remote Subquery Scan on all
+   Output: t1.val, t1.val2
+   ->  Seq Scan on public.t1
+         Output: t1.val, t1.val2
+(4 rows)
 
 explain (costs off, num_nodes off, nodes off, verbose on)  WITH q1 AS (SELECT * from t1 FOR UPDATE) SELECT * FROM q1 FOR UPDATE;
                        QUERY PLAN                       

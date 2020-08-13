@@ -724,16 +724,17 @@ _readCommonTableExpr(void)
 {
     READ_LOCALS(CommonTableExpr);
 
-    READ_STRING_FIELD(ctename);
-    READ_NODE_FIELD(aliascolnames);
-    READ_NODE_FIELD(ctequery);
-    READ_LOCATION_FIELD(location);
-    READ_BOOL_FIELD(cterecursive);
-    READ_INT_FIELD(cterefcount);
-    READ_NODE_FIELD(ctecolnames);
-    READ_NODE_FIELD(ctecoltypes);
-    READ_NODE_FIELD(ctecoltypmods);
-    READ_NODE_FIELD(ctecolcollations);
+	READ_STRING_FIELD(ctename);
+	READ_NODE_FIELD(aliascolnames);
+	READ_ENUM_FIELD(ctematerialized, CTEMaterialize);
+	READ_NODE_FIELD(ctequery);
+	READ_LOCATION_FIELD(location);
+	READ_BOOL_FIELD(cterecursive);
+	READ_INT_FIELD(cterefcount);
+	READ_NODE_FIELD(ctecolnames);
+	READ_NODE_FIELD(ctecoltypes);
+	READ_NODE_FIELD(ctecoltypmods);
+	READ_NODE_FIELD(ctecolcollations);
 
     READ_DONE();
 }

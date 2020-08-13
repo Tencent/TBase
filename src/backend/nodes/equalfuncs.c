@@ -2850,16 +2850,17 @@ _equalOnConflictClause(const OnConflictClause *a, const OnConflictClause *b)
 static bool
 _equalCommonTableExpr(const CommonTableExpr *a, const CommonTableExpr *b)
 {
-    COMPARE_STRING_FIELD(ctename);
-    COMPARE_NODE_FIELD(aliascolnames);
-    COMPARE_NODE_FIELD(ctequery);
-    COMPARE_LOCATION_FIELD(location);
-    COMPARE_SCALAR_FIELD(cterecursive);
-    COMPARE_SCALAR_FIELD(cterefcount);
-    COMPARE_NODE_FIELD(ctecolnames);
-    COMPARE_NODE_FIELD(ctecoltypes);
-    COMPARE_NODE_FIELD(ctecoltypmods);
-    COMPARE_NODE_FIELD(ctecolcollations);
+	COMPARE_STRING_FIELD(ctename);
+	COMPARE_NODE_FIELD(aliascolnames);
+	COMPARE_SCALAR_FIELD(ctematerialized);
+	COMPARE_NODE_FIELD(ctequery);
+	COMPARE_LOCATION_FIELD(location);
+	COMPARE_SCALAR_FIELD(cterecursive);
+	COMPARE_SCALAR_FIELD(cterefcount);
+	COMPARE_NODE_FIELD(ctecolnames);
+	COMPARE_NODE_FIELD(ctecoltypes);
+	COMPARE_NODE_FIELD(ctecoltypmods);
+	COMPARE_NODE_FIELD(ctecolcollations);
 
     return true;
 }

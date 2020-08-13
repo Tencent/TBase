@@ -2044,7 +2044,7 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test;
          Filter: (((a % 2) = 0) AND f_leak(b))
 (3 rows)
 
-PREPARE plancache_test2 AS WITH q AS (SELECT * FROM z1 WHERE f_leak(b)) SELECT * FROM q,z2;
+PREPARE plancache_test2 AS WITH q AS MATERIALIZED (SELECT * FROM z1 WHERE f_leak(b)) SELECT * FROM q,z2;
 EXPLAIN (COSTS OFF) EXECUTE plancache_test2;
                            QUERY PLAN                            
 -----------------------------------------------------------------
@@ -2059,7 +2059,7 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test2;
                ->  Seq Scan on z2
 (9 rows)
 
-PREPARE plancache_test3 AS WITH q AS (SELECT * FROM z2) SELECT * FROM q,z1 WHERE f_leak(z1.b);
+PREPARE plancache_test3 AS WITH q AS MATERIALIZED (SELECT * FROM z2) SELECT * FROM q,z1 WHERE f_leak(z1.b);
 EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
                            QUERY PLAN                            
 -----------------------------------------------------------------
@@ -2643,7 +2643,7 @@ ALTER TABLE t1 ENABLE ROW LEVEL SECURITY;
 GRANT ALL ON t1 TO regress_rls_bob;
 INSERT INTO t1 (SELECT x, md5(x::text) FROM generate_series(0,20) x);
 SET SESSION AUTHORIZATION regress_rls_bob;
-WITH cte1 AS (SELECT * FROM t1 WHERE f_leak(b) order by 1) SELECT * FROM cte1;
+WITH cte1 AS MATERIALIZED (SELECT * FROM t1 WHERE f_leak(b) order by 1) SELECT * FROM cte1;
  a  |                b                 
 ----+----------------------------------
   0 | cfcd208495d565ef66e7dff9f98764da
@@ -2659,7 +2659,8 @@ WITH cte1 AS (SELECT * FROM t1 WHERE f_leak(b) order by 1) SELECT * FROM cte1;
  20 | 98f13708210194c475687be6106a3b84
 (11 rows)
 
-EXPLAIN (COSTS OFF) WITH cte1 AS (SELECT * FROM t1 WHERE f_leak(b)) SELECT * FROM cte1;
+EXPLAIN (COSTS OFF)
+WITH cte1 AS MATERIALIZED (SELECT * FROM t1 WHERE f_leak(b)) SELECT * FROM cte1;
                          QUERY PLAN                          
 -------------------------------------------------------------
  CTE Scan on cte1

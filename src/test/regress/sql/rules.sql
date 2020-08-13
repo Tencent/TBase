@@ -1131,7 +1131,7 @@ SELECT tablename, rulename, definition FROM pg_rules
 explain (costs off) INSERT INTO hats VALUES ('h8', 'forbidden') RETURNING *;
 
 -- ensure upserting into a rule, with a CTE (different offsets!) works
-WITH data(hat_name, hat_color) AS (
+WITH data(hat_name, hat_color) AS MATERIALIZED (
     VALUES ('h8', 'green'),
         ('h9', 'blue'),
         ('h7', 'forbidden')
@@ -1139,7 +1139,8 @@ WITH data(hat_name, hat_color) AS (
 INSERT INTO hats
     SELECT * FROM data
 RETURNING *;
-EXPLAIN (nodes off, costs off) WITH data(hat_name, hat_color) AS (
+EXPLAIN (nodes off, costs off)
+WITH data(hat_name, hat_color) AS MATERIALIZED (
     VALUES ('h8', 'green'),
         ('h9', 'blue'),
         ('h7', 'forbidden')
