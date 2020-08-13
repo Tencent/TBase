@@ -2679,7 +2679,7 @@ not_allowed_join:
 			if (resultRelLoc == RESULT_REL_INNER &&
 				pathnode->jointype != JOIN_LEFT && pathnode->jointype != JOIN_FULL &&
 				pathnode->jointype != JOIN_SEMI && pathnode->jointype != JOIN_ANTI &&
-				nRemotePlans_outer < replication_level && !pathnode->inner_unique)
+				!pathnode->inner_unique)
 			{
 				/* Replicate outer */
 				pathnode->outerjoinpath = redistribute_path(
@@ -2697,7 +2697,7 @@ not_allowed_join:
 			}
 			else if (resultRelLoc == RESULT_REL_OUTER &&
 					 pathnode->jointype != JOIN_RIGHT && pathnode->jointype != JOIN_FULL &&
-					 nRemotePlans_outer < replication_level && !pathnode->inner_unique)
+					 !pathnode->inner_unique)
 			{
 				/* Replicate inner */
 				pathnode->innerjoinpath = redistribute_path(
