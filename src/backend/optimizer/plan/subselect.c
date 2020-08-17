@@ -2819,8 +2819,7 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
     /*
      * What we can not optimize.
      */
-    if (subselect->commandType != CMD_SELECT ||
-        subselect->hasAggs || subselect->hasDistinctOn ||
+    if (subselect->commandType != CMD_SELECT || subselect->hasDistinctOn ||
         subselect->setOperations || subselect->groupingSets ||
         subselect->groupClause || subselect->hasWindowFuncs ||
         subselect->hasTargetSRFs || subselect->hasModifyingCTE ||
@@ -2848,8 +2847,105 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
      * The rest of the sub-select must not refer to any Vars of the parent
      * query.  (Vars of higher levels should be okay, though.)
      */
+    subselect->jointree->quals = NULL;
     if (contain_vars_of_level((Node *) subselect, 1))
         return NULL;
+    subselect->jointree->quals = whereClause;
+
+    if (subselect->hasAggs)
+    {
+        List *joinquals  = NULL;
+        List *vars       = NULL;
+        TargetEntry *ent = NULL;
+        ListCell *cell   = NULL;
+        int ressortgroupref = 0;
+        int varno = 0;
+
+        /* process 'op' and 'bool' expr only */
+        if (contain_notexpr_or_neopexpr(whereClause, true, &joinquals))
+            return NULL;
+
+        vars = pull_vars_of_level((Node *) joinquals, 0);
+
+        /* construct groupby clause */
+        foreach (cell, vars)
+        {
+            Oid sortop;
+            Oid eqop;
+            bool hashable;
+            Oid restype;
+            SortGroupClause *grpcl;
+            Var *var = (Var *) lfirst(cell);
+            RangeTblEntry *tbl = (RangeTblEntry *) list_nth(subselect->rtable, var->varno - 1);
+
+            if (tbl->rtekind != RTE_RELATION && tbl->rtekind != RTE_CTE)
+                return NULL;
+
+            restype = exprType((Node *) var);
+
+            grpcl = makeNode(SortGroupClause);
+
+            ressortgroupref++;
+
+            if (tbl->rtekind == RTE_RELATION)
+            {
+                ent = makeTargetEntry((Expr *) copyObject(var), var->varoattno,
+                                      get_relid_attribute_name(tbl->relid, var->varoattno), false);
+            }
+            else
+            {
+                int plan_id;
+                int ndx;
+                ListCell *lc;
+                Plan *cte_plan;
+                TargetEntry *cte_ent = NULL;
+
+                /*
+                 * Note: cte_plan_ids can be shorter than cteList, if we are still working
+                 * on planning the CTEs (ie, this is a side-reference from another CTE).
+                 * So we mustn't use forboth here.
+                 */
+                ndx = 0;
+                foreach (lc, root->parse->cteList)
+                {
+                    CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc);
+
+                    if (strcmp(cte->ctename, tbl->ctename) == 0)
+                        break;
+                    ndx++;
+                }
+                if (lc == NULL) /* shouldn't happen */
+                    elog(ERROR, "could not find CTE \"%s\"", tbl->ctename);
+                if (ndx >= list_length(root->cte_plan_ids))
+                    elog(ERROR, "could not find plan for CTE \"%s\"", tbl->ctename);
+                plan_id = list_nth_int(root->cte_plan_ids, ndx);
+                cte_plan = (Plan *) lfirst(list_nth_cell(root->glob->subplans, plan_id - 1));
+                cte_ent = (TargetEntry *) lfirst(list_nth_cell(cte_plan->targetlist, var->varattno - 1));
+                ent = makeTargetEntry((Expr *) copyObject(var), var->varoattno, cte_ent->resname, false);
+            }
+
+            ent->ressortgroupref = ressortgroupref;
+
+            subselect->targetList = lappend(subselect->targetList, ent);
+
+            varno = list_length(subselect->targetList);
+            ent->resno = varno;
+
+            /* determine the eqop and optional sortop */
+            get_sort_group_operators(restype,
+                                     false, true, false,
+                                     &sortop, &eqop, NULL,
+                                     &hashable);
+
+            grpcl->tleSortGroupRef = ressortgroupref;
+            grpcl->eqop = eqop;
+            grpcl->sortop = sortop;
+            grpcl->nulls_first = false; /* OK with or without sortop */
+            grpcl->hashable = hashable;
+
+            subselect->groupClause = lappend(subselect->groupClause, grpcl);
+        }
+    }
 
     /*
      * Move sub-select to the parent query.

@@ -768,6 +768,14 @@ set enable_nestloop to true;
 set enable_hashjoin to true;
 set enable_mergejoin to true;
 
+-- agg
+explain (costs off)  select (select sum(b.a) from tbl_b b where b.a = a.a and b.b = a.b) from tbl_a a order by 1;
+select (select sum(b.a) from tbl_b b where b.a = a.a and b.b = a.b) from tbl_a a order by 1;
+explain (costs off)  select (select count(b.a) from tbl_b b where b.a = a.a) from tbl_a a order by 1;
+select (select count(b.a) from tbl_b b where b.a = a.a ) from tbl_a a order by 1;
+explain (costs off) select (select sum(b.a) from tbl_b b where b.a = a.a and b.b = a.b or b.a = 1) from tbl_a a order by 1;
+select (select sum(b.a) from tbl_b b where b.a = a.a and b.b = a.b or b.a = 1) from tbl_a a order by 1;
+
 drop table tbl_a;
 drop table tbl_b;
 set enable_pullup_subquery to false;
