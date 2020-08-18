@@ -2088,6 +2088,17 @@ static struct config_bool ConfigureNamesBool[] =
 
     {
         {
+            "enable_sampling_analyze", PGC_USERSET, CUSTOM_OPTIONS,
+            gettext_noop("sampling rows from datanodes when doing analyze on coordinator."),
+            NULL
+        },
+        &enable_sampling_analyze,
+        true,
+        NULL, NULL, NULL
+    },
+
+    {
+        {
             "enable_pgbouncer", PGC_SIGHUP, STATS_COLLECTOR,
             gettext_noop("use pgbouncer as coordinator connection pool."),
             NULL

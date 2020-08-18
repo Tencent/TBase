@@ -98,6 +98,9 @@ typedef struct AnlIndexData
 int            default_statistics_target = 100;
 
 #ifdef __TBASE__
+/* enable calculate coordinator statistics by sampling rows from data node */
+bool		enable_sampling_analyze = true;
+
 /* enable collecting distributed query info */
 bool        distributed_query_analyze = false;
 
@@ -138,11 +141,9 @@ static Datum std_fetch_func(VacAttrStatsP stats, int rownum, bool *isNull);
 static Datum ind_fetch_func(VacAttrStatsP stats, int rownum, bool *isNull);
 
 #ifdef XCP
-#ifndef __TBASE__
 static void analyze_rel_coordinator(Relation onerel, bool inh, int attr_cnt,
                         VacAttrStats **vacattrstats, int nindexes,
                         Relation *indexes, AnlIndexData *indexdata);
-#endif
 extern bool random_collect_stats;
 #endif
 
@@ -600,9 +601,12 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
 					 onerel->rd_locator_info && 
 					 !RELATION_IS_COORDINATOR_LOCAL(onerel));
 
-#ifndef __TBASE__
 #ifdef XCP
+#ifdef __TBASE__
+	if (!enable_sampling_analyze && iscoordinator)
+#else
 	if (iscoordinator)
+#endif
     {
         /*
          * Fetch relation statistics from remote nodes and update
@@ -621,7 +625,6 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
          */
         goto cleanup;
     }
-#endif
 #endif
     /*
      * Determine how many rows we need to sample, using the worst case from
@@ -651,7 +654,7 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
      */
     rows = (HeapTuple *) palloc(targrows * sizeof(HeapTuple));
 #ifdef __TBASE__
-	if (iscoordinator)
+	if (enable_sampling_analyze && iscoordinator)
 	{
 		numrows = acquire_coordinator_sample_rows(onerel, elevel,
 												rows, targrows,
@@ -816,13 +819,11 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
         }
     }
 
-#ifndef __TBASE__
 #ifdef XCP
     /*
      * Coordinator skips getting local stats of distributed table up to here
      */
 cleanup:
-#endif
 #endif
     /*
      * Report ANALYZE to the stats collector, too.  However, if doing
@@ -1852,7 +1853,6 @@ update_attstats(Oid relid, bool inh, int natts, VacAttrStats **vacattrstats)
     heap_close(sd, RowExclusiveLock);
 }
 
-#ifndef __TBASE__
 /*
  *    update_ext_stats() -- update extended statistics
  */
@@ -1921,7 +1921,6 @@ update_ext_stats(Name nspname, Name name,
     heap_freetuple(stup);
     heap_close(sd, RowExclusiveLock);
 }
-#endif
 
 /*
  * Standard fetch function for use by compute_stats subroutines.
@@ -3175,7 +3174,6 @@ compare_mcvs(const void *a, const void *b)
 
 
 #ifdef XCP
-#ifndef __TBASE__
 /*
  * coord_accu_distinct_stat
  *        Accumulate the distinct statistics for the attribute.
@@ -4387,7 +4385,7 @@ analyze_rel_coordinator(Relation onerel, bool inh, int attr_cnt,
     coord_collect_extended_stats(onerel, attr_cnt);
 }
 #endif
-#endif
+
 #ifdef __TBASE__
 Size
 QueryAnalyzeInfoShmemSize(void)
