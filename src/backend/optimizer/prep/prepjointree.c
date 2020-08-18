@@ -3077,6 +3077,7 @@ reduce_outer_joins_pass2(Node *jtnode,
 				break;
 			case JOIN_SEMI:
 			case JOIN_ANTI:
+			case JOIN_LEFT_SCALAR:
 
 				/*
 				 * These could only have been introduced by pull_up_sublinks,

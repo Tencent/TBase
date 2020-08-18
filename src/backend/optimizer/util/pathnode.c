@@ -1729,20 +1729,15 @@ set_joinpath_distribution(PlannerInfo *root, JoinPath *pathnode)
 	 * nullable data nodes will produce joined rows with NULLs for cases when
 	 * matching row exists, but on other data node.
 	 */
+
+	if ((innerd && IsLocatorReplicated(innerd->distributionType)) &&
+			(pathnode->jointype == JOIN_INNER ||
+			 pathnode->jointype == JOIN_LEFT ||
+			 pathnode->jointype == JOIN_SEMI ||
 #ifdef __TBASE__
-	if ((innerd && IsLocatorReplicated(innerd->distributionType)) &&
-			(pathnode->jointype == JOIN_INNER ||
-			 pathnode->jointype == JOIN_LEFT ||
-			 pathnode->jointype == JOIN_SEMI ||
              pathnode->jointype == JOIN_LEFT_SCALAR ||
-			 pathnode->jointype == JOIN_ANTI))
-#else
-	if ((innerd && IsLocatorReplicated(innerd->distributionType)) &&
-			(pathnode->jointype == JOIN_INNER ||
-			 pathnode->jointype == JOIN_LEFT ||
-			 pathnode->jointype == JOIN_SEMI ||
-			 pathnode->jointype == JOIN_ANTI))
 #endif
+			 pathnode->jointype == JOIN_ANTI))
 	{
 		/* We need inner relation is defined on all nodes where outer is */
 		if (!outerd || !bms_is_subset(outerd->nodes, innerd->nodes))
