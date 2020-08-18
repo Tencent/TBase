@@ -213,14 +213,14 @@ typedef struct VacuumParams
 /* GUC parameters */
 extern PGDLLIMPORT int default_statistics_target;    /* PGDLLIMPORT for PostGIS */
 extern int    vacuum_freeze_min_age;
-extern int  vacuum_defer_freeze_min_age;
+extern int	  vacuum_defer_freeze_min_age;
 extern int    vacuum_freeze_table_age;
 extern int    vacuum_multixact_freeze_min_age;
 extern int    vacuum_multixact_freeze_table_age;
 #ifdef __TBASE__
-extern bool distributed_query_analyze;
-
-extern bool explain_query_analyze;
+extern bool	  enable_sampling_analyze;
+extern bool   distributed_query_analyze;
+extern bool   explain_query_analyze;
 
 /* max number of queries collected */
 #define MAX_DISTRIBUTED_QUERIES 512
