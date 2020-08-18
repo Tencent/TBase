@@ -218,9 +218,9 @@ extern int    vacuum_freeze_table_age;
 extern int    vacuum_multixact_freeze_min_age;
 extern int    vacuum_multixact_freeze_table_age;
 #ifdef __TBASE__
-extern bool	  enable_sampling_analyze;
-extern bool   distributed_query_analyze;
-extern bool   explain_query_analyze;
+extern bool	enable_sampling_analyze;
+extern bool distributed_query_analyze;
+extern bool explain_query_analyze;
 
 /* max number of queries collected */
 #define MAX_DISTRIBUTED_QUERIES 512

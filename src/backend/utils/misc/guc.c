@@ -2097,6 +2097,17 @@ static struct config_bool ConfigureNamesBool[] =
         NULL, NULL, NULL
     },
 
+	{
+		{
+			"enable_pgbouncer", PGC_SIGHUP, STATS_COLLECTOR,
+			gettext_noop("use pgbouncer as coordinator connection pool."),
+			NULL
+		},
+		&g_enable_bouncer,
+		false,
+		NULL, NULL, NULL
+	},	
+
     {
         {
             "enable_pgbouncer", PGC_SIGHUP, STATS_COLLECTOR,
