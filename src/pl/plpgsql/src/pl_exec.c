@@ -5389,7 +5389,7 @@ exec_for_query(PLpgSQL_execstate *estate, PLpgSQL_stmt_forq *stmt,
      * few more rows to avoid multiple trips through executor startup
      * overhead.
      */
-#define MAX_REMOTE_QUERY_FETCH    10000    
+#define MAX_REMOTE_QUERY_FETCH    200000
     if (IsA(linitial(portal->stmts), PlannedStmt) &&
         (((PlannedStmt *) linitial(portal->stmts))->commandType != CMD_UTILITY) &&
         IsA(((PlannedStmt *) linitial(portal->stmts))->planTree, RemoteQuery))

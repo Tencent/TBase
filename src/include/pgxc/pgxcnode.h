@@ -282,10 +282,10 @@ extern void pgxc_print_pending_data(PGXCNodeHandle *handle, bool reset);
 
 #ifdef __TBASE__
 void add_error_message_from_combiner(PGXCNodeHandle *handle, void *combiner_input);
-inline void pgxc_set_coordinator_proc_pid(int proc_pid);
-inline int pgxc_get_coordinator_proc_pid(void);
-inline void pgxc_set_coordinator_proc_vxid(TransactionId proc_vxid);
-inline TransactionId pgxc_get_coordinator_proc_vxid(void);
+extern inline void pgxc_set_coordinator_proc_pid(int proc_pid);
+extern inline int pgxc_get_coordinator_proc_pid(void);
+extern inline void pgxc_set_coordinator_proc_vxid(TransactionId proc_vxid);
+extern inline TransactionId pgxc_get_coordinator_proc_vxid(void);
 #endif
 
 #ifdef __AUDIT__

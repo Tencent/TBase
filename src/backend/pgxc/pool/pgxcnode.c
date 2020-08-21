@@ -4177,7 +4177,14 @@ PGXCNodeGetNodeOid(int nodeid, char node_type)
 Datum
 pgxc_node_str(PG_FUNCTION_ARGS)
 {
-    PG_RETURN_TEXT_P(cstring_to_text(PGXCNodeName));
+    Name		result;
+
+	/* We use palloc0 here to ensure result is zero-padded */
+	result = (Name) palloc0(NAMEDATALEN);
+	memcpy(NameStr(*result), PGXCNodeName, NAMEDATALEN - 1);
+
+	PG_RETURN_NAME(result);
+
 }
 
 /*
