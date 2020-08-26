@@ -489,14 +489,19 @@ PGXCNodeConnStr(char *host, int port, char *dbname,
 #ifdef _MLS_
     }
 #endif    
-    /* Check for overflow */
-    if (num > 0 && num < sizeof(connstr))
-    {
-        /* Output result */
-        out = (char *) palloc(num + 1);
-        strcpy(out, connstr);
-        return out;
-    }
+	if (tcp_keepalives_idle > 0)
+	{
+		num += snprintf(connstr + num, sizeof(connstr) - num,
+					   " connect_timeout=%d", tcp_keepalives_idle);
+	}
+	/* Check for overflow */
+	if (num > 0 && num < sizeof(connstr))
+	{
+		/* Output result */
+		out = (char *) palloc(num + 1);
+		strcpy(out, connstr);
+		return out;
+	}
 
     /* return NULL if we have problem */
     return NULL;

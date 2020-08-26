@@ -287,4 +287,6 @@ extern int    pq_setkeepalivesidle(int idle, Port *port);
 extern int    pq_setkeepalivesinterval(int interval, Port *port);
 extern int    pq_setkeepalivescount(int count, Port *port);
 
-#endif                            /* LIBPQ_BE_H */
+extern void SetSockKeepAlive(int sock);
+
+#endif							/* LIBPQ_BE_H */

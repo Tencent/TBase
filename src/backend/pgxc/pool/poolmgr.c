@@ -6986,24 +6986,24 @@ preconnect_and_warm(DatabasePool *dbPool)
                 return false;
             }
 
-            slot->xc_cancelConn = (NODE_CANCEL *) PQgetCancel((PGconn *)slot->conn);
-            
-            
-            /* Increase count of pool size */            
-            nodePool->slot[nodePool->freeSize] = slot;
-            
-            /* Insert at the end of the pool */
-            IncreasePoolerSize(nodePool, __FILE__, __LINE__);
-            IncreasePoolerFreesize(nodePool,__FILE__,__LINE__);
-            slot->released = time(NULL);
-            slot->checked  = slot->released;
-            slot->created  = slot->released;
-            slot->node_name = nodePool->node_name;
-            slot->backend_pid = ((PGconn *) slot->conn)->be_pid;
-            if (dbPool->oldest_idle == (time_t) 0)
-            {
-                dbPool->oldest_idle = slot->released;
-            }
+			slot->xc_cancelConn = (NODE_CANCEL *) PQgetCancel((PGconn *)slot->conn);
+			SetSockKeepAlive(((PGconn *)slot->conn)->sock);
+			
+			/* Increase count of pool size */			
+			nodePool->slot[nodePool->freeSize] = slot;
+			
+			/* Insert at the end of the pool */
+			IncreasePoolerSize(nodePool, __FILE__, __LINE__);
+			IncreasePoolerFreesize(nodePool,__FILE__,__LINE__);
+			slot->released = time(NULL);
+			slot->checked  = slot->released;
+			slot->created  = slot->released;
+			slot->node_name = nodePool->node_name;
+			slot->backend_pid = ((PGconn *) slot->conn)->be_pid;
+			if (dbPool->oldest_idle == (time_t) 0)
+			{
+				dbPool->oldest_idle = slot->released;
+			}
 
             if (PoolConnectDebugPrint)
             {
@@ -7062,55 +7062,56 @@ void *pooler_async_connection_management_thread(void *arg)
     PGXCPoolConnectReq  *request     = NULL;
     PGXCNodePoolSlot     *slot        = NULL;    
 
-    threadIndex = ((PGXCPoolConnThreadParam*)arg)->threadIndex;
-    while (1)
-    {
-        /* wait for signal */
-        ThreadSemaDown(&g_PoolConnControl.sem[threadIndex]);        
-        
-        /* create connect as needed */
-        request = (PGXCPoolConnectReq*)PipeGet(g_PoolConnControl.request[threadIndex]);
-        if (request)
-        {
-            /* record status of the task */
-            pooler_async_task_start(&g_PoolConnControl, threadIndex, request->nodeindex, NULL, InvalidOid, request->cmd);
-            
-            switch (request->cmd)
-            {
-                case COMMAND_CONNECTION_BUILD:
-                {
-                    for (i = 0; i < request->size; i++, request->validSize++)
-                    {            
-                        slot =  &request->slot[i]; 
-                        /* If connection fails, be sure that slot is destroyed cleanly */
-                        slot->xc_cancelConn = NULL;
+	threadIndex = ((PGXCPoolConnThreadParam*)arg)->threadIndex;
+	while (1)
+	{
+		/* wait for signal */
+		ThreadSemaDown(&g_PoolConnControl.sem[threadIndex]);		
+		
+		/* create connect as needed */
+		request = (PGXCPoolConnectReq*)PipeGet(g_PoolConnControl.request[threadIndex]);
+		if (request)
+		{
+			/* record status of the task */
+			pooler_async_task_start(&g_PoolConnControl, threadIndex, request->nodeindex, NULL, InvalidOid, request->cmd);
+			
+			switch (request->cmd)
+			{
+				case COMMAND_CONNECTION_BUILD:
+				{
+					for (i = 0; i < request->size; i++, request->validSize++)
+					{			
+						slot =  &request->slot[i]; 
+						/* If connection fails, be sure that slot is destroyed cleanly */
+						slot->xc_cancelConn = NULL;
 
-                        /* Establish connection */
-                        slot->conn = PGXCNodeConnectBarely(request->connstr);
-                        if (!PGXCNodeConnected(slot->conn))
-                        {        
-                            request->failed = true;
-                            break;
-                        }        
-                        slot->xc_cancelConn = (NODE_CANCEL *) PQgetCancel((PGconn *)slot->conn);
-                        slot->bwarmed       = false;
-                    }                    
-                    break;
-                }
+						/* Establish connection */
+						slot->conn = PGXCNodeConnectBarely(request->connstr);
+						if (!PGXCNodeConnected(slot->conn))
+						{		
+							request->failed = true;
+							break;
+						}		
+						slot->xc_cancelConn = (NODE_CANCEL *) PQgetCancel((PGconn *)slot->conn);
+						slot->bwarmed       = false;
+						SetSockKeepAlive(((PGconn *)slot->conn)->sock);
+					}					
+					break;
+				}
 
-                case COMMAND_CONNECTION_CLOSE:
-                {                    
-                    PQfreeCancel((PGcancel *)request->slot[0].xc_cancelConn);    
-                    PGXCNodeClose(request->slot[0].conn);
-                    break;    
-                }
+				case COMMAND_CONNECTION_CLOSE:
+				{					
+					PQfreeCancel((PGcancel *)request->slot[0].xc_cancelConn);	
+					PGXCNodeClose(request->slot[0].conn);
+					break;	
+				}
 
-                default:
-                {
-                    /* should never happen */
-                    abort();
-                }
-            }
+				default:
+				{
+					/* should never happen */
+					abort();
+				}
+			}
 
             /* clear the work status */
             pooler_async_task_done(&g_PoolConnControl, threadIndex);    
@@ -7357,34 +7358,35 @@ void *pooler_sync_remote_operator_thread(void *arg)
                                         request->nodepool->connstr);
                                     SpinLockRelease(&request->agent->port.lock);
 #endif
-                                    set_task_status(request->taskControl, PoolAyncCtlStaus_error);        
-                                    finish_task_request(request->taskControl);
-                                    break;
-                                }                
+									set_task_status(request->taskControl, PoolAyncCtlStaus_error);		
+									finish_task_request(request->taskControl);
+									break;
+								}				
 
-                                slot->xc_cancelConn = (NODE_CANCEL *) PQgetCancel((PGconn *)slot->conn);
-                                slot->bwarmed       = false;
-                                
-                                /* set the time flags */
-                                slot->released = time(NULL);
-                                slot->checked  = slot->released;
-                                slot->created  = slot->released;
-                                
-                                /* increase usecount */
-                                slot->usecount++;
-                                slot->node_name = request->nodepool->node_name;
-                                slot->backend_pid = ((PGconn *) slot->conn)->be_pid;
-                                if (request->bCoord)
-                                {
-                                    request->agent->coord_connections[request->nodeindex] = slot;
-                                }
-                                else
-                                {
-                                    request->agent->dn_connections[request->nodeindex]       = slot;
-                                }
-                                request->current_status = PoolConnectStaus_connected;    
-#ifdef _POOLER_CHECK_                                
-                                snprintf(request->errmsg, POOLER_ERROR_MSG_LEN, "parallel connect thread build connection to node:%s backend_pid:%d nodeidx:%d succeed", slot->node_name, slot->backend_pid, request->nodeindex);
+								slot->xc_cancelConn = (NODE_CANCEL *) PQgetCancel((PGconn *)slot->conn);
+								slot->bwarmed       = false;
+								SetSockKeepAlive(((PGconn *)slot->conn)->sock);
+								
+								/* set the time flags */
+								slot->released = time(NULL);
+								slot->checked  = slot->released;
+								slot->created  = slot->released;
+								
+								/* increase usecount */
+								slot->usecount++;
+								slot->node_name = request->nodepool->node_name;
+								slot->backend_pid = ((PGconn *) slot->conn)->be_pid;
+								if (request->bCoord)
+								{
+									request->agent->coord_connections[request->nodeindex] = slot;
+								}
+								else
+								{
+									request->agent->dn_connections[request->nodeindex] 	  = slot;
+								}
+								request->current_status = PoolConnectStaus_connected;	
+#ifdef _POOLER_CHECK_								
+								snprintf(request->errmsg, POOLER_ERROR_MSG_LEN, "parallel connect thread build connection to node:%s backend_pid:%d nodeidx:%d succeed", slot->node_name, slot->backend_pid, request->nodeindex);
 #endif
                                 continue;
                             }
