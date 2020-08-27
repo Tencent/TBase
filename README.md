@@ -129,6 +129,12 @@ Use PGXC\_CTL tool to build a cluster, for example: a cluster with a global tran
 psql -h ${CoordinateNode_IP} -p ${CoordinateNode_PORT} -U ${pgxcOwner} -d postgres
 ```
 
+## References  
+
+```
+https://github.com/Tencent/TBase/wiki/1%E3%80%81TBase_Quick_Start
+```
+
 ## License
 
 The TBase is licensed under the BSD 3-Clause License. Copyright and license information can be found in the file [LICENSE.txt](LICENSE.txt)
