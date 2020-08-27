@@ -181,8 +181,11 @@ static void fix_append_rel_relids(List *append_rel_list, int varno,
 static Node *find_jointree_node_for_rel(Node *jtnode, int relid);
 
 #ifdef __TBASE__
-static Node * pull_up_or_sublinks_qual_recurse(PlannerInfo *root, Node *node, Node **jtlink,Node **orclauses);
-static bool check_pull_up_sublinks_qual_or_recurse(PlannerInfo *root, Node *node);
+static Node *pull_up_or_sublinks_qual_recurse(PlannerInfo *root, Node *node,
+									Node **jtlink,Node **orclauses);
+static bool check_pull_up_sublinks_qual_or_recurse(PlannerInfo *root,
+									Node *node);
+
 #endif
 
 /*
@@ -225,16 +228,19 @@ pull_up_sublinks(PlannerInfo *root)
      */
     if(enable_pullup_subquery)
     {
-        List *new_targetList = NIL;
-        ListCell *lc = NULL;
-        TargetEntry *entry = NULL;
-        TargetEntry *new_entry = NULL;
+        List 		*new_targetList = NIL;
+        ListCell 	*lc 			= NULL;
+        TargetEntry *entry 			= NULL;
+        TargetEntry *new_entry 		= NULL;
 
+        /* Iterate through out the target list */
         foreach(lc, root->parse->targetList)
         {
             entry = (TargetEntry *) lfirst(lc);
 
+            /* Try to convert sublink in targetlist entry to join */
             new_entry = convert_TargetList_sublink_to_join(root, entry);
+
             if (new_entry)
                 new_targetList = lappend(new_targetList, new_entry);
             else

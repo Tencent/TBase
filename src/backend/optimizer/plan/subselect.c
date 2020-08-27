@@ -2773,28 +2773,38 @@ get_or_exist_subquery_targetlist(PlannerInfo *root, Node *node, List **targetLis
 
 #ifdef __TBASE__
 /*
- * convert_TargetList_sublink_to_join :
- *          try to convert an EXISTS SubLink in targetlist to a join
- * On success, it returns not NULL.
+ * Try to convert an SubLink in targetlist to a join
+ *
+ * The sublink in targetlist has the semantic of SCALAR. Normal joins will join
+ * simply generate repeated tuples. So we add a new join type JOIN_LEFT_SCALAR
+ * which acts like left join and reports error when scalar semantics is broken.
+ *
+ * On success, it converts sublink to subquery to parent jointree and returns
+ * the converted new targetlist entry. Otherwise, it returnes NULL.
  */
 TargetEntry *
 convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
 {
-    Query *parse = root->parse;
-    Node  *whereClause = NULL;
-    Query   *subselect = NULL;
-    JoinExpr *joinExpr = NULL;
-    ParseState *pstate = NULL;
-    SubLink   *sublink = NULL;
-    RangeTblRef   *rtr = NULL;
+    Query		*parse = root->parse;
+    Node		*whereClause = NULL;
+    Query		*subselect = NULL;
+    JoinExpr	*joinExpr = NULL;
+    ParseState	*pstate = NULL;
+    SubLink		*sublink = NULL;
+    RangeTblRef	*rtr = NULL;
     RangeTblEntry *rte = NULL;
-    Var *var = NULL;
+    Var			*var = NULL;
+	List 		*sublinks = NIL;
 
-    /* Sanity check */
-    if (!IsA(entry->expr, SubLink))
-        return NULL;
+	/* Find sublinks in the targetlist entry */
+	find_sublink_walker((Node *)entry->expr, &sublinks);
 
-    sublink = (SubLink *) entry->expr;
+	/* Only one sublink can be handled */
+	if (list_length(sublinks) != 1)
+		return NULL;
+
+	sublink = linitial(sublinks);
+
     if (sublink->subLinkType != EXPR_SUBLINK)
         return NULL;
 
@@ -2811,7 +2821,7 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
         return NULL;
 
     /*
-     * The subquery must have a nonempty jointree, else we won't have a join.
+     * The SubQuery must have a non-empty JoinTree, else we won't have a join.
      */
     if (subselect->jointree->fromlist == NIL)
         return NULL;
@@ -2845,7 +2855,7 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
 
     /*
      * The rest of the sub-select must not refer to any Vars of the parent
-     * query.  (Vars of higher levels should be okay, though.)
+     * query. (Vars of higher levels should be okay, though.)
      */
     subselect->jointree->quals = NULL;
     if (contain_vars_of_level((Node *) subselect, 1))
@@ -2884,7 +2894,6 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
             restype = exprType((Node *) var);
 
             grpcl = makeNode(SortGroupClause);
-
             ressortgroupref++;
 
             if (tbl->rtekind == RTE_RELATION)
@@ -2965,7 +2974,7 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
      * Form join node.
      */
     joinExpr = makeNode(JoinExpr);
-    joinExpr->jointype = JOIN_LEFT_SCALAR;
+    joinExpr->jointype = subselect->hasAggs? JOIN_LEFT : JOIN_LEFT_SCALAR;
     joinExpr->isNatural = false;
     joinExpr->larg = (Node *) root->parse->jointree;
     joinExpr->rarg = (Node *) rtr;
@@ -2977,9 +2986,13 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
     /* Wrap join node in FromExpr as required. */
     parse->jointree = makeFromExpr(list_make1(joinExpr), NULL);
 
-    /* Replace sublink node with Var. */
+    /* Build a Var pointing to the subquery */
     var = makeVarFromTargetEntry(rtr->rtindex, linitial(subselect->targetList));
-    entry->expr = (Expr *) var;
+
+    /* Replace sublink node with Var. */
+    entry->expr = (Expr *)substitute_sublink_with_node((Node *)entry->expr,
+    												   sublink,
+													   (Node *)var);
     return entry;
 }
 #endif
