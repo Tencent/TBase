@@ -14,11 +14,11 @@
 #ifndef CLAUSES_H
 #define CLAUSES_H
 
+#include "access/htup.h"
 #include "nodes/relation.h"
 
-
-#define is_opclause(clause)        ((clause) != NULL && IsA(clause, OpExpr))
-#define is_funcclause(clause)    ((clause) != NULL && IsA(clause, FuncExpr))
+#define is_opclause(clause)		((clause) != NULL && IsA(clause, OpExpr))
+#define is_funcclause(clause)	((clause) != NULL && IsA(clause, FuncExpr))
 
 typedef struct
 {
@@ -85,7 +85,7 @@ extern Node *eval_const_expressions(PlannerInfo *root, Node *node);
 extern Node *estimate_expression_value(PlannerInfo *root, Node *node);
 
 extern Query *inline_set_returning_function(PlannerInfo *root,
-                              RangeTblEntry *rte);
+							  RangeTblEntry *rte);
 
 extern Node *substitute_sublink_with_node(Node *expr, SubLink *sublink,
 		                                                               Node *node);
