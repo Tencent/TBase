@@ -126,7 +126,14 @@ Use PGXC\_CTL tool to build a cluster, for example: a cluster with a global tran
 ## Usage
 
 ```
-psql -h ${CoordinateNode_IP} -p ${CoordinateNode_PORT} -U ${pgxcOwner} -d postgres
+$ psql -h ${CoordinateNode_IP} -p ${CoordinateNode_PORT} -U ${pgxcOwner} -d postgres
+
+postgres=# create default node group default_group  with (dn001,dn002);
+CREATE NODE GROUP
+postgres=# create sharding group to group default_group;
+CREATE SHARDING GROUP
+postgres=# create table foo(id bigint, str text) distribute by shard(id);
+
 ```
 
 ## References  
