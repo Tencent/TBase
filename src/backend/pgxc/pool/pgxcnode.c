@@ -161,6 +161,9 @@ static int    get_char(PGXCNodeHandle * conn, char *out);
 static ParamEntry * paramlist_get_paramentry(List *param_list, const char *name);
 static ParamEntry * paramentry_copy(ParamEntry * src_entry);
 static void PGXCNodeHandleError(PGXCNodeHandle *handle, char *msg_body, int len);
+static PGXCNodeAllHandles * make_PGXCNodeAllHandles();
+static void get_current_dn_handles_internal(PGXCNodeAllHandles *result);
+static void get_current_cn_handles_internal(PGXCNodeAllHandles *result);
 #endif
 
 /*
@@ -3908,12 +3911,38 @@ get_handles(List *datanodelist, List *coordlist, bool is_coord_only_query, bool 
     return result;
 }
 
+#ifdef __TBASE__
+static PGXCNodeAllHandles *
+make_PGXCNodeAllHandles()
+{
+    PGXCNodeAllHandles *result;
+    result = (PGXCNodeAllHandles *) palloc(sizeof(PGXCNodeAllHandles));
+    if (!result)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_OUT_OF_MEMORY),
+                        errmsg("out of memory")));
+    }
+
+    result->primary_handle = NULL;
+    result->co_conn_count = 0;
+    result->dn_conn_count = 0;
+    result->coord_handles = NULL;
+    result->datanode_handles = NULL;
+
+    return result;
+}
+#endif
+
 PGXCNodeAllHandles *
 get_current_handles(void)
-{// #lizard forgives
-    PGXCNodeAllHandles *result;
-    PGXCNodeHandle       *node_handle;
-    int                    i;
+{
+#ifndef __TBASE__
+    PGXCNodeAllHandles *result = make_PGXCNodeAllHandles();
+#else
+	PGXCNodeAllHandles *result;
+	PGXCNodeHandle	   *node_handle;
+	int					i;
 
     result = (PGXCNodeAllHandles *) palloc(sizeof(PGXCNodeAllHandles));
     if (!result)
@@ -3923,18 +3952,20 @@ get_current_handles(void)
                  errmsg("out of memory")));
     }
 
-    result->primary_handle = NULL;
-    result->co_conn_count = 0;
-    result->dn_conn_count = 0;
+	result->primary_handle = NULL;
+	result->co_conn_count = 0;
+	result->dn_conn_count = 0;
+#endif
 
-    result->datanode_handles = (PGXCNodeHandle **)
-                               palloc(NumDataNodes * sizeof(PGXCNodeHandle *));
-    if (!result->datanode_handles)
-    {
-        ereport(ERROR,
-                (errcode(ERRCODE_OUT_OF_MEMORY),
-                 errmsg("out of memory")));
-    }
+#ifdef __TBASE__
+	result->datanode_handles = (PGXCNodeHandle **)
+							   palloc(NumDataNodes * sizeof(PGXCNodeHandle *));
+	if (!result->datanode_handles)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("out of memory")));
+	}
 
     for (i = 0; i < NumDataNodes; i++)
     {
@@ -3952,17 +3983,87 @@ get_current_handles(void)
                  errmsg("out of memory")));
     }
 
+	for (i = 0; i < NumCoords; i++)
+	{
+		node_handle = &co_handles[i];
+		if (node_handle->sock != NO_SOCKET)
+			result->coord_handles[result->co_conn_count++] = node_handle;
+	}
+#else
+    get_current_cn_handles_internal(result);
+    get_current_dn_handles_internal(result);
+#endif
+
+    return result;
+}
+
+#ifdef __TBASE__
+
+
+PGXCNodeAllHandles *
+get_current_cn_handles(void)
+{
+    PGXCNodeAllHandles *result = make_PGXCNodeAllHandles();
+
+    get_current_cn_handles_internal(result);
+    return result;
+}
+
+PGXCNodeAllHandles *
+get_current_dn_handles(void)
+{
+    PGXCNodeAllHandles *result = make_PGXCNodeAllHandles();
+
+    get_current_dn_handles_internal(result);
+    return result;
+}
+
+static void
+get_current_dn_handles_internal(PGXCNodeAllHandles *result)
+{
+    PGXCNodeHandle	   *node_handle;
+    int					i;
+
+    result->datanode_handles = (PGXCNodeHandle **)
+            palloc(NumDataNodes * sizeof(PGXCNodeHandle *));
+    if (!result->datanode_handles)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_OUT_OF_MEMORY),
+                        errmsg("out of memory")));
+    }
+
+    for (i = 0; i < NumDataNodes; i++)
+    {
+        node_handle = &dn_handles[i];
+        if (node_handle->sock != NO_SOCKET)
+            result->datanode_handles[result->dn_conn_count++] = node_handle;
+    }
+}
+
+static void
+get_current_cn_handles_internal(PGXCNodeAllHandles *result)
+{
+    PGXCNodeHandle	   *node_handle;
+    int					i;
+
+    result->coord_handles = (PGXCNodeHandle **)
+            palloc(NumCoords * sizeof(PGXCNodeHandle *));
+    if (!result->coord_handles)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_OUT_OF_MEMORY),
+                        errmsg("out of memory")));
+    }
+
     for (i = 0; i < NumCoords; i++)
     {
         node_handle = &co_handles[i];
         if (node_handle->sock != NO_SOCKET)
             result->coord_handles[result->co_conn_count++] = node_handle;
     }
-
-    return result;
 }
 
-#ifdef __TBASE__
 PGXCNodeAllHandles *
 get_sock_fatal_handles(void)
 {
@@ -5454,5 +5555,33 @@ void PGXCGetAllDnOid(Oid *nodelist)
     return ;
 
 }
+
+#ifdef __TBASE__
+/*
+ * Return the name of ascii-minimized coordinator
+ */
+char* find_first_exec_cn(void)
+{
+    int i = 0;
+    char* result = co_handles[0].nodename;
+
+    for (i = 1; i < NumCoords; i++)
+    {
+        result = (strcmp(co_handles[i].nodename, result) < 0) ?
+                 co_handles[i].nodename :
+                 result;
+    }
+
+    return result;
+}
+
+/*
+ * Return whether I am the ascii-minimized coordinator
+ */
+bool is_first_exec_cn(char *first_cn)
+{
+    return strcmp(first_cn, PGXCNodeName) == 0;
+}
+#endif
 
 #endif

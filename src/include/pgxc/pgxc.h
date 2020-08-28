@@ -95,7 +95,10 @@ typedef enum
 } RemoteConnTypes;
 
 /* Determine remote connection type for a PGXC backend */
-extern int        remoteConnType;
+extern int		remoteConnType;
+#ifdef __TBASE__
+extern bool		is_forward;
+#endif
 
 /* Local node name and numer */
 extern char    *PGXCNodeName;
@@ -123,10 +126,10 @@ extern Datum xc_lockForBackupKey2;
 #define PGXC_PARENT_NODE_TYPE    parentPGXCNodeType
 #define REMOTE_CONN_TYPE remoteConnType
 
-#define IsConnFromApp() (remoteConnType == REMOTE_CONN_APP)
-#define IsConnFromCoord() (remoteConnType == REMOTE_CONN_COORD)
-#define IsConnFromDatanode() (remoteConnType == REMOTE_CONN_DATANODE)
-#define IsConnFromGtm() (remoteConnType == REMOTE_CONN_GTM)
+#define IsConnFromApp() (remoteConnType == REMOTE_CONN_APP || is_forward == true)
+#define IsConnFromCoord() (remoteConnType == REMOTE_CONN_COORD && is_forward == false)
+#define IsConnFromDatanode() (remoteConnType == REMOTE_CONN_DATANODE && is_forward == false)
+#define IsConnFromGtm() (remoteConnType == REMOTE_CONN_GTM && is_forward == false)
 #define IsConnFromGtmProxy() (remoteConnType == REMOTE_CONN_GTM_PROXY)
 
 /* key pair to be used as object id while using advisory lock for backup */

@@ -146,8 +146,12 @@ static bool IsStmtAllowedInLockedMode(Node *parsetree, const char *queryString);
 static void ExecCreateKeyValuesStmt(Node *parsetree);
 static void RemoveSequeceBarely(DropStmt *stmt);
 extern void RegisterSeqDrop(char *name, int32 type);
+static bool forward_ddl(Node *node, const char *queryString);
 
 extern bool    g_GTM_skip_catalog;
+
+bool has_ddl;
+bool enable_parallel_ddl;
 #endif
 
 #endif
@@ -1730,6 +1734,36 @@ ProcessUtilityPost(PlannedStmt *pstmt,
         ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, auto_commit,
                 exec_type, is_temp, add_context);
 }
+
+#ifdef __TBASE__
+static bool forward_ddl(Node *node, const char *queryString)
+{
+    Oid  *oid_list = NULL;
+    char *first_cn = NULL;
+
+    if (!enable_parallel_ddl || !IS_PGXC_LOCAL_COORDINATOR)
+        return false;
+
+    if (IsA(node,IndexStmt) &&
+        castNode(IndexStmt,node)->concurrent)
+        return false;
+
+    first_cn = find_first_exec_cn();
+    if(is_first_exec_cn(first_cn))
+        return false;
+
+    oid_list = (Oid *) palloc0(sizeof(Oid));
+    oid_list[0] = get_pgxc_nodeoid(first_cn);
+
+    PGXCNodeSetParam(false, "is_forward", "true", 0);
+    pgxc_execute_on_nodes(1, oid_list, strdup(queryString));
+    PGXCNodeSetParam(false, "is_forward", "false", 0);
+
+    pfree(oid_list);
+    return true;
+}
+#endif
+
 /*
  * standard_ProcessUtility itself deals only with utility commands for
  * which we do not provide event trigger support.  Commands that do have

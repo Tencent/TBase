@@ -198,6 +198,7 @@ extern BackendId CoordSessionBackendId;
 extern bool    PlpgsqlDebugPrint;
 /* used for get total size of session */
 static int32 g_TotalMemorySize = 0;
+extern bool    enable_parallel_ddl;
 #endif
 static int    GUC_check_errcode_value;
 
@@ -2669,21 +2670,39 @@ static struct config_bool ConfigureNamesBool[] =
 #endif
 
 #ifdef __TBASE__
+	{
+		{"enable_lock_account", PGC_SUSET, CUSTOM_OPTIONS,
+			gettext_noop("Enable lock account when login fail serval times."),
+			NULL
+		},
+		&enable_lock_account,
+		false,
+		NULL, NULL, NULL
+	},
+	{
+		{"lock_account_print", PGC_SUSET, CUSTOM_OPTIONS,
+			gettext_noop("Enable print log in lock account procedure."),
+			NULL
+		},
+		&lock_account_print,
+		false,
+		NULL, NULL, NULL
+	},
     {
-        {"enable_lock_account", PGC_SUSET, CUSTOM_OPTIONS,
-            gettext_noop("Enable lock account when login fail serval times."),
-            NULL
+        {"enable_parallel_ddl", PGC_USERSET, CUSTOM_OPTIONS,
+             gettext_noop("Enable parallel DDL with no dead lock."),
+             NULL
         },
-        &enable_lock_account,
-        false,
+        &enable_parallel_ddl,
+        true,
         NULL, NULL, NULL
     },
     {
-        {"lock_account_print", PGC_SUSET, CUSTOM_OPTIONS,
-            gettext_noop("Enable print log in lock account procedure."),
+        {"is_forward", PGC_INTERNAL, CUSTOM_OPTIONS,
+            gettext_noop("Whether DDL is forwarded from another coordinator."),
             NULL
         },
-        &lock_account_print,
+        &is_forward,
         false,
         NULL, NULL, NULL
     },
@@ -8180,7 +8199,8 @@ set_config_option(const char *name, const char *value,
 	 */
     if ((source == PGC_S_SESSION || source == PGC_S_CLIENT)
         && (IS_PGXC_DATANODE || !IsConnFromCoord())
-        && (strcmp(name,"remotetype") != 0 && strcmp(name,"parentnode") != 0))
+        && (strcmp(name,"remotetype") != 0 && strcmp(name,"parentnode") != 0 &&
+            strcmp(name,"is_forward") != 0))
         send_to_nodes = true;
 #endif
 

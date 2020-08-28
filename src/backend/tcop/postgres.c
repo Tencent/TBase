@@ -3468,9 +3468,11 @@ finish_xact_command(void)
         MemoryContextStats(TopMemoryContext);
 #endif
 
-        xact_started = false;
-
-    }
+		xact_started = false;
+#ifdef __TBASE__
+        has_ddl = false;
+#endif
+	}
 }
 
 
@@ -5103,61 +5105,66 @@ PostgresMain(int argc, char *argv[],
             AuditProcessResultInfo(false);
         }
 #endif
-        /*
-         * Abort the current transaction in order to recover.
-         */
-        AbortCurrentTransaction();
+		/*
+		 * Abort the current transaction in order to recover.
+		 */
+		AbortCurrentTransaction();
 
-        if (am_walsender)
-            WalSndErrorCleanup();
+		if (am_walsender)
+			WalSndErrorCleanup();
 
-        /*
-         * We can't release replication slots inside AbortTransaction() as we
-         * need to be able to start and abort transactions while having a slot
-         * acquired. But we never need to hold them across top level errors,
-         * so releasing here is fine. There's another cleanup in ProcKill()
-         * ensuring we'll correctly cleanup on FATAL errors as well.
-         */
-        if (MyReplicationSlot != NULL)
-            ReplicationSlotRelease();
+		/*
+		 * We can't release replication slots inside AbortTransaction() as we
+		 * need to be able to start and abort transactions while having a slot
+		 * acquired. But we never need to hold them across top level errors,
+		 * so releasing here is fine. There's another cleanup in ProcKill()
+		 * ensuring we'll correctly cleanup on FATAL errors as well.
+		 */
+		if (MyReplicationSlot != NULL)
+			ReplicationSlotRelease();
 
-        /* We also want to cleanup temporary slots on error. */
-        ReplicationSlotCleanup();
+		/* We also want to cleanup temporary slots on error. */
+		ReplicationSlotCleanup();
 
-        /*
-         * Now return to normal top-level context and clear ErrorContext for
-         * next time.
-         */
-        MemoryContextSwitchTo(TopMemoryContext);
-        FlushErrorState();
+		/*
+		 * Now return to normal top-level context and clear ErrorContext for
+		 * next time.
+		 */
+		MemoryContextSwitchTo(TopMemoryContext);
+		FlushErrorState();
 
-        /*
-         * If we were handling an extended-query-protocol message, initiate
-         * skip till next Sync.  This also causes us not to issue
-         * ReadyForQuery (until we get Sync).
-         */
-        if (doing_extended_query_message)
-            ignore_till_sync = true;
+		/*
+		 * If we were handling an extended-query-protocol message, initiate
+		 * skip till next Sync.  This also causes us not to issue
+		 * ReadyForQuery (until we get Sync).
+		 */
+		if (doing_extended_query_message)
+			ignore_till_sync = true;
 
-        /* We don't have a transaction command open anymore */
-        xact_started = false;
+		/* We don't have a transaction command open anymore */
+		xact_started = false;
 
-        /*
-         * If an error occurred while we were reading a message from the
-         * client, we have potentially lost track of where the previous
-         * message ends and the next one begins.  Even though we have
-         * otherwise recovered from the error, we cannot safely read any more
-         * messages from the client, so there isn't much we can do with the
-         * connection anymore.
-         */
-        if (pq_is_reading_msg())
-            ereport(FATAL,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                     errmsg("terminating connection because protocol synchronization was lost")));
+#ifdef __TBASE__
+		/* Clear DDL flag */
+		has_ddl = false;
+#endif
 
-        /* Now we can allow interrupts again */
-        RESUME_INTERRUPTS();
-    }
+		/*
+		 * If an error occurred while we were reading a message from the
+		 * client, we have potentially lost track of where the previous
+		 * message ends and the next one begins.  Even though we have
+		 * otherwise recovered from the error, we cannot safely read any more
+		 * messages from the client, so there isn't much we can do with the
+		 * connection anymore.
+		 */
+		if (pq_is_reading_msg())
+			ereport(FATAL,
+					(errcode(ERRCODE_PROTOCOL_VIOLATION),
+					 errmsg("terminating connection because protocol synchronization was lost")));
+
+		/* Now we can allow interrupts again */
+		RESUME_INTERRUPTS();
+	}
 
 #ifdef __TBASE__
     /* for error code contrib */

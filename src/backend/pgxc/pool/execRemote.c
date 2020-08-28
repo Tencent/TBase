@@ -51,6 +51,7 @@
 #include "utils/tuplesort.h"
 #include "utils/snapmgr.h"
 #include "utils/builtins.h"
+#include "tcop/utility.h"
 #include "pgxc/locator.h"
 #include "pgxc/pgxc.h"
 #include "parser/parse_type.h"
@@ -148,6 +149,7 @@ static void pgxc_abort_connections(PGXCNodeAllHandles *all_handles);
 static void pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle);
 static void pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle);
 static bool SetSnapshot(EState *state);
+static int pgxc_node_remote_commit_internal(PGXCNodeAllHandles *handles, TranscationType txn_type);
 #endif
 
 static void pgxc_connections_cleanup(ResponseCombiner *combiner);
@@ -4653,22 +4655,75 @@ prepare_err:
     return NULL;
 }
 
+#ifdef __TBASE__
+/*
+ * Commit transactions on remote nodes.
+ * If barrier lock is set wait while it is released.
+ * Release remote connection after completion.
+ *
+ * For DDL, DN will commit before CN does.
+ * Because DDLs normally have exclusive locks, then when CN gets committed,
+ * blocked user transactions will see DNs in a consistent state.
+ */
+static void
+pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
+{
+    int conn_count = 0;
+
+    if (!enable_parallel_ddl || !has_ddl)
+    {
+        /* normal cases */
+        conn_count = pgxc_node_remote_commit_internal(get_current_handles(), txn_type);
+    }
+    else
+    {
+        /* make sure first DN then CN */
+        conn_count =  pgxc_node_remote_commit_internal(get_current_dn_handles(), txn_type);
+        conn_count += pgxc_node_remote_commit_internal(get_current_cn_handles(), txn_type);
+    }
+
+    stat_transaction(conn_count);
+
+    if (need_release_handle)
+    {
+        if (!temp_object_included && !PersistentConnections)
+        {
+            /* Clean up remote sessions */
+            pgxc_node_remote_cleanup_all();
+            release_handles(false);
+        }
+    }
+    else
+    {
+        /* in subtxn, we just cleanup the connections. not release the handles. */
+        if (!temp_object_included && !PersistentConnections)
+        {
+            /* Clean up remote sessions without release handles. */
+            pgxc_node_remote_cleanup_all();
+        }
+    }
+
+    clear_handles();
+}
 
 /*
  * Commit transactions on remote nodes.
  * If barrier lock is set wait while it is released.
  * Release remote connection after completion.
  */
+static int
+pgxc_node_remote_commit_internal(PGXCNodeAllHandles *handles, TranscationType txn_type)
+#else
 static void
 pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
-{// #lizard forgives
-    int                result = 0;
-    char           *commitCmd = NULL;
-    int                i;
-    ResponseCombiner combiner;
-    PGXCNodeHandle **connections = NULL;
-    int                conn_count = 0;
-    PGXCNodeAllHandles *handles = get_current_handles();
+#endif
+{
+	int				result = 0;
+	char		   *commitCmd = NULL;
+	int				i;
+	ResponseCombiner combiner;
+	PGXCNodeHandle **connections = NULL;
+	int				conn_count = 0;
 
 #ifdef __TBASE__
     switch (txn_type)
@@ -4843,53 +4898,59 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
             result = EOF;
         }    
 
-        if (result)
-        {
-            if (combiner.errorMessage)
-            {
-                pgxc_node_report_error(&combiner);
-            }
-            else
-            {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INTERNAL_ERROR),
-                         errmsg("Failed to COMMIT the transaction on one or more nodes")));
-            }
-        }
-        CloseCombiner(&combiner);
-    }
-    
-    stat_transaction(conn_count);    
+		if (result)
+		{
+			if (combiner.errorMessage)
+			{
+				pgxc_node_report_error(&combiner);
+			}
+			else
+			{
+				ereport(ERROR,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("Failed to COMMIT the transaction on one or more nodes")));
+			}
+		}
+		CloseCombiner(&combiner);
+	}
 
-    
-    if (need_release_handle)
-    {
-        if (!temp_object_included && !PersistentConnections)
-        {
-            /* Clean up remote sessions */
-            pgxc_node_remote_cleanup_all();
-            release_handles(false);
-        }
-    }
-    else
-    {
-        /* in subtxn, we just cleanup the connections. not release the handles. */
-        if (!temp_object_included && !PersistentConnections)
-        {
-            /* Clean up remote sessions without release handles. */
-            pgxc_node_remote_cleanup_all();
-        }
-    }
-    
-    clear_handles();
+#ifndef __TBASE__
+	stat_transaction(conn_count);
+
+	
+	if (need_release_handle)
+	{
+		if (!temp_object_included && !PersistentConnections)
+		{
+			/* Clean up remote sessions */
+			pgxc_node_remote_cleanup_all();
+			release_handles(false);
+		}
+	}
+	else
+	{
+		/* in subtxn, we just cleanup the connections. not release the handles. */
+		if (!temp_object_included && !PersistentConnections)
+		{
+			/* Clean up remote sessions without release handles. */
+			pgxc_node_remote_cleanup_all();
+		}
+	}
+	
+	clear_handles();
+#endif
 
     pfree_pgxc_all_handles(handles);
 
-    if (connections)
-    {
-        pfree(connections);
-        connections = NULL;
-    }
+	if (connections)
+	{
+		pfree(connections);
+		connections = NULL;
+	}
+
+#ifdef __TBASE__
+	return conn_count;
+#endif
 }
 
 /*
@@ -6702,6 +6763,118 @@ ExecRemoteUtility(RemoteQuery *node)
      * Stop if all commands are completed or we got a data row and
      * initialized state node for subsequent invocations
      */
+    while (co_conn_count > 0)
+    {
+        int i = 0;
+
+        /* Wait until one of the connections has data available */
+        if (pgxc_node_receive(co_conn_count,
+                              pgxc_connections->coord_handles,
+                              NULL))
+        {
+            /*
+             * Got error
+             * TODO(Tbase): How do we check the error here?
+             */
+            break;
+        }
+
+        while (i < co_conn_count)
+        {
+            PGXCNodeHandle *conn = pgxc_connections->coord_handles[i];
+            int 			res = handle_response(conn, combiner);
+
+            if (res == RESPONSE_EOF)
+            {
+                i++;
+            }
+            else if (res == RESPONSE_COMPLETE)
+            {
+                /* Ignore, wait for ReadyForQuery */
+                if (conn->state == DN_CONNECTION_STATE_ERROR_FATAL)
+                {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_INTERNAL_ERROR),
+                                    errmsg("Unexpected FATAL ERROR on Connection to "
+                                           "Coordinator %s pid %d",
+                                           pgxc_connections->coord_handles[i]->nodename,
+                                           pgxc_connections->coord_handles[i]->backend_pid)));
+                }
+            }
+            else if (res == RESPONSE_ERROR)
+            {
+                /* Ignore, wait for ReadyForQuery */
+            }
+            else if (res == RESPONSE_READY)
+            {
+                if (i < --co_conn_count)
+                    pgxc_connections->coord_handles[i] =
+                            pgxc_connections->coord_handles[co_conn_count];
+            }
+            else if (res == RESPONSE_TUPDESC)
+            {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INTERNAL_ERROR),
+                                errmsg("Unexpected response from coordinator")));
+            }
+            else if (res == RESPONSE_DATAROW)
+            {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INTERNAL_ERROR),
+                                errmsg("Unexpected response from coordinator")));
+            }
+        }
+    }
+
+    /*
+	 * DDL will firstly be executed on coordinators then datanodes
+	 * which will avoid deadlocks in cluster.
+	 * Let us assume that user sql and ddl hold conflict locks,
+	 * then there will be two situations:
+	 * 1. The coordinator is not locked, user sql will see datanodes with no lock.
+	 * 2. The coordinator is locked, user sql will wait for ddl to complete.
+     *
+     * Send BEGIN control command to all coordinator nodes
+     */
+    if (pgxc_node_begin(co_conn_count,
+                        pgxc_connections->coord_handles,
+                        gxid,
+                        need_tran_block,
+                        false,
+                        PGXC_NODE_COORDINATOR))
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                        errmsg("Could not begin transaction on coordinators")));
+    }
+
+    /* Send other txn related messages to coordinator nodes */
+    for (i = 0; i < co_conn_count; i++)
+    {
+        PGXCNodeHandle *conn = pgxc_connections->coord_handles[i];
+
+        if (snapshot && pgxc_node_send_snapshot(conn, snapshot))
+        {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                            errmsg("Failed to send command to coordinators")));
+        }
+        if (pgxc_node_send_cmd_id(conn, cid) < 0)
+        {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                            errmsg("Failed to send command ID to Datanodes")));
+        }
+
+        if (pgxc_node_send_query(conn, node->sql_statement) != 0)
+        {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                            errmsg("Failed to send command to coordinators")));
+        }
+    }
+
+    /* Make the same for Coordinators */
     while (co_conn_count > 0)
     {
         int i = 0;

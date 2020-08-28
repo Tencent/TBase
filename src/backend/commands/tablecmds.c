@@ -632,118 +632,123 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
      * namespace is selected.
      */
 #ifdef __TBASE__
-    if (stmt->interval_child)
+	if (stmt->interval_child)
+	{
+		/* interval partition child's namespace is same as parent. */
+		namespaceId = get_rel_namespace(stmt->interval_parentId);
+	}
+	else
     {
-        /* interval partition child's namespace is same as parent. */
-        namespaceId = get_rel_namespace(stmt->interval_parentId);
+        namespaceId =
+                RangeVarGetAndCheckCreationNamespace(stmt->relation, ExclusiveLock, NULL);
     }
-    else
+#else
+	namespaceId =
+		RangeVarGetAndCheckCreationNamespace(stmt->relation, NoLock, NULL);
 #endif
-    namespaceId =
-        RangeVarGetAndCheckCreationNamespace(stmt->relation, NoLock, NULL);
 
-    /*
-     * Security check: disallow creating temp tables from security-restricted
-     * code.  This is needed because calling code might not expect untrusted
-     * tables to appear in pg_temp at the front of its search path.
-     */
-    if (stmt->relation->relpersistence == RELPERSISTENCE_TEMP
-        && InSecurityRestrictedOperation())
-        ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                 errmsg("cannot create temporary table within security-restricted operation")));
+	/*
+	 * Security check: disallow creating temp tables from security-restricted
+	 * code.  This is needed because calling code might not expect untrusted
+	 * tables to appear in pg_temp at the front of its search path.
+	 */
+	if (stmt->relation->relpersistence == RELPERSISTENCE_TEMP
+		&& InSecurityRestrictedOperation())
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+				 errmsg("cannot create temporary table within security-restricted operation")));
 
-    /*
-     * Select tablespace to use.  If not specified, use default tablespace
-     * (which may in turn default to database's default).
-     */
-    if (stmt->tablespacename)
-    {
-        tablespaceId = get_tablespace_oid(stmt->tablespacename, false);
-    }
-    else
-    {
-        tablespaceId = GetDefaultTablespace(stmt->relation->relpersistence);
-        /* note InvalidOid is OK in this case */
-    }
+	/*
+	 * Select tablespace to use.  If not specified, use default tablespace
+	 * (which may in turn default to database's default).
+	 */
+	if (stmt->tablespacename)
+	{
+		tablespaceId = get_tablespace_oid(stmt->tablespacename, false);
+	}
+	else
+	{
+		tablespaceId = GetDefaultTablespace(stmt->relation->relpersistence);
+		/* note InvalidOid is OK in this case */
+	}
 
-    /* Check permissions except when using database's default */
-    if (OidIsValid(tablespaceId) && tablespaceId != MyDatabaseTableSpace)
-    {
-        AclResult    aclresult;
+	/* Check permissions except when using database's default */
+	if (OidIsValid(tablespaceId) && tablespaceId != MyDatabaseTableSpace)
+	{
+		AclResult	aclresult;
 
-        aclresult = pg_tablespace_aclcheck(tablespaceId, GetUserId(),
-                                           ACL_CREATE);
-        if (aclresult != ACLCHECK_OK)
-            aclcheck_error(aclresult, ACL_KIND_TABLESPACE,
-                           get_tablespace_name(tablespaceId));
-    }
+		aclresult = pg_tablespace_aclcheck(tablespaceId, GetUserId(),
+										   ACL_CREATE);
+		if (aclresult != ACLCHECK_OK)
+			aclcheck_error(aclresult, ACL_KIND_TABLESPACE,
+						   get_tablespace_name(tablespaceId));
+	}
 
-    /* In all cases disallow placing user relations in pg_global */
-    if (tablespaceId == GLOBALTABLESPACE_OID)
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("only shared relations can be placed in pg_global tablespace")));
+	/* In all cases disallow placing user relations in pg_global */
+	if (tablespaceId == GLOBALTABLESPACE_OID)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("only shared relations can be placed in pg_global tablespace")));
 
-    /* Identify user ID that will own the table */
-    if (!OidIsValid(ownerId))
-        ownerId = GetUserId();
+	/* Identify user ID that will own the table */
+	if (!OidIsValid(ownerId))
+		ownerId = GetUserId();
 
-    /*
-     * Parse and validate reloptions, if any.
-     */
-    reloptions = transformRelOptions((Datum) 0, stmt->options, NULL, validnsps,
-                                     true, false);
+	/*
+	 * Parse and validate reloptions, if any.
+	 */
+	reloptions = transformRelOptions((Datum) 0, stmt->options, NULL, validnsps,
+									 true, false);
 
-    if (relkind == RELKIND_VIEW)
-        (void) view_reloptions(reloptions, true);
-    else
-        (void) heap_reloptions(relkind, reloptions, true);
+	if (relkind == RELKIND_VIEW)
+		(void) view_reloptions(reloptions, true);
+	else
+		(void) heap_reloptions(relkind, reloptions, true);
 
-    if (stmt->ofTypename)
-    {
-        AclResult    aclresult;
+	if (stmt->ofTypename)
+	{
+		AclResult	aclresult;
 
-        ofTypeId = typenameTypeId(NULL, stmt->ofTypename);
+		ofTypeId = typenameTypeId(NULL, stmt->ofTypename);
 
-        aclresult = pg_type_aclcheck(ofTypeId, GetUserId(), ACL_USAGE);
-        if (aclresult != ACLCHECK_OK)
-            aclcheck_error_type(aclresult, ofTypeId);
-    }
-    else
-        ofTypeId = InvalidOid;
+		aclresult = pg_type_aclcheck(ofTypeId, GetUserId(), ACL_USAGE);
+		if (aclresult != ACLCHECK_OK)
+			aclcheck_error_type(aclresult, ofTypeId);
+	}
+	else
+		ofTypeId = InvalidOid;
 
-    /*
-     * Look up inheritance ancestors and generate relation schema, including
-     * inherited attributes.  (Note that stmt->tableElts is destructively
-     * modified by MergeAttributes.)
-     */
-    stmt->tableElts =
-        MergeAttributes(stmt->tableElts, stmt->inhRelations,
-                        stmt->relation->relpersistence,
-                        stmt->partbound != NULL,
-                        &inheritOids, &old_constraints, &parentOidCount);
+	/*
+	 * Look up inheritance ancestors and generate relation schema, including
+	 * inherited attributes.  (Note that stmt->tableElts is destructively
+	 * modified by MergeAttributes.)
+	 */
+	stmt->tableElts =
+		MergeAttributes(stmt->tableElts, stmt->inhRelations,
+						stmt->relation->relpersistence,
+						stmt->partbound != NULL,
+						&inheritOids, &old_constraints, &parentOidCount);
 
-    /*
-     * Create a tuple descriptor from the relation schema.  Note that this
-     * deals with column names, types, and NOT NULL constraints, but not
-     * default values or CHECK constraints; we handle those below.
-     */
-    descriptor = BuildDescForRelation(stmt->tableElts);
+	/*
+	 * Create a tuple descriptor from the relation schema.  Note that this
+	 * deals with column names, types, and NOT NULL constraints, but not
+	 * default values or CHECK constraints; we handle those below.
+	 */
+	descriptor = BuildDescForRelation(stmt->tableElts);
 
-    /*
-     * Notice that we allow OIDs here only for plain tables and partitioned
-     * tables, even though some other relkinds can support them.  This is
-     * necessary because the default_with_oids GUC must apply only to plain
-     * tables and not any other relkind; doing otherwise would break existing
-     * pg_dump files.  We could allow explicit "WITH OIDS" while not allowing
-     * default_with_oids to affect other relkinds, but it would complicate
-     * interpretOidsOption().
-     */
-    localHasOids = interpretOidsOption(stmt->options,
-                                       (relkind == RELKIND_RELATION ||
-                                        relkind == RELKIND_PARTITIONED_TABLE));
-    descriptor->tdhasoid = (localHasOids || parentOidCount > 0);
+	/*
+	 * Notice that we allow OIDs here only for plain tables and partitioned
+	 * tables, even though some other relkinds can support them.  This is
+	 * necessary because the default_with_oids GUC must apply only to plain
+	 * tables and not any other relkind; doing otherwise would break existing
+	 * pg_dump files.  We could allow explicit "WITH OIDS" while not allowing
+	 * default_with_oids to affect other relkinds, but it would complicate
+	 * interpretOidsOption().
+	 */
+	localHasOids = interpretOidsOption(stmt->options,
+									   (relkind == RELKIND_RELATION ||
+										relkind == RELKIND_PARTITIONED_TABLE));
+	descriptor->tdhasoid = (localHasOids || parentOidCount > 0);
 #ifdef _SHARDING_
     if(IS_PGXC_DATANODE)
         has_extent = interpretExtentOption(stmt->options,

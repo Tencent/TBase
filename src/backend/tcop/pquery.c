@@ -1894,12 +1894,15 @@ PortalRunUtility(Portal portal, PlannedStmt *pstmt,
 #endif
     {
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-        /* Avoid the start timestamp to be too old to execute on DNs */
-        if(IsA(utilityStmt, VacuumStmt) || IsA(utilityStmt, AlterNodeStmt))
-        {
-            snapshot = GetLocalTransactionSnapshot();
-        }else
-            snapshot = GetTransactionSnapshot();
+		/* Avoid the start timestamp to be too old to execute on DNs */
+		if(IsA(utilityStmt, VacuumStmt) || IsA(utilityStmt, AlterNodeStmt))
+		{
+			snapshot = GetLocalTransactionSnapshot();
+		}
+		else
+			snapshot = GetTransactionSnapshot();
+
+        has_ddl = true;
 #else
         snapshot = GetTransactionSnapshot();
 #endif

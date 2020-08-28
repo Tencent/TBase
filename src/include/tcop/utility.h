@@ -66,5 +66,8 @@ extern bool pgxc_lock_for_utility_stmt(Node *parsetree);
 #ifdef __TBASE__
 typedef void (*ErrcodeHookType) (ErrorData *edata, StringInfo buff);
 extern PGDLLIMPORT ErrcodeHookType g_pfErrcodeHook;
+
+extern bool has_ddl;
+extern bool enable_parallel_ddl;
 #endif
 #endif                            /* UTILITY_H */
