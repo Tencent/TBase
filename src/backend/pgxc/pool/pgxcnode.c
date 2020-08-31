@@ -5570,7 +5570,10 @@ find_ddl_leader_cn(void)
         }
     }
 
-    return pstrdup(result);
+    if(result)
+        result = pstrdup(result);
+
+    return result;
 }
 
 /*
@@ -5579,6 +5582,9 @@ find_ddl_leader_cn(void)
 inline bool
 is_ddl_leader_cn(char *first_cn)
 {
+    if(first_cn == NULL)
+        return false;
+
     return strcmp(first_cn, PGXCNodeName) == 0;
 }
 #endif
