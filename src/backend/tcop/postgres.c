@@ -975,8 +975,9 @@ pg_analyze_and_rewrite_params(RawStmt *parsetree,
  */
 static List *
 pg_rewrite_query(Query *query)
-{// #lizard forgives
-    List       *querytree_list;
+{
+	List	   *querytree_list;
+	char       *leader_cn = NULL;
 
     if (Debug_print_parse)
         elog_node_display(LOG, "parse tree", query,
@@ -986,17 +987,21 @@ pg_rewrite_query(Query *query)
         ResetUsage();
 
 #ifdef PGXC
+	/* directly forward the request */
+	leader_cn = find_ddl_leader_cn();
+
     if (query->commandType == CMD_UTILITY &&
-        IsA(query->utilityStmt, CreateTableAsStmt))
-    {
-        /*
-         * CREATE TABLE AS SELECT and SELECT INTO are rewritten so that the
-         * target table is created first. The SELECT query is then transformed
-         * into an INSERT INTO statement
-         */
-        querytree_list = QueryRewriteCTAS(query);
-    }
-    else
+        IsA(query->utilityStmt, CreateTableAsStmt) &&
+        (enable_parallel_ddl && is_ddl_leader_cn(leader_cn)))
+	{
+		/*
+		 * CREATE TABLE AS SELECT and SELECT INTO are rewritten so that the
+		 * target table is created first. The SELECT query is then transformed
+		 * into an INSERT INTO statement
+		 */
+		querytree_list = QueryRewriteCTAS(query);
+	}
+	else
 #endif
     if (query->commandType == CMD_UTILITY)
     {
@@ -3470,7 +3475,7 @@ finish_xact_command(void)
 
 		xact_started = false;
 #ifdef __TBASE__
-        has_ddl = false;
+        is_txn_has_parallel_ddl = false;
 #endif
 	}
 }
@@ -5145,8 +5150,8 @@ PostgresMain(int argc, char *argv[],
 		xact_started = false;
 
 #ifdef __TBASE__
-		/* Clear DDL flag */
-		has_ddl = false;
+		/* Clear parallel DDL flag */
+		is_txn_has_parallel_ddl = false;
 #endif
 
 		/*

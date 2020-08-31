@@ -288,8 +288,8 @@ inline void pgxc_set_coordinator_proc_pid(int proc_pid);
 inline int pgxc_get_coordinator_proc_pid(void);
 inline void pgxc_set_coordinator_proc_vxid(TransactionId proc_vxid);
 inline TransactionId pgxc_get_coordinator_proc_vxid(void);
-char* find_first_exec_cn(void);
-bool is_first_exec_cn(char *first_cn);
+inline char* find_ddl_leader_cn(void);
+inline bool  is_ddl_leader_cn(char *leader_cn);
 #endif
 
 #ifdef __AUDIT__

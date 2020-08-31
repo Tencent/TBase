@@ -67,7 +67,9 @@ extern bool pgxc_lock_for_utility_stmt(Node *parsetree);
 typedef void (*ErrcodeHookType) (ErrorData *edata, StringInfo buff);
 extern PGDLLIMPORT ErrcodeHookType g_pfErrcodeHook;
 
-extern bool has_ddl;
+/* Does txn include parallel DDLs */
+extern bool is_txn_has_parallel_ddl;
+/* Parallel DDL switch */
 extern bool enable_parallel_ddl;
 #endif
 #endif                            /* UTILITY_H */

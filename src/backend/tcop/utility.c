@@ -146,11 +146,11 @@ static bool IsStmtAllowedInLockedMode(Node *parsetree, const char *queryString);
 static void ExecCreateKeyValuesStmt(Node *parsetree);
 static void RemoveSequeceBarely(DropStmt *stmt);
 extern void RegisterSeqDrop(char *name, int32 type);
-static bool forward_ddl(Node *node, const char *queryString);
+static bool forward_ddl_to_leader_cn(Node *node, const char *queryString);
 
 extern bool    g_GTM_skip_catalog;
 
-bool has_ddl;
+bool is_txn_has_parallel_ddl;
 bool enable_parallel_ddl;
 #endif
 
@@ -1736,30 +1736,46 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 }
 
 #ifdef __TBASE__
-static bool forward_ddl(Node *node, const char *queryString)
+/*
+ * Forward specific DDLs request to leader cn
+ * on success return true else false
+ */
+static bool forward_ddl_to_leader_cn(Node *node, const char *queryString)
 {
-    Oid  *oid_list = NULL;
-    char *first_cn = NULL;
+    Oid  leader_cn = InvalidOid;
+    char *leader_name = NULL;
 
-    if (!enable_parallel_ddl || !IS_PGXC_LOCAL_COORDINATOR)
+    /* avoid forward recurse */
+    if (!enable_parallel_ddl || !IS_PGXC_LOCAL_COORDINATOR || is_forward_request)
+    {
         return false;
+    }
 
-    if (IsA(node,IndexStmt) &&
-        castNode(IndexStmt,node)->concurrent)
+    /* CONCURRENT INDEX is not supported */
+    if (IsA(node,IndexStmt) && castNode(IndexStmt,node)->concurrent)
+    {
         return false;
+    }
 
-    first_cn = find_first_exec_cn();
-    if(is_first_exec_cn(first_cn))
+    /* Set parallel ddl flag */
+    is_txn_has_parallel_ddl = true;
+
+    leader_name = find_ddl_leader_cn();
+    if(is_ddl_leader_cn(leader_name))
+    {
         return false;
+    }
 
-    oid_list = (Oid *) palloc0(sizeof(Oid));
-    oid_list[0] = get_pgxc_nodeoid(first_cn);
+    leader_cn = get_pgxc_nodeoid(leader_name);
 
-    PGXCNodeSetParam(false, "is_forward", "true", 0);
-    pgxc_execute_on_nodes(1, oid_list, strdup(queryString));
-    PGXCNodeSetParam(false, "is_forward", "false", 0);
+    /* Set flag to indicate forwarded request */
+    PGXCNodeSetParam(false, "is_forward_request", "true", 0);
 
-    pfree(oid_list);
+    pgxc_execute_on_nodes(1, &leader_cn, pstrdup(queryString));
+
+    /* Cancel forwarded flag for subsequent requests */
+    PGXCNodeSetParam(false, "is_forward_request", "false", 0);
+
     return true;
 }
 #endif

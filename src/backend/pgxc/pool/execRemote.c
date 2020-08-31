@@ -4662,15 +4662,15 @@ prepare_err:
  * Release remote connection after completion.
  *
  * For DDL, DN will commit before CN does.
- * Because DDLs normally have exclusive locks, then when CN gets committed,
- * blocked user transactions will see DNs in a consistent state.
+ * Because DDLs normally have conflict locks, when CN gets committed,
+ * DNs will be in a consistent state for blocked user transactions.
  */
 static void
 pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
 {
     int conn_count = 0;
 
-    if (!enable_parallel_ddl || !has_ddl)
+    if (!enable_parallel_ddl || !is_txn_has_parallel_ddl)
     {
         /* normal cases */
         conn_count = pgxc_node_remote_commit_internal(get_current_handles(), txn_type);
@@ -6874,7 +6874,10 @@ ExecRemoteUtility(RemoteQuery *node)
         }
     }
 
-    /* Make the same for Coordinators */
+    /*
+     * Stop if all commands are completed or we got a data row and
+     * initialized state node for subsequent invocations
+     */
     while (co_conn_count > 0)
     {
         int i = 0;

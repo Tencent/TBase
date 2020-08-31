@@ -1900,9 +1900,9 @@ PortalRunUtility(Portal portal, PlannedStmt *pstmt,
 			snapshot = GetLocalTransactionSnapshot();
 		}
 		else
-			snapshot = GetTransactionSnapshot();
-
-        has_ddl = true;
+        {
+            snapshot = GetTransactionSnapshot();
+        }
 #else
         snapshot = GetTransactionSnapshot();
 #endif
