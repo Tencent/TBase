@@ -690,7 +690,8 @@ explain (costs off)  select (case when a.b =1 then (select b.a from tbl_b b wher
 select (case when a.b =1 then (select b.a from tbl_b b where b.a = a.a and b.b = a.b) else 0 end) from tbl_a a order by 1;
 explain (costs off)  select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b in (1,2)) else 0 end) from tbl_a a order by 1;
 select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b in (1,2)) else 0 end) from tbl_a a order by 1;
-
+explain (costs off)  select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b is not null) else 0 end) from tbl_a a order by 1;
+select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b is not null) else 0 end) from tbl_a a order by 1;
 drop table tbl_a;
 drop table tbl_b;
 set enable_pullup_subquery to false;

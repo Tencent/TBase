@@ -1654,7 +1654,7 @@ contain_notexpr_or_neopexpr(Node *whereclause, bool check_or, List **joinquals)
 	else if (IsA(whereclause, ArrayExpr))
 	{
 		ListCell *lc = NULL;
-		ArrayExpr *arrayExpr = (ArrayExpr*)whereclause;
+		ArrayExpr *arrayExpr = (ArrayExpr *)whereclause;
 
 		foreach(lc, arrayExpr->elements)
 		{
@@ -2866,7 +2866,7 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
 	if (sublink->subLinkType != EXPR_SUBLINK)
 		return NULL;
 
-    /*
+	/*
 	 * Copy object so that we can modify it.
 	 */
 	subselect = copyObject((Query *) sublink->subselect);
