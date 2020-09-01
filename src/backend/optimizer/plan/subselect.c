@@ -1516,9 +1516,8 @@ simplify_ALL_query(PlannerInfo *root, Query *query)
 }
 
 /* 
-  * if whereclause contains 'not' boolexpr or not equal opexpr,
-  * return true.
-  */
+ * If where clause contains 'not' BoolExpr or not-equal OpExpr, return true.
+ */
 static bool
 contain_notexpr_or_neopexpr(Node *whereclause, bool check_or, List **joinquals)
 {// #lizard forgives
@@ -1536,7 +1535,7 @@ contain_notexpr_or_neopexpr(Node *whereclause, bool check_or, List **joinquals)
 			if(!check_or)
                 return true;
 
-			/* look for common expr */
+			/* Look for common EXPR */
 			foreach(cell, expr->args)
 			{
 				List *cur = NIL;
@@ -1561,11 +1560,11 @@ contain_notexpr_or_neopexpr(Node *whereclause, bool check_or, List **joinquals)
 			return false;
         }
 
-		/* and expr */
-        foreach(cell, expr->args)
-        {
-            bool result;
-            Node *arg = lfirst(cell);
+		/* AND EXPR */
+		foreach(cell, expr->args)
+		{
+			bool result;
+			Node *arg = lfirst(cell);
 
 			result = contain_notexpr_or_neopexpr(arg, check_or, joinquals);
 
@@ -1588,16 +1587,17 @@ contain_notexpr_or_neopexpr(Node *whereclause, bool check_or, List **joinquals)
 
         *joinquals = lappend(*joinquals, expr);
 
-		
+		/* Make sure the operator is hashjoinable */
 		if (!op_hashjoinable(expr->opno, exprType((Node *)lexpr)))
         {
 			return true;
-        }
-			
-        foreach(cell, expr->args)
-        {
-            bool result;
-            Node *arg = lfirst(cell);
+		}
+
+		/* Check the operands of the OpExpr */
+		foreach(cell, expr->args)
+		{
+			bool result;
+			Node *arg = lfirst(cell);
 
 			result = contain_notexpr_or_neopexpr(arg, check_or, joinquals);
 
@@ -1616,11 +1616,69 @@ contain_notexpr_or_neopexpr(Node *whereclause, bool check_or, List **joinquals)
         bool result;
         RelabelType *label = (RelabelType *)whereclause;
 
-		result = contain_notexpr_or_neopexpr((Node *)label->arg, check_or, joinquals);
-        if (result)
-                return true;
-        return false;
-    }
+		result = contain_notexpr_or_neopexpr((Node *)label->arg,
+											 check_or,
+											 joinquals);
+		if (result)
+				return true;
+		return false;
+	}
+	/* In case the where clause is "tbl.col_a IN ('0','1')" */
+	else if (IsA(whereclause, ScalarArrayOpExpr))
+	{
+		ListCell 		  *lc = NULL;
+		ScalarArrayOpExpr *scalarArray = (ScalarArrayOpExpr*)whereclause;
+		Expr 			  *lexpr = linitial(scalarArray->args);
+
+		if (!op_hashjoinable(scalarArray->opno, exprType((Node *)lexpr)))
+		{
+			return true;
+		}
+
+		foreach(lc, scalarArray->args)
+		{
+			if (contain_notexpr_or_neopexpr((Node *)lfirst(lc),
+											check_or,
+											joinquals))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+	/*
+	 * The right operand of ScalarArrayOpExpr, we only support array of
+	 * constant values
+	 */
+	else if (IsA(whereclause, ArrayExpr))
+	{
+		ListCell *lc = NULL;
+		ArrayExpr *arrayExpr = (ArrayExpr*)whereclause;
+
+		foreach(lc, arrayExpr->elements)
+		{
+			if (!IsA((Node *)lfirst(lc), Const))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+    /* In case the where clause is "tbl.col_a is(is not) NULL" */
+	else if (IsA(whereclause, NullTest))
+	{
+		NullTest *nullTestExpr = (NullTest *)whereclause;
+
+		if (contain_notexpr_or_neopexpr((Node *)nullTestExpr->arg,
+										check_or,
+										joinquals))
+		{
+			return true;
+		}
+		return false;
+	}
 
     return true;
 }
@@ -2785,15 +2843,15 @@ get_or_exist_subquery_targetlist(PlannerInfo *root, Node *node, List **targetLis
 TargetEntry *
 convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
 {
-    Query		*parse = root->parse;
-    Node		*whereClause = NULL;
-    Query		*subselect = NULL;
-    JoinExpr	*joinExpr = NULL;
-    ParseState	*pstate = NULL;
-    SubLink		*sublink = NULL;
-    RangeTblRef	*rtr = NULL;
-    RangeTblEntry *rte = NULL;
-    Var			*var = NULL;
+	Query		*parse = root->parse;
+	Node		*whereClause = NULL;
+	Query		*subselect = NULL;
+	JoinExpr	*joinExpr = NULL;
+	ParseState	*pstate = NULL;
+	SubLink		*sublink = NULL;
+	RangeTblRef	*rtr = NULL;
+	RangeTblEntry *rte = NULL;
+	Var			*var = NULL;
 	List 		*sublinks = NIL;
 
 	/* Find sublinks in the targetlist entry */
@@ -2805,195 +2863,195 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
 
 	sublink = linitial(sublinks);
 
-    if (sublink->subLinkType != EXPR_SUBLINK)
-        return NULL;
+	if (sublink->subLinkType != EXPR_SUBLINK)
+		return NULL;
 
     /*
-     * Copy object so that we can modify it.
-     */
-    subselect = copyObject((Query *) sublink->subselect);
-    whereClause = subselect->jointree->quals;
+	 * Copy object so that we can modify it.
+	 */
+	subselect = copyObject((Query *) sublink->subselect);
+	whereClause = subselect->jointree->quals;
 
-    /*
-     * Only one targetEntry can be handled.
-     */
-    if (list_length(subselect->targetList) > 1)
-        return NULL;
+	/*
+	 * Only one targetEntry can be handled.
+	 */
+	if (list_length(subselect->targetList) > 1)
+		return NULL;
 
-    /*
-     * The SubQuery must have a non-empty JoinTree, else we won't have a join.
-     */
-    if (subselect->jointree->fromlist == NIL)
-        return NULL;
+	/*
+	 * The SubQuery must have a non-empty JoinTree, else we won't have a join.
+	 */
+	if (subselect->jointree->fromlist == NIL)
+		return NULL;
 
-    /*
-     * What we can not optimize.
-     */
-    if (subselect->commandType != CMD_SELECT || subselect->hasDistinctOn ||
-        subselect->setOperations || subselect->groupingSets ||
-        subselect->groupClause || subselect->hasWindowFuncs ||
-        subselect->hasTargetSRFs || subselect->hasModifyingCTE ||
-        subselect->havingQual || subselect->limitOffset ||
-        subselect->limitCount || subselect->rowMarks ||
-        subselect->cteList || subselect->sortClause)
-    {
-        return NULL;
-    }
+	/*
+	 * What we can not optimize.
+	 */
+	if (subselect->commandType != CMD_SELECT || subselect->hasDistinctOn ||
+		subselect->setOperations || subselect->groupingSets ||
+		subselect->groupClause || subselect->hasWindowFuncs ||
+		subselect->hasTargetSRFs || subselect->hasModifyingCTE ||
+		subselect->havingQual || subselect->limitOffset ||
+		subselect->limitCount || subselect->rowMarks ||
+		subselect->cteList || subselect->sortClause)
+	{
+		return NULL;
+	}
 
-    /*
-     * On one hand, the WHERE clause must contain some Vars of the
-     * parent query, else it's not gonna be a join.
-     */
-    if (!contain_vars_of_level(whereClause, 1))
-        return NULL;
+	/*
+	 * On one hand, the WHERE clause must contain some Vars of the
+	 * parent query, else it's not gonna be a join.
+	 */
+	if (!contain_vars_of_level(whereClause, 1))
+		return NULL;
 
-    /*
-     * We don't risk optimizing if the WHERE clause is volatile, either.
-     */
-    if (contain_volatile_functions(whereClause))
-        return NULL;
+	/*
+	 * We don't risk optimizing if the WHERE clause is volatile, either.
+	 */
+	if (contain_volatile_functions(whereClause))
+		return NULL;
 
-    /*
-     * The rest of the sub-select must not refer to any Vars of the parent
-     * query. (Vars of higher levels should be okay, though.)
-     */
-    subselect->jointree->quals = NULL;
-    if (contain_vars_of_level((Node *) subselect, 1))
-        return NULL;
-    subselect->jointree->quals = whereClause;
+	/*
+	 * The rest of the sub-select must not refer to any Vars of the parent
+	 * query. (Vars of higher levels should be okay, though.)
+	 */
+	subselect->jointree->quals = NULL;
+	if (contain_vars_of_level((Node *) subselect, 1))
+		return NULL;
+	subselect->jointree->quals = whereClause;
 
-    if (subselect->hasAggs)
-    {
-        List *joinquals  = NULL;
-        List *vars       = NULL;
-        TargetEntry *ent = NULL;
-        ListCell *cell   = NULL;
-        int ressortgroupref = 0;
-        int varno = 0;
+	if (subselect->hasAggs)
+	{
+		List *joinquals  = NULL;
+		List *vars       = NULL;
+		TargetEntry *ent = NULL;
+		ListCell *cell   = NULL;
+		int ressortgroupref = 0;
+		int varno = 0;
 
-        /* process 'op' and 'bool' expr only */
-        if (contain_notexpr_or_neopexpr(whereClause, true, &joinquals))
-            return NULL;
+		/* process 'op' and 'bool' expr only */
+		if (contain_notexpr_or_neopexpr(whereClause, true, &joinquals))
+			return NULL;
 
-        vars = pull_vars_of_level((Node *) joinquals, 0);
+		vars = pull_vars_of_level((Node *) joinquals, 0);
 
-        /* construct groupby clause */
+		/* construct groupby clause */
         foreach (cell, vars)
         {
-            Oid sortop;
-            Oid eqop;
-            bool hashable;
-            Oid restype;
-            SortGroupClause *grpcl;
-            Var *var = (Var *) lfirst(cell);
-            RangeTblEntry *tbl = (RangeTblEntry *) list_nth(subselect->rtable, var->varno - 1);
+        	Oid sortop;
+        	Oid eqop;
+        	bool hashable;
+        	Oid restype;
+        	SortGroupClause *grpcl;
+        	Var *var = (Var *) lfirst(cell);
+        	RangeTblEntry *tbl = (RangeTblEntry *) list_nth(subselect->rtable, var->varno - 1);
 
-            if (tbl->rtekind != RTE_RELATION && tbl->rtekind != RTE_CTE)
-                return NULL;
+        	if (tbl->rtekind != RTE_RELATION && tbl->rtekind != RTE_CTE)
+        		return NULL;
 
-            restype = exprType((Node *) var);
+        	restype = exprType((Node *) var);
 
-            grpcl = makeNode(SortGroupClause);
-            ressortgroupref++;
+        	grpcl = makeNode(SortGroupClause);
+        	ressortgroupref++;
 
-            if (tbl->rtekind == RTE_RELATION)
-            {
-                ent = makeTargetEntry((Expr *) copyObject(var), var->varoattno,
-                                      get_relid_attribute_name(tbl->relid, var->varoattno), false);
-            }
-            else
-            {
-                int plan_id;
-                int ndx;
-                ListCell *lc;
-                Plan *cte_plan;
-                TargetEntry *cte_ent = NULL;
+        	if (tbl->rtekind == RTE_RELATION)
+        	{
+        		ent = makeTargetEntry((Expr *) copyObject(var), var->varoattno,
+        							  get_relid_attribute_name(tbl->relid, var->varoattno), false);
+        	}
+        	else
+        	{
+        		int plan_id;
+        		int ndx;
+        		ListCell *lc;
+        		Plan *cte_plan;
+        		TargetEntry *cte_ent = NULL;
 
-                /*
-                 * Note: cte_plan_ids can be shorter than cteList, if we are still working
-                 * on planning the CTEs (ie, this is a side-reference from another CTE).
-                 * So we mustn't use forboth here.
-                 */
-                ndx = 0;
-                foreach (lc, root->parse->cteList)
-                {
-                    CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc);
+        		/*
+        		 * Note: cte_plan_ids can be shorter than cteList, if we are still working
+        		 * on planning the CTEs (ie, this is a side-reference from another CTE).
+        		 * So we mustn't use forboth here.
+        		 */
+        		ndx = 0;
+        		foreach (lc, root->parse->cteList)
+        		{
+        			CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc);
 
-                    if (strcmp(cte->ctename, tbl->ctename) == 0)
-                        break;
-                    ndx++;
-                }
-                if (lc == NULL) /* shouldn't happen */
-                    elog(ERROR, "could not find CTE \"%s\"", tbl->ctename);
-                if (ndx >= list_length(root->cte_plan_ids))
-                    elog(ERROR, "could not find plan for CTE \"%s\"", tbl->ctename);
-                plan_id = list_nth_int(root->cte_plan_ids, ndx);
-                cte_plan = (Plan *) lfirst(list_nth_cell(root->glob->subplans, plan_id - 1));
-                cte_ent = (TargetEntry *) lfirst(list_nth_cell(cte_plan->targetlist, var->varattno - 1));
-                ent = makeTargetEntry((Expr *) copyObject(var), var->varoattno, cte_ent->resname, false);
-            }
+        			if (strcmp(cte->ctename, tbl->ctename) == 0)
+        				break;
+        			ndx++;
+        		}
+        		if (lc == NULL) /* shouldn't happen */
+        			elog(ERROR, "could not find CTE \"%s\"", tbl->ctename);
+        		if (ndx >= list_length(root->cte_plan_ids))
+        			elog(ERROR, "could not find plan for CTE \"%s\"", tbl->ctename);
+        		plan_id = list_nth_int(root->cte_plan_ids, ndx);
+        		cte_plan = (Plan *) lfirst(list_nth_cell(root->glob->subplans, plan_id - 1));
+        		cte_ent = (TargetEntry *) lfirst(list_nth_cell(cte_plan->targetlist, var->varattno - 1));
+        		ent = makeTargetEntry((Expr *) copyObject(var), var->varoattno, cte_ent->resname, false);
+        	}
 
-            ent->ressortgroupref = ressortgroupref;
+        	ent->ressortgroupref = ressortgroupref;
 
-            subselect->targetList = lappend(subselect->targetList, ent);
+        	subselect->targetList = lappend(subselect->targetList, ent);
 
-            varno = list_length(subselect->targetList);
-            ent->resno = varno;
+        	varno = list_length(subselect->targetList);
+        	ent->resno = varno;
 
-            /* determine the eqop and optional sortop */
-            get_sort_group_operators(restype,
-                                     false, true, false,
-                                     &sortop, &eqop, NULL,
-                                     &hashable);
+        	/* determine the eqop and optional sortop */
+        	get_sort_group_operators(restype,
+        							 false, true, false,
+        							 &sortop, &eqop, NULL,
+        							 &hashable);
 
-            grpcl->tleSortGroupRef = ressortgroupref;
-            grpcl->eqop = eqop;
-            grpcl->sortop = sortop;
-            grpcl->nulls_first = false; /* OK with or without sortop */
-            grpcl->hashable = hashable;
+        	grpcl->tleSortGroupRef = ressortgroupref;
+        	grpcl->eqop = eqop;
+        	grpcl->sortop = sortop;
+        	grpcl->nulls_first = false; /* OK with or without sortop */
+        	grpcl->hashable = hashable;
 
-            subselect->groupClause = lappend(subselect->groupClause, grpcl);
+        	subselect->groupClause = lappend(subselect->groupClause, grpcl);
         }
-    }
+	}
 
-    /*
-     * Move sub-select to the parent query.
-     */
-    pstate = make_parsestate(NULL);
-    rte = addRangeTableEntryForSubquery(pstate,
-                                        subselect,
-                                        makeAlias("TARGETLIST_subquery", NIL),
-                                        true,
-                                        false);
-    parse->rtable = lappend(parse->rtable, rte);
+	/*
+	 * Move sub-select to the parent query.
+	 */
+	pstate = make_parsestate(NULL);
+	rte = addRangeTableEntryForSubquery(pstate,
+										subselect,
+										makeAlias("TARGETLIST_subquery", NIL),
+										true,
+										false);
+	parse->rtable = lappend(parse->rtable, rte);
 
-    rtr = makeNode(RangeTblRef);
-    rtr->rtindex = list_length(parse->rtable);
+	rtr = makeNode(RangeTblRef);
+	rtr->rtindex = list_length(parse->rtable);
 
-    /*
-     * Form join node.
-     */
-    joinExpr = makeNode(JoinExpr);
-    joinExpr->jointype = subselect->hasAggs? JOIN_LEFT : JOIN_LEFT_SCALAR;
-    joinExpr->isNatural = false;
-    joinExpr->larg = (Node *) root->parse->jointree;
-    joinExpr->rarg = (Node *) rtr;
-    joinExpr->usingClause = NIL;
-    joinExpr->alias   = NULL;
-    joinExpr->rtindex = 0; /* we don't need an RTE for it */
-    joinExpr->quals   = NULL;
+	/*
+	 * Form join node.
+	 */
+	joinExpr = makeNode(JoinExpr);
+	joinExpr->jointype = subselect->hasAggs? JOIN_LEFT : JOIN_LEFT_SCALAR;
+	joinExpr->isNatural = false;
+	joinExpr->larg = (Node *) root->parse->jointree;
+	joinExpr->rarg = (Node *) rtr;
+	joinExpr->usingClause = NIL;
+	joinExpr->alias   = NULL;
+	joinExpr->rtindex = 0; /* we don't need an RTE for it */
+	joinExpr->quals   = NULL;
 
-    /* Wrap join node in FromExpr as required. */
-    parse->jointree = makeFromExpr(list_make1(joinExpr), NULL);
+	/* Wrap join node in FromExpr as required. */
+	parse->jointree = makeFromExpr(list_make1(joinExpr), NULL);
 
-    /* Build a Var pointing to the subquery */
-    var = makeVarFromTargetEntry(rtr->rtindex, linitial(subselect->targetList));
+	/* Build a Var pointing to the subquery */
+	var = makeVarFromTargetEntry(rtr->rtindex, linitial(subselect->targetList));
 
-    /* Replace sublink node with Var. */
-    entry->expr = (Expr *)substitute_sublink_with_node((Node *)entry->expr,
-    												   sublink,
+	/* Replace sublink node with Var. */
+	entry->expr = (Expr *)substitute_sublink_with_node((Node *)entry->expr,
+													   sublink,
 													   (Node *)var);
-    return entry;
+	return entry;
 }
 #endif
 

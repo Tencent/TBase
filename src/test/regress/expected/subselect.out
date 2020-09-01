@@ -1895,6 +1895,40 @@ select (case when a.b =1 then (select b.a from tbl_b b where b.a = a.a and b.b =
      
 (10 rows)
 
+explain (costs off)  select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b in (1,2)) else 0 end) from tbl_a a order by 1;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Sort
+   Sort Key: (CASE WHEN (a.b = 1) THEN "TARGETLIST_subquery".count ELSE '0'::bigint END)
+   ->  Nested Loop Left Join
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               ->  Seq Scan on tbl_a a
+         ->  Materialize
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     ->  Subquery Scan on "TARGETLIST_subquery"
+                           ->  GroupAggregate
+                                 Group Key: b.a, b.b
+                                 ->  Result
+                                       One-Time Filter: (a.b = ANY ('{1,2}'::integer[]))
+                                       ->  Seq Scan on tbl_b b
+                                             Filter: ((a = a.a) AND (b = a.b))
+(14 rows)
+
+select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b in (1,2)) else 0 end) from tbl_a a order by 1;
+ case 
+------
+    1
+    1
+    1
+    1
+    1
+    1
+    1
+    1
+    1
+     
+(10 rows)
+
 drop table tbl_a;
 drop table tbl_b;
 set enable_pullup_subquery to false;
