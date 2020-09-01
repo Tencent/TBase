@@ -55,7 +55,7 @@ SET check_function_bodies = false;
 create function f1 () returns setof my_tab1 as $$ create table my_tab2 (a int); select * from my_tab1; $$ language sql;
 ERROR:  function "f1" already exists with same argument types
 select f1();
-ERROR:  Unexpected response from Datanode
+ERROR:  Unexpected response from coordinator
 CONTEXT:  SQL function "f1" statement 1
 SET check_function_bodies = true;
 drop function f1();
