@@ -2851,8 +2851,9 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
 	SubLink		*sublink = NULL;
 	RangeTblRef	*rtr = NULL;
 	RangeTblEntry *rte = NULL;
-	Var			*var = NULL;
-	List 		*sublinks = NIL;
+	Node	   *target = NULL;
+	List 	 *sublinks = NIL;
+    bool     count_agg = false;
 
 	/* Find sublinks in the targetlist entry */
 	find_sublink_walker((Node *)entry->expr, &sublinks);
@@ -2922,16 +2923,48 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
 
 	if (subselect->hasAggs)
 	{
+        int ressortgroupref = 0;
+        int varno = 0;
 		List *joinquals  = NULL;
 		List *vars       = NULL;
 		TargetEntry *ent = NULL;
 		ListCell *cell   = NULL;
-		int ressortgroupref = 0;
-		int varno = 0;
+		char  *name = NULL;
+		Aggref *agg = NULL;
+		Node  *expr = linitial(subselect->targetList);
 
 		/* process 'op' and 'bool' expr only */
 		if (contain_notexpr_or_neopexpr(whereClause, true, &joinquals))
 			return NULL;
+
+		expr = (Node *)((TargetEntry *)expr)->expr;
+		/*
+		 * First node must be Agg.
+		 * we optimize subquery only like "SELECT agg()",
+		 * others will not be optimized for now.
+		 */
+        if (!IsA(expr, Aggref))
+            return NULL;
+
+        agg = (Aggref *)expr;
+        name = get_func_name(agg->aggfnoid);
+        if(!name)
+        {
+            return NULL;
+        }
+
+        /* count agg */
+        if (pg_strcasecmp(name, "count") == 0)
+        {
+            count_agg = true;
+        }
+        /* strict aggs are allowed */
+        else if (pg_strcasecmp(name, "max") != 0    && pg_strcasecmp(name, "min") != 0 &&
+                 pg_strcasecmp(name, "stddev") != 0 && pg_strcasecmp(name, "sum") != 0 &&
+                 pg_strcasecmp(name, "avg") != 0    && pg_strcasecmp(name, "variance") != 0)
+        {
+            return NULL;
+        }
 
 		vars = pull_vars_of_level((Node *) joinquals, 0);
 
@@ -3045,12 +3078,20 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
 	parse->jointree = makeFromExpr(list_make1(joinExpr), NULL);
 
 	/* Build a Var pointing to the subquery */
-	var = makeVarFromTargetEntry(rtr->rtindex, linitial(subselect->targetList));
+	target = (Node *)makeVarFromTargetEntry(rtr->rtindex, linitial(subselect->targetList));
 
-	/* Replace sublink node with Var. */
-	entry->expr = (Expr *)substitute_sublink_with_node((Node *)entry->expr,
-													   sublink,
-													   (Node *)var);
+	/* Add Coalesce(count,0) */
+    if (count_agg)
+    {
+        CoalesceExpr *coalesce = makeNode(CoalesceExpr);
+        coalesce->args = list_make2(target,
+                                    makeConst(INT8OID, -1, InvalidOid, sizeof(int64), Int64GetDatum(0), false, true));
+        coalesce->coalescetype = INT8OID;
+        target = (Node *) coalesce;
+    }
+
+	/* Replace sublink node with Result. */
+	entry->expr = (Expr *)substitute_sublink_with_node((Node *)entry->expr, sublink, target);
 	return entry;
 }
 #endif
