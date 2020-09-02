@@ -1081,100 +1081,105 @@ IsGTMConnected()
 }
 
 #ifdef __TBASE__
+/*
+ * Set gtm info with GtmHost and GtmPort.
+ *
+ * There are three cases:
+ * 1.New gtm info from create/alter gtm node command
+ * 2.Gtm info from pgxc_node
+ * 3.Gtm info from recovery gtm host
+ */
 static void 
 GetMasterGtmInfo(void)
-{// #lizard forgives
-    /* Check gtm host and port info */
-    Relation    rel;
-    HeapScanDesc scan;
-    HeapTuple    gtmtup;
-    Form_pgxc_node    nodeForm;
-    bool        found = false;
+{
+	/* Check gtm host and port info */
+	Relation	rel;
+	HeapScanDesc scan;
+	HeapTuple	gtmtup;
+	Form_pgxc_node	nodeForm;
+	bool		found = false;
 
-    /* reset gtm info */
-    ResetGtmInfo();
+	/* reset gtm info */
+	ResetGtmInfo();
 
-    /* we have no recovery gtm host info, just read from heap. */
-    if (!g_recovery_gtm_host->need_read)
-    {
-        rel = heap_open(PgxcNodeRelationId, AccessShareLock);
-        scan = heap_beginscan_catalog(rel, 0, NULL);
+	/* If NewGtmHost and NewGtmPort, just use it. */
+	if (NewGtmHost && NewGtmPort != 0)
+	{
+		GtmHost = strdup(NewGtmHost);
+		GtmPort = NewGtmPort;
 
-        /* Only one record will match */
-        while (HeapTupleIsValid(gtmtup = heap_getnext(scan, ForwardScanDirection)))
-        {
-            nodeForm = (Form_pgxc_node) GETSTRUCT(gtmtup);
-            if (PGXC_NODE_GTM == nodeForm->node_type && nodeForm->nodeis_primary)
-            {
-                GtmHost = strdup(NameStr(nodeForm->node_host));
-                GtmPort = nodeForm->node_port;
-                found = true;
-                break;
-            }
-        }
+		free(NewGtmHost);
+		NewGtmHost = NULL;
+		NewGtmPort = 0;
 
-        heap_endscan(scan);
-        heap_close(rel, AccessShareLock);
-    }
-    else
-    {
-        /* get the gtm host info  */
-        GtmHost = strdup(NameStr(g_recovery_gtm_host->hostdata));
-        GtmPort = g_recovery_gtm_host->port;    
-        found = true;
-    }    
+		elog(LOG,
+			"GetMasterGtmInfo: set master gtm info with NewGtmHost:%s NewGtmPort:%d",
+			NewGtmHost, NewGtmPort);
+		return;
+	}
 
-    if (!found)
-    {
-        if (NewGtmHost && NewGtmPort != 0)
-        {
-            elog(LOG, "GetMasterGtmInfo: can not get master gtm info from pgxc_node, try use NewGtmHost:%s NewGtmPort:%d",
-                        NewGtmHost, NewGtmPort);
-        }
-        else
-        {
-            elog(LOG, "GetMasterGtmInfo: can not get master gtm info from pgxc_node");
-        }
-    }
+	/* we have no recovery gtm host info, just read from heap. */
+	if (!g_recovery_gtm_host->need_read)
+	{
+		/*
+		 * We must be sure there is no error report, because we may be
+		 * in AbortTransaction now.
+		 * 1.If we are not in a transaction, we should not open relation.
+		 * 2.If we do not get lock, it is ok to try it next time.
+		 */
+		if (IsTransactionState() &&
+			ConditionalLockRelationOid(PgxcNodeRelationId, AccessShareLock))
+		{
+			rel = relation_open(PgxcNodeRelationId, NoLock);
+			scan = heap_beginscan_catalog(rel, 0, NULL);
+			/* Only one record will match */
+			while (HeapTupleIsValid(gtmtup = heap_getnext(scan, ForwardScanDirection)))
+			{
+				nodeForm = (Form_pgxc_node) GETSTRUCT(gtmtup);
+				if (PGXC_NODE_GTM == nodeForm->node_type && nodeForm->nodeis_primary)
+				{
+					GtmHost = strdup(NameStr(nodeForm->node_host));
+					GtmPort = nodeForm->node_port;
+					found = true;
+					break;
+				}
+			}
+			heap_endscan(scan);
+			relation_close(rel, AccessShareLock);
+		}
+	}
+	else
+	{
+		/* get the gtm host info  */
+		GtmHost = strdup(NameStr(g_recovery_gtm_host->hostdata));
+		GtmPort = g_recovery_gtm_host->port;	
+		found = true;
+	}	
+
+	if (!found)
+	{
+		elog(LOG,
+			"GetMasterGtmInfo: can not get master gtm info from pgxc_node");
+	}
 }
 #endif
 
 static void
 CheckConnection(void)
-{// #lizard forgives
-#ifdef __TBASE__
-    /* First time try connect to gtm, get gtm info from syscache first */
-    if (NULL == GtmHost && 0 == GtmPort)
-    {
-        GetMasterGtmInfo();
-    }
+{
+	/* Be sure that a backend does not use a postmaster connection */
+	if (IsUnderPostmaster && GTMPQispostmaster(conn) == 1)
+	{
+		CloseGTM();
+		InitGTM();
+		return;
+	}
 
-    /* If NewGtmHost and NewGtmPort were set, we are in create/alter gtm node command */
-    if (NewGtmHost && NewGtmPort != 0)
-    {
-        ResetGtmInfo();
-        
-        GtmHost = strdup(NewGtmHost);
-        GtmPort = NewGtmPort;
-
-        free(NewGtmHost);
-        NewGtmHost = NULL;
-        NewGtmPort = 0;
-
-        /* Close old gtm connection */
-        CloseGTM();
-    }
-#endif
-
-    /* Be sure that a backend does not use a postmaster connection */
-    if (IsUnderPostmaster && GTMPQispostmaster(conn) == 1)
-    {
-        InitGTM();
-        return;
-    }
-
-    if (GTMPQstatus(conn) != CONNECTION_OK)
-        InitGTM();
+	if (GTMPQstatus(conn) != CONNECTION_OK)
+	{
+		CloseGTM();
+		InitGTM();
+	}
 }
 
 void
@@ -1183,8 +1188,26 @@ InitGTM(void)
 #define  CONNECT_STR_LEN   256 /* 256 bytes should be enough */
     char conn_str[CONNECT_STR_LEN];
 #ifdef __TBASE__
-    int  try_cnt = 0;
-    const int max_try_cnt = 1;
+	int  try_cnt = 0;
+	const int max_try_cnt = 1;
+
+	/*
+	 * Only re-set gtm info in two cases:
+	 * 1.No gtm info
+	 * 2.New gtm info by create/alter gtm node command
+	 */
+	if ((GtmHost == NULL && GtmPort == 0) ||
+		(NewGtmHost != NULL && NewGtmPort != 0))
+	{
+		GetMasterGtmInfo();
+	}
+	if (GtmHost == NULL && GtmPort == 0)
+	{
+		ereport(LOG,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("GtmHost and GtmPort are not set")));
+		return;
+	}
 #endif
 
 try_connect_gtm:

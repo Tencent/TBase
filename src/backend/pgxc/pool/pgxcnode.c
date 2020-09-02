@@ -1365,23 +1365,17 @@ get_message(PGXCNodeHandle *conn, int *len, char **msg)
  */
 void
 release_handles(bool force)
-{// #lizard forgives
-    bool        destroy = false;
-    int            i;
-    int             nbytes    = 0;    
-    if (!force)
-    {
-        if (HandlesInvalidatePending)
-        {
-            DoInvalidateRemoteHandles();
-            return;
-        }
-
-        /* don't free connection if holding a cluster lock */
-        if (cluster_ex_lock_held)
-        {
-            return;
-        }
+{
+	bool		destroy = false;
+	int			i;
+	int		 	nbytes	= 0;	
+	if (!force)
+	{
+		/* don't free connection if holding a cluster lock */
+		if (cluster_ex_lock_held)
+		{
+			return;
+		}
 
         if (datanode_count == 0 && coord_count == 0 && slavedatanode_count == 0)
         {
@@ -1425,34 +1419,33 @@ release_handles(bool force)
 #ifndef __USE_GLOBAL_SNAPSHOT__
         handle->sendGxidVersion = 0;
 #endif
-        nbytes = pgxc_node_is_data_enqueued(handle);
-        if (nbytes)
-        {
-            elog(PANIC, "Connection to Datanode %s has data %d pending",
-                     handle->nodename, nbytes);
-        }
-    }
-
-    
-    for (i = 0; i < NumSlaveDataNodes; i++)
-    {
-        PGXCNodeHandle *handle = &sdn_handles[i];
-        
-        if (handle->sock != NO_SOCKET)
-        {
-            /*
-             * Connections at this point should be completely inactive,
-             * otherwise abaandon them. We can not allow not cleaned up
-             * connection is returned to pool.
-             */
-            if (handle->state != DN_CONNECTION_STATE_IDLE ||
-                    handle->transaction_status != 'I')
-            {
-                destroy = true;
-                elog(DEBUG1, "Connection to Datanode %d has unexpected state %d and will be dropped",
-                     handle->nodeoid, handle->state);
-            }
-            
+		nbytes = pgxc_node_is_data_enqueued(handle);
+		if (nbytes)
+		{
+			elog(PANIC, "Connection to Datanode %s has data %d pending",
+					 handle->nodename, nbytes);
+		}
+	}
+	
+	for (i = 0; i < NumSlaveDataNodes; i++)
+	{
+		PGXCNodeHandle *handle = &sdn_handles[i];
+		
+		if (handle->sock != NO_SOCKET)
+		{
+			/*
+			 * Connections at this point should be completely inactive,
+			 * otherwise abaandon them. We can not allow not cleaned up
+			 * connection is returned to pool.
+			 */
+			if (handle->state != DN_CONNECTION_STATE_IDLE ||
+					handle->transaction_status != 'I')
+			{
+				destroy = true;
+				elog(DEBUG1, "Connection to Datanode %d has unexpected state %d and will be dropped",
+					 handle->nodeoid, handle->state);
+			}
+			
 #ifdef _PG_REGRESS_
             elog(LOG, "release_handles release a connection with datanode %s"
                       "remote backend PID %d",
@@ -1513,8 +1506,7 @@ release_handles(bool force)
         }
     }
 
-	//destroy = true;
-    /* And finally release all the connections on pooler */
+	/* And finally release all the connections on pooler */
 	PoolManagerReleaseConnections(destroy);
 
     datanode_count = 0;
@@ -4795,12 +4787,12 @@ DoInvalidateRemoteHandles(void)
 {
     bool            result = false;
 
-    HandlesInvalidatePending = false;
-    HandlesRefreshPending = false;
+	InitMultinodeExecutor(true);
 
-    InitMultinodeExecutor(true);
+	HandlesInvalidatePending = false;
+	HandlesRefreshPending = false;
 
-    return result;
+	return result;
 }
 
 /*
