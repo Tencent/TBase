@@ -1499,7 +1499,7 @@ explain (costs off)  select (select count(b.a) from tbl_b b where b.a = a.a) fro
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Sort
-   Sort Key: "TARGETLIST_subquery".count
+   Sort Key: (COALESCE("TARGETLIST_subquery".count, '0'::bigint))
    ->  Nested Loop Left Join
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                ->  Seq Scan on tbl_a a
@@ -1515,6 +1515,7 @@ explain (costs off)  select (select count(b.a) from tbl_b b where b.a = a.a) fro
 select (select count(b.a) from tbl_b b where b.a = a.a ) from tbl_a a order by 1;
  count 
 -------
+     0
      1
      1
      1
@@ -1524,7 +1525,6 @@ select (select count(b.a) from tbl_b b where b.a = a.a ) from tbl_a a order by 1
      1
      1
      2
-      
 (10 rows)
 
 explain (costs off) select (select sum(b.a) from tbl_b b where b.a = a.a and b.b = a.b or b.a = 1) from tbl_a a order by 1;
@@ -1619,10 +1619,10 @@ select (case when a.b =1 then (select b.a from tbl_b b where b.a = a.a and b.b =
 (10 rows)
 
 explain (costs off)  select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b in (1,2)) else 0 end) from tbl_a a order by 1;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
  Sort
-   Sort Key: (CASE WHEN (a.b = 1) THEN "TARGETLIST_subquery".count ELSE '0'::bigint END)
+   Sort Key: (CASE WHEN (a.b = 1) THEN COALESCE("TARGETLIST_subquery".count, '0'::bigint) ELSE '0'::bigint END)
    ->  Nested Loop Left Join
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                ->  Seq Scan on tbl_a a
@@ -1640,6 +1640,7 @@ explain (costs off)  select (case when a.b =1 then (select count(*) from tbl_b b
 select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b in (1,2)) else 0 end) from tbl_a a order by 1;
  case 
 ------
+    0
     1
     1
     1
@@ -1649,7 +1650,40 @@ select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and 
     1
     1
     1
-     
+(10 rows)
+
+explain (costs off)  select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b is not null) else 0 end) from tbl_a a order by 1;
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: (CASE WHEN (a.b = 1) THEN COALESCE("TARGETLIST_subquery".count, '0'::bigint) ELSE '0'::bigint END)
+   ->  Nested Loop Left Join
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               ->  Seq Scan on tbl_a a
+         ->  Materialize
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     ->  Subquery Scan on "TARGETLIST_subquery"
+                           ->  GroupAggregate
+                                 Group Key: b.a, b.b
+                                 ->  Result
+                                       One-Time Filter: (a.b IS NOT NULL)
+                                       ->  Seq Scan on tbl_b b
+                                             Filter: ((a = a.a) AND (b = a.b))
+(14 rows)
+
+select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b is not null) else 0 end) from tbl_a a order by 1;
+ case 
+------
+    0
+    1
+    1
+    1
+    1
+    1
+    1
+    1
+    1
+    1
 (10 rows)
 
 drop table tbl_a;
