@@ -98,7 +98,6 @@ extern List *pull_var_clause(Node *node, int flags);
 extern Node *flatten_join_alias_vars(PlannerInfo *root, Node *node);
 #ifdef __TBASE__
 extern bool contain_vars_upper_level(Node *node, int levelsup);
-
 #endif
 
 #endif                            /* VAR_H */

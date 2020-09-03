@@ -606,8 +606,8 @@ drop function tattle(x int, y int);
 set enable_pullup_subquery to true;
 create table tbl_a(a int,b int);
 create table tbl_b(a int,b int);
-insert into tbl_a select generate_series(1,10),1 ;
-insert into tbl_b select generate_series(2,11),1 ;
+insert into tbl_a select generate_series(1,10),1;
+insert into tbl_b select generate_series(2,11),1;
 
 -- check targetlist subquery scenario.
 set enable_nestloop to true;
@@ -692,6 +692,11 @@ explain (costs off)  select (case when a.b =1 then (select count(*) from tbl_b b
 select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b in (1,2)) else 0 end) from tbl_a a order by 1;
 explain (costs off)  select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b is not null) else 0 end) from tbl_a a order by 1;
 select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b is not null) else 0 end) from tbl_a a order by 1;
+
+-- support pullup lateral ANY_SUBLINK
+explain select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);
+select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);
+
 drop table tbl_a;
 drop table tbl_b;
 set enable_pullup_subquery to false;

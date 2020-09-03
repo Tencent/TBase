@@ -844,6 +844,15 @@ alias_relid_set(PlannerInfo *root, Relids relids)
 }
 
 #ifdef __TBASE__
+/*
+ * contain_vars_upper_level
+ *	  Recursively scan a clause to discover whether it contains any Var nodes
+ *	  of/above the specified query level.
+ *
+ *	  Returns true if any such Var found.
+ *
+ * Will recurse into sublinks.  Also, may be invoked directly on a Query.
+ */
 bool
 contain_vars_upper_level(Node *node, int levelsup)
 {

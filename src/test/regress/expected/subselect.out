@@ -1161,297 +1161,13 @@ NOTICE:  x = 9, y = 13
 
 drop function tattle(x int, y int);
 --
--- Tests for CTE inlining behavior
---
--- Basic subquery that can be inlined
-explain (verbose, costs off)
-with x as (select * from (select f1 from subselect_tbl) ss)
-select * from x where f1 = 1;
-                QUERY PLAN                
-------------------------------------------
- Remote Subquery Scan on all (datanode_1)
-   Output: subselect_tbl.f1
-   ->  Seq Scan on public.subselect_tbl
-         Output: subselect_tbl.f1
-         Filter: (subselect_tbl.f1 = 1)
-(5 rows)
-
--- Explicitly request materialization
-explain (verbose, costs off)
-with x as materialized (select * from (select f1 from subselect_tbl) ss)
-select * from x where f1 = 1;
-                         QUERY PLAN                          
--------------------------------------------------------------
- CTE Scan on x
-   Output: x.f1
-   Filter: (x.f1 = 1)
-   CTE x
-     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-           Output: subselect_tbl.f1
-           ->  Seq Scan on public.subselect_tbl
-                 Output: subselect_tbl.f1
-(8 rows)
-
--- Stable functions are safe to inline
-explain (verbose, costs off)
-with x as (select * from (select f1, now() from subselect_tbl) ss)
-select * from x where f1 = 1;
-                QUERY PLAN                
-------------------------------------------
- Remote Subquery Scan on all (datanode_1)
-   Output: subselect_tbl.f1, now()
-   ->  Seq Scan on public.subselect_tbl
-         Output: subselect_tbl.f1, now()
-         Filter: (subselect_tbl.f1 = 1)
-(5 rows)
-
--- Volatile functions prevent inlining
-explain (verbose, costs off)
-with x as (select * from (select f1, random() from subselect_tbl) ss)
-select * from x where f1 = 1;
-                         QUERY PLAN                          
--------------------------------------------------------------
- CTE Scan on x
-   Output: x.f1, x.random
-   Filter: (x.f1 = 1)
-   CTE x
-     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-           Output: f1, random
-           ->  Seq Scan on public.subselect_tbl
-                 Output: subselect_tbl.f1, random()
-(8 rows)
-
--- SELECT FOR UPDATE cannot be inlined
-explain (verbose, costs off)
-with x as (select * from (select f1 from subselect_tbl for update) ss)
-select * from x where f1 = 1;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- CTE Scan on x
-   Output: x.f1
-   Filter: (x.f1 = 1)
-   CTE x
-     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-           Output: ss.f1
-           ->  Subquery Scan on ss
-                 Output: ss.f1
-                 ->  LockRows
-                       Output: subselect_tbl.f1, subselect_tbl.ctid
-                       ->  Seq Scan on public.subselect_tbl
-                             Output: subselect_tbl.f1, subselect_tbl.ctid
-(12 rows)
-
--- Multiply-referenced CTEs are inlined only when requested
-explain (verbose, costs off)
-with x as (select * from (select f1, now() as n from subselect_tbl) ss)
-select * from x, x x2 where x.n = x2.n;
-                         QUERY PLAN                          
--------------------------------------------------------------
- Merge Join
-   Output: x.f1, x.n, x2.f1, x2.n
-   Merge Cond: (x.n = x2.n)
-   CTE x
-     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-           Output: subselect_tbl.f1, now()
-           ->  Seq Scan on public.subselect_tbl
-                 Output: subselect_tbl.f1, now()
-   ->  Sort
-         Output: x.f1, x.n
-         Sort Key: x.n
-         ->  CTE Scan on x
-               Output: x.f1, x.n
-   ->  Sort
-         Output: x2.f1, x2.n
-         Sort Key: x2.n
-         ->  CTE Scan on x x2
-               Output: x2.f1, x2.n
-(18 rows)
-
-explain (verbose, costs off)
-with x as not materialized (select * from (select f1, now() as n from subselect_tbl) ss)
-select * from x, x x2 where x.n = x2.n;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)
-   Output: subselect_tbl.f1, now(), subselect_tbl_1.f1, now()
-   ->  Result
-         Output: subselect_tbl.f1, (now()), subselect_tbl_1.f1, (now())
-         One-Time Filter: (now() = now())
-         ->  Nested Loop
-               Output: subselect_tbl.f1, (now()), subselect_tbl_1.f1, (now())
-               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                     Output: subselect_tbl.f1, now()
-                     Distribute results by H: now()
-                     ->  Seq Scan on public.subselect_tbl
-                           Output: subselect_tbl.f1, now()
-               ->  Materialize
-                     Output: subselect_tbl_1.f1, (now())
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           Output: subselect_tbl_1.f1, now()
-                           Distribute results by H: now()
-                           ->  Seq Scan on public.subselect_tbl subselect_tbl_1
-                                 Output: subselect_tbl_1.f1, now()
-(19 rows)
-
--- Multiply-referenced CTEs can't be inlined if they contain outer self-refs
-explain (verbose, costs off)
-with recursive x(a) as
-  ((values ('a'), ('b'))
-   union all
-   (with z as not materialized (select * from x)
-    select z.a || z1.a as a from z cross join z as z1
-    where length(z.a || z1.a) < 5))
-select * from x;
-                        QUERY PLAN                        
-----------------------------------------------------------
- CTE Scan on x
-   Output: x.a
-   CTE x
-     ->  Recursive Union
-           ->  Values Scan on "*VALUES*"
-                 Output: "*VALUES*".column1
-           ->  Nested Loop
-                 Output: (z.a || z1.a)
-                 Join Filter: (length((z.a || z1.a)) < 5)
-                 CTE z
-                   ->  WorkTable Scan on x x_1
-                         Output: x_1.a
-                 ->  CTE Scan on z
-                       Output: z.a
-                 ->  Materialize
-                       Output: z1.a
-                       ->  CTE Scan on z z1
-                             Output: z1.a
-(18 rows)
-
-with recursive x(a) as
-  ((values ('a'), ('b'))
-   union all
-   (with z as not materialized (select * from x)
-    select z.a || z1.a as a from z cross join z as z1
-    where length(z.a || z1.a) < 5))
-select * from x;
-  a   
-------
- a
- b
- aa
- ab
- ba
- bb
- aaaa
- aaab
- aaba
- aabb
- abaa
- abab
- abba
- abbb
- baaa
- baab
- baba
- babb
- bbaa
- bbab
- bbba
- bbbb
-(22 rows)
-
-explain (verbose, costs off)
-with recursive x(a) as
-  ((values ('a'), ('b'))
-   union all
-   (with z as not materialized (select * from x)
-    select z.a || z.a as a from z
-    where length(z.a || z.a) < 5))
-select * from x;
-                       QUERY PLAN                       
---------------------------------------------------------
- CTE Scan on x
-   Output: x.a
-   CTE x
-     ->  Recursive Union
-           ->  Values Scan on "*VALUES*"
-                 Output: "*VALUES*".column1
-           ->  WorkTable Scan on x x_1
-                 Output: (x_1.a || x_1.a)
-                 Filter: (length((x_1.a || x_1.a)) < 5)
-(9 rows)
-
-with recursive x(a) as
-  ((values ('a'), ('b'))
-   union all
-   (with z as not materialized (select * from x)
-    select z.a || z.a as a from z
-    where length(z.a || z.a) < 5))
-select * from x;
-  a   
-------
- a
- b
- aa
- bb
- aaaa
- bbbb
-(6 rows)
-
--- Check handling of outer references
-explain (verbose, costs off)
-with x as (select * from int4_tbl)
-select * from (with y as (select * from x) select * from y) ss;
-                QUERY PLAN                
-------------------------------------------
- Remote Subquery Scan on all (datanode_1)
-   Output: f1
-   ->  Seq Scan on public.int4_tbl
-         Output: int4_tbl.f1
-(4 rows)
-
-explain (verbose, costs off)
-with x as materialized (select * from int4_tbl)
-select * from (with y as (select * from x) select * from y) ss;
-                    QUERY PLAN                    
---------------------------------------------------
- CTE Scan on x
-   Output: x.f1
-   CTE x
-     ->  Remote Subquery Scan on all (datanode_1)
-           Output: int4_tbl.f1
-           ->  Seq Scan on public.int4_tbl
-                 Output: int4_tbl.f1
-(7 rows)
-
--- Ensure that we inline the currect CTE when there are
--- multiple CTEs with the same name
-explain (verbose, costs off)
-with x as (select 1 as y)
-select * from (with x as (select 2 as y) select * from x) ss;
- QUERY PLAN  
--------------
- Result
-   Output: 2
-(2 rows)
-
--- Row marks are not pushed into CTEs
-explain (verbose, costs off)
-with x as (select * from subselect_tbl)
-select * from x for update;
-                              QUERY PLAN                              
-----------------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)
-   Output: subselect_tbl.f1, subselect_tbl.f2, subselect_tbl.f3
-   ->  Seq Scan on public.subselect_tbl
-         Output: subselect_tbl.f1, subselect_tbl.f2, subselect_tbl.f3
-(4 rows)
-
---
 -- Tests for pulling up more sublinks
 --
 set enable_pullup_subquery to true;
 create table tbl_a(a int,b int);
 create table tbl_b(a int,b int);
-insert into tbl_a select generate_series(1,10),1 ;
-insert into tbl_b select generate_series(2,11),1 ;
+insert into tbl_a select generate_series(1,10),1;
+insert into tbl_b select generate_series(2,11),1;
 -- check targetlist subquery scenario.
 set enable_nestloop to true;
 set enable_hashjoin to false;
@@ -1930,10 +1646,10 @@ select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and 
 (10 rows)
 
 explain (costs off)  select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b is not null) else 0 end) from tbl_a a order by 1;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
  Sort
-   Sort Key: (CASE WHEN (a.b = 1) THEN "TARGETLIST_subquery".count ELSE '0'::bigint END)
+   Sort Key: (CASE WHEN (a.b = 1) THEN COALESCE("TARGETLIST_subquery".count, '0'::bigint) ELSE '0'::bigint END)
    ->  Nested Loop Left Join
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                ->  Seq Scan on tbl_a a
@@ -1951,6 +1667,7 @@ explain (costs off)  select (case when a.b =1 then (select count(*) from tbl_b b
 select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b is not null) else 0 end) from tbl_a a order by 1;
  case 
 ------
+    0
     1
     1
     1
@@ -1960,9 +1677,312 @@ select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and 
     1
     1
     1
-     
 (10 rows)
+
+-- support pullup lateral ANY_SUBLINK
+explain select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=140.38..193.10 rows=225 width=8)
+   ->  Hash Semi Join  (cost=140.38..193.10 rows=225 width=8)
+         Hash Cond: (a.b = b.a)
+         Join Filter: (b.b > a.b)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..141.05 rows=1350 width=8)
+               Distribute results by H: b
+               ->  Seq Scan on tbl_a a  (cost=0.00..23.50 rows=1350 width=8)
+         ->  Hash  (cost=23.50..23.50 rows=1350 width=8)
+               ->  Seq Scan on tbl_b b  (cost=0.00..23.50 rows=1350 width=8)
+(9 rows)
+
+select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);
+ a | b 
+---+---
+(0 rows)
 
 drop table tbl_a;
 drop table tbl_b;
 set enable_pullup_subquery to false;
+--
+-- Tests for CTE inlining behavior
+--
+-- Basic subquery that can be inlined
+explain (verbose, costs off)
+with x as (select * from (select f1 from subselect_tbl) ss)
+select * from x where f1 = 1;
+                QUERY PLAN                
+------------------------------------------
+ Remote Subquery Scan on all (datanode_1)
+   Output: subselect_tbl.f1
+   ->  Seq Scan on public.subselect_tbl
+         Output: subselect_tbl.f1
+         Filter: (subselect_tbl.f1 = 1)
+(5 rows)
+
+-- Explicitly request materialization
+explain (verbose, costs off)
+with x as materialized (select * from (select f1 from subselect_tbl) ss)
+select * from x where f1 = 1;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ CTE Scan on x
+   Output: x.f1
+   Filter: (x.f1 = 1)
+   CTE x
+     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+           Output: subselect_tbl.f1
+           ->  Seq Scan on public.subselect_tbl
+                 Output: subselect_tbl.f1
+(8 rows)
+
+-- Stable functions are safe to inline
+explain (verbose, costs off)
+with x as (select * from (select f1, now() from subselect_tbl) ss)
+select * from x where f1 = 1;
+                QUERY PLAN                
+------------------------------------------
+ Remote Subquery Scan on all (datanode_1)
+   Output: subselect_tbl.f1, now()
+   ->  Seq Scan on public.subselect_tbl
+         Output: subselect_tbl.f1, now()
+         Filter: (subselect_tbl.f1 = 1)
+(5 rows)
+
+-- Volatile functions prevent inlining
+explain (verbose, costs off)
+with x as (select * from (select f1, random() from subselect_tbl) ss)
+select * from x where f1 = 1;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ CTE Scan on x
+   Output: x.f1, x.random
+   Filter: (x.f1 = 1)
+   CTE x
+     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+           Output: f1, random
+           ->  Seq Scan on public.subselect_tbl
+                 Output: subselect_tbl.f1, random()
+(8 rows)
+
+-- SELECT FOR UPDATE cannot be inlined
+explain (verbose, costs off)
+with x as (select * from (select f1 from subselect_tbl for update) ss)
+select * from x where f1 = 1;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ CTE Scan on x
+   Output: x.f1
+   Filter: (x.f1 = 1)
+   CTE x
+     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+           Output: ss.f1
+           ->  Subquery Scan on ss
+                 Output: ss.f1
+                 ->  LockRows
+                       Output: subselect_tbl.f1, subselect_tbl.ctid
+                       ->  Seq Scan on public.subselect_tbl
+                             Output: subselect_tbl.f1, subselect_tbl.ctid
+(12 rows)
+
+-- Multiply-referenced CTEs are inlined only when requested
+explain (verbose, costs off)
+with x as (select * from (select f1, now() as n from subselect_tbl) ss)
+select * from x, x x2 where x.n = x2.n;
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Merge Join
+   Output: x.f1, x.n, x2.f1, x2.n
+   Merge Cond: (x.n = x2.n)
+   CTE x
+     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+           Output: subselect_tbl.f1, now()
+           ->  Seq Scan on public.subselect_tbl
+                 Output: subselect_tbl.f1, now()
+   ->  Sort
+         Output: x.f1, x.n
+         Sort Key: x.n
+         ->  CTE Scan on x
+               Output: x.f1, x.n
+   ->  Sort
+         Output: x2.f1, x2.n
+         Sort Key: x2.n
+         ->  CTE Scan on x x2
+               Output: x2.f1, x2.n
+(18 rows)
+
+explain (verbose, costs off)
+with x as not materialized (select * from (select f1, now() as n from subselect_tbl) ss)
+select * from x, x x2 where x.n = x2.n;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   Output: subselect_tbl.f1, now(), subselect_tbl_1.f1, now()
+   ->  Result
+         Output: subselect_tbl.f1, (now()), subselect_tbl_1.f1, (now())
+         One-Time Filter: (now() = now())
+         ->  Nested Loop
+               Output: subselect_tbl.f1, (now()), subselect_tbl_1.f1, (now())
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Output: subselect_tbl.f1, now()
+                     Distribute results by H: now()
+                     ->  Seq Scan on public.subselect_tbl
+                           Output: subselect_tbl.f1, now()
+               ->  Materialize
+                     Output: subselect_tbl_1.f1, (now())
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Output: subselect_tbl_1.f1, now()
+                           Distribute results by H: now()
+                           ->  Seq Scan on public.subselect_tbl subselect_tbl_1
+                                 Output: subselect_tbl_1.f1, now()
+(19 rows)
+
+-- Multiply-referenced CTEs can't be inlined if they contain outer self-refs
+explain (verbose, costs off)
+with recursive x(a) as
+  ((values ('a'), ('b'))
+   union all
+   (with z as not materialized (select * from x)
+    select z.a || z1.a as a from z cross join z as z1
+    where length(z.a || z1.a) < 5))
+select * from x;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ CTE Scan on x
+   Output: x.a
+   CTE x
+     ->  Recursive Union
+           ->  Values Scan on "*VALUES*"
+                 Output: "*VALUES*".column1
+           ->  Nested Loop
+                 Output: (z.a || z1.a)
+                 Join Filter: (length((z.a || z1.a)) < 5)
+                 CTE z
+                   ->  WorkTable Scan on x x_1
+                         Output: x_1.a
+                 ->  CTE Scan on z
+                       Output: z.a
+                 ->  Materialize
+                       Output: z1.a
+                       ->  CTE Scan on z z1
+                             Output: z1.a
+(18 rows)
+
+with recursive x(a) as
+  ((values ('a'), ('b'))
+   union all
+   (with z as not materialized (select * from x)
+    select z.a || z1.a as a from z cross join z as z1
+    where length(z.a || z1.a) < 5))
+select * from x;
+  a   
+------
+ a
+ b
+ aa
+ ab
+ ba
+ bb
+ aaaa
+ aaab
+ aaba
+ aabb
+ abaa
+ abab
+ abba
+ abbb
+ baaa
+ baab
+ baba
+ babb
+ bbaa
+ bbab
+ bbba
+ bbbb
+(22 rows)
+
+explain (verbose, costs off)
+with recursive x(a) as
+  ((values ('a'), ('b'))
+   union all
+   (with z as not materialized (select * from x)
+    select z.a || z.a as a from z
+    where length(z.a || z.a) < 5))
+select * from x;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ CTE Scan on x
+   Output: x.a
+   CTE x
+     ->  Recursive Union
+           ->  Values Scan on "*VALUES*"
+                 Output: "*VALUES*".column1
+           ->  WorkTable Scan on x x_1
+                 Output: (x_1.a || x_1.a)
+                 Filter: (length((x_1.a || x_1.a)) < 5)
+(9 rows)
+
+with recursive x(a) as
+  ((values ('a'), ('b'))
+   union all
+   (with z as not materialized (select * from x)
+    select z.a || z.a as a from z
+    where length(z.a || z.a) < 5))
+select * from x;
+  a   
+------
+ a
+ b
+ aa
+ bb
+ aaaa
+ bbbb
+(6 rows)
+
+-- Check handling of outer references
+explain (verbose, costs off)
+with x as (select * from int4_tbl)
+select * from (with y as (select * from x) select * from y) ss;
+                QUERY PLAN                
+------------------------------------------
+ Remote Subquery Scan on all (datanode_1)
+   Output: f1
+   ->  Seq Scan on public.int4_tbl
+         Output: int4_tbl.f1
+(4 rows)
+
+explain (verbose, costs off)
+with x as materialized (select * from int4_tbl)
+select * from (with y as (select * from x) select * from y) ss;
+                    QUERY PLAN                    
+--------------------------------------------------
+ CTE Scan on x
+   Output: x.f1
+   CTE x
+     ->  Remote Subquery Scan on all (datanode_1)
+           Output: int4_tbl.f1
+           ->  Seq Scan on public.int4_tbl
+                 Output: int4_tbl.f1
+(7 rows)
+
+-- Ensure that we inline the currect CTE when there are
+-- multiple CTEs with the same name
+explain (verbose, costs off)
+with x as (select 1 as y)
+select * from (with x as (select 2 as y) select * from x) ss;
+ QUERY PLAN  
+-------------
+ Result
+   Output: 2
+(2 rows)
+
+-- Row marks are not pushed into CTEs
+explain (verbose, costs off)
+with x as (select * from subselect_tbl)
+select * from x for update;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   Output: subselect_tbl.f1, subselect_tbl.f2, subselect_tbl.f3
+   ->  Seq Scan on public.subselect_tbl
+         Output: subselect_tbl.f1, subselect_tbl.f2, subselect_tbl.f3
+(4 rows)
+

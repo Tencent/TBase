@@ -172,8 +172,12 @@ static bool finalize_primnode(Node *node, finalize_primnode_context *context);
 static bool finalize_agg_primnode(Node *node, finalize_primnode_context *context);
 
 #ifdef __TBASE__
-static Expr * convert_OR_EXIST_sublink_to_join(PlannerInfo *root, SubLink *sublink, Node **jtlink);
-static Node * get_or_exist_subquery_targetlist(PlannerInfo *root, Node *node,List **targetList, List **joinClause, int *next_attno);
+static Expr * convert_OR_EXIST_sublink_to_join(PlannerInfo *root,
+			  SubLink *sublink, Node **jtlink);
+static Node * get_or_exist_subquery_targetlist(PlannerInfo *root, Node *node,
+			  List **targetList, List **joinClause, int *next_attno);
+static bool is_simple_subquery(Query *subquery, JoinExpr *lowest_outer_join,
+			  bool deletion_ok);
 #endif
 /*
  * Select a PARAM_EXEC number to identify the given Var as a parameter for
@@ -537,6 +541,140 @@ get_first_col_type(Plan *plan, Oid *coltype, int32 *coltypmod,
     *coltypmod = -1;
     *colcollation = InvalidOid;
 }
+
+#ifdef __TBASE__
+/*
+ * Check if there is a range table entry of type func expr whose arguments
+ * are correlated
+ */
+bool
+has_correlation_in_funcexpr_rte(List *rtable)
+{
+	/*
+	 * check if correlation occurs in a func expr in the from clause of the
+	 * subselect
+	 */
+	ListCell   *lc_rte;
+
+	foreach(lc_rte, rtable)
+	{
+		RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc_rte);
+
+		if (rte->functions && contain_vars_upper_level((Node *) rte->functions, 1))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+/*
+ * is_simple_subquery
+ *	  Check a subquery in the range table to see if it's simple enough
+ *	  to pull up into the parent query.
+ *
+ * rte is the RTE_SUBQUERY RangeTblEntry that contained the subquery.
+ * (Note subquery is not necessarily equal to rte->subquery; it could be a
+ * processed copy of that.)
+ * lowest_outer_join is the lowest outer join above the subquery, or NULL.
+ * deletion_ok is TRUE if it'd be okay to delete the subquery entirely.
+ */
+static bool
+is_simple_subquery(Query *subquery,
+				   JoinExpr *lowest_outer_join,
+				   bool deletion_ok)
+{
+	/*
+	 * Let's just make sure it's a valid subselect ...
+	 */
+	if (!IsA(subquery, Query) ||
+		subquery->commandType != CMD_SELECT)
+		elog(ERROR, "subquery is bogus");
+
+	/*
+	 * Can't currently pull up a query with setops (unless it's simple UNION
+	 * ALL, which is handled by a different code path). Maybe after querytree
+	 * redesign...
+	 */
+	if (subquery->setOperations)
+		return false;
+
+	/*
+	 * Can't pull up a subquery involving grouping, aggregation, SRFs,
+	 * sorting, limiting, or WITH.  (XXX WITH could possibly be allowed later)
+	 *
+	 * We also don't pull up a subquery that has explicit FOR UPDATE/SHARE
+	 * clauses, because pullup would cause the locking to occur semantically
+	 * higher than it should.  Implicit FOR UPDATE/SHARE is okay because in
+	 * that case the locking was originally declared in the upper query
+	 * anyway.
+	 */
+	if (subquery->hasAggs ||
+		subquery->hasWindowFuncs ||
+		subquery->hasTargetSRFs ||
+		subquery->groupClause ||
+		subquery->groupingSets ||
+		subquery->havingQual ||
+		subquery->sortClause ||
+		subquery->distinctClause ||
+		subquery->limitOffset ||
+		subquery->limitCount ||
+		subquery->hasForUpdate ||
+		subquery->cteList)
+		return false;
+
+	/*
+	 * Don't pull up a subquery with an empty jointree, unless it has no quals
+	 * and deletion_ok is TRUE and we're not underneath an outer join.
+	 *
+	 * query_planner() will correctly generate a Result plan for a jointree
+	 * that's totally empty, but we can't cope with an empty FromExpr
+	 * appearing lower down in a jointree: we identify join rels via baserelid
+	 * sets, so we couldn't distinguish a join containing such a FromExpr from
+	 * one without it.  We can only handle such cases if the place where the
+	 * subquery is linked is a FromExpr or inner JOIN that would still be
+	 * nonempty after removal of the subquery, so that it's still identifiable
+	 * via its contained baserelids.  Safe contexts are signaled by
+	 * deletion_ok.
+	 *
+	 * But even in a safe context, we must keep the subquery if it has any
+	 * quals, because it's unclear where to put them in the upper query.
+	 *
+	 * Also, we must forbid pullup if such a subquery is underneath an outer
+	 * join, because then we might need to wrap its output columns with
+	 * PlaceHolderVars, and the PHVs would then have empty relid sets meaning
+	 * we couldn't tell where to evaluate them.  (This test is separate from
+	 * the deletion_ok flag for possible future expansion: deletion_ok tells
+	 * whether the immediate parent site in the jointree could cope, not
+	 * whether we'd have PHV issues.  It's possible this restriction could be
+	 * fixed by letting the PHVs use the relids of the parent jointree item,
+	 * but that complication is for another day.)
+	 *
+	 * Note that deletion of a subquery is also dependent on the check below
+	 * that its targetlist contains no set-returning functions.  Deletion from
+	 * a FROM list or inner JOIN is okay only if the subquery must return
+	 * exactly one row.
+	 */
+	if (subquery->jointree->fromlist == NIL &&
+		(subquery->jointree->quals != NULL ||
+		 !deletion_ok ||
+		 lowest_outer_join != NULL))
+		return false;
+
+	/*
+	 * Don't pull up a subquery that has any volatile functions in its
+	 * targetlist.  Otherwise we might introduce multiple evaluations of these
+	 * functions, if they get copied to multiple places in the upper query,
+	 * leading to surprising results.  (Note: the PlaceHolderVar mechanism
+	 * doesn't quite guarantee single evaluation; else we could pull up anyway
+	 * and just wrap such items in PlaceHolderVars ...)
+	 */
+	if (contain_volatile_functions((Node *) subquery->targetList))
+		return false;
+
+	return true;
+}
+#endif
 
 /*
  * Convert a SubLink (as created by the parser) into a SubPlan.
@@ -1454,12 +1592,6 @@ SS_process_ctes(PlannerInfo *root)
 
 #ifdef __TBASE__
 static bool
-simplify_ANY_query(PlannerInfo *root, Query *query)
-{
-    return false;
-}
-
-static bool
 simplify_EXPR_query(PlannerInfo *root, Query *query)
 {// #lizard forgives
     Node *whereclause = NULL;
@@ -2005,82 +2137,73 @@ convert_ANY_sublink_to_join(PlannerInfo *root, SubLink *sublink,
     Node       *quals;
     ParseState *pstate;
 #ifdef __TBASE__
-    int            offset = 0;
-    Node       *whereClause = NULL;
+	bool		correlated = false;
 #endif
 
     Assert(sublink->subLinkType == ANY_SUBLINK);
 
 #ifdef __TBASE__
-    /*
-      * handle correlated subquery here.
-      * simple case: select * from a where a.X in (select b.X from b where a.Xx ? b.Xx.......);
-      */
-    if (simplify_ANY_query(root, subselect))
-    {
-        subselect = copyObject(subselect);
-         whereClause = subselect->jointree->quals;
-        subselect->jointree->quals = NULL;
+	if (enable_pullup_subquery)
+	{
+		/*
+		 * If there are CTEs, then the transformation does not work. Don't attempt
+		 * to pullup.
+		 */
+		if (parse->cteList)
+			return NULL;
 
-        /*
-         * The rest of the sub-select must not refer to any Vars of the parent
-         * query.  (Vars of higher levels should be okay, though.)
-         */
-        if (contain_vars_of_level((Node *) subselect, 1))
-            return NULL;
+		/*
+		 * If uncorrelated, and no Var nodes on lhs, the subquery will be executed
+		 * only once.  It should become an InitPlan, but make_subplan() doesn't
+		 * handle that case, so just flatten it for now.
+		 * TODO: Let it become an InitPlan, so its QEs can be recycled.
+		 *
+		 * We only handle level 1 correlated cases. The sub-select must not refer
+		 * to any Vars of the parent query. (Vars of higher levels should be okay,
+		 * though.)
+		 */
+		correlated = contain_vars_of_level((Node *) subselect, 1);
 
-        if (whereClause)
-        {        
+		if (correlated)
+		{
+			/*
+			 * If deeply(>1) correlated, then don't pull it up
+			 */
+			if (contain_vars_upper_level(sublink->subselect, 1))
+				return NULL;
 
-            if (contain_vars_of_level((Node *) subselect, 1))
-                return NULL;
-            /*
-             * the WHERE clause may contain some Vars of the
-             * parent query.
-             */
-            upper_varnos = pull_varnos_of_level(whereClause, 1);
+			/*
+			 * Under certain conditions, we cannot pull up the subquery as a join.
+			 */
+			if (!is_simple_subquery(subselect, NULL, false))
+				return NULL;
 
-            if (upper_varnos)
-            {
-                /* whereclause contains vars from different parent query */
-                if (bms_num_members(upper_varnos) > 1)
-                {
-                    return NULL;
-                }
-    
-                if (!bms_is_subset(upper_varnos, available_rels))
-                {
-                    return NULL;
-                }
-            }
+			/*
+			 * Do not pull subqueries with correlation in a func expr in the from
+			 * clause of the subselect
+			 */
+			if (has_correlation_in_funcexpr_rte(subselect->rtable))
+				return NULL;
 
-            /*
-             * We don't risk optimizing if the WHERE clause is volatile, either.
-             */
-            if (contain_volatile_functions(whereClause))
-                return NULL;
-        }
-    }
-    else
-    {    
-        whereClause = NULL;
+			if (contain_subplans(subselect->jointree->quals))
+				return NULL;
+		}
+	}
+	else
+	{
+#endif
+	/*
+	 * The sub-select must not refer to any Vars of the parent query. (Vars of
+	 * higher levels should be okay, though.)
+	 */
+	if (contain_vars_of_level((Node *) subselect, 1))
+		return NULL;
+#ifdef __TBASE__
+	}
 
-        if (under_not)
-        {
-            return NULL;
-        }
-
-        if (contain_vars_of_level((Node *) subselect, 1))
-            return NULL;
-    }
-    
-#else
-    /*
-     * The sub-select must not refer to any Vars of the parent query. (Vars of
-     * higher levels should be okay, though.)
-     */
-    if (contain_vars_of_level((Node *) subselect, 1))
-        return NULL;
+	/* TODO: Currently we do not pullup under_not */
+	if (under_not)
+		return NULL;
 #endif
 
     /*
@@ -2107,50 +2230,28 @@ convert_ANY_sublink_to_join(PlannerInfo *root, SubLink *sublink,
     /* Create a dummy ParseState for addRangeTableEntryForSubquery */
     pstate = make_parsestate(NULL);
 
+	/*
+	 * Okay, pull up the sub-select into upper range table.
+	 *
+	 * We rely here on the assumption that the outer query has no references
+	 * to the inner (necessarily true, other than the Vars that we build
+	 * below). Therefore this is a lot easier than what pull_up_subqueries has
+	 * to go through.
+	 *
+	 * If the subquery is correlated, i.e. it refers to any Vars of the
+	 * parent query, mark it as lateral.
+	 */
+	rte = addRangeTableEntryForSubquery(pstate,
+										subselect,
+										makeAlias("ANY_subquery", NIL),
 #ifdef __TBASE__
-    if (whereClause)
-    {
-        rtindex = list_length(parse->rtable);
-
-        offset  = rtindex;
-
-        OffsetVarNodes(whereClause, rtindex, 0);
-
-        IncrementVarSublevelsUp(whereClause, -1, 1);
-    }
+										correlated,	/* lateral */
+#else
+										false,
 #endif
-
-    /*
-     * Okay, pull up the sub-select into upper range table.
-     *
-     * We rely here on the assumption that the outer query has no references
-     * to the inner (necessarily true, other than the Vars that we build
-     * below). Therefore this is a lot easier than what pull_up_subqueries has
-     * to go through.
-     */
-#ifdef __TBASE__
-    if (whereClause)
-    {
-#endif
-    rte = addRangeTableEntryForSubquery(pstate,
-                                        subselect,
-                                        makeAlias("ANY_subquery", NIL),
-                                        false,
-                                        false);
-#ifdef __TBASE__
-    }
-    else
-    {
-        rte = addRangeTableEntryForSubquery(pstate,
-                                    (Query *) sublink->subselect,
-                                    makeAlias("ANY_subquery", NIL),
-                                    false,
-                                    false);
-    }
-#endif
-
-    parse->rtable = lappend(parse->rtable, rte);
-    rtindex = list_length(parse->rtable);
+										false);
+	parse->rtable = lappend(parse->rtable, rte);
+	rtindex = list_length(parse->rtable);
 
     /*
      * Form a RangeTblRef for the pulled-up sub-select.
@@ -2165,95 +2266,15 @@ convert_ANY_sublink_to_join(PlannerInfo *root, SubLink *sublink,
                                            subselect->targetList,
                                            rtindex);
 
-#ifdef __TBASE__
-    /* add vars from subquery in whereclause into targetlist */
-    if (whereClause)
-    {
-        ListCell *cell;
-        List *vars = pull_vars_of_level((Node *)whereClause, 0);
+	/*
+	 * Build the new join's qual expression, replacing Params with these Vars.
+	 */
+	quals = convert_testexpr(root, sublink->testexpr, subquery_vars);
 
-        foreach(cell, vars)
-        {
-            Var *var = lfirst(cell);
-
-            if (var->varno == rtindex)
-            {
-                bool match = false;
-                ListCell *lc;
-                Var *temp_var = NULL;
-                TargetEntry *ent = NULL;
-                int varno        = 0;
-                int varlevelsup  = 0;
-
-                if (var->varlevelsup >= 1)
-                {
-                    varlevelsup = var->varlevelsup;
-                    var->varlevelsup = 0;
-                }
-                
-                temp_var = copyObject(var);
-                temp_var->varno -= offset;
-                temp_var->varnoold -= offset;
-
-                match = false;
-                foreach(lc, subselect->targetList)
-                {
-                    TargetEntry *tent = (TargetEntry *) lfirst(lc);
-
-                    if (IsA(tent->expr, Var))
-                    {
-                        if (equal(temp_var, tent->expr))
-                        {
-                            match = true;
-
-                            var->varattno = var->varoattno = tent->resno;
-                            
-                            break;
-                        }
-                    }
-                }
-
-                if (!match)
-                {
-                    ent = makeTargetEntry((Expr *)temp_var, temp_var->varoattno, NULL, false);
-        
-                    subselect->targetList = lappend(subselect->targetList, ent);
-
-                    varno = list_length(subselect->targetList);
-
-                    ent->resno = varno;
-
-                    var->varattno = var->varoattno = varno;
-                }
-
-                if (varlevelsup)
-                {
-                    var->varlevelsup = varlevelsup;
-                }
-            }
-        }
-    }
-#endif
-
-    /*
-     * Build the new join's qual expression, replacing Params with these Vars.
-     */
-    quals = convert_testexpr(root, sublink->testexpr, subquery_vars);
-
-#ifdef __TBASE__
-    /* make join quals with whereclause */
-    if (whereClause)
-    {
-        Expr *expr = makeBoolExpr(AND_EXPR, list_make2(quals, whereClause), 0);
-
-        quals = (Node *)expr;
-    }
-#endif
-
-    /*
-     * And finally, build the JoinExpr node.
-     */
-    result = makeNode(JoinExpr);
+	/*
+	 * And finally, build the JoinExpr node.
+	 */
+	result = makeNode(JoinExpr);
 #ifdef __TBASE__
     result->jointype = under_not ? JOIN_ANTI : JOIN_SEMI;
 #else
