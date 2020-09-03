@@ -660,15 +660,18 @@ PortalDrop(Portal portal, bool isTopCommit)
     {
 
 #ifdef __TBASE__
-        /* 
-         * when dn recv rollback_subtxn, the resource already release by AbortSubTransaction,
-         * and the memory delete by CleanupSubTransaction (delete parent memory context op will delete child)
-         */
-		if (strcmp(portal->commandTag, "ROLLBACK SUBTXN") == 0)
-        {
-            elog(LOG, "skip delete portal resowner");
-        }
-        else
+		/* 
+		 * When CN/DN received rollback_subtxn, the resource already been
+		 * released by AbortSubTransaction, and the memory delete by
+		 * CleanupSubTransaction (delete parent memory context operation
+		 * will delete child)
+		 */
+		if (portal->commandTag &&
+			strcmp(portal->commandTag, "ROLLBACK SUBTXN") == 0)
+		{
+			elog(LOG, "skip delete portal resowner");
+		}
+		else
 #endif
         {
             bool        isCommit = (portal->status != PORTAL_FAILED);
