@@ -8874,16 +8874,17 @@ ExecRemoteQuery(PlanState *pstate)
          */
         combiner->node_count = regular_conn_count;
 
-        /*
-         * Start transaction on data nodes if we are in explicit transaction
-         * or going to use extended query protocol or write to multiple nodes
-         */
-        if (step->force_autocommit)
-            need_tran_block = false;
-        else
-            need_tran_block = step->cursor ||
-                    (!step->read_only && total_conn_count > 1) ||
-                    (TransactionBlockStatusCode() == 'T');
+		/*
+		 * Start transaction on data nodes if we are in explicit transaction
+		 * or going to use extended query protocol or write to multiple nodes
+		 */
+		if (step->force_autocommit)
+			need_tran_block = false;
+		else
+			need_tran_block = step->cursor ||
+					step->statement || node->rqs_num_params ||
+					(!step->read_only && total_conn_count > 1) ||
+					(TransactionBlockStatusCode() == 'T');
 
 #ifdef __TBASE__
 		/* Set plpgsql transaction begin for all connections */
