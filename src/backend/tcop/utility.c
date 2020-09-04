@@ -1737,10 +1737,12 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 
 #ifdef __TBASE__
 /*
- * Forward specific DDLs request to leader cn
- * on success return true else false
+ * Forward specific DDLs request to leader cn.
+ *
+ * On success return true else false.
  */
-static bool forward_ddl_to_leader_cn(Node *node, const char *queryString)
+static bool
+forward_ddl_to_leader_cn(Node *node, const char *queryString)
 {
     Oid  leader_cn = InvalidOid;
     char *leader_name = NULL;
