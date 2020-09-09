@@ -1607,6 +1607,36 @@ select * from tab1_replicated where val = 7;
 -----+------
 (0 rows)
 
+-- Constant subquery
+create table subquery_fqs(id int, a varchar, c int);
+insert into subquery_fqs values(1,'gd', 2);
+insert into subquery_fqs values(1,'zj', 2);
+insert into subquery_fqs values(1,'sz', 2);
+explain select * from subquery_fqs t join (select 1 id, 'gd' a, 2 c from dual union select 1 id, 'sz' a, 2 c union select 1 id, 'zj' a, 2 c from dual) t2 ON (t.id = t2.id and t.a = t2.a);
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Node/s: datanode_1, datanode_2
+   ->  Hash Join  (cost=0.19..25.60 rows=1 width=80)
+         Hash Cond: ((t.id = (1)) AND ((t.a)::text = ('gd'::text)))
+         ->  Seq Scan on subquery_fqs t  (cost=0.00..18.80 rows=880 width=40)
+         ->  Hash  (cost=0.14..0.14 rows=3 width=40)
+               ->  HashAggregate  (cost=0.08..0.11 rows=3 width=40)
+                     Group Key: (1), ('gd'::text), (2)
+                     ->  Append  (cost=0.00..0.06 rows=3 width=40)
+                           ->  Result  (cost=0.00..0.01 rows=1 width=40)
+                           ->  Result  (cost=0.00..0.01 rows=1 width=40)
+                           ->  Result  (cost=0.00..0.01 rows=1 width=40)
+(12 rows)
+
+select * from subquery_fqs t join (select 1 id, 'gd' a, 2 c from dual union select 1 id, 'sz' a, 2 c union select 1 id, 'zj' a, 2 c from dual) t2 ON (t.id = t2.id and t.a = t2.a);
+ id | a  | c | id | a  | c 
+----+----+---+----+----+---
+  1 | gd | 2 |  1 | gd | 2
+  1 | zj | 2 |  1 | zj | 2
+  1 | sz | 2 |  1 | sz | 2
+(3 rows)
+
 drop table tab1_rr;
 drop table tab1_hash;
 drop table tab1_modulo;

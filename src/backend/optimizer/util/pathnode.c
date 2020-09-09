@@ -56,10 +56,12 @@
 #ifdef __TBASE__
 /*GUC parameter */
 bool prefer_olap;
-
+/* Max replication level on join to make Query more efficient */
 int replication_level;
-
+/* Restrict query to involved node as possible */
 bool restrict_query = false;
+/* Support fast query shipping for subquery */
+bool enable_subquery_shipping = false;
 
 #define  REPLICATION_FACTOR 0.8
 #endif
@@ -2173,24 +2175,24 @@ not_allowed_join:
                     Expr *left_expr = left;
                     Expr *right_expr = right;
 #endif
-                    Oid leftType PG_USED_FOR_ASSERTS_ONLY = exprType((Node *) left);
+					Oid leftType PG_USED_FOR_ASSERTS_ONLY = exprType((Node *) left);
 #ifndef __TBASE__
 					Oid rightType PG_USED_FOR_ASSERTS_ONLY = exprType((Node *) right);
 #endif
-                    Relids inner_rels = pathnode->innerjoinpath->parent->relids;
-                    Relids outer_rels = pathnode->outerjoinpath->parent->relids;
-                    QualCost cost;
+					Relids inner_rels = pathnode->innerjoinpath->parent->relids;
+					Relids outer_rels = pathnode->outerjoinpath->parent->relids;
+					QualCost cost;
 
-#ifndef    __TBASE__
-                    /*
-                     * Check if both parts are of the same data type and choose
-                     * distribution type to redistribute.
-                     * XXX We may want more sophisticated algorithm to choose
-                     * the best condition to redistribute parts along.
-                     * For now use simple but reliable approach.
-                     */
-                    if (leftType != rightType)
-                        continue;
+#ifndef	__TBASE__
+					/*
+					 * Check if both parts are of the same data type and choose
+					 * distribution type to redistribute.
+					 * XXX We may want more sophisticated algorithm to choose
+					 * the best condition to redistribute parts along.
+					 * For now use simple but reliable approach.
+					 */
+					if (leftType != rightType)
+						continue;
 #endif
 #ifndef _PG_REGRESS_
                     {        

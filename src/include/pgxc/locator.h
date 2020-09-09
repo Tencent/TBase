@@ -96,21 +96,22 @@ typedef struct
  */
 typedef struct
 {
-    NodeTag        type;
-    List        *primarynodelist;
-    List        *nodeList;
-    char        baselocatortype;
-    Expr        *en_expr;        /* expression to evaluate at execution time if planner
-                         * can not determine execution nodes */
+	NodeTag		type;
+	List		*primarynodelist;
+	List		*nodeList;
+	char		baselocatortype;
+	Expr		*en_expr;		/* expression to evaluate at execution time if planner
+						 	 	 * can not determine execution nodes */
 #ifdef __COLD_HOT__
     Expr        *sec_en_expr;    /* Sec Expression to evaluate at execution time
                                  * if planner can not determine execution
                                  * nodes */
 #endif
-    Oid        en_relid;        /* Relation to determine execution nodes */
-    RelationAccessType accesstype;        /* Access type to determine execution nodes */
+	Oid			en_relid;			/* Relation to determine execution nodes */
+	RelationAccessType accesstype;	/* Access type to determine execution nodes */
 #ifdef __TBASE__
-    bool    restrict_shippable;
+	bool    	restrict_shippable; /* The ExecNode is choose by join qual on distribute column */
+	bool		const_subquery; 	/* The subquery rte only got constant values */
 #endif
 } ExecNodes;
 

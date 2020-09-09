@@ -2312,6 +2312,16 @@ static struct config_bool ConfigureNamesBool[] =
 		false,
 		NULL, NULL, NULL
 	},
+
+	{
+		{"enable_subquery_shipping", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("support fast query shipping for subquery"),
+			NULL
+		},
+		&enable_subquery_shipping,
+		true,
+		NULL, NULL, NULL
+	},
 #endif
 
 #ifdef _MIGRATE_

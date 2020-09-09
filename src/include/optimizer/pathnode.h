@@ -358,6 +358,7 @@ extern void contains_remotesubplan(Path *path, int *number, bool *redistribute);
 extern int replication_level;
 
 extern bool restrict_query;
+extern bool enable_subquery_shipping;
 #endif
 
 #endif                            /* PATHNODE_H */

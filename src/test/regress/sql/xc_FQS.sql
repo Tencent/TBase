@@ -275,6 +275,15 @@ delete from tab1_replicated where val = 7;
 explain (verbose on, costs off) delete from tab1_replicated where val = 7; 
 select * from tab1_replicated where val = 7;
 
+-- Constant subquery
+create table subquery_fqs(id int, a varchar, c int);
+insert into subquery_fqs values(1,'gd', 2);
+insert into subquery_fqs values(1,'zj', 2);
+insert into subquery_fqs values(1,'sz', 2);
+explain select * from subquery_fqs t join (select 1 id, 'gd' a, 2 c from dual union select 1 id, 'sz' a, 2 c union select 1 id, 'zj' a, 2 c from dual) t2 ON (t.id = t2.id and t.a = t2.a);
+select * from subquery_fqs t join (select 1 id, 'gd' a, 2 c from dual union select 1 id, 'sz' a, 2 c union select 1 id, 'zj' a, 2 c from dual) t2 ON (t.id = t2.id and t.a = t2.a);
+
+
 drop table tab1_rr;
 drop table tab1_hash;
 drop table tab1_modulo;
