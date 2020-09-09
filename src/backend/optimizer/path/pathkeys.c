@@ -29,6 +29,7 @@
 
 
 static bool pathkey_is_redundant(PathKey *new_pathkey, List *pathkeys);
+static Var *find_var_for_subquery_tle(RelOptInfo *rel, TargetEntry *tle);
 static bool right_merge_direction(PlannerInfo *root, PathKey *pathkey);
 
 
@@ -599,206 +600,237 @@ build_expression_pathkey(PlannerInfo *root,
  * 'subquery_pathkeys': the subquery's output pathkeys, in its terms.
  * 'subquery_tlist': the subquery's output targetlist, in its terms.
  *
- * It is not necessary for caller to do truncate_useless_pathkeys(),
- * because we select keys in a way that takes usefulness of the keys into
- * account.
+ * We intentionally don't do truncate_useless_pathkeys() here, because there
+ * are situations where seeing the raw ordering of the subquery is helpful.
+ * For example, if it returns ORDER BY x DESC, that may prompt us to
+ * construct a mergejoin using DESC order rather than ASC order; but the
+ * right_merge_direction heuristic would have us throw the knowledge away.
  */
 List *
 convert_subquery_pathkeys(PlannerInfo *root, RelOptInfo *rel,
-                          List *subquery_pathkeys,
-                          List *subquery_tlist)
-{// #lizard forgives
-    List       *retval = NIL;
-    int            retvallen = 0;
-    int            outer_query_keys = list_length(root->query_pathkeys);
-    ListCell   *i;
+						  List *subquery_pathkeys,
+						  List *subquery_tlist)
+{
+	List	   *retval = NIL;
+	int			retvallen = 0;
+	int			outer_query_keys = list_length(root->query_pathkeys);
+	ListCell   *i;
 
-    foreach(i, subquery_pathkeys)
-    {
-        PathKey    *sub_pathkey = (PathKey *) lfirst(i);
-        EquivalenceClass *sub_eclass = sub_pathkey->pk_eclass;
-        PathKey    *best_pathkey = NULL;
+	foreach(i, subquery_pathkeys)
+	{
+		PathKey    *sub_pathkey = (PathKey *) lfirst(i);
+		EquivalenceClass *sub_eclass = sub_pathkey->pk_eclass;
+		PathKey    *best_pathkey = NULL;
 
-        if (sub_eclass->ec_has_volatile)
-        {
-            /*
-             * If the sub_pathkey's EquivalenceClass is volatile, then it must
-             * have come from an ORDER BY clause, and we have to match it to
-             * that same targetlist entry.
-             */
-            TargetEntry *tle;
+		if (sub_eclass->ec_has_volatile)
+		{
+			/*
+			 * If the sub_pathkey's EquivalenceClass is volatile, then it must
+			 * have come from an ORDER BY clause, and we have to match it to
+			 * that same targetlist entry.
+			 */
+			TargetEntry *tle;
+			Var		   *outer_var;
 
-            if (sub_eclass->ec_sortref == 0)    /* can't happen */
-                elog(ERROR, "volatile EquivalenceClass has no sortref");
-            tle = get_sortgroupref_tle(sub_eclass->ec_sortref, subquery_tlist);
-            Assert(tle);
-            /* resjunk items aren't visible to outer query */
-            if (!tle->resjunk)
-            {
-                /* We can represent this sub_pathkey */
-                EquivalenceMember *sub_member;
-                Expr       *outer_expr;
-                EquivalenceClass *outer_ec;
+			if (sub_eclass->ec_sortref == 0)	/* can't happen */
+				elog(ERROR, "volatile EquivalenceClass has no sortref");
+			tle = get_sortgroupref_tle(sub_eclass->ec_sortref, subquery_tlist);
+			Assert(tle);
+			/* Is TLE actually available to the outer query? */
+			outer_var = find_var_for_subquery_tle(rel, tle);
+			if (outer_var)
+			{
+				/* We can represent this sub_pathkey */
+				EquivalenceMember *sub_member;
+				EquivalenceClass *outer_ec;
 
-                Assert(list_length(sub_eclass->ec_members) == 1);
-                sub_member = (EquivalenceMember *) linitial(sub_eclass->ec_members);
-                outer_expr = (Expr *) makeVarFromTargetEntry(rel->relid, tle);
+				Assert(list_length(sub_eclass->ec_members) == 1);
+				sub_member = (EquivalenceMember *) linitial(sub_eclass->ec_members);
 
-                /*
-                 * Note: it might look funny to be setting sortref = 0 for a
-                 * reference to a volatile sub_eclass.  However, the
-                 * expression is *not* volatile in the outer query: it's just
-                 * a Var referencing whatever the subquery emitted. (IOW, the
-                 * outer query isn't going to re-execute the volatile
-                 * expression itself.)    So this is okay.  Likewise, it's
-                 * correct to pass nullable_relids = NULL, because we're
-                 * underneath any outer joins appearing in the outer query.
-                 */
-                outer_ec =
-                    get_eclass_for_sort_expr(root,
-                                             outer_expr,
-                                             NULL,
-                                             sub_eclass->ec_opfamilies,
-                                             sub_member->em_datatype,
-                                             sub_eclass->ec_collation,
-                                             0,
-                                             rel->relids,
-                                             false);
+				/*
+				 * Note: it might look funny to be setting sortref = 0 for a
+				 * reference to a volatile sub_eclass.  However, the
+				 * expression is *not* volatile in the outer query: it's just
+				 * a Var referencing whatever the subquery emitted. (IOW, the
+				 * outer query isn't going to re-execute the volatile
+				 * expression itself.)	So this is okay.  Likewise, it's
+				 * correct to pass nullable_relids = NULL, because we're
+				 * underneath any outer joins appearing in the outer query.
+				 */
+				outer_ec =
+					get_eclass_for_sort_expr(root,
+											 (Expr *) outer_var,
+											 NULL,
+											 sub_eclass->ec_opfamilies,
+											 sub_member->em_datatype,
+											 sub_eclass->ec_collation,
+											 0,
+											 rel->relids,
+											 false);
 
-                /*
-                 * If we don't find a matching EC, sub-pathkey isn't
-                 * interesting to the outer query
-                 */
-                if (outer_ec)
-                    best_pathkey =
-                        make_canonical_pathkey(root,
-                                               outer_ec,
-                                               sub_pathkey->pk_opfamily,
-                                               sub_pathkey->pk_strategy,
-                                               sub_pathkey->pk_nulls_first);
-            }
-        }
-        else
-        {
-            /*
-             * Otherwise, the sub_pathkey's EquivalenceClass could contain
-             * multiple elements (representing knowledge that multiple items
-             * are effectively equal).  Each element might match none, one, or
-             * more of the output columns that are visible to the outer query.
-             * This means we may have multiple possible representations of the
-             * sub_pathkey in the context of the outer query.  Ideally we
-             * would generate them all and put them all into an EC of the
-             * outer query, thereby propagating equality knowledge up to the
-             * outer query.  Right now we cannot do so, because the outer
-             * query's EquivalenceClasses are already frozen when this is
-             * called. Instead we prefer the one that has the highest "score"
-             * (number of EC peers, plus one if it matches the outer
-             * query_pathkeys). This is the most likely to be useful in the
-             * outer query.
-             */
-            int            best_score = -1;
-            ListCell   *j;
+				/*
+				 * If we don't find a matching EC, sub-pathkey isn't
+				 * interesting to the outer query
+				 */
+				if (outer_ec)
+					best_pathkey =
+						make_canonical_pathkey(root,
+											   outer_ec,
+											   sub_pathkey->pk_opfamily,
+											   sub_pathkey->pk_strategy,
+											   sub_pathkey->pk_nulls_first);
+			}
+		}
+		else
+		{
+			/*
+			 * Otherwise, the sub_pathkey's EquivalenceClass could contain
+			 * multiple elements (representing knowledge that multiple items
+			 * are effectively equal).  Each element might match none, one, or
+			 * more of the output columns that are visible to the outer query.
+			 * This means we may have multiple possible representations of the
+			 * sub_pathkey in the context of the outer query.  Ideally we
+			 * would generate them all and put them all into an EC of the
+			 * outer query, thereby propagating equality knowledge up to the
+			 * outer query.  Right now we cannot do so, because the outer
+			 * query's EquivalenceClasses are already frozen when this is
+			 * called. Instead we prefer the one that has the highest "score"
+			 * (number of EC peers, plus one if it matches the outer
+			 * query_pathkeys). This is the most likely to be useful in the
+			 * outer query.
+			 */
+			int			best_score = -1;
+			ListCell   *j;
 
-            foreach(j, sub_eclass->ec_members)
-            {
-                EquivalenceMember *sub_member = (EquivalenceMember *) lfirst(j);
-                Expr       *sub_expr = sub_member->em_expr;
-                Oid            sub_expr_type = sub_member->em_datatype;
-                Oid            sub_expr_coll = sub_eclass->ec_collation;
-                ListCell   *k;
+			foreach(j, sub_eclass->ec_members)
+			{
+				EquivalenceMember *sub_member = (EquivalenceMember *) lfirst(j);
+				Expr	   *sub_expr = sub_member->em_expr;
+				Oid			sub_expr_type = sub_member->em_datatype;
+				Oid			sub_expr_coll = sub_eclass->ec_collation;
+				ListCell   *k;
 
-                if (sub_member->em_is_child)
-                    continue;    /* ignore children here */
+				if (sub_member->em_is_child)
+					continue;	/* ignore children here */
 
-                foreach(k, subquery_tlist)
-                {
-                    TargetEntry *tle = (TargetEntry *) lfirst(k);
-                    Expr       *tle_expr;
-                    Expr       *outer_expr;
-                    EquivalenceClass *outer_ec;
-                    PathKey    *outer_pk;
-                    int            score;
+				foreach(k, subquery_tlist)
+				{
+					TargetEntry *tle = (TargetEntry *) lfirst(k);
+					Var		   *outer_var;
+					Expr	   *tle_expr;
+					EquivalenceClass *outer_ec;
+					PathKey    *outer_pk;
+					int			score;
 
-                    /* resjunk items aren't visible to outer query */
-                    if (tle->resjunk)
-                        continue;
+					/* Is TLE actually available to the outer query? */
+					outer_var = find_var_for_subquery_tle(rel, tle);
+					if (!outer_var)
+						continue;
 
-                    /*
-                     * The targetlist entry is considered to match if it
-                     * matches after sort-key canonicalization.  That is
-                     * needed since the sub_expr has been through the same
-                     * process.
-                     */
-                    tle_expr = canonicalize_ec_expression(tle->expr,
-                                                          sub_expr_type,
-                                                          sub_expr_coll);
-                    if (!equal(tle_expr, sub_expr))
-                        continue;
+					/*
+					 * The targetlist entry is considered to match if it
+					 * matches after sort-key canonicalization.  That is
+					 * needed since the sub_expr has been through the same
+					 * process.
+					 */
+					tle_expr = canonicalize_ec_expression(tle->expr,
+														  sub_expr_type,
+														  sub_expr_coll);
+					if (!equal(tle_expr, sub_expr))
+						continue;
 
-                    /*
-                     * Build a representation of this targetlist entry as an
-                     * outer Var.
-                     */
-                    outer_expr = (Expr *) makeVarFromTargetEntry(rel->relid,
-                                                                 tle);
+					/* See if we have a matching EC for the TLE */
+					outer_ec = get_eclass_for_sort_expr(root,
+														(Expr *) outer_var,
+														NULL,
+														sub_eclass->ec_opfamilies,
+														sub_expr_type,
+														sub_expr_coll,
+														0,
+														rel->relids,
+														false);
 
-                    /* See if we have a matching EC for that */
-                    outer_ec = get_eclass_for_sort_expr(root,
-                                                        outer_expr,
-                                                        NULL,
-                                                        sub_eclass->ec_opfamilies,
-                                                        sub_expr_type,
-                                                        sub_expr_coll,
-                                                        0,
-                                                        rel->relids,
-                                                        false);
+					/*
+					 * If we don't find a matching EC, this sub-pathkey isn't
+					 * interesting to the outer query
+					 */
+					if (!outer_ec)
+						continue;
 
-                    /*
-                     * If we don't find a matching EC, this sub-pathkey isn't
-                     * interesting to the outer query
-                     */
-                    if (!outer_ec)
-                        continue;
+					outer_pk = make_canonical_pathkey(root,
+													  outer_ec,
+													  sub_pathkey->pk_opfamily,
+													  sub_pathkey->pk_strategy,
+													  sub_pathkey->pk_nulls_first);
+					/* score = # of equivalence peers */
+					score = list_length(outer_ec->ec_members) - 1;
+					/* +1 if it matches the proper query_pathkeys item */
+					if (retvallen < outer_query_keys &&
+						list_nth(root->query_pathkeys, retvallen) == outer_pk)
+						score++;
+					if (score > best_score)
+					{
+						best_pathkey = outer_pk;
+						best_score = score;
+					}
+				}
+			}
+		}
 
-                    outer_pk = make_canonical_pathkey(root,
-                                                      outer_ec,
-                                                      sub_pathkey->pk_opfamily,
-                                                      sub_pathkey->pk_strategy,
-                                                      sub_pathkey->pk_nulls_first);
-                    /* score = # of equivalence peers */
-                    score = list_length(outer_ec->ec_members) - 1;
-                    /* +1 if it matches the proper query_pathkeys item */
-                    if (retvallen < outer_query_keys &&
-                        list_nth(root->query_pathkeys, retvallen) == outer_pk)
-                        score++;
-                    if (score > best_score)
-                    {
-                        best_pathkey = outer_pk;
-                        best_score = score;
-                    }
-                }
-            }
-        }
+		/*
+		 * If we couldn't find a representation of this sub_pathkey, we're
+		 * done (we can't use the ones to its right, either).
+		 */
+		if (!best_pathkey)
+			break;
 
-        /*
-         * If we couldn't find a representation of this sub_pathkey, we're
-         * done (we can't use the ones to its right, either).
-         */
-        if (!best_pathkey)
-            break;
+		/*
+		 * Eliminate redundant ordering info; could happen if outer query
+		 * equivalences subquery keys...
+		 */
+		if (!pathkey_is_redundant(best_pathkey, retval))
+		{
+			retval = lappend(retval, best_pathkey);
+			retvallen++;
+		}
+	}
 
-        /*
-         * Eliminate redundant ordering info; could happen if outer query
-         * equivalences subquery keys...
-         */
-        if (!pathkey_is_redundant(best_pathkey, retval))
-        {
-            retval = lappend(retval, best_pathkey);
-            retvallen++;
-        }
-    }
+	return retval;
+}
 
-    return retval;
+/*
+ * find_var_for_subquery_tle
+ *
+ * If the given subquery tlist entry is due to be emitted by the subquery's
+ * scan node, return a Var for it, else return NULL.
+ *
+ * We need this to ensure that we don't return pathkeys describing values
+ * that are unavailable above the level of the subquery scan.
+ */
+static Var *
+find_var_for_subquery_tle(RelOptInfo *rel, TargetEntry *tle)
+{
+	ListCell   *lc;
+
+	/* If the TLE is resjunk, it's certainly not visible to the outer query */
+	if (tle->resjunk)
+		return NULL;
+
+	/* Search the rel's targetlist to see what it will return */
+	foreach(lc, rel->reltarget->exprs)
+	{
+		Var		   *var = (Var *) lfirst(lc);
+
+		/* Ignore placeholders */
+		if (!IsA(var, Var))
+			continue;
+		Assert(var->varno == rel->relid);
+
+		/* If we find a Var referencing this TLE, we're good */
+		if (var->varattno == tle->resno)
+			return copyObject(var); /* Make a copy for safety */
+	}
+	return NULL;
 }
 
 /*

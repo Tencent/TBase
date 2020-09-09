@@ -49,6 +49,7 @@
 #include "utils/lsyscache.h"
 #include "utils/resowner.h"
 #include "lib/stringinfo.h"
+#include "libpq/libpq-be.h"
 #include "libpq/pqformat.h"
 #include "common/username.h"
 #include "pgxc/locator.h"

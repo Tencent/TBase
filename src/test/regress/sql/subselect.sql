@@ -793,3 +793,31 @@ select * from (with x as (select 2 as y) select * from x) ss;
 explain (verbose, costs off)
 with x as (select * from subselect_tbl)
 select * from x for update;
+
+-- test subquery pathkey
+CREATE TABLE catalog_sales (
+    cs_sold_date_sk integer,
+    cs_item_sk integer NOT NULL,
+    cs_order_number integer NOT NULL
+);
+CREATE TABLE catalog_returns (
+    cr_returned_date_sk integer,
+    cr_item_sk integer NOT NULL,
+    cr_order_number integer NOT NULL
+);
+CREATE TABLE date_dim (
+    d_date_sk integer NOT NULL,
+    d_year integer
+);
+with cs as
+(
+    select d_year AS cs_sold_year, cs_item_sk
+    from catalog_sales
+        left join catalog_returns on cr_order_number=cs_order_number and cs_item_sk=cr_item_sk
+        join date_dim on cs_sold_date_sk = d_date_sk
+    order by d_year, cs_item_sk
+)
+select 1
+from date_dim
+    join cs on (cs_sold_year=d_year and cs_item_sk=cs_item_sk);
+drop table catalog_sales, catalog_returns, date_dim;

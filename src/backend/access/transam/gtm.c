@@ -40,6 +40,7 @@
 #include "utils/tqual.h"
 #include "pgxc/nodemgr.h"
 #include "access/xlog.h"
+#include "storage/lmgr.h"
 #endif
 
 /* To access sequences */
