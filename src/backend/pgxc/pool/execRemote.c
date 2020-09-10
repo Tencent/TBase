@@ -11505,6 +11505,16 @@ ExecEndRemoteSubplan(RemoteSubplanState *node)
 
         conn = combiner->connections[i];
 
+		/* connection can be null in sort, forget it */
+		if (!conn)
+		{
+			combiner->conn_count--;
+			combiner->connections[i] =
+					combiner->connections[combiner->conn_count];
+			i--;
+			continue;
+		}
+
         CHECK_OWNERSHIP(conn, combiner);
 
         if (pgxc_node_send_close(conn, true, cursor) != 0)
