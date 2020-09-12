@@ -3206,7 +3206,6 @@ ExecEndModifyTable(ModifyTableState *node)
 #ifdef __TBASE__
 	if (IS_PGXC_COORDINATOR)
 	{
-		ResponseCombiner   *combiner;
 		ModifyTable *plan = (ModifyTable *)node->ps.plan;
 
 		if (plan->remote_plans)
@@ -3217,7 +3216,6 @@ ExecEndModifyTable(ModifyTableState *node)
 			{
 				RemoteQuery *rq = (RemoteQuery *)list_nth(plan->remote_plans, i);
 
-				combiner = (ResponseCombiner *) node->mt_remoterels[i];
 
 				ExecEndNode(node->mt_remoterels[i]);
 

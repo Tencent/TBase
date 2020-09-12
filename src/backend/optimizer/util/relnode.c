@@ -507,9 +507,6 @@ build_join_rel(PlannerInfo *root,
 {
 	RelOptInfo *joinrel;
 	List	   *restrictlist;
-#ifdef __TBASE__
-	PlannerInfo *top_root = root;
-#endif
 
 	/*
 	 * See if we already have a joinrel for this set of base rels.
