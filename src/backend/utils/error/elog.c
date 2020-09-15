@@ -2562,23 +2562,23 @@ log_line_prefix(StringInfo buf, ErrorData *edata)
                 {
                     char        strfbuf[128];
 
-					snprintf(strfbuf, sizeof(strfbuf) - 1, "%lx.%x,coord(%d,%u)",
+					snprintf(strfbuf, sizeof(strfbuf) - 1, "%lx.%x,coord(%d.%u)",
 							 (long) (MyStartTime), MyProcPid, 
 							 pgxc_get_coordinator_proc_pid(),
 							 pgxc_get_coordinator_proc_vxid());
-                    appendStringInfo(buf, "%*s", padding, strfbuf);
-                }
-                else
-					appendStringInfo(buf, "%lx.%x,coord(%d,%u)", 
+					appendStringInfo(buf, "%*s", padding, strfbuf);
+				}
+				else
+					appendStringInfo(buf, "%lx.%x,coord(%d.%u)",
 									(long) (MyStartTime), MyProcPid, 
 									pgxc_get_coordinator_proc_pid(),
 									pgxc_get_coordinator_proc_vxid());
-                break;
-            case 'p':
-                if (padding != 0)
-                    appendStringInfo(buf, "%*d", padding, MyProcPid);
-                else
-					appendStringInfo(buf, "%d,coord(%d,%u)",
+				break;
+			case 'p':
+				if (padding != 0)
+					appendStringInfo(buf, "%*d", padding, MyProcPid);
+				else
+					appendStringInfo(buf, "%d,coord(%d.%u)",
 									MyProcPid, 
 									pgxc_get_coordinator_proc_pid(),
 									pgxc_get_coordinator_proc_vxid());
@@ -2829,78 +2829,78 @@ appendCSVLiteral(StringInfo buf, const char *data)
  */
 static void
 write_csvlog(ErrorData *edata)
-{// #lizard forgives
-    StringInfoData buf;
-    bool        print_stmt = false;
+{
+	StringInfoData buf;
+	bool		print_stmt = false;
 
-    /* static counter for line numbers */
-    static long log_line_number = 0;
+	/* static counter for line numbers */
+	static long log_line_number = 0;
 
-    /* has counter been reset in current process? */
-    static int    log_my_pid = 0;
+	/* has counter been reset in current process? */
+	static int	log_my_pid = 0;
 
-    /*
-     * This is one of the few places where we'd rather not inherit a static
-     * variable's value from the postmaster.  But since we will, reset it when
-     * MyProcPid changes.
-     */
-    if (log_my_pid != MyProcPid)
-    {
-        log_line_number = 0;
-        log_my_pid = MyProcPid;
-        formatted_start_time[0] = '\0';
-    }
-    log_line_number++;
+	/*
+	 * This is one of the few places where we'd rather not inherit a static
+	 * variable's value from the postmaster.  But since we will, reset it when
+	 * MyProcPid changes.
+	 */
+	if (log_my_pid != MyProcPid)
+	{
+		log_line_number = 0;
+		log_my_pid = MyProcPid;
+		formatted_start_time[0] = '\0';
+	}
+	log_line_number++;
 
-    initStringInfo(&buf);
+	initStringInfo(&buf);
 
-    /*
-     * timestamp with milliseconds
-     *
-     * Check if the timestamp is already calculated for the syslog message,
-     * and use it if so.  Otherwise, get the current timestamp.  This is done
-     * to put same timestamp in both syslog and csvlog messages.
-     */
-    if (formatted_log_time[0] == '\0')
-        setup_formatted_log_time();
+	/*
+	 * timestamp with milliseconds
+	 *
+	 * Check if the timestamp is already calculated for the syslog message,
+	 * and use it if so.  Otherwise, get the current timestamp.  This is done
+	 * to put same timestamp in both syslog and csvlog messages.
+	 */
+	if (formatted_log_time[0] == '\0')
+		setup_formatted_log_time();
 
-    appendStringInfoString(&buf, formatted_log_time);
-    appendStringInfoChar(&buf, ',');
+	appendStringInfoString(&buf, formatted_log_time);
+	appendStringInfoChar(&buf, ',');
 
-    /* username */
-    if (MyProcPort)
-        appendCSVLiteral(&buf, MyProcPort->user_name);
-    appendStringInfoChar(&buf, ',');
+	/* username */
+	if (MyProcPort)
+		appendCSVLiteral(&buf, MyProcPort->user_name);
+	appendStringInfoChar(&buf, ',');
 
-    /* database name */
-    if (MyProcPort)
-        appendCSVLiteral(&buf, MyProcPort->database_name);
-    appendStringInfoChar(&buf, ',');
+	/* database name */
+	if (MyProcPort)
+		appendCSVLiteral(&buf, MyProcPort->database_name);
+	appendStringInfoChar(&buf, ',');
 
-    /* Process id  */
-    if (MyProcPid != 0)
-		appendStringInfo(&buf, "%d,coord(%d,%u)",
+	/* Process id  */
+	if (MyProcPid != 0)
+		appendStringInfo(&buf, "%d,coord(%d.%u)",
 						MyProcPid,
 						pgxc_get_coordinator_proc_pid(),
 						pgxc_get_coordinator_proc_vxid());
-    appendStringInfoChar(&buf, ',');
+	appendStringInfoChar(&buf, ',');
 
-    /* Remote host and port */
-    if (MyProcPort && MyProcPort->remote_host)
-    {
-        appendStringInfoChar(&buf, '"');
-        appendStringInfoString(&buf, MyProcPort->remote_host);
-        if (MyProcPort->remote_port && MyProcPort->remote_port[0] != '\0')
-        {
-            appendStringInfoChar(&buf, ':');
-            appendStringInfoString(&buf, MyProcPort->remote_port);
-        }
-        appendStringInfoChar(&buf, '"');
-    }
-    appendStringInfoChar(&buf, ',');
+	/* Remote host and port */
+	if (MyProcPort && MyProcPort->remote_host)
+	{
+		appendStringInfoChar(&buf, '"');
+		appendStringInfoString(&buf, MyProcPort->remote_host);
+		if (MyProcPort->remote_port && MyProcPort->remote_port[0] != '\0')
+		{
+			appendStringInfoChar(&buf, ':');
+			appendStringInfoString(&buf, MyProcPort->remote_port);
+		}
+		appendStringInfoChar(&buf, '"');
+	}
+	appendStringInfoChar(&buf, ',');
 
-    /* session id */
-	appendStringInfo(&buf, "%lx.%x,coord(%d,%u)", 
+	/* session id */
+	appendStringInfo(&buf, "%lx.%x,coord(%d.%u)",
 					(long) MyStartTime, MyProcPid,
 					pgxc_get_coordinator_proc_pid(),
 					pgxc_get_coordinator_proc_vxid());
