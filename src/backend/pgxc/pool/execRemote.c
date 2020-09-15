@@ -8585,9 +8585,34 @@ pgxc_node_remote_finish(char *prepareGID, bool commit,
         }
     }
 
-    for (i = 0; i < pgxc_handles->co_conn_count; i++)
+    /* Make sure datanode commit first */
+    if (conn_count && is_txn_has_parallel_ddl)
     {
-        PGXCNodeHandle *conn = pgxc_handles->coord_handles[i];
+        InitResponseCombiner(&combiner, conn_count, COMBINE_TYPE_NONE);
+#ifdef __TWO_PHASE_TRANS__
+        g_twophase_state.response_operation =
+                (commit == true) ? REMOTE_FINISH_COMMIT : REMOTE_FINISH_ABORT;
+#endif
+        /* Receive responses */
+        if (pgxc_node_receive_responses(conn_count, connections, NULL, &combiner) ||
+            !validate_combiner(&combiner))
+        {
+            if (combiner.errorMessage)
+                pgxc_node_report_error(&combiner);
+            else
+                ereport(ERROR,
+                        (errcode(ERRCODE_INTERNAL_ERROR),
+                                errmsg("Failed to COMMIT the transaction on one or more nodes")));
+        }
+        else
+            CloseCombiner(&combiner);
+
+        conn_count = 0;
+    }
+
+	for (i = 0; i < pgxc_handles->co_conn_count; i++)
+	{
+		PGXCNodeHandle *conn = pgxc_handles->coord_handles[i];
 #ifdef __TWO_PHASE_TRANS__
         twophase_index = g_twophase_state.coord_index;
         g_twophase_state.coord_state[twophase_index].is_participant = true;
