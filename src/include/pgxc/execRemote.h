@@ -338,8 +338,8 @@ typedef enum
 extern int PGXLRemoteFetchSize;
 
 
-#if __TBASE__
-extern PGDLLIMPORT bool g_in_plpgsql_exec_fun;
+#ifdef __TBASE__
+extern PGDLLIMPORT int g_in_plpgsql_exec_fun;
 #endif
 
 

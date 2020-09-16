@@ -122,7 +122,7 @@ static SimpleEcontextStackEntry *simple_econtext_stack = NULL;
     MemoryContextAllocZero(get_eval_mcontext(estate), sz)
 
 #ifdef __TBASE__
-extern bool PGDLLIMPORT g_in_plpgsql_exec_fun;
+extern int PGDLLIMPORT g_in_plpgsql_exec_fun;
 extern bool PGDLLIMPORT PlpgsqlDebugPrint;
 #endif
 
@@ -1472,6 +1472,8 @@ exec_stmt_block(PLpgSQL_execstate *estate, PLpgSQL_stmt_block *block)
             /* Restore stmt_mcontext stack and release the error data */
             pop_stmt_mcontext(estate);
             MemoryContextReset(stmt_mcontext);
+
+			SetExitPlpgsqlFunc();
         }
         PG_END_TRY();
 

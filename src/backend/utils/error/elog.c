@@ -112,7 +112,7 @@ sigjmp_buf *PG_exception_stack = NULL;
 extern bool redirection_done;
 
 #ifdef __TBASE__
-extern PGDLLIMPORT bool g_in_plpgsql_exec_fun;
+extern PGDLLIMPORT int g_in_plpgsql_exec_fun;
 #endif
 
 #ifdef __TBASE__
