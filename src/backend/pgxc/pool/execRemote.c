@@ -82,7 +82,7 @@
 int PGXLRemoteFetchSize;
 
 #ifdef __TBASE__
-bool g_in_plpgsql_exec_fun = false;
+int g_in_plpgsql_exec_fun = 0;
 bool PlpgsqlDebugPrint = false;
 
 bool need_global_snapshot = false;

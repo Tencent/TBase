@@ -171,7 +171,7 @@ bool		g_allow_force_ddl = false;
 #endif
 
 #ifdef __TBASE__
-extern PGDLLIMPORT bool g_in_plpgsql_exec_fun;
+extern PGDLLIMPORT int g_in_plpgsql_exec_fun;
 extern bool PlpgsqlDebugPrint;
 #endif
 
@@ -4184,7 +4184,7 @@ AbortTransaction(void)
 #endif
 
 #ifdef __TBASE__
-    SetExitPlpgsqlFunc();
+	//SetExitPlpgsqlFunc();
     SetExitCreateExtension();
     SetCurrentHandlesReadonly();
     AtEOXact_Global();
@@ -8248,12 +8248,12 @@ void SetTopXactNeedBeginTxn(void)
 
 void SetEnterPlpgsqlFunc(void)
 {
-    g_in_plpgsql_exec_fun = true;
+	g_in_plpgsql_exec_fun = g_in_plpgsql_exec_fun + 1;
 }
 
 void SetExitPlpgsqlFunc(void)
 {
-    g_in_plpgsql_exec_fun = false;
+	g_in_plpgsql_exec_fun = g_in_plpgsql_exec_fun - 1;
 }
 
 

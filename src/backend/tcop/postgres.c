@@ -5248,6 +5248,8 @@ PostgresMain(int argc, char *argv[],
         end_query_requested = false;
         Executor_done = false;
 
+		g_in_plpgsql_exec_fun = 0;
+
         ClearQueryAnalyzeInfo();
 #endif
 
