@@ -279,25 +279,25 @@ ExecInitCteScan(CteScan *node, EState *estate, int eflags)
 void
 ExecEndCteScan(CteScanState *node)
 {
-    /*
-     * Free exprcontext
-     */
-    ExecFreeExprContext(&node->ss.ps);
+	/*
+	 * Free exprcontext
+	 */
+	ExecFreeExprContext(&node->ss.ps);
 
-    /*
-     * clean out the tuple table
-     */
-    ExecClearTuple(node->ss.ps.ps_ResultTupleSlot);
-    ExecClearTuple(node->ss.ss_ScanTupleSlot);
+	/*
+	 * clean out the tuple table
+	 */
+	ExecClearTuple(node->ss.ps.ps_ResultTupleSlot);
+	ExecClearTuple(node->ss.ss_ScanTupleSlot);
 
-    /*
-     * If I am the leader, free the tuplestore.
-     */
-    if (node->leader == node)
-    {
-        tuplestore_end(node->cte_table);
-        node->cte_table = NULL;
-    }
+	/*
+	 * If I am the leader, free the tuplestore.
+	 */
+	if (node->leader == node && node->cte_table)
+	{
+		tuplestore_end(node->cte_table);
+		node->cte_table = NULL;
+	}
 }
 
 /* ----------------------------------------------------------------
