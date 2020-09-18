@@ -1212,90 +1212,98 @@ InitGTM(void)
 #endif
 
 try_connect_gtm:
-    /* If this thread is postmaster itself, it contacts gtm identifying itself */
-    if (!IsUnderPostmaster)
-    {
-        GTM_PGXCNodeType remote_type = GTM_NODE_DEFAULT;
+	/* If this thread is postmaster itself, it contacts gtm identifying itself */
+	if (!IsUnderPostmaster)
+	{
+		GTM_PGXCNodeType remote_type = GTM_NODE_DEFAULT;
 
-        if (IS_PGXC_COORDINATOR)
-            remote_type = GTM_NODE_COORDINATOR;
-        else if (IS_PGXC_DATANODE)
-            remote_type = GTM_NODE_DATANODE;
+		if (IS_PGXC_COORDINATOR)
+			remote_type = GTM_NODE_COORDINATOR;
+		else if (IS_PGXC_DATANODE)
+			remote_type = GTM_NODE_DATANODE;
 
-        /* Use 60s as connection timeout */
-        snprintf(conn_str, CONNECT_STR_LEN, "host=%s port=%d node_name=%s remote_type=%d postmaster=1 connect_timeout=%d",
-                                GtmHost, GtmPort, PGXCNodeName, remote_type,
-                                GtmConnectTimeout);
+		/* Use 60s as connection timeout */
+		snprintf(conn_str, CONNECT_STR_LEN, "host=%s port=%d node_name=%s remote_type=%d postmaster=1 connect_timeout=%d",
+								GtmHost, GtmPort, PGXCNodeName, remote_type,
+								tcp_keepalives_idle > 0 ?
+								tcp_keepalives_idle : GtmConnectTimeout);
 
-        /* Log activity of GTM connections */
-        if(GTMDebugPrint)
-            elog(LOG, "Postmaster: connection established to GTM with string %s", conn_str);
-    }
-    else
-    {
-        /* Use 60s as connection timeout */
-        snprintf(conn_str, CONNECT_STR_LEN, "host=%s port=%d node_name=%s connect_timeout=%d",
-                GtmHost, GtmPort, PGXCNodeName, GtmConnectTimeout);
+		/* Log activity of GTM connections */
+		if(GTMDebugPrint)
+			elog(LOG, "Postmaster: connection established to GTM with string %s", conn_str);
+	}
+	else
+	{
+		/* Use 60s as connection timeout */
+		snprintf(conn_str, CONNECT_STR_LEN, "host=%s port=%d node_name=%s connect_timeout=%d",
+				GtmHost, GtmPort, PGXCNodeName,
+				tcp_keepalives_idle > 0 ?
+				tcp_keepalives_idle : GtmConnectTimeout);
 
-        /* Log activity of GTM connections */
-        if (IsAutoVacuumWorkerProcess() && GTMDebugPrint)
-            elog(LOG, "Autovacuum worker: connection established to GTM with string %s", conn_str);
-        else if (IsAutoVacuumLauncherProcess() && GTMDebugPrint)
-            elog(LOG, "Autovacuum launcher: connection established to GTM with string %s", conn_str);
-        else if (IsClusterMonitorProcess() && GTMDebugPrint)
-            elog(LOG, "Cluster monitor: connection established to GTM with string %s", conn_str);
-        else if(GTMDebugPrint)
-            elog(LOG, "Postmaster child: connection established to GTM with string %s", conn_str);
-    }
+		/* Log activity of GTM connections */
+		if (IsAutoVacuumWorkerProcess() && GTMDebugPrint)
+			elog(LOG, "Autovacuum worker: connection established to GTM with string %s", conn_str);
+		else if (IsAutoVacuumLauncherProcess() && GTMDebugPrint)
+			elog(LOG, "Autovacuum launcher: connection established to GTM with string %s", conn_str);
+		else if (IsClusterMonitorProcess() && GTMDebugPrint)
+			elog(LOG, "Cluster monitor: connection established to GTM with string %s", conn_str);
+		else if(GTMDebugPrint)
+			elog(LOG, "Postmaster child: connection established to GTM with string %s", conn_str);
+	}
 
-    conn = PQconnectGTM(conn_str);
-    if (GTMPQstatus(conn) != CONNECTION_OK)
-    {
-        int save_errno = errno;
-        
-#ifdef __TBASE__    
-        if (try_cnt < max_try_cnt)
-        {
-            /* If connect gtm failed, get gtm info from syscache, and try again */
-            GetMasterGtmInfo();
-            if (GtmHost != NULL && GtmPort)
-            {
-                elog(DEBUG1, "[InitGTM] Get GtmHost:%s  GtmPort:%d try_cnt:%d max_try_cnt:%d", 
-                             GtmHost, GtmPort, try_cnt, max_try_cnt);
-            }
-            CloseGTM();
-            try_cnt++;
-            goto try_connect_gtm;
-        }
-        else
-#endif        
-        {
-            ResetGtmInfo();
+	conn = PQconnectGTM(conn_str);
+	if (GTMPQstatus(conn) != CONNECTION_OK)
+	{
+		int save_errno = errno;
+		
+#ifdef __TBASE__	
+		if (try_cnt < max_try_cnt)
+		{
+			/* If connect gtm failed, get gtm info from syscache, and try again */
+			GetMasterGtmInfo();
+			if (GtmHost != NULL && GtmPort)
+			{
+				elog(DEBUG1, "[InitGTM] Get GtmHost:%s  GtmPort:%d try_cnt:%d max_try_cnt:%d", 
+							 GtmHost, GtmPort, try_cnt, max_try_cnt);
+			}
+			CloseGTM();
+			try_cnt++;
+			goto try_connect_gtm;
+		}
+		else
+#endif		
+		{
+			ResetGtmInfo();
 
-            /* Use LOG instead of ERROR to avoid error stack overflow. */
-            if(conn)
-            {
-                ereport(LOG,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("can not connect to GTM: %s %m", GTMPQerrorMessage(conn))));
-            }
-            else
-            {
-                ereport(LOG,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("connection is null: %m")));
-            }
+			/* Use LOG instead of ERROR to avoid error stack overflow. */
+			if(conn)
+			{
+				ereport(LOG,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("can not connect to GTM: %s %m", GTMPQerrorMessage(conn))));
+			}
+			else
+			{
+				ereport(LOG,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("connection is null: %m")));
+			}
 
-            errno = save_errno;
+			errno = save_errno;
 
-            CloseGTM();
-        }
-        
-    }
-    else if (IS_PGXC_COORDINATOR)
-    {
-        register_session(conn, PGXCNodeName, MyProcPid, MyBackendId);
-    }
+			CloseGTM();
+		}
+		
+	}
+	else
+	{
+		GTMSetSockKeepAlive(conn, tcp_keepalives_idle,
+							tcp_keepalives_interval, tcp_keepalives_count);
+		if (IS_PGXC_COORDINATOR)
+		{
+			register_session(conn, PGXCNodeName, MyProcPid, MyBackendId);
+		}
+	}
 }
 
 void

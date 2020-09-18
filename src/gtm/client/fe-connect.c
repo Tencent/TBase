@@ -82,11 +82,10 @@ PQconnectGTM(const char *conninfo)
 {
     GTM_Conn       *conn = PQconnectGTMStart(conninfo);
 
-    if (conn && conn->status != CONNECTION_BAD)
-    {
-        (void)connectGTMComplete(conn);
-        
-    }
+	if (conn && conn->status != CONNECTION_BAD)
+	{
+		(void)connectGTMComplete(conn);
+	}
 #if 0
     else if (conn != NULL)
     {
@@ -1422,4 +1421,64 @@ GTMPQuntrace(GTM_Conn *conn)
         fflush(conn->Pfdebug);
         conn->Pfdebug = NULL;
     }
+}
+
+/*
+ * Set socket keepalive and user_timeout.
+ * We can use this to detect the broken connection quickly.
+ */
+void
+GTMSetSockKeepAlive(GTM_Conn *conn, int tcp_keepalives_idle,
+	int tcp_keepalives_interval, int tcp_keepalives_count)
+{
+	int sock = conn->sock;
+	int keepalive = 1;
+	/* user_timeout in ms */
+	uint32 user_timeout = UINT32_MAX / 1000 < tcp_keepalives_idle ?
+						  0 : tcp_keepalives_idle * (uint32)1000;
+	struct tcp_info info;
+	int len = sizeof(info);
+	/* check sock */
+	getsockopt(sock, IPPROTO_TCP, TCP_INFO, &info, (socklen_t *)&len);
+	if (info.tcpi_state != TCP_ESTABLISHED)
+	{
+		return;
+	}
+
+	/* set keepalive */
+	if (setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE,
+				   (char *)&keepalive, sizeof(keepalive)) < 0)
+	{
+		elog(LOG, "GTMSetSockKeepAlive setsockopt(SO_KEEPALIVE) failed: %m");
+	}
+	if (tcp_keepalives_idle > 0 &&
+		setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE,
+				   (char *)&tcp_keepalives_idle,
+				   sizeof(tcp_keepalives_idle)) < 0)
+	{
+		elog(LOG, "GTMSetSockKeepAlive setsockopt(TCP_KEEPIDLE) failed: %m");
+	}
+	if (tcp_keepalives_interval > 0 &&
+		setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL,
+				   (char *)&tcp_keepalives_interval,
+				   sizeof(tcp_keepalives_interval)) < 0)
+	{
+		elog(LOG, "GTMSetSockKeepAlive setsockopt(TCP_KEEPINTVL) failed: %m");
+	}
+	if (tcp_keepalives_count > 0 &&
+		setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT,
+				   (char *)&tcp_keepalives_count,
+				   sizeof(tcp_keepalives_count)) < 0)
+	{
+		elog(LOG, "GTMSetSockKeepAlive setsockopt(TCP_KEEPCNT) failed: %m");
+	}
+
+	/* set user_timeout */
+	if (user_timeout > 0 &&
+		setsockopt(sock, IPPROTO_TCP, TCP_USER_TIMEOUT,
+				   (char *)&user_timeout,
+				   sizeof(user_timeout)) < 0)
+	{
+		elog(LOG, "GTMSetSockKeepAlive setsockopt(TCP_USER_TIMEOUT) failed: %m");
+	}
 }
