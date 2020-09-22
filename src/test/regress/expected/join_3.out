@@ -6154,3 +6154,60 @@ where exists (select 1 from j3
 (19 rows)
 
 drop table j3;
+--
+-- Test nestloop path suppression if the selectivity could be under estimated
+--
+create table nestloop_suppression1(a int, b int, c int, d varchar(20));
+create table nestloop_suppression2(a int, b int, c int, d varchar(20));
+create table nestloop_suppression3(a int, b int);
+insert into nestloop_suppression1 select i, i+1, i+2, 'char'||i from generate_series(1,10000) i;
+insert into nestloop_suppression2 select i, i+1, i+2, 'char'||i from generate_series(1,10000) i;
+insert into nestloop_suppression3 select i, i+1 from generate_series(1,100) i;
+create index idx_nestloop_suppression1_b on nestloop_suppression1(b);
+analyze nestloop_suppression1;
+analyze nestloop_suppression2;
+analyze nestloop_suppression3;
+set enable_hashjoin = false;
+explain select t3.b from nestloop_suppression1 t1, nestloop_suppression2 t2, nestloop_suppression3 t3 
+	where t1.b=2 and t1.c=3 and t1.d like 'char%' and t1.a=t2.a and t3.b>t2.a;
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop  (cost=200.16..596.19 rows=33 width=4)
+   Join Filter: (t3.b > t2.a)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.16..453.19 rows=1 width=4)
+         ->  Nested Loop  (cost=0.16..353.18 rows=1 width=4)
+               Join Filter: (t1.a = t2.a)
+               ->  Index Scan using idx_nestloop_suppression1_b on nestloop_suppression1 t1  (cost=0.16..8.18 rows=1 width=4)
+                     Index Cond: (b = 2)
+                     Filter: (((d)::text ~~ 'char%'::text) AND (c = 3))
+               ->  Seq Scan on nestloop_suppression2 t2  (cost=0.00..220.00 rows=10000 width=4)
+   ->  Materialize  (cost=100.00..141.75 rows=100 width=4)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..141.50 rows=100 width=4)
+               ->  Seq Scan on nestloop_suppression3 t3  (cost=0.00..41.00 rows=100 width=4)
+(12 rows)
+
+set enable_nestloop_suppression = true;
+explain select t3.b from nestloop_suppression1 t1, nestloop_suppression2 t2, nestloop_suppression3 t3 
+	where t1.b=2 and t1.c=3 and t1.d like 'char%' and t1.a=t2.a and t3.b>t2.a;
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop  (cost=200.16..621.19 rows=33 width=4)
+   Join Filter: (t3.b > t2.a)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.16..478.19 rows=1 width=4)
+         ->  Nested Loop  (cost=0.16..378.19 rows=1 width=4)
+               Join Filter: (t1.a = t2.a)
+               ->  Seq Scan on nestloop_suppression2 t2  (cost=0.00..220.00 rows=10000 width=4)
+               ->  Materialize  (cost=0.16..8.19 rows=1 width=4)
+                     ->  Index Scan using idx_nestloop_suppression1_b on nestloop_suppression1 t1  (cost=0.16..8.18 rows=1 width=4)
+                           Index Cond: (b = 2)
+                           Filter: (((d)::text ~~ 'char%'::text) AND (c = 3))
+   ->  Materialize  (cost=100.00..141.75 rows=100 width=4)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..141.50 rows=100 width=4)
+               ->  Seq Scan on nestloop_suppression3 t3  (cost=0.00..41.00 rows=100 width=4)
+(13 rows)
+
+drop table nestloop_suppression1;
+drop table nestloop_suppression2;
+drop table nestloop_suppression3;
+reset enable_nestloop_suppression;
+reset enable_hashjoin;

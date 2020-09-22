@@ -128,19 +128,20 @@ Cost        disable_cost = 1.0e10;
 
 int            max_parallel_workers_per_gather = 2;
 
-bool        enable_seqscan = true;
-bool        enable_indexscan = true;
-bool        enable_indexonlyscan = true;
-bool        enable_bitmapscan = true;
-bool        enable_tidscan = true;
-bool        enable_sort = true;
-bool        enable_hashagg = true;
-bool        enable_nestloop = true;
-bool        enable_material = true;
-bool        enable_mergejoin = true;
-bool        enable_hashjoin = true;
-bool        enable_fast_query_shipping = true;
-bool        enable_gathermerge = true;
+bool		enable_seqscan = true;
+bool		enable_indexscan = true;
+bool		enable_indexonlyscan = true;
+bool		enable_bitmapscan = true;
+bool		enable_tidscan = true;
+bool		enable_sort = true;
+bool		enable_hashagg = true;
+bool		enable_nestloop = true;
+bool		enable_material = true;
+bool		enable_mergejoin = true;
+bool		enable_hashjoin = true;
+bool		enable_fast_query_shipping = true;
+bool		enable_gathermerge = true;
+bool		enable_nestloop_suppression = false;
 
 typedef struct
 {
@@ -2345,6 +2346,22 @@ final_cost_nestloop(PlannerInfo *root, NestPath *path,
 	{
 		/* Normal-case source costs were included in preliminary estimate */
 
+#ifdef __TBASE__
+		/*
+		 * When outerpath only got one row, we need to check if the number of
+		 * rows is under estimated. It might lead to huge cost estimation error
+		 * if innerpath is SeqScan.
+		 * If it is the case, we count additional disable_cost to suppress this
+		 * nestloop path. Thus Hashjoin or the rotated Nestloop join paths
+		 * could win.
+		 */
+		if (enable_nestloop_suppression &&
+			outer_path_rows == 1 && inner_path->pathtype == T_SeqScan &&
+			clause_selectivity_could_under_estimated(root, outer_path))
+		{
+			startup_cost += disable_cost;
+		}
+#endif
 		/* Compute number of tuples processed (not number emitted!) */
 		ntuples = outer_path_rows * inner_path_rows;
 	}
@@ -4021,7 +4038,6 @@ has_indexed_join_quals(NestPath *joinpath)
     }
     return found_one;
 }
-
 
 /*
  * approx_tuple_count

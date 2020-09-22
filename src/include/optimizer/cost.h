@@ -77,7 +77,8 @@ extern bool enable_mergejoin;
 extern bool enable_hashjoin;
 extern bool enable_fast_query_shipping;
 extern bool enable_gathermerge;
-extern int    constraint_exclusion;
+extern bool enable_nestloop_suppression;
+extern int	constraint_exclusion;
 
 extern double clamp_row_est(double nrows);
 extern double index_pages_fetched(double tuples_fetched, BlockNumber pages,
@@ -219,10 +220,13 @@ extern Selectivity clauselist_selectivity(PlannerInfo *root,
                         JoinType jointype,
                         SpecialJoinInfo *sjinfo);
 extern Selectivity clause_selectivity(PlannerInfo *root,
-                    Node *clause,
-                    int varRelid,
-                    JoinType jointype,
-                    SpecialJoinInfo *sjinfo);
+				   Node *clause,
+				   int varRelid,
+				   JoinType jointype,
+				   SpecialJoinInfo *sjinfo);
+#ifdef __TBASE__
+extern bool clause_selectivity_could_under_estimated(PlannerInfo *root, Path *path);
+#endif
 extern void cost_gather_merge(GatherMergePath *path, PlannerInfo *root,
                   RelOptInfo *rel, ParamPathInfo *param_info,
                   Cost input_startup_cost, Cost input_total_cost,

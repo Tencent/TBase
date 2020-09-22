@@ -1021,105 +1021,116 @@ static const unit_conversion time_unit_conversion_table[] =
 
 static struct config_bool ConfigureNamesBool[] =
 {
-    {
-        {"enable_seqscan", PGC_USERSET, QUERY_TUNING_METHOD,
-            gettext_noop("Enables the planner's use of sequential-scan plans."),
-            NULL
-        },
-        &enable_seqscan,
-        true,
-        NULL, NULL, NULL
-    },
-    {
-        {"enable_indexscan", PGC_USERSET, QUERY_TUNING_METHOD,
-            gettext_noop("Enables the planner's use of index-scan plans."),
-            NULL
-        },
-        &enable_indexscan,
-        true,
-        NULL, NULL, NULL
-    },
-    {
-        {"enable_indexonlyscan", PGC_USERSET, QUERY_TUNING_METHOD,
-            gettext_noop("Enables the planner's use of index-only-scan plans."),
-            NULL
-        },
-        &enable_indexonlyscan,
-        true,
-        NULL, NULL, NULL
-    },
-    {
-        {"enable_bitmapscan", PGC_USERSET, QUERY_TUNING_METHOD,
-            gettext_noop("Enables the planner's use of bitmap-scan plans."),
-            NULL
-        },
-        &enable_bitmapscan,
-        true,
-        NULL, NULL, NULL
-    },
-    {
-        {"enable_tidscan", PGC_USERSET, QUERY_TUNING_METHOD,
-            gettext_noop("Enables the planner's use of TID scan plans."),
-            NULL
-        },
-        &enable_tidscan,
-        true,
-        NULL, NULL, NULL
-    },
-    {
-        {"enable_sort", PGC_USERSET, QUERY_TUNING_METHOD,
-            gettext_noop("Enables the planner's use of explicit sort steps."),
-            NULL
-        },
-        &enable_sort,
-        true,
-        NULL, NULL, NULL
-    },
-    {
-        {"enable_hashagg", PGC_USERSET, QUERY_TUNING_METHOD,
-            gettext_noop("Enables the planner's use of hashed aggregation plans."),
-            NULL
-        },
-        &enable_hashagg,
-        true,
-        NULL, NULL, NULL
-    },
-    {
-        {"enable_material", PGC_USERSET, QUERY_TUNING_METHOD,
-            gettext_noop("Enables the planner's use of materialization."),
-            NULL
-        },
-        &enable_material,
-        true,
-        NULL, NULL, NULL
-    },
-    {
-        {"enable_nestloop", PGC_USERSET, QUERY_TUNING_METHOD,
-            gettext_noop("Enables the planner's use of nested-loop join plans."),
-            NULL
-        },
-        &enable_nestloop,
-        true,
-        NULL, NULL, NULL
-    },
-    {
-        {"enable_mergejoin", PGC_USERSET, QUERY_TUNING_METHOD,
-            gettext_noop("Enables the planner's use of merge join plans."),
-            NULL
-        },
-        &enable_mergejoin,
-        true,
-        NULL, NULL, NULL
-    },
-    {
-        {"enable_hashjoin", PGC_USERSET, QUERY_TUNING_METHOD,
-            gettext_noop("Enables the planner's use of hash join plans."),
-            NULL
-        },
-        &enable_hashjoin,
-        true,
-        NULL, NULL, NULL
-    },
+	{
+		{"enable_seqscan", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of sequential-scan plans."),
+			NULL
+		},
+		&enable_seqscan,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_indexscan", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of index-scan plans."),
+			NULL
+		},
+		&enable_indexscan,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_indexonlyscan", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of index-only-scan plans."),
+			NULL
+		},
+		&enable_indexonlyscan,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_bitmapscan", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of bitmap-scan plans."),
+			NULL
+		},
+		&enable_bitmapscan,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_tidscan", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of TID scan plans."),
+			NULL
+		},
+		&enable_tidscan,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_sort", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of explicit sort steps."),
+			NULL
+		},
+		&enable_sort,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_hashagg", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of hashed aggregation plans."),
+			NULL
+		},
+		&enable_hashagg,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_material", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of materialization."),
+			NULL
+		},
+		&enable_material,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_nestloop", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of nested-loop join plans."),
+			NULL
+		},
+		&enable_nestloop,
+		true,
+		NULL, NULL, NULL
+	},
+#ifdef __TBASE__
+	{
+		{"enable_nestloop_suppression", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the selectivity hints when planning nested-loop joins."),
+			NULL
+		},
+		&enable_nestloop_suppression,
+		false,
+		NULL, NULL, NULL
+	},
+#endif
+	{
+		{"enable_mergejoin", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of merge join plans."),
+			NULL
+		},
+		&enable_mergejoin,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_hashjoin", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of hash join plans."),
+			NULL
+		},
+		&enable_hashjoin,
+		true,
+		NULL, NULL, NULL
+	},
 #ifdef PGXC
     {
         {"enable_fast_query_shipping", PGC_USERSET, QUERY_TUNING_METHOD,

@@ -1987,3 +1987,32 @@ where exists (select 1 from j3
       and t1.unique1 < 1;
 
 drop table j3;
+
+--
+-- Test nestloop path suppression if the selectivity could be under estimated
+--
+create table nestloop_suppression1(a int, b int, c int, d varchar(20));
+create table nestloop_suppression2(a int, b int, c int, d varchar(20));
+create table nestloop_suppression3(a int, b int);
+
+insert into nestloop_suppression1 select i, i+1, i+2, 'char'||i from generate_series(1,10000) i;
+insert into nestloop_suppression2 select i, i+1, i+2, 'char'||i from generate_series(1,10000) i;
+insert into nestloop_suppression3 select i, i+1 from generate_series(1,100) i;
+create index idx_nestloop_suppression1_b on nestloop_suppression1(b);
+analyze nestloop_suppression1;
+analyze nestloop_suppression2;
+analyze nestloop_suppression3;
+
+set enable_hashjoin = false;
+explain select t3.b from nestloop_suppression1 t1, nestloop_suppression2 t2, nestloop_suppression3 t3 
+	where t1.b=2 and t1.c=3 and t1.d like 'char%' and t1.a=t2.a and t3.b>t2.a;
+set enable_nestloop_suppression = true;
+explain select t3.b from nestloop_suppression1 t1, nestloop_suppression2 t2, nestloop_suppression3 t3 
+	where t1.b=2 and t1.c=3 and t1.d like 'char%' and t1.a=t2.a and t3.b>t2.a;
+
+drop table nestloop_suppression1;
+drop table nestloop_suppression2;
+drop table nestloop_suppression3;
+
+reset enable_nestloop_suppression;
+reset enable_hashjoin;

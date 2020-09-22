@@ -23,6 +23,11 @@
 #include "utils/lsyscache.h"
 #include "utils/selfuncs.h"
 #include "statistics/statistics.h"
+#ifdef __TBASE__
+#include "access/htup_details.h"
+#include "catalog/pg_operator.h"
+#include "utils/syscache.h"
+#endif
 
 
 /*
@@ -866,3 +871,103 @@ clause_selectivity(PlannerInfo *root,
 
     return s1;
 }
+
+#ifdef __TBASE__
+/*
+ * clause_selectivity_could_under_estimated
+ *	  Check whether BaseRelOpt of the path might got under estimated rows.
+ *
+ * In real user scenarios, multiple columns could have correlation. It needs
+ * more statistic hints for the optimizer to know the data model
+ * characteristics. Since the extended mutli-column statistic calculation only
+ * supports '=' operation, we introduced this function to check if the
+ * selectivity of input path is under estimated.
+ */
+bool
+clause_selectivity_could_under_estimated(PlannerInfo *root, Path *path)
+{
+	RelOptInfo *rel = NULL;
+
+	/* We only support 1-depth nestloop outer path for now. */
+	if (path->pathtype == T_SeqScan ||
+		path->pathtype == T_IndexScan ||
+		path->pathtype == T_IndexOnlyScan ||
+		path->pathtype == T_BitmapIndexScan ||
+		path->pathtype == T_BitmapHeapScan)
+	{
+		rel = path->parent;
+	}
+	else
+	{
+		return false;
+	}
+
+	Assert(rel);
+
+	/*
+	 * The correlation problem only happens when there are multiple
+	 * restrictions.
+	 */
+	if (list_length(rel->baserestrictinfo) > 1)
+	{
+		ListCell 	*lc;
+		Node 		*clause;
+		int 		count = 0;
+
+		/* Walk through all restrictions */
+		foreach (lc, rel->baserestrictinfo)
+		{
+			RestrictInfo *ri = (RestrictInfo *) lfirst(lc);
+
+			/*
+			 * Proceed with examination of contained clause.  If the clause is
+			 * an OR-clause.
+			 */
+			if (ri->orclause)
+				clause = (Node *) ri->orclause;
+			else
+				clause = (Node *) ri->clause;
+
+			/*
+			 * The multi-column statistic only supports '=' operator based on
+			 * single column histograms. Thus we count all unsupported cases
+			 * here. is_opclause() covers the NULL check for 'clause'
+			 *
+			 * TODO(Tbase): Be more precise on other type of clauses.
+			 */
+			if (is_opclause(clause))
+			{
+				OpExpr	   		   *opclause = (OpExpr *) clause;
+				char		 	   *oprname;
+				Oid					opno = opclause->opno;
+				HeapTuple 			opTuple;
+				Form_pg_operator 	operform;
+
+				opTuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(opno));
+				if (HeapTupleIsValid(opTuple))
+				{
+					operform = (Form_pg_operator)GETSTRUCT(opTuple);
+					oprname = NameStr(operform->oprname);
+				}
+				ReleaseSysCache(opTuple);
+
+				/* Supported case, skip the count. */
+				if (oprname && strcmp(oprname, "=") == 0)
+					continue;
+			}
+
+			/* Unsupported case */
+			count++;
+		}
+
+		/*
+		 * The path got some restrictions which could lead to selectivity
+		 * under estimation.
+		 */
+		if (count > 0)
+			return true;
+	}
+
+	return false;
+}
+#endif
