@@ -1787,27 +1787,28 @@ select * from x where f1 = 1;
 explain (verbose, costs off)
 with x as (select * from (select f1, now() as n from subselect_tbl) ss)
 select * from x, x x2 where x.n = x2.n;
-                         QUERY PLAN                          
--------------------------------------------------------------
- Merge Join
-   Output: x.f1, x.n, x2.f1, x2.n
-   Merge Cond: (x.n = x2.n)
-   CTE x
-     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-           Output: subselect_tbl.f1, now()
-           ->  Seq Scan on public.subselect_tbl
-                 Output: subselect_tbl.f1, now()
-   ->  Sort
-         Output: x.f1, x.n
-         Sort Key: x.n
-         ->  CTE Scan on x
-               Output: x.f1, x.n
-   ->  Sort
-         Output: x2.f1, x2.n
-         Sort Key: x2.n
-         ->  CTE Scan on x x2
-               Output: x2.f1, x2.n
-(18 rows)
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   Output: subselect_tbl.f1, now(), subselect_tbl_1.f1, now()
+   ->  Result
+         Output: subselect_tbl.f1, (now()), subselect_tbl_1.f1, (now())
+         One-Time Filter: (now() = now())
+         ->  Nested Loop
+               Output: subselect_tbl.f1, (now()), subselect_tbl_1.f1, (now())
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Output: subselect_tbl.f1, now()
+                     Distribute results by H: now()
+                     ->  Seq Scan on public.subselect_tbl
+                           Output: subselect_tbl.f1, now()
+               ->  Materialize
+                     Output: subselect_tbl_1.f1, (now())
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                           Output: subselect_tbl_1.f1, now()
+                           Distribute results by H: now()
+                           ->  Seq Scan on public.subselect_tbl subselect_tbl_1
+                                 Output: subselect_tbl_1.f1, now()
+(19 rows)
 
 explain (verbose, costs off)
 with x as not materialized (select * from (select f1, now() as n from subselect_tbl) ss)

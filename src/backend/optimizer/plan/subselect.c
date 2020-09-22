@@ -98,6 +98,7 @@
 #include "pgxc/pgxc.h"
 #endif
 #ifdef __TBASE__
+#include <math.h>
 #include "nodes/pg_list.h"
 #include "parser/parse_oper.h"
 #include "parser/parse_func.h"
@@ -1383,6 +1384,80 @@ hash_ok_operator(OpExpr *expr)
     }
 }
 
+#ifdef __TBASE__
+/*
+ * Check if total cost of inlining to multiple subquery is cheaper.
+ *
+ * There are three alternatives to optimize CTE with multiple references.
+ * XXX Keep the CTE as an optimization fence, using materialized CTE scan could
+ * 	   be cost saving. But in TBase distributed system, this will lead to more
+ * 	   executor nodes perfored in CN, which could be much slower.
+ * XXX Inline the CTE to multiple subqueries. This could leverage more join
+ *     reordering and predicate pushdown opetimization automatically.
+ * XXX Inline the CTE to some of the reference place(s). This need an overall
+ *     cost based optimizer including CTE inline and sublink pullup phase,
+ *     postgres optimizer does not support this yet.
+ */
+static bool
+is_cte_worth_inline(CommonTableExpr *cte, Plan *plan, Path *path)
+{
+	Cost 	inline_total_cost = 0;
+	Cost 	cte_total_cost = 0;
+	Cost 	material_cost = 0;
+	double 	material_bytes = 0;
+	long	work_mem_bytes = work_mem * 1024L;
+
+	/* Force pullup multi-reference CTE when enable_pullup_subquery enabled */
+	if (enable_pullup_subquery)
+		return true;
+
+	/* Num bytes to be materialized by CTE */
+	material_bytes = plan->plan_rows * plan->plan_width;
+
+	/*
+	 * Whether spilling or not, charge 2x cpu_operator_cost per tuple to
+	 * reflect bookkeeping overhead.  (This rate must be more than what
+	 * cost_rescan charges for materialize, ie, cpu_operator_cost per tuple;
+	 * if it is exactly the same then there will be a cost tie between
+	 * nestloop with A outer, materialized B inner and nestloop with B outer,
+	 * materialized A inner.  The extra cost ensures we'll prefer
+	 * materializing the smaller rel.)	Note that this is normally a good deal
+	 * less than cpu_tuple_cost; which is OK because a Material plan node
+	 * doesn't do qual-checking or projection, so it's got less overhead than
+	 * most plan nodes.
+	 */
+	material_cost += 2 * cpu_operator_cost * plan->plan_rows;
+
+	/*
+	 * If we will spill to disk, charge at the rate of seq_page_cost per page.
+	 * This cost is assumed to be evenly spread through the plan run phase,
+	 * which isn't exactly accurate but our cost model doesn't allow for
+	 * nonuniform costs within the run phase.
+	 */
+	if (material_bytes > work_mem_bytes)
+	{
+		double npages = ceil(material_bytes / BLCKSZ);
+
+		material_bytes += seq_page_cost * npages;
+	}
+
+	/* Calculate total costs for different options */
+	cte_total_cost = plan->total_cost + material_cost;
+	inline_total_cost = plan->total_cost * cte->cterefcount;
+
+	/*
+	 * In a distributed system like TBase, the inline one could leverage more
+	 * optimizations like subquery pullup, predicate pushdown, etc. We add a
+	 * optimization factor 0.5 here to show case these cost saves.
+	 */
+	inline_total_cost = inline_total_cost * 0.5;
+
+	if (inline_total_cost <= cte_total_cost)
+		return true;
+	else
+		return false;
+}
+#endif
 
 /*
  * SS_process_ctes: process a query's WITH list
@@ -1507,6 +1582,35 @@ SS_process_ctes(PlannerInfo *root)
 			subroot->distribution = best_path->distribution;
 
 		plan = create_plan(subroot, best_path);
+
+#ifdef __TBASE__
+		/*
+		 * Handle the CTE with multiple references in the main query. Since we
+		 * need to compare the cost between CTE Scan and inline subquery Scan,
+		 * perform the inline check after we got the best path of CTE subquery.
+		 */
+		if ((cte->ctematerialized == CTEMaterializeNever ||
+			 (cte->ctematerialized == CTEMaterializeDefault &&
+			  cte->cterefcount > 1)) &&
+			!cte->cterecursive &&
+			cmdType == CMD_SELECT &&
+			!contain_dml(cte->ctequery) &&
+			(cte->cterefcount <= 1 ||
+			 !contain_outer_selfref(cte->ctequery)) &&
+			!contain_volatile_functions(cte->ctequery))
+		{
+			/*
+			 * Check if total cost of inlining to multiple subquery is cheaper.
+			 */
+			if (is_cte_worth_inline(cte, plan, best_path))
+			{
+				inline_cte(root, cte);
+				/* Make a dummy entry in cte_plan_ids */
+				root->cte_plan_ids = lappend_int(root->cte_plan_ids, -1);
+				continue;
+			}
+		}
+#endif
 
 #ifdef XCP
         /* Add a remote subplan, if redistribution is needed. */
