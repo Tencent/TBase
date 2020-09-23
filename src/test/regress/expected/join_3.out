@@ -2979,6 +2979,7 @@ select * from int4_tbl a full join int4_tbl b on false order by 1,2;
 --
 -- test for ability to use a cartesian join when necessary
 --
+set enable_hashjoin = false;
 explain (num_nodes off, nodes off, costs off)
 select * from
   tenk1 join int4_tbl on f1 = twothousand,
@@ -2987,8 +2988,8 @@ select * from
 where q1 = thousand or q2 = thousand;
                                      QUERY PLAN                                     
 ------------------------------------------------------------------------------------
- Hash Join
-   Hash Cond: (tenk1.twothousand = int4_tbl.f1)
+ Nested Loop
+   Join Filter: (tenk1.twothousand = int4_tbl.f1)
    ->  Nested Loop
          ->  Nested Loop
                ->  Function Scan on q1
@@ -3002,7 +3003,7 @@ where q1 = thousand or q2 = thousand;
                                        Index Cond: (q1.q1 = thousand)
                                  ->  Bitmap Index Scan on tenk1_thous_tenthous
                                        Index Cond: (q2.q2 = thousand)
-   ->  Hash
+   ->  Materialize
          ->  Remote Subquery Scan on all
                ->  Seq Scan on int4_tbl
 (18 rows)
@@ -3015,8 +3016,8 @@ select * from
 where thousand = (q1 + q2);
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
- Hash Join
-   Hash Cond: (tenk1.twothousand = int4_tbl.f1)
+ Nested Loop
+   Join Filter: (tenk1.twothousand = int4_tbl.f1)
    ->  Nested Loop
          ->  Nested Loop
                ->  Function Scan on q1
@@ -3027,41 +3028,38 @@ where thousand = (q1 + q2);
                            Recheck Cond: (thousand = (q1.q1 + q2.q2))
                            ->  Bitmap Index Scan on tenk1_thous_tenthous
                                  Index Cond: (thousand = (q1.q1 + q2.q2))
-   ->  Hash
+   ->  Materialize
          ->  Remote Subquery Scan on all
                ->  Seq Scan on int4_tbl
 (15 rows)
 
+set enable_hashjoin = true;
 --
 -- test ability to generate a suitable plan for a star-schema query
 --
+set enable_mergejoin = false;
 explain (costs off)
 select * from
   tenk1, int8_tbl a, int8_tbl b
 where thousand = a.q1 and tenthous = b.q1 and a.q2 = 1 and b.q2 = 2;
-                       QUERY PLAN                        
----------------------------------------------------------
+                    QUERY PLAN                    
+--------------------------------------------------
  Remote Fast Query Execution
    Node/s: datanode_1, datanode_2
-   ->  Merge Join
-         Merge Cond: (tenk1.thousand = a.q1)
-         ->  Sort
-               Sort Key: tenk1.thousand
-               ->  Merge Join
-                     Merge Cond: (tenk1.tenthous = b.q1)
-                     ->  Sort
-                           Sort Key: tenk1.tenthous
-                           ->  Seq Scan on tenk1
-                     ->  Sort
-                           Sort Key: b.q1
-                           ->  Seq Scan on int8_tbl b
-                                 Filter: (q2 = 2)
-         ->  Sort
-               Sort Key: a.q1
+   ->  Hash Join
+         Hash Cond: (tenk1.thousand = a.q1)
+         ->  Hash Join
+               Hash Cond: (tenk1.tenthous = b.q1)
+               ->  Seq Scan on tenk1
+               ->  Hash
+                     ->  Seq Scan on int8_tbl b
+                           Filter: (q2 = 2)
+         ->  Hash
                ->  Seq Scan on int8_tbl a
                      Filter: (q2 = 1)
-(19 rows)
+(13 rows)
 
+set enable_mergejoin = true;
 --
 -- test a corner case in which we shouldn't apply the star-schema optimization
 --

@@ -884,7 +884,7 @@ select * from int4_tbl a full join int4_tbl b on false order by 1,2;
 --
 -- test for ability to use a cartesian join when necessary
 --
-
+set enable_hashjoin = false;
 explain (num_nodes off, nodes off, costs off)
 select * from
   tenk1 join int4_tbl on f1 = twothousand,
@@ -898,15 +898,17 @@ select * from
   int4(sin(1)) q1,
   int4(sin(0)) q2
 where thousand = (q1 + q2);
+set enable_hashjoin = true;
 
 --
 -- test ability to generate a suitable plan for a star-schema query
 --
-
+set enable_mergejoin = false;
 explain (costs off)
 select * from
   tenk1, int8_tbl a, int8_tbl b
 where thousand = a.q1 and tenthous = b.q1 and a.q2 = 1 and b.q2 = 2;
+set enable_mergejoin = true;
 
 --
 -- test a corner case in which we shouldn't apply the star-schema optimization
