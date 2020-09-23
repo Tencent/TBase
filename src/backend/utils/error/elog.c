@@ -1591,12 +1591,31 @@ EmitErrorReport(void)
     /* Send to client, if enabled */
     if (edata->output_to_client)
     {
-        if (true == g_enable_copy_silence)
+        if (true == g_enable_copy_silence ||
+			(IS_PGXC_DATANODE && edata->elevel < ERROR))
         {
+			/*
+			 * Do not send nonfatal msg to client for Datanode.
+			 *
+			 * It is possible that DataPumpRawSendData is sending data now,
+			 * and this msg can be mixed with data message
+			 * if the socket is written concurrently.
+			 *
+			 * In addition, the msg is not that important.
+			 */
             ;
         }
         else
         {
+			/*
+			 * For the same reason as above, shut down producer for Datanode
+			 * before send ERROR/FATAL msg.
+			 * It is ok to shut down it again in AbortTransaction.
+			 */
+			if (IS_PGXC_DATANODE)
+			{
+				SqueueProducerExit();
+			}
             send_message_to_frontend(edata);
         }
     }
