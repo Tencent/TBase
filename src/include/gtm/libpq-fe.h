@@ -130,7 +130,7 @@ extern void GTMPQuntrace(GTM_Conn *conn);
 /* Force the write buffer to be written (or at least try) */
 extern int    PQflush(GTM_Conn *conn);
 
-extern void GTMSetSockKeepAlive(GTM_Conn *conn, int tcp_keepalives_idle,
+extern bool GTMSetSockKeepAlive(GTM_Conn *conn, int tcp_keepalives_idle,
 	int tcp_keepalives_interval, int tcp_keepalives_count);
 
 #define libpq_gettext(x)	x

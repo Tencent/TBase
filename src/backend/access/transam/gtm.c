@@ -1297,8 +1297,13 @@ try_connect_gtm:
 	}
 	else
 	{
-		GTMSetSockKeepAlive(conn, tcp_keepalives_idle,
-							tcp_keepalives_interval, tcp_keepalives_count);
+		if (!GTMSetSockKeepAlive(conn, tcp_keepalives_idle,
+							tcp_keepalives_interval, tcp_keepalives_count))
+		{
+			ereport(LOG,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("GTMSetSockKeepAlive failed: %m")));
+		}
 		if (IS_PGXC_COORDINATOR)
 		{
 			register_session(conn, PGXCNodeName, MyProcPid, MyBackendId);
