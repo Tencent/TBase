@@ -19,6 +19,9 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <inttypes.h>
+#include "gtm/gtm_stat.h"
+#include "gtm/gtm_stat_error.h"
 
 #ifdef HAVE_SYS_RESOURCE_H
 #include <sys/time.h>
@@ -31,6 +34,7 @@
 #endif
 /* PID can be negative for standalone backend */
 typedef long pgpid_t;
+
 
 typedef enum
 {
@@ -49,10 +53,13 @@ typedef enum
     RESTART_COMMAND,
     STATUS_COMMAND,
 	RECONNECT_COMMAND,
-	RELOAD_COMMAND
+	RELOAD_COMMAND,
+	STAT_COMMAND,
+    ERRLOG_COMMAND
 } CtlCommand;
 
-#define DEFAULT_WAIT    60
+#define DEFAULT_WAIT	60
+#define DEFAULT_FLAG	0
 
 static bool do_wait = false;
 static bool wait_set = false;
@@ -78,6 +85,7 @@ GTM_ThreadID    TopMostThreadID;
 int    tcp_keepalives_idle = 0;
 int    tcp_keepalives_interval = 0;
 int tcp_keepalives_count = 0;
+static int	clear_flag = DEFAULT_FLAG;
 #endif
 static void
 write_stderr(const char *fmt,...)
@@ -1099,6 +1107,206 @@ do_status(void)
 }
 
 
+static void
+do_stat(void)
+{
+    int  ret = 0;
+    int  i = 0;
+    char gtm_connect_str[MAXPGPATH];
+    GTM_Conn *gtm_conn = NULL;
+    GTM_StatisticsResult* result = NULL;
+    struct tm timeinfo;
+    char   time_buff[128];
+    int    interval_time   = 0;
+    float  interval_minute = 0.0;
+    uint32 calcu_result[3];
+    static const float EPSINON = 0.00001;
+    static char* statistics_name_tab[CMD_STATISTICS_TYPE_COUNT] = {
+        "GET_GTS",
+        "SEQUENCE_GET_NEXT",
+        "TXN_START_PREPARED"
+    };
+
+    /* Connect gtm and get the lates timestamp. */
+    if (gtm_port == NULL || gtm_host == NULL)
+    {
+        return;
+    }
+
+    snprintf(gtm_connect_str, MAXPGPATH, "host=%s port=%s node_name=gtm_ctl remote_type=%d postmaster=0 connect_timeout=%d",
+             gtm_host, gtm_port, GTM_NODE_GTM_CTL,wait_seconds);
+    gtm_conn = connect_gtm(gtm_connect_str);
+    if (gtm_conn == NULL) {
+        return;
+    }
+
+    ret = get_gtm_statistics(gtm_conn, clear_flag, wait_seconds, &result);
+    if (!ret)
+    {
+        printf(_("GTM statistics:\n"));
+        strftime(time_buff, sizeof(time_buff),
+                 "%Y-%m-%d %H:%M:%S",
+                 localtime_r(&result->start_time, &timeinfo));
+        printf(_("statistics start time: %s\n"), time_buff);
+
+        strftime(time_buff, sizeof(time_buff),
+                 "%Y-%m-%d %H:%M:%S",
+                 localtime_r(&result->end_time, &timeinfo));
+        printf(_("statistics end time: %s\n"), time_buff);
+
+        printf(_("sequences remained: %d\n"), result->sequences_remained);
+        printf(_("txn remained: %d\n"), result->txn_remained);
+
+        interval_time = result->end_time - result->start_time;
+        calcu_result[0] = (interval_time == 0) ? 0 :
+                result->stat_info[0].total_request_times / interval_time;
+
+        interval_minute = (float)interval_time / (float)60.0;
+        if ((interval_minute >= - EPSINON) && (interval_minute <= EPSINON)) // 0
+        {
+            calcu_result[1] = 0;
+            calcu_result[2] = 0;
+        }
+        else
+        {
+            calcu_result[1] = (int)((float)result->stat_info[1].total_request_times / interval_minute);
+            calcu_result[2] = (int)((float)result->stat_info[2].total_request_times / interval_minute);
+        }
+
+        for (i = 0; i < CMD_STATISTICS_TYPE_COUNT; i++)
+        {
+            printf(_("%s info:\n"), statistics_name_tab[i]);
+            printf(_("total request times: %u\n"), result->stat_info[i].total_request_times);
+            printf(_("avg costtime: %u(ms)\n"), result->stat_info[i].avg_costtime);
+            printf(_("max costtime: %u(ms)\n"), result->stat_info[i].max_costtime);
+            printf(_("min costtime: %u(ms)\n"), result->stat_info[i].min_costtime);
+            if (i == 0)
+            {
+                printf(_("requests per second: %u\n"), calcu_result[i]);
+            }
+            else
+            {
+                printf(_("requests per minute: %u\n"), calcu_result[i]);
+            }
+        }
+    }
+    else
+    {
+        printf(_("%s: Can not get statistics, please check gtm status!\n"),
+               progname);
+    }
+
+    disconnect_gtm(gtm_conn);
+    return;
+}
+
+/*
+* error_severity --- get localized string representing elevel
+*/
+static const char *
+error_severity(int elevel)
+{
+    const char *prefix;
+
+    switch (elevel)
+    {
+        case 10:
+        case 11:
+        case 12:
+        case 13:
+        case 14:
+            prefix = _("DEBUG");
+            break;
+        case 15:
+        case 16:
+            prefix = _("LOG");
+            break;
+        case 17:
+            prefix = _("INFO");
+            break;
+        case 18:
+            prefix = _("NOTICE");
+            break;
+        case 19:
+            prefix = _("WARNING");
+            break;
+        case 20:
+            prefix = _("ERROR");
+            break;
+        case 22:
+            prefix = _("FATAL");
+            break;
+        case 23:
+            prefix = _("PANIC");
+            break;
+        default:
+            prefix = "???";
+            break;
+    }
+
+    return prefix;
+}
+
+static void
+do_errlog(void)
+{
+    int  ret = 0;
+    char gtm_connect_str[MAXPGPATH];
+    GTM_Conn *gtm_conn = NULL;
+    char     *errlog   = NULL;
+    int      len = 0;
+    GTM_ErrLog* err_info = NULL;
+    struct tm timeinfo;
+    char time_buff[128];
+
+    /* Connect gtm and get the lates timestamp. */
+    if (gtm_port == NULL || gtm_host == NULL)
+    {
+        return;
+    }
+
+    snprintf(gtm_connect_str, MAXPGPATH, "host=%s port=%s node_name=gtm_ctl remote_type=%d postmaster=0 connect_timeout=%d",
+             gtm_host, gtm_port, GTM_NODE_GTM_CTL,wait_seconds);
+    gtm_conn = connect_gtm(gtm_connect_str);
+    if (gtm_conn == NULL) {
+        return;
+    }
+
+    ret = get_gtm_errlog(gtm_conn, wait_seconds, &errlog, &len);
+    if (!ret)
+    {
+        printf(_("%s: errlog len: %d \n"), progname, len);
+        while (len)
+        {
+            err_info = (GTM_ErrLog*)errlog;
+            err_info->proc_id = ntohl(err_info->proc_id);
+            err_info->error_no = ntohl(err_info->error_no);
+            err_info->log_time = be64toh(err_info->log_time);
+            err_info->err_level = ntohl(err_info->err_level);
+            err_info->errmsg_len = ntohl(err_info->errmsg_len);
+
+            strftime(time_buff, sizeof(time_buff),
+                        "%Y-%m-%d %H:%M:%S",
+                     localtime_r(&err_info->log_time, &timeinfo));
+
+            printf(_("%d|%d|%s|%s|%d|%s\n"), err_info->proc_id,
+                   err_info->error_no, time_buff, error_severity(err_info->err_level), err_info->errmsg_len,
+                   err_info->errmsg);
+
+            errlog += (sizeof(GTM_ErrLog) + err_info->errmsg_len);
+            len -= (sizeof(GTM_ErrLog) + err_info->errmsg_len);
+        }
+    }
+    else
+    {
+        printf(_("%s: Can not get errlog, please check gtm status!\n"),
+               progname);
+    }
+
+    disconnect_gtm(gtm_conn);
+    return;
+}
+
 /*
  *    utility routines
  */
@@ -1259,84 +1467,93 @@ main(int argc, char **argv)
      */
     optind = 1;
 
-    /* process command-line options */
-    while (optind < argc)
-    {
-		while ((c = getopt(argc, argv, "D:i:l:m:o:p:t:wWZ:H:P:g:")) != -1)
-        {
-            switch (c)
-            {
-                case 'D':
-                    {
-                        char       *gtmdata_D;
-                        char       *env_var = pg_malloc(strlen(optarg) + 9);
+	/* process command-line options */
+	while (optind < argc)
+	{
+		while ((c = getopt(argc, argv, "D:i:l:m:o:p:t:wWZ:H:P:g:c:")) != -1)
+		{
+			switch (c)
+			{
+				case 'D':
+					{
+						char	   *gtmdata_D;
+						char	   *env_var = pg_malloc(strlen(optarg) + 9);
 
-                        gtmdata_D = xstrdup(optarg);
-                        canonicalize_path(gtmdata_D);
-                        snprintf(env_var, strlen(optarg) + 9, "GTMDATA=%s",
-                                 gtmdata_D);
-                        putenv(env_var);
+						gtmdata_D = xstrdup(optarg);
+						canonicalize_path(gtmdata_D);
+						snprintf(env_var, strlen(optarg) + 9, "GTMDATA=%s",
+								 gtmdata_D);
+						putenv(env_var);
 
-                        /*
-                         * We could pass GTMDATA just in an environment
-                         * variable but we do -D too for clearer gtm
-                         * 'ps' display
-                         */
-                        gtmdata_opt = (char *) pg_malloc(strlen(gtmdata_D) + 8);
-                        snprintf(gtmdata_opt, strlen(gtmdata_D) + 8,
-                                 "-D \"%s\" ",
-                                 gtmdata_D);
-                        break;
-                    }
-                case 'i':
-                    nodename = strdup(optarg);
-                    break;
-                case 'l':
-                    log_file = xstrdup(optarg);
-                    break;
-                case 'm':
-                    set_mode(optarg);
-                    break;
-                case 'o':
-                    gtm_opts = xstrdup(optarg);
-                    break;
-                case 'p':
-                    gtm_path = xstrdup(optarg);
-                    canonicalize_path(gtm_path);
-                    break;
-                case 't':
-                    wait_seconds = atoi(optarg);
-                    break;
-                case 'w':
-                    do_wait = true;
-                    wait_set = true;
-                    break;
-                case 'W':
-                    do_wait = false;
-                    wait_set = true;
-                    break;
-                case 'Z':
-                    gtm_app = xstrdup(optarg);
-                    if (strcmp(gtm_app,"gtm_proxy") != 0
-                        && strcmp(gtm_app,"gtm_standby") != 0
-                        && strcmp(gtm_app,"gtm") != 0)
-                    {
-                        write_stderr(_("%s: %s launch name set not correct\n"), progname, gtm_app);
-                        do_advice();
-                        exit(1);
-                    }
-                    break;
+						/*
+						 * We could pass GTMDATA just in an environment
+						 * variable but we do -D too for clearer gtm
+						 * 'ps' display
+						 */
+						gtmdata_opt = (char *) pg_malloc(strlen(gtmdata_D) + 8);
+						snprintf(gtmdata_opt, strlen(gtmdata_D) + 8,
+								 "-D \"%s\" ",
+								 gtmdata_D);
+						break;
+					}
+				case 'i':
+					nodename = strdup(optarg);
+					break;
+				case 'l':
+					log_file = xstrdup(optarg);
+					break;
+				case 'm':
+					set_mode(optarg);
+					break;
+				case 'o':
+					gtm_opts = xstrdup(optarg);
+					break;
+				case 'p':
+					gtm_path = xstrdup(optarg);
+					canonicalize_path(gtm_path);
+					break;
+				case 't':
+					wait_seconds = atoi(optarg);
+					break;
+				case 'w':
+					do_wait = true;
+					wait_set = true;
+					break;
+				case 'W':
+					do_wait = false;
+					wait_set = true;
+					break;
+				case 'Z':
+					gtm_app = xstrdup(optarg);
+					if (strcmp(gtm_app,"gtm_proxy") != 0
+						&& strcmp(gtm_app,"gtm_standby") != 0
+						&& strcmp(gtm_app,"gtm") != 0)
+					{
+						write_stderr(_("%s: %s launch name set not correct\n"), progname, gtm_app);
+						do_advice();
+						exit(1);
+					}
+					break;
 #ifdef __TBASE__
-                case 'H':
-                    gtm_host = xstrdup(optarg);
-                    break;
-                    
-                case 'P':
-                    gtm_port = xstrdup(optarg);
+				case 'H':
+					gtm_host = xstrdup(optarg);
+					break;
+
+				case 'P':
+					gtm_port = xstrdup(optarg);
 					break;
 				case 'g':
 					startup_gts = xstrdup(optarg);
 					break;
+			    case 'c':
+			        clear_flag = atoi(optarg);
+			        if (clear_flag != 0 && clear_flag != 1)
+                    {
+                        write_stderr(_("%s: %d clear_flag set not correct\n"), progname, clear_flag);
+                        do_advice();
+                        exit(1);
+                    }
+			        break;
 #endif
                 default:
                     /* getopt_long already issued a suitable error message */
@@ -1369,16 +1586,20 @@ main(int argc, char **argv)
                 ctl_command = RECONNECT_COMMAND;
 			else if (strcmp(argv[optind], "reload") == 0)
 				ctl_command = RELOAD_COMMAND;
-            else
-            {
-                write_stderr(_("%s: unrecognized operation mode \"%s\"\n"),
-                             progname, argv[optind]);
-                do_advice();
-                exit(1);
-            }
-            optind++;
-        }
-    }
+			else if (strcmp(argv[optind], "stat") == 0)
+                ctl_command = STAT_COMMAND;
+            else if (strcmp(argv[optind], "errlog") == 0)
+                ctl_command = ERRLOG_COMMAND;
+			else
+			{
+				write_stderr(_("%s: unrecognized operation mode \"%s\"\n"),
+							 progname, argv[optind]);
+				do_advice();
+				exit(1);
+			}
+			optind++;
+		}
+	}
 
     if (ctl_command == NO_COMMAND)
     {
@@ -1395,13 +1616,14 @@ main(int argc, char **argv)
         canonicalize_path(gtm_data);
     }
 
-    if (!gtm_data && ctl_command != STATUS_COMMAND)
-    {
-        write_stderr("%s: no GTM/GTM Proxy directory specified \n",
-                     progname);
-        do_advice();
-        exit(1);
-    }
+	if (!gtm_data && ctl_command != STATUS_COMMAND &&
+	                ctl_command != STAT_COMMAND && ctl_command != ERRLOG_COMMAND)
+	{
+		write_stderr("%s: no GTM/GTM Proxy directory specified \n",
+					 progname);
+		do_advice();
+		exit(1);
+	}
 
     /*
      * pid files of gtm and gtm proxy are named differently
@@ -1442,12 +1664,13 @@ main(int argc, char **argv)
     }
 
 #ifdef __TBASE__
-    if(ctl_command == STATUS_COMMAND)
-    {
-        if(gtm_port == NULL)
-        {
-            write_stderr(_("%s: option -P GTM_port is not specified\n"),
-                         progname);
+	if(ctl_command == STATUS_COMMAND || ctl_command == STAT_COMMAND
+	            || ctl_command == ERRLOG_COMMAND)
+	{
+		if(gtm_port == NULL)
+		{
+			write_stderr(_("%s: option -P GTM_port is not specified\n"),
+						 progname);
             do_advice();
             exit(1);
         }
@@ -1463,15 +1686,17 @@ main(int argc, char **argv)
             case PROMOTE_COMMAND:
             case STATUS_COMMAND:
 			case RELOAD_COMMAND:
-                do_wait = false;
-                break;
-            case STOP_COMMAND:
-                do_wait = true;
-                break;
-            default:
-                break;
-        }
-    }
+            case STAT_COMMAND:
+            case ERRLOG_COMMAND:
+				do_wait = false;
+				break;
+			case STOP_COMMAND:
+				do_wait = true;
+				break;
+			default:
+				break;
+		}
+	}
 
     /* Build strings for pid file and option file */
     if(gtm_data)
@@ -1523,9 +1748,15 @@ main(int argc, char **argv)
 		case RELOAD_COMMAND:
 			do_reload();
 			break;
-        default:
+        case STAT_COMMAND:
+            do_stat();
             break;
-    }
+	    case ERRLOG_COMMAND:
+	        do_errlog();
+	        break;
+		default:
+			break;
+	}
 
     exit(0);
 }

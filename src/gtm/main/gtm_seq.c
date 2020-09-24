@@ -2115,48 +2115,47 @@ ProcessSequenceGetCurrentCommand(Port *myport, StringInfo message)
  */
 void
 ProcessSequenceGetNextCommand(Port *myport, StringInfo message, bool is_backup)
-{// #lizard forgives
-    GTM_SequenceKeyData seqkey;
-    StringInfoData buf;
-    GTM_Sequence seqval;
-    GTM_Sequence range;
-    GTM_Sequence rangemax;
-    uint32 coord_namelen;
-    char  *coord_name;
-    uint32 coord_procid;
-    
-    if (Recovery_IsStandby())
-    {
-        if (myport->remote_type != GTM_NODE_GTM)
-        {
-            elog(ERROR, "gtm standby can't provide sequence to datanodes or coordinators.");
-        }
-    }    
+{
+	GTM_SequenceKeyData seqkey;
+	StringInfoData buf;
+	GTM_Sequence seqval;
+	GTM_Sequence range;
+	GTM_Sequence rangemax;
+	uint32 coord_namelen;
+	char  *coord_name;
+	uint32 coord_procid;
+	
+	if (Recovery_IsStandby())
+	{
+		if (myport->remote_type != GTM_NODE_GTM)
+		{
+			elog(ERROR, "gtm standby can't provide sequence to datanodes or coordinators.");
+		}
+	}	
 
 
-    seqkey.gsk_keylen = pq_getmsgint(message, sizeof (seqkey.gsk_keylen));
-    seqkey.gsk_key = (char *)pq_getmsgbytes(message, seqkey.gsk_keylen);
+	seqkey.gsk_keylen = pq_getmsgint(message, sizeof (seqkey.gsk_keylen));
+	seqkey.gsk_key = (char *)pq_getmsgbytes(message, seqkey.gsk_keylen);
 
-    coord_namelen = pq_getmsgint(message, sizeof(coord_namelen));
-    if (coord_namelen > 0)
-        coord_name = (char *)pq_getmsgbytes(message, coord_namelen);
-    else
-        coord_name = NULL;
-    coord_procid = pq_getmsgint(message, sizeof(coord_procid));
-    memcpy(&range, pq_getmsgbytes(message, sizeof (GTM_Sequence)),
-           sizeof (GTM_Sequence));
+	coord_namelen = pq_getmsgint(message, sizeof(coord_namelen));
+	if (coord_namelen > 0)
+		coord_name = (char *)pq_getmsgbytes(message, coord_namelen);
+	else
+		coord_name = NULL;
+	coord_procid = pq_getmsgint(message, sizeof(coord_procid));
+	memcpy(&range, pq_getmsgbytes(message, sizeof (GTM_Sequence)),
+		   sizeof (GTM_Sequence));
 
-    if (GTM_SeqGetNext(&seqkey, coord_name, coord_procid, range,
-                    &seqval, &rangemax))
-        ereport(ERROR,
-                (ERANGE,
-                 errmsg("Can not get current value of the sequence")));
-        
+	if (GTM_SeqGetNext(&seqkey, coord_name, coord_procid, range,
+					&seqval, &rangemax))
+		ereport(ERROR,
+				(ERANGE,
+				 errmsg("Can not get current value of the sequence")));
 
-    elog(DEBUG1, "Getting next value %ld for sequence %s", seqval, seqkey.gsk_key);
+	elog(DEBUG1, "Getting next value %ld for sequence %s", seqval, seqkey.gsk_key);
 
-    if (!is_backup)
-    {
+	if (!is_backup)
+	{
 #ifndef __XLOG__
         /* Backup first */
         if (GetMyConnection(myport)->standby)

@@ -52,6 +52,7 @@ int            Log_destination = LOG_DESTINATION_STDERR;
         } \
     } while (0)
 
+errlog_collection_hook_type errlog_collection_func = NULL;
 
 static void send_message_to_server_log(ErrorData *edata);
 static void send_message_to_frontend(Port *myport, ErrorData *edata);
@@ -61,8 +62,8 @@ static const char *error_severity(int elevel);
 static void append_with_tabs(StringInfo buf, const char *str);
 static bool is_log_level_output(int elevel, int log_min_level);
 
-int    log_min_messages = WARNING;
-char       *Log_line_prefix = "%l:%p:%m -";        /* format for extra log line info */
+int	log_min_messages = WARNING;
+char	   *Log_line_prefix = "%p:%m -";		/* format for extra log line info */
 
 #define FORMATTED_TS_LEN 128
 static char formatted_start_time[FORMATTED_TS_LEN];
@@ -797,70 +798,73 @@ DebugFileOpen(void)
  */
 static void
 send_message_to_server_log(ErrorData *edata)
-{// #lizard forgives
-    StringInfoData buf;
+{
+	StringInfoData buf;
 
-    initStringInfo(&buf);
+	initStringInfo(&buf);
 
-    formatted_log_time[0] = '\0';
+	formatted_log_time[0] = '\0';
 
-    log_line_prefix(&buf);
-    appendStringInfo(&buf, "%s:  ", error_severity(edata->elevel));
+	log_line_prefix(&buf);
+	appendStringInfo(&buf, "%s:  ", error_severity(edata->elevel));
 
-    if (edata->message)
-        append_with_tabs(&buf, edata->message);
-    else
-        append_with_tabs(&buf, _("missing error text"));
+	if (edata->message)
+		append_with_tabs(&buf, edata->message);
+	else
+		append_with_tabs(&buf, _("missing error text"));
 
-    appendStringInfoChar(&buf, '\n');
+	appendStringInfoChar(&buf, '\n');
 
-    if (edata->detail_log)
-    {
-        log_line_prefix(&buf);
-        appendStringInfoString(&buf, _("DETAIL:  "));
-        append_with_tabs(&buf, edata->detail_log);
-        appendStringInfoChar(&buf, '\n');
-    }
-    else if (edata->detail)
-    {
-        log_line_prefix(&buf);
-        appendStringInfoString(&buf, _("DETAIL:  "));
-        append_with_tabs(&buf, edata->detail);
-        appendStringInfoChar(&buf, '\n');
-    }
-    if (edata->hint)
-    {
-        log_line_prefix(&buf);
-        appendStringInfoString(&buf, _("HINT:  "));
-        append_with_tabs(&buf, edata->hint);
-        appendStringInfoChar(&buf, '\n');
-    }
-    if (edata->context)
-    {
-        log_line_prefix(&buf);
-        appendStringInfoString(&buf, _("CONTEXT:  "));
-        append_with_tabs(&buf, edata->context);
-        appendStringInfoChar(&buf, '\n');
-    }
+	if (edata->detail_log)
+	{
+		log_line_prefix(&buf);
+		appendStringInfoString(&buf, _("DETAIL:  "));
+		append_with_tabs(&buf, edata->detail_log);
+		appendStringInfoChar(&buf, '\n');
+	}
+	else if (edata->detail)
+	{
+		log_line_prefix(&buf);
+		appendStringInfoString(&buf, _("DETAIL:  "));
+		append_with_tabs(&buf, edata->detail);
+		appendStringInfoChar(&buf, '\n');
+	}
+	if (edata->hint)
+	{
+		log_line_prefix(&buf);
+		appendStringInfoString(&buf, _("HINT:  "));
+		append_with_tabs(&buf, edata->hint);
+		appendStringInfoChar(&buf, '\n');
+	}
+	if (edata->context)
+	{
+		log_line_prefix(&buf);
+		appendStringInfoString(&buf, _("CONTEXT:  "));
+		append_with_tabs(&buf, edata->context);
+		appendStringInfoChar(&buf, '\n');
+	}
 
-    /* assume no newlines in funcname or filename... */
-    if (edata->funcname && edata->filename)
-    {
-        appendStringInfo(&buf, _("LOCATION:  %s, %s:%d\n"),
-                         edata->funcname, edata->filename,
-                         edata->lineno);
-    }
-    else if (edata->filename)
-    {
-        appendStringInfo(&buf, _("LOCATION:  %s:%d\n"),
-                         edata->filename, edata->lineno);
-    }
+	/* assume no newlines in funcname or filename... */
+	if (edata->funcname && edata->filename)
+	{
+		appendStringInfo(&buf, _("LOCATION:  %s, %s:%d\n"),
+						 edata->funcname, edata->filename,
+						 edata->lineno);
+	}
+	else if (edata->filename)
+	{
+		appendStringInfo(&buf, _("LOCATION:  %s:%d\n"),
+						 edata->filename, edata->lineno);
+	}
 
-    /* Write to stderr, if enabled */
-    if (Log_destination & LOG_DESTINATION_STDERR)
-        write(fileno(stderr), buf.data, buf.len);
+	/* Write to stderr, if enabled */
+	if (Log_destination & LOG_DESTINATION_STDERR)
+		write(fileno(stderr), buf.data, buf.len);
 
-    pfree(buf.data);
+    if (errlog_collection_func && (buf.len > 0) && ('\0' != buf.data[0]))
+        (*errlog_collection_func) (edata, &buf);
+
+	pfree(buf.data);
 }
 
 /*

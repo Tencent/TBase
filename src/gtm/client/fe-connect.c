@@ -929,76 +929,83 @@ freeGTM_Conn(GTM_Conn *conn)
     termGTMPQExpBuffer(&conn->errorMessage);
     termGTMPQExpBuffer(&conn->workBuffer);
 #ifdef XCP
-    if (conn->result)
-    {
-        /* Free last snapshot if defined */
-        if (conn->result->gr_snapshot.sn_xip)
-            free(conn->result->gr_snapshot.sn_xip);
+	if (conn->result)
+	{
+		/* Free last snapshot if defined */
+		if (conn->result->gr_snapshot.sn_xip)
+			free(conn->result->gr_snapshot.sn_xip);
 
-        /* Depending on result type there could be allocated data */
-        switch (conn->result->gr_type)
+		/* Depending on result type there could be allocated data */
+		switch (conn->result->gr_type)
+		{
+			case SEQUENCE_INIT_RESULT:
+			case SEQUENCE_RESET_RESULT:
+			case SEQUENCE_CLOSE_RESULT:
+			case SEQUENCE_RENAME_RESULT:
+			case SEQUENCE_ALTER_RESULT:
+			case SEQUENCE_SET_VAL_RESULT:
+			case MSG_DB_SEQUENCE_RENAME_RESULT:
+				if (conn->result->gr_resdata.grd_seqkey.gsk_key)
+					free(conn->result->gr_resdata.grd_seqkey.gsk_key);
+				break;
+
+			case SEQUENCE_GET_NEXT_RESULT:
+			case SEQUENCE_GET_LAST_RESULT:
+				if (conn->result->gr_resdata.grd_seq.seqkey.gsk_key)
+					free(conn->result->gr_resdata.grd_seq.seqkey.gsk_key);
+				break;
+				
+			default:
+				break;
+		}
+
+		
+#ifdef __TBASE__					
+		if (conn->result->grd_storage_data.len && conn->result->grd_storage_data.data)
+		{
+			free(conn->result->grd_storage_data.data);
+			conn->result->grd_storage_data.data = NULL;
+			conn->result->grd_storage_data.len  = 0;
+		}
+
+		if (conn->result->grd_store_seq.count && conn->result->grd_store_seq.seqs)
+		{
+			free(conn->result->grd_store_seq.seqs);
+			conn->result->grd_store_seq.seqs = NULL;
+			conn->result->grd_store_seq.count  = 0;
+		}
+
+		if (conn->result->grd_store_txn.count && conn->result->grd_store_txn.txns)
+		{
+			free(conn->result->grd_store_txn.txns);
+			conn->result->grd_store_txn.txns   = NULL;
+			conn->result->grd_store_txn.count  = 0;
+		}	
+
+		if (conn->result->grd_store_check_seq.count && conn->result->grd_store_check_seq.seqs)
+		{
+			free(conn->result->grd_store_check_seq.seqs);
+			conn->result->grd_store_check_seq.seqs   = NULL;
+			conn->result->grd_store_check_seq.count  = 0;
+		}
+
+		if (conn->result->grd_store_check_txn.count && conn->result->grd_store_check_txn.txns)
+		{
+			free(conn->result->grd_store_check_txn.txns);
+			conn->result->grd_store_check_txn.txns   = NULL;
+			conn->result->grd_store_check_txn.count  = 0;
+		}
+
+		if (conn->result->grd_errlog.len && conn->result->grd_errlog.errlog)
         {
-            case SEQUENCE_INIT_RESULT:
-            case SEQUENCE_RESET_RESULT:
-            case SEQUENCE_CLOSE_RESULT:
-            case SEQUENCE_RENAME_RESULT:
-            case SEQUENCE_ALTER_RESULT:
-            case SEQUENCE_SET_VAL_RESULT:
-            case MSG_DB_SEQUENCE_RENAME_RESULT:
-                if (conn->result->gr_resdata.grd_seqkey.gsk_key)
-                    free(conn->result->gr_resdata.grd_seqkey.gsk_key);
-                break;
-
-            case SEQUENCE_GET_NEXT_RESULT:
-            case SEQUENCE_GET_LAST_RESULT:
-                if (conn->result->gr_resdata.grd_seq.seqkey.gsk_key)
-                    free(conn->result->gr_resdata.grd_seq.seqkey.gsk_key);
-                break;
-                
-            default:
-                break;
+		    free(conn->result->grd_errlog.errlog);
+            conn->result->grd_errlog.errlog = NULL;
+            conn->result->grd_errlog.len = 0;
         }
-
-        
-#ifdef __TBASE__                    
-        if (conn->result->grd_storage_data.len && conn->result->grd_storage_data.data)
-        {
-            free(conn->result->grd_storage_data.data);
-            conn->result->grd_storage_data.data = NULL;
-            conn->result->grd_storage_data.len  = 0;
-        }
-
-        if (conn->result->grd_store_seq.count && conn->result->grd_store_seq.seqs)
-        {
-            free(conn->result->grd_store_seq.seqs);
-            conn->result->grd_store_seq.seqs = NULL;
-            conn->result->grd_store_seq.count  = 0;
-        }
-
-        if (conn->result->grd_store_txn.count && conn->result->grd_store_txn.txns)
-        {
-            free(conn->result->grd_store_txn.txns);
-            conn->result->grd_store_txn.txns   = NULL;
-            conn->result->grd_store_txn.count  = 0;
-        }    
-
-        if (conn->result->grd_store_check_seq.count && conn->result->grd_store_check_seq.seqs)
-        {
-            free(conn->result->grd_store_check_seq.seqs);
-            conn->result->grd_store_check_seq.seqs   = NULL;
-            conn->result->grd_store_check_seq.count  = 0;
-        }
-
-        if (conn->result->grd_store_check_txn.count && conn->result->grd_store_check_txn.txns)
-        {
-            free(conn->result->grd_store_check_txn.txns);
-            conn->result->grd_store_check_txn.txns   = NULL;
-            conn->result->grd_store_check_txn.count  = 0;
-        }
-        
-#endif    
-        free(conn->result);
-    }
+		
+#endif	
+		free(conn->result);
+	}
 #endif
 
     free(conn);

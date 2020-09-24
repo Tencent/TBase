@@ -25,6 +25,8 @@
 #include "gtm/elog.h"
 #include "gtm/gtm_list.h"
 #include "gtm/gtm_xlog_internal.h"
+#include "gtm/gtm_stat.h"
+#include "gtm/datapump.h"
 
 extern char *GTMLogFile;
 typedef enum GTM_ThreadStatus
@@ -98,6 +100,8 @@ typedef struct GTM_ThreadInfo
     XLogWaiter          xlog_waiter;
     bool                handle_standby;
 #endif
+    GTM_WorkerStatistics  *stat_handle;     /* statistics hanndle */
+    DataPumpBuf           *datapump_buff;   /* log collection buff */
 } GTM_ThreadInfo;
 
 typedef struct GTM_Threads

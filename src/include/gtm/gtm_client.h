@@ -22,6 +22,8 @@
 #include "gtm/register.h"
 #include "gtm/libpq-fe.h"
 #include "access/xlogdefs.h"
+#include "gtm/gtm_stat.h"
+
 #define MAX_HOSTADDR_LEN 32
 #define MAX_PORT_LEN     8
 
@@ -77,110 +79,111 @@ typedef union GTM_ResultData
     
 #endif
 
-    GlobalTransactionId            grd_gxid;            /* TXN_PREPARE        
-                                                     * TXN_START_PREPARED
-                                                     * TXN_ROLLBACK
-                                                     */
-    struct {
-        GlobalTransactionId            gxid;
-                                                    /* TXN_COMMIT
-                                                     * TXN_COMMIT_PREPARED
-                                                     */
-        int                            status;
-    } grd_eof_txn;
+	GlobalTransactionId			grd_gxid;			/* TXN_PREPARE		
+													 * TXN_START_PREPARED
+													 * TXN_ROLLBACK
+													 */
+	struct {
+		GlobalTransactionId			gxid;
+													/* TXN_COMMIT
+													 * TXN_COMMIT_PREPARED
+													 */
+		int							status;
+	} grd_eof_txn;
 
-    GlobalTransactionId            grd_next_gxid;
+	GlobalTransactionId			grd_next_gxid;
 
-    struct
-    {
-        GTM_TransactionHandle    txnhandle;
-        GlobalTransactionId        gxid;
-    } grd_txn;                                    /* TXN_GET_GXID */
+	struct
+	{
+		GTM_TransactionHandle	txnhandle;
+		GlobalTransactionId		gxid;
+	} grd_txn;									/* TXN_GET_GXID */
 
-    GTM_SequenceKeyData            grd_seqkey;        /* SEQUENCE_INIT
-                                                 * SEQUENCE_RESET
-                                                 * SEQUENCE_CLOSE */
-    struct
-    {
-        GTM_SequenceKeyData        seqkey;
-        GTM_Sequence            seqval;
-        GTM_Sequence            rangemax;
-    } grd_seq;                                    /* SEQUENCE_GET_CURRENT
-                                                 * SEQUENCE_GET_NEXT */
-    struct
-    {
-        int32                    seq_count;
-        GTM_SeqInfo               *seq;
-    } grd_seq_list;                                /* SEQUENCE_GET_LIST */
+	GTM_SequenceKeyData			grd_seqkey;		/* SEQUENCE_INIT
+												 * SEQUENCE_RESET
+												 * SEQUENCE_CLOSE */
+	struct
+	{
+		GTM_SequenceKeyData		seqkey;
+		GTM_Sequence			seqval;
+		GTM_Sequence			rangemax;
+	} grd_seq;									/* SEQUENCE_GET_CURRENT
+												 * SEQUENCE_GET_NEXT */
+	struct
+	{
+		int32					seq_count;
+		GTM_SeqInfo			   *seq;
+	} grd_seq_list;								/* SEQUENCE_GET_LIST */
 
-    struct
-    {  
-        int32                     txn_count;                 /* TXN_BEGIN_GETGXID_MULTI */
-        GlobalTransactionId        txn_gxid[GTM_MAX_GLOBAL_TRANSACTIONS];
-        GTM_Timestamp            timestamp;
-    } grd_txn_get_multi;
+	struct
+	{  
+		int32			     	txn_count; 				/* TXN_BEGIN_GETGXID_MULTI */
+		GlobalTransactionId		txn_gxid[GTM_MAX_GLOBAL_TRANSACTIONS];
+		GTM_Timestamp			timestamp;
+	} grd_txn_get_multi;
 
-    struct
-    {
-        int                ts_count;                 /* GETGTS_MULTI */
-        GTM_Timestamp        gts[GTM_MAX_GLOBAL_TRANSACTIONS];
-    } grd_gts_get_multi;
+	struct
+	{
+		int				ts_count; 				/* GETGTS_MULTI */
+		GTM_Timestamp		gts[GTM_MAX_GLOBAL_TRANSACTIONS];
+	} grd_gts_get_multi;
 
-    struct
-    {
-        int                txn_count;                /* TXN_COMMIT_MULTI */
-        int                status[GTM_MAX_GLOBAL_TRANSACTIONS];
-    } grd_txn_rc_multi;
+	struct
+	{
+		int				txn_count;				/* TXN_COMMIT_MULTI */
+		int				status[GTM_MAX_GLOBAL_TRANSACTIONS];
+	} grd_txn_rc_multi;
 
-    struct
-    {
-        GTM_TransactionHandle    txnhandle;        /* SNAPSHOT_GXID_GET */
-        GlobalTransactionId        gxid;            /* SNAPSHOT_GET */
-        int                        txn_count;        /* SNAPSHOT_GET_MULTI */
-        int                        status[GTM_MAX_GLOBAL_TRANSACTIONS];
-    } grd_txn_snap_multi;
+	struct
+	{
+		GTM_TransactionHandle	txnhandle;		/* SNAPSHOT_GXID_GET */
+		GlobalTransactionId		gxid;			/* SNAPSHOT_GET */
+		int						txn_count;		/* SNAPSHOT_GET_MULTI */
+		int						status[GTM_MAX_GLOBAL_TRANSACTIONS];
+	} grd_txn_snap_multi;
 
-    struct
-    {
-        GlobalTransactionId        gxid;
-        GlobalTransactionId        prepared_gxid;
-        int                nodelen;
-        char            *nodestring;
-    } grd_txn_get_gid_data;                    /* TXN_GET_GID_DATA_RESULT */
+	struct
+	{
+		GlobalTransactionId		gxid;
+		GlobalTransactionId		prepared_gxid;
+		int				nodelen;
+		char			*nodestring;
+	} grd_txn_get_gid_data;					/* TXN_GET_GID_DATA_RESULT */
 
-    struct
-    {
-        char                *ptr;
-        int                  len;
-    } grd_txn_gid_list;                        /* TXN_GXID_LIST_RESULT */
+	struct
+	{
+		char				*ptr;
+		int  				len;
+	} grd_txn_gid_list;						/* TXN_GXID_LIST_RESULT */
 
-    struct
-    {
-        GTM_PGXCNodeType    type;            /* NODE_REGISTER */
-        int                  len;
-        char                *node_name;        /* NODE_UNREGISTER */
-        GlobalTransactionId xmin;
-    } grd_node;
+	struct
+	{
+		GTM_PGXCNodeType	type;			/* NODE_REGISTER */
+		int  				len;
+		char				*node_name;		/* NODE_UNREGISTER */
+		GlobalTransactionId xmin;
+	} grd_node;
 
-    struct
-    {
-        int                num_node;
-        GTM_PGXCNodeInfo        *nodeinfo[MAX_NODES];
-    } grd_node_list;
+	struct
+	{
+		int				num_node;
+		GTM_PGXCNodeInfo		*nodeinfo[MAX_NODES];
+	} grd_node_list;
 
-    struct
-    {
-        GlobalTransactionId        latest_completed_xid;
-        GlobalTransactionId        global_xmin;
-        int                        errcode;
-    } grd_report_xmin;                        /* REPORT_XMIN */
+	struct
+	{
+		GlobalTransactionId		latest_completed_xid;
+		GlobalTransactionId		global_xmin;
+		int						errcode;
+	} grd_report_xmin;						/* REPORT_XMIN */
 
+    GTM_StatisticsResult statistic_result;
 
-    /*
-     * TODO
-     *     TXN_GET_STATUS
-     *     TXN_GET_ALL_PREPARED
-     */
+	/*
+	 * TODO
+	 * 	TXN_GET_STATUS
+	 * 	TXN_GET_ALL_PREPARED
+	 */
 } GTM_ResultData;
 
 #define GTM_RESULT_COMM_ERROR (-2) /* Communication error */
@@ -210,35 +213,41 @@ typedef struct GTM_Result
         XLogRecPtr              start_pos;
         TimeLineID              time_line;
 #endif
-    } grd_storage_data;                     /* STORAGE_TRANSFER_RESULT */
-    int                            gr_finish_status;    /* TXN_FINISH_GID_RESULT result */
-    GTMStorageStatus            gtm_status;
-    
-    struct 
-    {
-        int32                    count;
-        GTM_StoredSeqInfo       *seqs;
-    }grd_store_seq;
+	} grd_storage_data; 					/* STORAGE_TRANSFER_RESULT */
+	int							gr_finish_status;	/* TXN_FINISH_GID_RESULT result */
+	GTMStorageStatus            gtm_status;
+	
+	struct 
+	{
+		int32					count;
+		GTM_StoredSeqInfo       *seqs;
+	}grd_store_seq;
 
-    struct 
-    {
-        int32                             count;
-        GTM_StoredTransactionInfo       *txns;
-    }grd_store_txn;
+	struct 
+	{
+		int32							 count;
+		GTM_StoredTransactionInfo       *txns;
+	}grd_store_txn;
 
 
-    struct 
-    {
-        int32                            count;
-        GTMStorageSequneceStatus       *seqs;
-    }grd_store_check_seq;
+	struct 
+	{
+		int32							count;
+		GTMStorageSequneceStatus       *seqs;
+	}grd_store_check_seq;
 
-    struct 
+	struct 
+	{
+		int32							count;
+		GTMStorageTransactionStatus     *txns;
+	}grd_store_check_txn;
+
+    struct
     {
-        int32                            count;
-        GTMStorageTransactionStatus     *txns;
-    }grd_store_check_txn;
-    
+        int len;
+        char* errlog;
+    } grd_errlog;
+
 #endif
     /*
      * We keep these two items outside the union to avoid repeated malloc/free
@@ -296,6 +305,9 @@ int check_gtm_status(GTM_Conn *conn, int *status, GTM_Timestamp *master,XLogRecP
 int check_gtm_status(GTM_Conn *conn, int *status, GTM_Timestamp *master, GTM_Timestamp *standby, char *standbyhost, char *standbyport, int32 buflen);
 #endif
 int bkup_global_timestamp(GTM_Conn *conn, GlobalTimestamp timestamp);
+int get_gtm_statistics(GTM_Conn *conn, int clear_flag, int timeout_seconds, GTM_StatisticsResult** result);
+int get_gtm_errlog(GTM_Conn *conn, int timeout_seconds, char** errlog, int* len);
+
 #endif
 
 int bkup_begin_transaction_gxid(GTM_Conn *conn, GlobalTransactionId gxid,

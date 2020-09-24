@@ -574,6 +574,106 @@ send_failed:
     return GTM_RESULT_ERROR;
 }
 
+/*
+ * to get GTM statistics info
+ */
+int
+get_gtm_statistics(GTM_Conn *conn, int clear_flag, int timeout_seconds, GTM_StatisticsResult** result)
+{
+    GTM_Result *res = NULL;
+    time_t finish_time;
+
+    /* Start the message. */
+    if (gtmpqPutMsgStart('C', true, conn) ||
+        gtmpqPutInt(MSG_GET_STATISTICS, sizeof (GTM_MessageType), conn))
+        goto send_failed;
+
+    if (gtmpqPutInt(clear_flag,sizeof(int),conn))
+        goto send_failed;
+
+    /* Finish the message. */
+    if (gtmpqPutMsgEnd(conn))
+        goto send_failed;
+
+    /* Flush to ensure backend gets it. */
+    if (gtmpqFlush(conn))
+        goto send_failed;
+
+    /* add two seconds to allow extra wait */
+    finish_time = time(NULL) + timeout_seconds + 2;
+    if (gtmpqWaitTimed(true, false, conn, finish_time) ||
+        gtmpqReadData(conn) < 0)
+        goto receive_failed;
+
+    if ((res = GTMPQgetResult(conn)) == NULL)
+        goto receive_failed;
+
+    if (GTM_RESULT_OK == res->gr_status)
+    {
+        *result = &(res->gr_resdata.statistic_result);
+        return GTM_RESULT_OK;
+    }
+    else
+    {
+        return GTM_RESULT_ERROR;
+    }
+
+receive_failed:
+send_failed:
+    conn->result = makeEmptyResultIfIsNull(conn->result);
+    conn->result->gr_status = GTM_RESULT_COMM_ERROR;
+    return GTM_RESULT_ERROR;
+}
+
+/*
+ * to get gtm error log
+ */
+int
+get_gtm_errlog(GTM_Conn *conn, int timeout_seconds, char** errlog, int* len)
+{
+    GTM_Result *res = NULL;
+    time_t finish_time;
+
+    /* Start the message. */
+    if (gtmpqPutMsgStart('C', true, conn) ||
+        gtmpqPutInt(MSG_GET_ERRORLOG, sizeof (GTM_MessageType), conn))
+        goto send_failed;
+
+    /* Finish the message. */
+    if (gtmpqPutMsgEnd(conn))
+        goto send_failed;
+
+    /* Flush to ensure backend gets it. */
+    if (gtmpqFlush(conn))
+        goto send_failed;
+
+    /* add two seconds to allow extra wait */
+    finish_time = time(NULL) + timeout_seconds + 2;
+    if (gtmpqWaitTimed(true, false, conn, finish_time) ||
+        gtmpqReadData(conn) < 0)
+        goto receive_failed;
+
+    if ((res = GTMPQgetResult(conn)) == NULL)
+        goto receive_failed;
+
+    if (GTM_RESULT_OK == res->gr_status)
+    {
+        *errlog = res->grd_errlog.errlog;
+        *len = res->grd_errlog.len;
+        return GTM_RESULT_OK;
+    }
+    else
+    {
+        return GTM_RESULT_ERROR;
+    }
+
+receive_failed:
+send_failed:
+    conn->result = makeEmptyResultIfIsNull(conn->result);
+    conn->result->gr_status = GTM_RESULT_COMM_ERROR;
+    return GTM_RESULT_ERROR;
+}
+
 #endif
 /*
  * Transaction Management API

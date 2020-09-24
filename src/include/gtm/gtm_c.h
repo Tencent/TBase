@@ -392,7 +392,7 @@ typedef enum
 #define GTM_GTS_ONE_SECOND               (1000 * 1000L)
 #define GTM_SYNC_CYCLE                     (5   * GTM_GTS_ONE_SECOND)
 #define GTM_SYNC_TIME_LIMIT              (60  * GTM_GTS_ONE_SECOND)
-
+#define GTM_LOG_COLLECT_CYCLE		     (5   * GTM_GTS_ONE_SECOND)
 
 #pragma pack()
 

@@ -634,5 +634,5 @@ pq_getmsgend(StringInfo msg)
 int
 pq_getmsgunreadlen(StringInfo msg)
 {
-    return msg->len - msg->cursor;
+	return msg->len - msg->cursor;
 }

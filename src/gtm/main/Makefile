@@ -15,7 +15,7 @@ ifneq ($(PORTNAME), win32)
 override CFLAGS += $(PTHREAD_CFLAGS)
 endif
 
-OBJS=main.o gtm_thread.o gtm_txn.o gtm_seq.o gtm_snap.o gtm_standby.o gtm_opt.o gtm_backup.o gtm_store.o gtm_xlog.o
+OBJS=main.o gtm_thread.o gtm_txn.o gtm_seq.o gtm_snap.o gtm_standby.o gtm_opt.o gtm_backup.o gtm_store.o gtm_xlog.o gtm_stat.o gtm_stat_error.o
 
 OTHERS= ../libpq/libpqcomm.a ../path/libgtmpath.a ../recovery/libgtmrecovery.a ../client/libgtmclient.a ../common/libgtm.a ../../port/libpgport.a
 

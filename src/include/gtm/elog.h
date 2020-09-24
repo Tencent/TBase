@@ -76,6 +76,7 @@
 #define ELOG_H
 
 #include "c.h"
+#include "stringinfo.h"
 
 /* Error level codes */
 #define DEBUG8         9
@@ -314,5 +315,10 @@ write_stderr(const char *fmt,...)
 /* This extension allows gcc to check the format string for consistency with
    the supplied arguments. */
 __attribute__((format(printf, 1, 2)));
+
+
+/* log collection function hook */
+typedef void (*errlog_collection_hook_type) (ErrorData *edata, StringInfo buff);
+extern errlog_collection_hook_type errlog_collection_func;
 
 #endif   /* GTM_ELOG_H */

@@ -57,7 +57,8 @@
 #include "gtm/gtm_utils.h"
 #include "gtm/gtm_backup.h"
 #include "gtm/gtm_time.h"
-
+#include "gtm/gtm_stat.h"
+#include "gtm/gtm_stat_error.h"
 
 #ifdef __TBASE__
 #include "gtm/gtm_store.h"
@@ -135,6 +136,9 @@ int             g_max_thread_number = 512; /* max thread number of gtm. */
 GTM_ThreadInfo  *g_timekeeper_thread = NULL;
 GTM_ThreadInfo    *g_timebackup_thread = NULL;
 GTM_ThreadInfo  *g_timer_thread = NULL;
+GTM_ThreadInfo  *g_logcollector_thread = NULL;
+void *GTM_ThreadLogCollector(void *argp);
+extern void GTM_ErrorLogCollector(ErrorData *edata, StringInfo buff);
 
 #ifdef __XLOG__
 GTM_ThreadInfo  *g_basebackup_thread   = NULL;
@@ -1476,25 +1480,41 @@ main(int argc, char *argv[])
     }
 
     for(i = 0; i < max_wal_sender; i++)
+	{
+		{
+    		GTM_ThreadInfo *thr = GTM_ThreadCreate(GTM_ThreadWalSender, g_max_lock_number);
+    		if (NULL == thr)
+    		{
+    			elog(ERROR, "Failed to create wal sender thread.");
+    			exit(1);
+    		}
+		}
+	}
+
+    g_logcollector_thread = GTM_ThreadCreate(GTM_ThreadLogCollector, g_max_lock_number);
+    if (NULL == g_logcollector_thread)
     {
-        {
-            GTM_ThreadInfo *thr = GTM_ThreadCreate(GTM_ThreadWalSender, g_max_lock_number);
-            if (NULL == thr)
-            {
-                elog(ERROR, "Failed to create wal sender thread.");
-                exit(1);
-            }
-        }
+        elog(ERROR, "Failed to create gtm log collector thread.");
+        exit(1);
     }
-    fprintf(stdout, "TBase create %d worker thread.\n", process_thread_num); 
-    
-    /* Processing threads + Timer + Timekeeper + Timebackup threads + Walwrite + CheckPointer*/
-    GTMThreads->gt_start_thread_count = process_thread_num + max_wal_sender + util_thread_cnt;
-    fprintf(stdout, "Start sever loop start thread count %d running thread count %d.\n",
-        GTMThreads->gt_start_thread_count, GTMThreads->gt_thread_count); 
-    
-    elog(LOG, "Start sever loop start thread count %d running thread count %d.\n",
-            GTMThreads->gt_start_thread_count, GTMThreads->gt_thread_count);
+    util_thread_cnt++;
+
+	fprintf(stdout, "TBase create %d worker thread.\n", process_thread_num); 
+	
+	/* Processing threads + Timer + Timekeeper + Timebackup threads + Walwrite + CheckPointer*/
+	GTMThreads->gt_start_thread_count = process_thread_num + max_wal_sender + util_thread_cnt;
+	fprintf(stdout, "Start sever loop start thread count %d running thread count %d.\n",
+		GTMThreads->gt_start_thread_count, GTMThreads->gt_thread_count); 
+	
+	elog(LOG, "Start sever loop start thread count %d running thread count %d.\n",
+			GTMThreads->gt_start_thread_count, GTMThreads->gt_thread_count);
+
+	/* init statistic time */
+    GTM_InitGtmStatistics();
+
+    /* init log hook */
+    errlog_collection_func = GTM_ErrorLogCollector;
+
 #endif
     fprintf(stdout, "TBase GTM is ready to go!!\n");
     /*
@@ -2352,6 +2372,92 @@ shutdown:
     return my_threadinfo;    
 }
 
+/*
+ * Log collection thread, responsible for summarizing
+ * the log data of each thread to global datapump
+ */
+void *
+GTM_ThreadLogCollector(void *argp)
+{
+    GTM_ThreadInfo *my_threadinfo = (GTM_ThreadInfo *)argp;
+    sigjmp_buf  local_sigjmp_buf;
+    struct sigaction action;
+    int ret = 0;
+    action.sa_flags = 0;
+    action.sa_handler = GTM_ThreadSigHandler;
+
+    ret = sigaction(SIGQUIT, &action, NULL);
+    if (ret)
+    {
+        elog(LOG, "register thread quit handler failed");
+    }
+
+    elog(DEBUG8, "Starting the log collector thread");
+    MessageContext = AllocSetContextCreate(TopMemoryContext,
+                                           "MessageContext",
+                                           ALLOCSET_DEFAULT_MINSIZE,
+                                           ALLOCSET_DEFAULT_INITSIZE,
+                                           ALLOCSET_DEFAULT_MAXSIZE,
+                                           false);
+
+    /*
+     * POSTGRES main processing loop begins here
+     *
+     * If an exception is encountered, processing resumes here so we abort the
+     * current transaction and start a new one.
+     *
+     * You might wonder why this isn't coded as an infinite loop around a
+     * PG_TRY construct.  The reason is that this is the bottom of the
+     * exception stack, and so with PG_TRY there would be no exception handler
+     * in force at all during the CATCH part.  By leaving the outermost setjmp
+     * always active, we have at least some chance of recovering from an error
+     * during error recovery.  (If we get into an infinite loop thereby, it
+     * will soon be stopped by overflow of elog.c's internal state stack.)
+     */
+
+    if (sigsetjmp(local_sigjmp_buf, 1) != 0)
+    {
+#ifdef __TBASE__
+        RWLockCleanUp();
+#endif
+        EmitErrorReport(NULL);
+
+        /*
+         * Now return to normal top-level context and clear ErrorContext for
+         * next time.
+         */
+        MemoryContextSwitchTo(TopMemoryContext);
+        FlushErrorState();
+    }
+
+    /* We can now handle ereport(ERROR) */
+    PG_exception_stack = &local_sigjmp_buf;
+
+    if (GTM_InitLogCollector() != 0)
+    {
+        elog(ERROR, "Failed to Init LogCollector.");
+        exit(1);
+    }
+
+    for(;;)
+    {
+        /* no need to lock here. */
+        if(GTM_SHUTTING_DOWN == GTMTransactions.gt_gtm_state)
+        {
+           break;
+        }
+
+        /* sleep GTM_LOG_COLLECT_CYCLE */
+        usleep(GTM_LOG_COLLECT_CYCLE);
+
+        GTM_ProcessLogCollection();
+    }
+
+    GTM_DeInitLogCollector();
+    elog(LOG, "GTM is shutting down, log collector exits!");
+    return my_threadinfo;
+}
+
 void
 SendXLogSyncStatus(GTM_Conn *conn)
 {// #lizard forgives
@@ -2955,13 +3061,15 @@ GTM_ThreadMain(void *argp)
     action.sa_handler = GTM_ThreadSigHandler;  
          
     ret = sigaction(SIGQUIT, &action, NULL);  
-    if (ret)
-    {
-        elog(LOG, "register thread quit handler failed");
-    }
+	if (ret)
+	{
+		elog(LOG, "register thread quit handler failed");
+	}
 
-    elog(DEBUG8, "Starting the connection helper thread");
-    bind_service_threads();
+	elog(DEBUG8, "Starting the connection helper thread");
+	bind_service_threads();
+
+    GTM_InitStatisticsHandle();
 
     /*
      * Create the memory context we will use in the main loop.
@@ -2971,52 +3079,52 @@ GTM_ThreadMain(void *argp)
      *
      * This context is thread-specific
      */
-    MessageContext = AllocSetContextCreate(TopMemoryContext,
-                                           "MessageContext",
-                                           ALLOCSET_DEFAULT_MINSIZE,
-                                           ALLOCSET_DEFAULT_INITSIZE,
-                                           ALLOCSET_DEFAULT_MAXSIZE,
-                                           false);
-    
-    efd = epoll_create1(0);
-    if(efd == -1)
-    {
-        elog(ERROR, "failed to create epoll");
-    }
-    thrinfo->thr_efd = efd;
-    thrinfo->thr_epoll_ok = true;
-    
-    /*
-     * Acquire the thread lock to prevent connection from GTM-Standby to update
-     * GTM-Standby registration.
-     */
+	MessageContext = AllocSetContextCreate(TopMemoryContext,
+										   "MessageContext",
+										   ALLOCSET_DEFAULT_MINSIZE,
+										   ALLOCSET_DEFAULT_INITSIZE,
+										   ALLOCSET_DEFAULT_MAXSIZE,
+										   false);
+	
+	efd = epoll_create1(0);
+	if(efd == -1)
+	{
+		elog(ERROR, "failed to create epoll");
+	}
+	thrinfo->thr_efd = efd;
+	thrinfo->thr_epoll_ok = true;
+	
+	/*
+	 * Acquire the thread lock to prevent connection from GTM-Standby to update
+	 * GTM-Standby registration.
+	 */
 
-    /*
-     * Get the input_message in the TopMemoryContext so that we don't need to
-     * free/palloc it for every incoming message. Unlike Postgres, we don't
-     * expect the incoming messages to be of arbitrary sizes
-     */
+	/*
+	 * Get the input_message in the TopMemoryContext so that we don't need to
+	 * free/palloc it for every incoming message. Unlike Postgres, we don't
+	 * expect the incoming messages to be of arbitrary sizes
+	 */
 
-    initStringInfo(&input_message);
+	initStringInfo(&input_message);
 
-    /*
-     * POSTGRES main processing loop begins here
-     *
-     * If an exception is encountered, processing resumes here so we abort the
-     * current transaction and start a new one.
-     *
-     * You might wonder why this isn't coded as an infinite loop around a
-     * PG_TRY construct.  The reason is that this is the bottom of the
-     * exception stack, and so with PG_TRY there would be no exception handler
-     * in force at all during the CATCH part.  By leaving the outermost setjmp
-     * always active, we have at least some chance of recovering from an error
-     * during error recovery.  (If we get into an infinite loop thereby, it
-     * will soon be stopped by overflow of elog.c's internal state stack.)
-     */
+	/*
+	 * POSTGRES main processing loop begins here
+	 *
+	 * If an exception is encountered, processing resumes here so we abort the
+	 * current transaction and start a new one.
+	 *
+	 * You might wonder why this isn't coded as an infinite loop around a
+	 * PG_TRY construct.  The reason is that this is the bottom of the
+	 * exception stack, and so with PG_TRY there would be no exception handler
+	 * in force at all during the CATCH part.  By leaving the outermost setjmp
+	 * always active, we have at least some chance of recovering from an error
+	 * during error recovery.  (If we get into an infinite loop thereby, it
+	 * will soon be stopped by overflow of elog.c's internal state stack.)
+	 */
 
-    if (sigsetjmp(local_sigjmp_buf, 1) != 0)
-    {
-        bool    report = false;
+	if (sigsetjmp(local_sigjmp_buf, 1) != 0)
+	{
+		bool	report = false;
 #ifdef __TBASE__
         RWLockCleanUp();
 #endif
@@ -3422,7 +3530,7 @@ ProcessCommand(Port *myport, StringInfo input_message)
 #ifdef __TBASE__
     GTM_ThreadInfo *my_threadinfo = NULL;
     long long  start_time;
-    long long  end_time;
+    long long  cost_time;
     my_threadinfo = GetMyThreadInfo;
 #ifndef __XLOG__
     GTM_ConnectionInfo *conn;
@@ -3641,6 +3749,16 @@ ProcessCommand(Port *myport, StringInfo input_message)
             break;
         }
 #endif
+        case MSG_GET_STATISTICS:
+        {
+            ProcessGetStatisticsCommand(myport,input_message);
+            break;
+        }
+        case MSG_GET_ERRORLOG:
+        {
+            ProcessGetErrorlogCommand(myport,input_message);
+            break;
+        }
 #endif
         default:
             ereport(FATAL,
@@ -3651,12 +3769,13 @@ ProcessCommand(Port *myport, StringInfo input_message)
 
     BeforeReplyToClientXLogTrigger();
 
-    end_time = getSystemTime();
-
-    if(enable_gtm_debug || end_time - start_time > warnning_time_cost)
-	    elog(LOG, "cost mtype = %s (%d) %lld ms.", gtm_util_message_name(mtype), (int)mtype,end_time - start_time);
-
 #ifdef __TBASE__
+    cost_time = getSystemTime() - start_time;
+    if(enable_gtm_debug || cost_time > warnning_time_cost)
+	    elog(LOG, "cost mtype = %s (%d) %lld ms.", gtm_util_message_name(mtype), (int)mtype,cost_time);
+
+    GTM_UpdateStatistics(my_threadinfo->stat_handle, mtype, cost_time);
+
     if (my_threadinfo->handle_standby)
     {
         GTM_RWLockRelease(&my_threadinfo->thr_lock);

@@ -19,6 +19,8 @@
 #include "gtm/gtm_xlog.h"
 #include "gtm/gtm_txn.h"
 #include "gtm/libpq.h"
+#include "gtm/gtm_stat_error.h"
+
 #ifdef __TBASE__
 #include "gtm/gtm_store.h"
 #endif
@@ -275,60 +277,64 @@ GTM_ThreadCreate(void *(* startroutine)(void *), int32 max_lock)
     thrinfo->insert_lock_id = -1;
     thrinfo->insert_try_lock_id = pthread_self() % NUM_XLOGINSERT_LOCKS;
     thrinfo->register_buff = NULL;
-    thrinfo->last_sync_gts = 0; 
+    thrinfo->last_sync_gts = 0;
+    thrinfo->stat_handle = NULL;
+    thrinfo->datapump_buff = GTM_BuildDataPumpBuf(GTM_THREAD_ERRLOG_DATAPUMP_SIZE);
 #endif
 
-    /*
-     * Each thread gets its own ErrorContext and its a child of ErrorContext of
-     * the main process
-     *
-     * This is a thread-specific context and is not shared between other
-     * threads
-     */
-    thrinfo->thr_error_context = AllocSetContextCreate(ErrorContext,
-                                                       "ErrorContext",
-                                                       8 * 1024,
-                                                       8 * 1024,
-                                                       8 * 1024,
-                                                       false);
+	/*
+	 * Each thread gets its own ErrorContext and its a child of ErrorContext of
+	 * the main process
+	 *
+	 * This is a thread-specific context and is not shared between other
+	 * threads
+	 */
+	thrinfo->thr_error_context = AllocSetContextCreate(ErrorContext,
+													   "ErrorContext",
+													   8 * 1024,
+													   8 * 1024,
+													   8 * 1024,
+													   false);
 
-    thrinfo->thr_startroutine = startroutine;
+	thrinfo->thr_startroutine = startroutine;
 
-    /*
-     * Now start the thread. The thread will start executing the given
-     * "startroutine". The thrinfo structure is also passed to the thread. Any
-     * additional parameters should be passed via the thrinfo strcuture.
-     *
-     * Return the thrinfo structure to the caller
-     */
-    if ((err = pthread_create(&thrinfo->thr_id, NULL, GTM_ThreadMainWrapper,
-                              thrinfo)))
-    {
-        ereport(LOG,
-                (err,
-                 errmsg("Failed to create a new thread: error %s", strerror(err))));
+	/*
+	 * Now start the thread. The thread will start executing the given
+	 * "startroutine". The thrinfo structure is also passed to the thread. Any
+	 * additional parameters should be passed via the thrinfo strcuture.
+	 *
+	 * Return the thrinfo structure to the caller
+	 */
+	if ((err = pthread_create(&thrinfo->thr_id, NULL, GTM_ThreadMainWrapper,
+							  thrinfo)))
+	{
+		ereport(LOG,
+				(err,
+				 errmsg("Failed to create a new thread: error %s", strerror(err))));
 
-        GTM_ThreadRemove(thrinfo);
+		GTM_ThreadRemove(thrinfo);
 
-        MemoryContextDelete(thrinfo->thr_error_context);
-        MemoryContextDelete(thrinfo->thr_thread_context);
+		MemoryContextDelete(thrinfo->thr_error_context);
+		MemoryContextDelete(thrinfo->thr_thread_context);
 
-        GTM_RWLockDestroy(&thrinfo->thr_lock);
+		GTM_RWLockDestroy(&thrinfo->thr_lock);
+#ifdef __TBASE__
+        GTM_DestroyDataPumpBuf(thrinfo->datapump_buff);
+#endif
+		pfree(thrinfo);
 
-        pfree(thrinfo);
+		return NULL;
+	}
 
-        return NULL;
-    }
+	/*
+	 * Ensure that the resources are released when the thread exits. (We used
+	 * to do this inside GTM_ThreadMainWrapper, but thrinfo->thr_id may not set
+	 * by the time GTM_ThreadMainWrapper starts executing, this possibly
+	 * calling the function on an invalid thr_id
+	 */
+	pthread_detach(thrinfo->thr_id);
 
-    /*
-     * Ensure that the resources are released when the thread exits. (We used
-     * to do this inside GTM_ThreadMainWrapper, but thrinfo->thr_id may not set
-     * by the time GTM_ThreadMainWrapper starts executing, this possibly
-     * calling the function on an invalid thr_id
-     */
-    pthread_detach(thrinfo->thr_id);
-
-    return thrinfo;
+	return thrinfo;
 }
 
 /*
@@ -398,8 +404,10 @@ GTM_ThreadCleanup(void *argp)
     RWLockCleanUp();
     if(thrinfo->locks_hold != NULL)
         pfree(thrinfo->locks_hold);
-    if(thrinfo->write_locks_hold != NULL)
-        pfree(thrinfo->write_locks_hold);
+	if(thrinfo->write_locks_hold != NULL)
+		pfree(thrinfo->write_locks_hold);
+	if(thrinfo->datapump_buff != NULL)
+        GTM_DestroyDataPumpBuf(thrinfo->datapump_buff);
 #endif
     /*
      * Switch to the memory context of the main process so that we can free up
