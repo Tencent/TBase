@@ -1416,6 +1416,15 @@ select MLS_TRANSPARENT_CRYPT_ALGORITHM_UNBIND_TABLE('no_crypted_schema_alt', 'tb
 select MLS_TRANSPARENT_CRYPT_ALGORITHM_UNBIND_TABLE('no_crypted_schema_alt_2', 'tbl_crypt_alt_2');
 select MLS_TRANSPARENT_CRYPT_ALGORITHM_UNBIND_SCHEMA('crypted_schema_alt');
 select MLS_TRANSPARENT_CRYPT_ALGORITHM_UNBIND_SCHEMA('crypted_schema_alt_2');
+
+-- child table has bind
+select algorithm_id, nspname, tblname from pg_transparent_crypt_policy_map where nspname ilike '%alt%' order by 1,2,3;
+
+--clean child
+select MLS_TRANSPARENT_CRYPT_ALGORITHM_UNBIND_TABLE('no_crypted_schema_alt_2', 'tbl_crypt_alt_2_part_0');
+select MLS_TRANSPARENT_CRYPT_ALGORITHM_UNBIND_TABLE('no_crypted_schema_alt_2', 'tbl_crypt_alt_2_part_1');
+select MLS_TRANSPARENT_CRYPT_ALGORITHM_UNBIND_TABLE('no_crypted_schema_alt_2', 'tbl_crypt_alt_2_part_2');
+
 \c - godlike
 drop table no_crypted_schema_alt.tbl_crypted_alt;
 drop table no_crypted_schema_alt.tbl_nocrypt_alt;
@@ -1923,7 +1932,7 @@ select * from xixi where i = 3;
 insert into xixi as x(i,j) values(3,3) on conflict(i) do update set j = 2048 where x.j = 1024 and x.i = 3;
 select * from xixi where i = 3;
 \c - badboy
---fails to update 
+--fails to update
 insert into xixi as x(i,j) values(6,6) on conflict(i) do update set j = 3096 where x.j = 2048 and x.i = 6;
 select * from xixi where i = 6;
 \c - godlike
@@ -2153,7 +2162,13 @@ drop table lala;
 drop table lala2;
 drop table lala3;
 
+\c - mls_admin
+select * from pg_cls_table;
+select MLS_CLS_DROP_TABLE_LABEL('cls_compare', 'public', 'xixi');
+select * from pg_cls_table;
+
 --everything is done
+\c - godlike
 drop table xixi;
 drop table momo;
 

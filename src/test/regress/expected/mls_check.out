@@ -3776,6 +3776,34 @@ select MLS_TRANSPARENT_CRYPT_ALGORITHM_UNBIND_SCHEMA('crypted_schema_alt_2');
  t
 (1 row)
 
+-- child table has bind
+select algorithm_id, nspname, tblname from pg_transparent_crypt_policy_map where nspname ilike '%alt%' order by 1,2,3;
+ algorithm_id |         nspname         |        tblname         
+--------------+-------------------------+------------------------
+            4 | no_crypted_schema_alt_2 | tbl_crypt_alt_2_part_0
+            4 | no_crypted_schema_alt_2 | tbl_crypt_alt_2_part_1
+            4 | no_crypted_schema_alt_2 | tbl_crypt_alt_2_part_2
+(3 rows)
+
+--clean child
+select MLS_TRANSPARENT_CRYPT_ALGORITHM_UNBIND_TABLE('no_crypted_schema_alt_2', 'tbl_crypt_alt_2_part_0');
+ mls_transparent_crypt_algorithm_unbind_table 
+----------------------------------------------
+ t
+(1 row)
+
+select MLS_TRANSPARENT_CRYPT_ALGORITHM_UNBIND_TABLE('no_crypted_schema_alt_2', 'tbl_crypt_alt_2_part_1');
+ mls_transparent_crypt_algorithm_unbind_table 
+----------------------------------------------
+ t
+(1 row)
+
+select MLS_TRANSPARENT_CRYPT_ALGORITHM_UNBIND_TABLE('no_crypted_schema_alt_2', 'tbl_crypt_alt_2_part_2');
+ mls_transparent_crypt_algorithm_unbind_table 
+----------------------------------------------
+ t
+(1 row)
+
 \c - godlike
 drop table no_crypted_schema_alt.tbl_crypted_alt;
 drop table no_crypted_schema_alt.tbl_nocrypt_alt;
@@ -5001,7 +5029,7 @@ select * from xixi where i = 3;
 (1 row)
 
 \c - badboy
---fails to update 
+--fails to update
 insert into xixi as x(i,j) values(6,6) on conflict(i) do update set j = 3096 where x.j = 2048 and x.i = 6;
 select * from xixi where i = 6;
  i | j | _cls 
@@ -5534,7 +5562,26 @@ truncate table lala3;
 drop table lala;
 drop table lala2;
 drop table lala3;
+\c - mls_admin
+select * from pg_cls_table;
+ polid | attnum | relid | enable | nspname | tblname | reloptions 
+-------+--------+-------+--------+---------+---------+------------
+    99 |      3 | 17061 | t      | public  | xixi    | 
+(1 row)
+
+select MLS_CLS_DROP_TABLE_LABEL('cls_compare', 'public', 'xixi');
+ mls_cls_drop_table_label 
+--------------------------
+ t
+(1 row)
+
+select * from pg_cls_table;
+ polid | attnum | relid | enable | nspname | tblname | reloptions 
+-------+--------+-------+--------+---------+---------+------------
+(0 rows)
+
 --everything is done
+\c - godlike
 drop table xixi;
 drop table momo;
 -----------------CLS END--------------------

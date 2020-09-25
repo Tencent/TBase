@@ -84,5 +84,7 @@ extern void mls_update_cls_with_current_user(TupleTableSlot *slot);
 extern bool mls_cls_column_add_check(char * colname, Oid typoid);
 extern bool mls_cls_column_drop_check(char * name);
 extern bool cls_check_table_col_has_policy(Oid relid, int attnum);
+extern bool cls_check_table_has_policy(Oid relid);
+extern bool cls_check_user_has_policy(Oid relid);
 
 #endif

@@ -1109,5 +1109,61 @@ bool cls_check_table_col_has_policy(Oid relid, int attnum)
     return false;
 }
 
+/*
+ * check table has policy
+ */
+bool cls_check_table_has_policy(Oid relid)
+{
+	int16       attnum = InvalidAttrNumber;
+
+	attnum = cls_check_table_has_cls_policy(relid);
+	if (attnum != InvalidAttrNumber)
+	{
+		return true;
+	}
+	return false;
+}
+
+/*
+ * check user whether has policy
+ */
+bool cls_check_user_has_policy(Oid roleid)
+{
+	SysScanDesc scan;
+	ScanKeyData skey[1];
+	HeapTuple   htup;
+	Relation    rel;
+	bool        found = false;
+
+	ScanKeyInit(&skey[0],
+	            Anum_pg_cls_user_userid,
+	            BTEqualStrategyNumber,
+	            F_OIDEQ,
+	            ObjectIdGetDatum(roleid));
+
+	rel = heap_open(ClsUserRelationId, AccessShareLock);
+	scan = systable_beginscan(rel,
+	                          PgClsUserPolidUseridIndexId,
+	                          true,
+	                          NULL,
+	                          1,
+	                          skey);
+
+	while (HeapTupleIsValid(htup = systable_getnext(scan)))
+	{
+		Form_pg_cls_user form_cls_user = (Form_pg_cls_user) GETSTRUCT(htup);
+
+		if (form_cls_user)
+		{
+			found = true;
+			break;
+		}
+	}
+
+	systable_endscan(scan);
+	heap_close(rel, AccessShareLock);
+
+	return found;
+}
 
 #endif

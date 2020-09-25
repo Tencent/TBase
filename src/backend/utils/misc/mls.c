@@ -363,10 +363,7 @@ Datum pg_trsprt_crypt_support_datatype(PG_FUNCTION_ARGS)
  */
 bool mls_check_relation_permission(Oid relid, bool * schema_bound)
 {
-    bool found;
     Oid  parent_oid;
-
-    found = false;
 
     if (!IS_SYSTEM_REL(relid))
     {
@@ -377,20 +374,27 @@ bool mls_check_relation_permission(Oid relid, bool * schema_bound)
         
         parent_oid = mls_get_parent_oid_by_relid(relid);
         
-        found = datamask_check_table_has_datamask(parent_oid);
-        if (true == found)
+        if (datamask_check_table_has_datamask(parent_oid) ||
+		        datamask_check_table_has_datamask(relid))
         {
-            return found;
+            return true;
         }
 
-        found = trsprt_crypt_check_table_has_crypt(parent_oid,  true, schema_bound);
-        if (true == found)
+        if (transparent_crypt_check_table_has_crypto(parent_oid,  true, schema_bound) ||
+		        transparent_crypt_check_table_has_crypto(relid,  true, schema_bound))
         {
-            return found;
+            return true;
         }
+
+        if (cls_check_table_has_policy(parent_oid) ||
+                cls_check_table_has_policy(relid))
+        {
+        	return true;
+        }
+
     }
 
-    return found;
+    return false;
 }
 
 bool mls_check_schema_permission(Oid schemaoid)
@@ -429,31 +433,31 @@ bool mls_check_schema_permission(Oid schemaoid)
 bool mls_check_column_permission(Oid relid, int attnum)
 {
     Oid  parent_oid;
-    bool found = false;
 
     if (!IS_SYSTEM_REL(relid))
     {
         parent_oid = mls_get_parent_oid_by_relid(relid);
-        found = dmask_check_table_col_has_dmask(parent_oid, attnum);
-        if (true == found)
+
+        if (datamask_check_table_col_has_datamask(parent_oid, attnum) ||
+		        datamask_check_table_col_has_datamask(relid, attnum))
         {
-            return found;
+            return true;
         }
 
-        found = trsprt_crypt_chk_tbl_col_has_crypt(parent_oid, attnum);
-        if (true == found)
+        if (transparent_crypt_check_table_col_has_crypto(parent_oid, attnum) ||
+		        transparent_crypt_check_table_col_has_crypto(relid, attnum))
         {
-            return found;
+            return true;
         }
 
-        found = cls_check_table_col_has_policy(parent_oid, attnum);
-        if (true == found)
+        if (cls_check_table_col_has_policy(parent_oid, attnum) ||
+		        cls_check_table_col_has_policy(relid, attnum))
         {
-            return found;
+            return true;
         }        
     }
 
-    return found;
+    return false;
 
 }
 

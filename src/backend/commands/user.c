@@ -1178,22 +1178,11 @@ DropRole(DropRoleStmt *stmt)
                      errdetail_log("%s", detail_log)));
 
 #ifdef _MLS_
-        if (true == mls_check_role_permission(roleid))
+        if (true == mls_check_role_permission(roleid) ||
+                true == cls_check_user_has_policy(roleid))
         {
-            elog(ERROR, "could not drop role:%s, cause this role has mls policy bound",
+            elog(ERROR, "could not drop role:%s, cause this role has mls poilcy bound", 
                             role);
-        }
-
-        if (!is_mls_user() && userid_is_mls_user(roleid))
-        {
-            elog(ERROR, "non-mls user could not drop mls role:%s, permission denied",
-                 role);
-        }
-
-        if(is_mls_user() && !userid_is_mls_user(roleid))
-        {
-            elog(ERROR, "mls user could not drop role:%s, permission denied",
-                 role);
         }
 #endif
         /*
