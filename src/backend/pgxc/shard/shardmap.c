@@ -767,62 +767,72 @@ static bool SyncShardMapList_Node_DN(void)
         return false;
     }
 
-    self_node_oid = get_pgxc_nodeoid_extend(PGXCNodeName, PGXCMainClusterName);
-    if (InvalidOid == self_node_oid)
-    {
-        elog(LOG, "SyncShardMapList_Node_DN failed to get nodeoid, node:%s", PGXCNodeName);
-        return false;
-    }
-    curr_groupoid = GetGroupOidByNode(self_node_oid);
-    if (InvalidOid == curr_groupoid)
-    {
-        elog(LOG, "SyncShardMapList_Node_DN failed to get groupoid, node:%s, nodeoid:%d", PGXCNodeName, self_node_oid);
-        return false;
-    }            
-    
-    if (is_group_sharding_inited(curr_groupoid))
-    {
-        bms_clear(g_DatanodeShardgroupBitmap);
-        
-        /* If the group sharding has not been inited */
-        if (!g_GroupShardingMgr_DN->used)
-        {
-            g_GroupShardingMgr_DN->members->shardMapStatus = SHMEM_SHRADMAP_STATUS_LOADING;
-            g_GroupShardingMgr_DN->members->group = curr_groupoid;
-            g_GroupShardingMgr_DN->used = true;
-        }
-            
-        shardrel = heap_open(PgxcShardMapRelationId, AccessShareLock);
-        ScanKeyInit(&skey,
-            Anum_pgxc_shard_map_nodegroup,
-            BTEqualStrategyNumber, F_OIDEQ,
-            ObjectIdGetDatum(curr_groupoid));
+	self_node_oid = get_pgxc_nodeoid_extend(PGXCNodeName, PGXCMainClusterName);
+	if (InvalidOid == self_node_oid)
+	{
+		elog(LOG, "SyncShardMapList_Node_DN failed to get nodeoid, node:%s", PGXCNodeName);
+		return false;
+	}
+	curr_groupoid = GetGroupOidByNode(self_node_oid);
+	if (InvalidOid == curr_groupoid)
+	{
+		elog(LOG, "SyncShardMapList_Node_DN failed to get groupoid, node:%s, nodeoid:%d", PGXCNodeName, self_node_oid);
+		return false;
+	}			
+	
+	if (is_group_sharding_inited(curr_groupoid))
+	{
+		bms_clear(g_DatanodeShardgroupBitmap);
+		
+		/* 
+		 * If sharding of the group has not been inited, or this sharding map is in use but 
+		 * store overdue information, possibly caused by group syncing backend crashing right
+		 * before the shmem sync.
+		 */
+		if (!g_GroupShardingMgr_DN->used || curr_groupoid != g_GroupShardingMgr_DN->members->group)
+		{
+			/* 
+			 * Datanodes can only be in one node group, so we save the effort of
+			 * removing entry and skip right into resetting the mgr.
+			 */
+			g_GroupShardingMgr_DN->members->shardMapStatus = SHMEM_SHRADMAP_STATUS_LOADING;
+			SpinLockAcquire(&g_GroupShardingMgr_DN->lock);
+			g_GroupShardingMgr_DN->members->group = curr_groupoid;
+			g_GroupShardingMgr_DN->used = true;
+			SpinLockRelease(&g_GroupShardingMgr_DN->lock);
+		}
+			
+		shardrel = heap_open(PgxcShardMapRelationId, AccessShareLock);
+		ScanKeyInit(&skey,
+			Anum_pgxc_shard_map_nodegroup,
+			BTEqualStrategyNumber, F_OIDEQ,
+			ObjectIdGetDatum(curr_groupoid));
 
-        sysscan = systable_beginscan(shardrel,
-                                  PgxcShardMapGroupIndexId, 
-                                  true,
-                                  NULL, 1, &skey);
-        
-        while(HeapTupleIsValid(oldtup = systable_getnext(sysscan)))
-        {
-            pgxc_shard = (Form_pgxc_shard_map)GETSTRUCT(oldtup);
-            InsertShardMap_DN(pgxc_shard);
+		sysscan = systable_beginscan(shardrel,
+								  PgxcShardMapGroupIndexId, 
+								  true,
+								  NULL, 1, &skey);
+		
+		while(HeapTupleIsValid(oldtup = systable_getnext(sysscan)))
+		{
+			pgxc_shard = (Form_pgxc_shard_map)GETSTRUCT(oldtup);
+			InsertShardMap_DN(pgxc_shard);
 
-            /* 
-             * If node is DN AND pgxc_shard_map tuple's primary copy is itself,
-             * Add this shardid to bitmap.
-             */
-            BuildDatanodeVisibilityMap(pgxc_shard, self_node_oid);
-        }
-        systable_endscan(sysscan);
-        heap_close(shardrel, AccessShareLock);    
-        ShardMapInitDone_DN(curr_groupoid, false);                    
-    }
-    else
-    {
-        elog(LOG, "SyncShardMapList_Node_DN group %d is not inited.", curr_groupoid);
-        return false;
-    }
+			/* 
+			 * If node is DN AND pgxc_shard_map tuple's primary copy is itself,
+			 * Add this shardid to bitmap.
+			 */
+			BuildDatanodeVisibilityMap(pgxc_shard, self_node_oid);
+		}
+		systable_endscan(sysscan);
+		heap_close(shardrel, AccessShareLock);	
+		ShardMapInitDone_DN(curr_groupoid, false);					
+	}
+	else
+	{
+		elog(LOG, "SyncShardMapList_Node_DN group %d is not inited.", curr_groupoid);
+		return false;
+	}
 
     return true;
 }
@@ -1028,26 +1038,27 @@ static void ShardMapInitDone_CN(int32 map, Oid group, bool need_lock)
 
 
 static void ShardMapInitDone_DN(Oid group, bool need_lock)
-{// #lizard forgives
-    bool           dup = false;
-    int32           maxNodeIndex = 0;
-    int32          i;
-    int32          j;
-    int32          nodeindex = 0;
-    int32          nodeCnt = 0;
-    ShardMapItemDef item;
+{
+	bool           dup = false;
+	int32		   maxNodeIndex = 0;
+	int32          i;
+	int32          j;
+	int32          nodeindex = 0;
+	int32          nodeCnt = 0;
+	ShardMapItemDef item;
 
-    if(!IS_PGXC_DATANODE)
-    {
-        elog(ERROR, "ShardMapInitDone_DN should only be called in datanode");
-        return;
-    }
-    
-    if(group != g_GroupShardingMgr_DN->members->group)
-    {
-        elog(PANIC, "groupoid %d in mgr is not group %d", g_GroupShardingMgr_DN->members->group, group);
-        return;
-    }
+	if(!IS_PGXC_DATANODE)
+	{
+		elog(ERROR, "ShardMapInitDone_DN should only be called in datanode");
+		return;
+	}
+	
+	if(group != g_GroupShardingMgr_DN->members->group)
+	{
+		/* PANIC here is to reset shmem, although a more elegant way should be provided by ShardMapShmem AM */
+		elog(PANIC, "groupoid %d in mgr is not group %d", g_GroupShardingMgr_DN->members->group, group);
+		return;
+	}
 
     if (need_lock)
     {
