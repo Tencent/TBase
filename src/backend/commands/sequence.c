@@ -996,28 +996,29 @@ nextval_internal(Oid relid, bool check_permissions)
 Datum
 currval_oid(PG_FUNCTION_ARGS)
 {
-    Oid            relid = PG_GETARG_OID(0);
-    int64        result;
-    SeqTable    elm;
-    Relation    seqrel;
-    char *seqname = NULL;
+	Oid			relid = PG_GETARG_OID(0);
+	int64		result;
+	SeqTable	elm;
+	Relation	seqrel;
+	char *seqname = NULL;
 
-    /* open and lock sequence */
-    init_sequence(relid, &elm, &seqrel);
+	/* open and lock sequence */
+	init_sequence(relid, &elm, &seqrel);
 
-    if (pg_class_aclcheck(elm->relid, GetUserId(),
-                          ACL_SELECT | ACL_USAGE) != ACLCHECK_OK)
-        ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                 errmsg("permission denied for sequence %s",
-                        RelationGetRelationName(seqrel))));
-#if 0
-    if (!elm->last_valid)
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("currval of sequence \"%s\" is not yet defined in this session",
-                        RelationGetRelationName(seqrel))));
-#endif    
+	if (pg_class_aclcheck(elm->relid, GetUserId(),
+						  ACL_SELECT | ACL_USAGE) != ACLCHECK_OK)
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+				 errmsg("permission denied for sequence %s",
+						RelationGetRelationName(seqrel))));
+
+	if (elm->last_valid)
+	{
+		result = elm->last;
+		relation_close(seqrel, NoLock);
+		PG_RETURN_INT64(result);
+	}
+
 #ifdef XCP
     {
         /*

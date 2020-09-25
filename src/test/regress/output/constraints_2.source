@@ -188,7 +188,7 @@ DETAIL:  Failing row contains (9, Y, -9).
 SELECT 'eight' AS one, currval('insert_seq');
   one  | currval 
 -------+---------
- eight |       9
+ eight |       7
 (1 row)
 
 -- According to SQL, it is OK to insert a record that gives rise to NULL
