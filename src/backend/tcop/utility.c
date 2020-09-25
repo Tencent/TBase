@@ -6581,7 +6581,11 @@ IsStmtAllowedInLockedMode(Node *parsetree, const char *queryString)
 #ifdef XCP
         case T_PauseClusterStmt:
 #endif
-            return ALLOW;
+#ifdef __TBASE__
+		/* Node Lock/Unlock do not modify any data */
+		case T_LockNodeStmt:
+#endif
+			return ALLOW;
 
         default:
             return DISALLOW;

@@ -1864,27 +1864,31 @@ PortalRunUtility(Portal portal, PlannedStmt *pstmt,
     GetGtmInfoFromUserCmd(utilityStmt);
 #endif
 
-    /*
-     * Set snapshot if utility stmt needs one.  Most reliable way to do this
-     * seems to be to enumerate those that do not need one; this is a short
-     * list.  Transaction control, LOCK, and SET must *not* set a snapshot
-     * since they need to be executable at the start of a transaction-snapshot
-     * mode transaction without freezing a snapshot.  By extension we allow
-     * SHOW not to set a snapshot.  The other stmts listed are just efficiency
-     * hacks.  Beware of listing anything that can modify the database --- if,
-     * say, it has to update an index with expressions that invoke
-     * user-defined functions, then it had better have a snapshot.
-     */
-    if (!(IsA(utilityStmt, TransactionStmt) ||
-          IsA(utilityStmt, LockStmt) ||
-          IsA(utilityStmt, VariableSetStmt) ||
-          IsA(utilityStmt, VariableShowStmt) ||
-          IsA(utilityStmt, ConstraintsSetStmt) ||
-    /* efficiency hacks from here down */
-          IsA(utilityStmt, FetchStmt) ||
-          IsA(utilityStmt, ListenStmt) ||
-          IsA(utilityStmt, NotifyStmt) ||
-          IsA(utilityStmt, UnlistenStmt) ||
+	/*
+	 * Set snapshot if utility stmt needs one.  Most reliable way to do this
+	 * seems to be to enumerate those that do not need one; this is a short
+	 * list.  Transaction control, LOCK, and SET must *not* set a snapshot
+	 * since they need to be executable at the start of a transaction-snapshot
+	 * mode transaction without freezing a snapshot.  By extension we allow
+	 * SHOW not to set a snapshot.  The other stmts listed are just efficiency
+	 * hacks.  Beware of listing anything that can modify the database --- if,
+	 * say, it has to update an index with expressions that invoke
+	 * user-defined functions, then it had better have a snapshot.
+	 */
+	if (!(IsA(utilityStmt, TransactionStmt) ||
+		  IsA(utilityStmt, LockStmt) ||
+		  IsA(utilityStmt, VariableSetStmt) ||
+		  IsA(utilityStmt, VariableShowStmt) ||
+		  IsA(utilityStmt, ConstraintsSetStmt) ||
+	/* efficiency hacks from here down */
+		  IsA(utilityStmt, FetchStmt) ||
+		  IsA(utilityStmt, ListenStmt) ||
+		  IsA(utilityStmt, NotifyStmt) ||
+		  IsA(utilityStmt, UnlistenStmt) ||
+#ifdef __TBASE__
+		  /* Node Lock/Unlock do not modify any data */
+		  IsA(utilityStmt, LockNodeStmt) ||
+#endif
 #ifdef PGXC
           IsA(utilityStmt, PauseClusterStmt) ||
           IsA(utilityStmt, BarrierStmt) ||
