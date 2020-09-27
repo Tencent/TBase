@@ -1738,6 +1738,7 @@ set_joinpath_distribution(PlannerInfo *root, JoinPath *pathnode)
 			 pathnode->jointype == JOIN_SEMI ||
 #ifdef __TBASE__
              pathnode->jointype == JOIN_LEFT_SCALAR ||
+			 pathnode->jointype == JOIN_LEFT_SEMI ||
 #endif
 			 pathnode->jointype == JOIN_ANTI))
 	{
@@ -2704,7 +2705,8 @@ not_allowed_join:
 			if (resultRelLoc == RESULT_REL_INNER &&
 				pathnode->jointype != JOIN_LEFT && pathnode->jointype != JOIN_FULL &&
 				pathnode->jointype != JOIN_SEMI && pathnode->jointype != JOIN_ANTI &&
-				pathnode->jointype != JOIN_LEFT_SCALAR && !pathnode->inner_unique)
+				pathnode->jointype != JOIN_LEFT_SCALAR &&
+				pathnode->jointype != JOIN_LEFT_SEMI && !pathnode->inner_unique)
 			{
 				/* Replicate outer */
 				pathnode->outerjoinpath = redistribute_path(
@@ -2752,7 +2754,8 @@ not_allowed_join:
 		if (innerd &&resultRelLoc == RESULT_REL_INNER &&
 			pathnode->jointype != JOIN_LEFT && pathnode->jointype != JOIN_FULL &&
 			pathnode->jointype != JOIN_SEMI && pathnode->jointype != JOIN_ANTI &&
-			pathnode->jointype != JOIN_LEFT_SCALAR && !pathnode->inner_unique)
+			pathnode->jointype != JOIN_LEFT_SCALAR &&
+			pathnode->jointype != JOIN_LEFT_SEMI && !pathnode->inner_unique)
 		{
 			pathnode->path.distribution = innerd;
 			return alternate;

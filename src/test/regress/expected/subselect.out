@@ -1461,7 +1461,7 @@ explain (costs off)  select (select sum(b.a) from tbl_b b where b.a = a.a and b.
 -------------------------------------------------------------------------
  Sort
    Sort Key: "TARGETLIST_subquery".sum
-   ->  Nested Loop Left Join
+   ->  Nested Loop Left Semi Join
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                ->  Seq Scan on tbl_a a
          ->  Materialize
@@ -1493,7 +1493,7 @@ explain (costs off)  select (select count(b.a) from tbl_b b where b.a = a.a) fro
 -----------------------------------------------------------------------
  Sort
    Sort Key: (COALESCE("TARGETLIST_subquery".count, '0'::bigint))
-   ->  Nested Loop Left Join
+   ->  Nested Loop Left Semi Join
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                ->  Seq Scan on tbl_a a
          ->  Materialize
@@ -1556,7 +1556,7 @@ explain (costs off)  select (case when a.b =1 then (select sum(b.a) from tbl_b b
 ---------------------------------------------------------------------------------------
  Sort
    Sort Key: (CASE WHEN (a.b = 1) THEN "TARGETLIST_subquery".sum ELSE '0'::bigint END)
-   ->  Nested Loop Left Join
+   ->  Nested Loop Left Semi Join
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                ->  Seq Scan on tbl_a a
          ->  Materialize
@@ -1616,7 +1616,7 @@ explain (costs off)  select (case when a.b =1 then (select count(*) from tbl_b b
 ----------------------------------------------------------------------------------------------------------------
  Sort
    Sort Key: (CASE WHEN (a.b = 1) THEN COALESCE("TARGETLIST_subquery".count, '0'::bigint) ELSE '0'::bigint END)
-   ->  Nested Loop Left Join
+   ->  Nested Loop Left Semi Join
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                ->  Seq Scan on tbl_a a
          ->  Materialize
@@ -1650,7 +1650,7 @@ explain (costs off)  select (case when a.b =1 then (select count(*) from tbl_b b
 ----------------------------------------------------------------------------------------------------------------
  Sort
    Sort Key: (CASE WHEN (a.b = 1) THEN COALESCE("TARGETLIST_subquery".count, '0'::bigint) ELSE '0'::bigint END)
-   ->  Nested Loop Left Join
+   ->  Nested Loop Left Semi Join
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                ->  Seq Scan on tbl_a a
          ->  Materialize
@@ -1677,6 +1677,35 @@ select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and 
     1
     1
     1
+(10 rows)
+
+-- targetlist sublink with limit 1
+explain (costs off) select a.a,(select b.a from tbl_b b where b.a = a.a limit 1) q from tbl_a a order by 1,2;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   ->  Sort
+         Sort Key: a.a, b.a
+         ->  Hash Left Semi Join
+               Hash Cond: (a.a = b.a)
+               ->  Seq Scan on tbl_a a
+               ->  Hash
+                     ->  Seq Scan on tbl_b b
+(8 rows)
+
+select a.a,(select b.a from tbl_b b where b.a = a.a limit 1) q from tbl_a a order by 1,2;
+ a  | q  
+----+----
+  1 |   
+  2 |  2
+  3 |  3
+  4 |  4
+  5 |  5
+  6 |  6
+  7 |  7
+  8 |  8
+  9 |  9
+ 10 | 10
 (10 rows)
 
 -- support pullup lateral ANY_SUBLINK

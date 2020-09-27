@@ -1374,9 +1374,12 @@ ExplainNode(PlanState *planstate, List *ancestors,
 						jointype = "Anti";
 						break;
 #ifdef __TBASE__
-                    case JOIN_LEFT_SCALAR:
-                        jointype = "Left Scalar";
-                        break;
+					case JOIN_LEFT_SCALAR:
+						jointype = "Left Scalar";
+						break;
+					case JOIN_LEFT_SEMI:
+						jointype = "Left Semi";
+						break;
 #endif
 					default:
 						jointype = "???";

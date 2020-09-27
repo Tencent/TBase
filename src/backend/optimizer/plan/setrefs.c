@@ -1740,6 +1740,7 @@ set_join_references(PlannerInfo *root, Join *join, int rtoffset)
 		case JOIN_ANTI:
 #ifdef __TBASE__
         case JOIN_LEFT_SCALAR:
+        case JOIN_LEFT_SEMI:
 #endif
 			inner_itlist->has_non_vars = false;
 			break;

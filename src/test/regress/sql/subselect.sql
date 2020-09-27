@@ -693,6 +693,10 @@ select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and 
 explain (costs off)  select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b is not null) else 0 end) from tbl_a a order by 1;
 select (case when a.b =1 then (select count(*) from tbl_b b where b.a = a.a and b.b = a.b and a.b is not null) else 0 end) from tbl_a a order by 1;
 
+-- targetlist sublink with limit 1
+explain (costs off) select a.a,(select b.a from tbl_b b where b.a = a.a limit 1) q from tbl_a a order by 1,2;
+select a.a,(select b.a from tbl_b b where b.a = a.a limit 1) q from tbl_a a order by 1,2;
+
 -- support pullup lateral ANY_SUBLINK
 explain select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);
 select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);

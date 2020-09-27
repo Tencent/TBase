@@ -179,7 +179,8 @@ ExecNestLoop(PlanState *pstate)
             if (!node->nl_MatchedOuter &&
                 (node->js.jointype == JOIN_LEFT ||
                  node->js.jointype == JOIN_ANTI ||
-                 node->js.jointype == JOIN_LEFT_SCALAR))
+                 node->js.jointype == JOIN_LEFT_SCALAR ||
+				 node->js.jointype == JOIN_LEFT_SEMI))
 #else
 			if (!node->nl_MatchedOuter &&
 				(node->js.jointype == JOIN_LEFT ||
@@ -341,7 +342,8 @@ ExecInitNestLoop(NestLoop *node, EState *estate, int eflags)
 	 * detect whether we need only consider the first matching inner tuple
 	 */
 	nlstate->js.single_match = (node->join.inner_unique ||
-								node->join.jointype == JOIN_SEMI);
+								node->join.jointype == JOIN_SEMI ||
+								node->join.jointype == JOIN_LEFT_SEMI);
 
 	/* set up null tuples for outer joins, if needed */
 	switch (node->join.jointype)
@@ -351,6 +353,7 @@ ExecInitNestLoop(NestLoop *node, EState *estate, int eflags)
             break;
 #ifdef __TBASE__
 		case JOIN_LEFT_SCALAR:
+		case JOIN_LEFT_SEMI:
             nlstate->nl_NullInnerTupleSlot =
                     ExecInitNullTupleSlot(estate,
                                           ExecGetResultType(innerPlanState(nlstate)));

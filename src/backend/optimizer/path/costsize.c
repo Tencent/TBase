@@ -2137,6 +2137,7 @@ initial_cost_nestloop(PlannerInfo *root, JoinCostWorkspace *workspace,
     if (jointype == JOIN_SEMI ||
         jointype == JOIN_ANTI ||
         jointype == JOIN_LEFT_SCALAR ||
+        jointype == JOIN_LEFT_SEMI ||
 		extra->inner_unique)
 #else
 	if (jointype == JOIN_SEMI || jointype == JOIN_ANTI ||
@@ -2230,6 +2231,7 @@ final_cost_nestloop(PlannerInfo *root, NestPath *path,
     if (path->jointype == JOIN_SEMI ||
         path->jointype == JOIN_ANTI ||
         path->jointype == JOIN_LEFT_SCALAR ||
+        path->jointype == JOIN_LEFT_SEMI ||
 		extra->inner_unique)
 #else
 	if (path->jointype == JOIN_SEMI || path->jointype == JOIN_ANTI ||
@@ -2731,6 +2733,7 @@ final_cost_mergejoin(PlannerInfo *root, MergePath *path,
 	if ((path->jpath.jointype == JOIN_SEMI ||
 		 path->jpath.jointype == JOIN_ANTI ||
          path->jpath.jointype == JOIN_LEFT_SCALAR ||
+         path->jpath.jointype == JOIN_LEFT_SEMI ||
 		 extra->inner_unique) &&
 		(list_length(path->jpath.joinrestrictinfo) ==
 		 list_length(path->path_mergeclauses)))
@@ -3240,6 +3243,7 @@ final_cost_hashjoin(PlannerInfo *root, HashPath *path,
     if (path->jpath.jointype == JOIN_SEMI ||
         path->jpath.jointype == JOIN_ANTI ||
         path->jpath.jointype == JOIN_LEFT_SCALAR ||
+        path->jpath.jointype == JOIN_LEFT_SEMI ||
         extra->inner_unique)
 #else
 	if (path->jpath.jointype == JOIN_SEMI ||
@@ -3288,7 +3292,9 @@ final_cost_hashjoin(PlannerInfo *root, HashPath *path,
 
 		/* Get # of tuples that will pass the basic join */
 #ifdef __TBASE__
-		if (path->jpath.jointype == JOIN_SEMI || path->jpath.jointype == JOIN_LEFT_SCALAR)
+		if (path->jpath.jointype == JOIN_SEMI ||
+			path->jpath.jointype == JOIN_LEFT_SCALAR ||
+			path->jpath.jointype == JOIN_LEFT_SEMI)
 #else
 		if (path->jpath.jointype == JOIN_SEMI)
 #endif
@@ -4446,6 +4452,7 @@ calc_joinrel_size_estimate(PlannerInfo *root,
         case JOIN_SEMI:
 #ifdef __TBASE__
         case JOIN_LEFT_SCALAR:
+        case JOIN_LEFT_SEMI:
 #endif
 			nrows = outer_rows * fkselec * jselec;
 			/* pselec not used */
@@ -4527,7 +4534,8 @@ get_foreign_key_join_selectivity(PlannerInfo *root,
 		 * Hence, if either case applies, punt and ignore the FK.
 		 */
 #ifdef __TBASE__
-		if ((jointype == JOIN_SEMI || jointype == JOIN_ANTI || jointype == JOIN_LEFT_SCALAR) &&
+		if ((jointype == JOIN_SEMI || jointype == JOIN_ANTI ||
+			 jointype == JOIN_LEFT_SCALAR || jointype == JOIN_LEFT_SEMI) &&
 			(ref_is_outer || bms_membership(inner_relids) != BMS_SINGLETON))
             continue;
 #else
@@ -4649,7 +4657,8 @@ get_foreign_key_join_selectivity(PlannerInfo *root,
 		 * table.  So, at least for now, disregard inheritance here.
 		 */
 #ifdef __TBASE__
-		if (jointype == JOIN_SEMI || jointype == JOIN_ANTI || jointype == JOIN_LEFT_SCALAR)
+		if (jointype == JOIN_SEMI || jointype == JOIN_ANTI ||
+			jointype == JOIN_LEFT_SCALAR || jointype == JOIN_LEFT_SEMI)
 #else
 		if (jointype == JOIN_SEMI || jointype == JOIN_ANTI)
 #endif

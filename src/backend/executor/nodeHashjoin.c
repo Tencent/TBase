@@ -660,7 +660,8 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
 	 * detect whether we need only consider the first matching inner tuple
 	 */
 	hjstate->js.single_match = (node->join.inner_unique ||
-								node->join.jointype == JOIN_SEMI);
+								node->join.jointype == JOIN_SEMI ||
+								node->join.jointype == JOIN_LEFT_SEMI);
 
 	/* set up null tuples for outer joins, if needed */
 	switch (node->join.jointype)
@@ -669,11 +670,8 @@ ExecInitHashJoin(HashJoin *node, EState *estate, int eflags)
         case JOIN_SEMI:
 		    break;
 #ifdef __TBASE__
-        case JOIN_LEFT_SCALAR:
-            hjstate->hj_NullInnerTupleSlot =
-                    ExecInitNullTupleSlot(estate,
-                                          ExecGetResultType(innerPlanState(hjstate)));
-            break;
+		case JOIN_LEFT_SCALAR:
+		case JOIN_LEFT_SEMI:
 #endif
 		case JOIN_LEFT:
 		case JOIN_ANTI:

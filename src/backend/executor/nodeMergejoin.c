@@ -694,14 +694,14 @@ ExecMergeJoin(PlanState *pstate)
                             break;
                         }
 #ifdef __TBASE__
-                        /*
-                          * if we have finished the join, and the inner never be executed,
-                          * we need to disconnect from remote node.
-                                              */
-                        if (!node->mj_InnerInited && IS_PGXC_DATANODE)
-                        {
-                            ExecDisconnectNode(innerPlan);
-                        }
+						/*
+						 * If we have finished the join, and the inner never
+						 * be executed, we need to disconnect from remote node.
+						 */
+						if (!node->mj_InnerInited && IS_PGXC_DATANODE)
+						{
+							ExecDisconnectNode(innerPlan);
+						}
 #endif
                         /* Otherwise we're done. */
                         return NULL;
@@ -1542,7 +1542,8 @@ ExecInitMergeJoin(MergeJoin *node, EState *estate, int eflags)
 	 * detect whether we need only consider the first matching inner tuple
 	 */
 	mergestate->js.single_match = (node->join.inner_unique ||
-								   node->join.jointype == JOIN_SEMI);
+								   node->join.jointype == JOIN_SEMI ||
+								   node->join.jointype == JOIN_LEFT_SEMI);
 
 	/* set up null tuples for outer joins, if needed */
 	switch (node->join.jointype)
@@ -1554,12 +1555,7 @@ ExecInitMergeJoin(MergeJoin *node, EState *estate, int eflags)
 			break;
 #ifdef __TBASE__
         case JOIN_LEFT_SCALAR:
-            mergestate->mj_FillOuter = true;
-            mergestate->mj_FillInner = false;
-            mergestate->mj_NullInnerTupleSlot =
-                    ExecInitNullTupleSlot(estate,
-                                          ExecGetResultType(innerPlanState(mergestate)));
-            break;
+        case JOIN_LEFT_SEMI:
 #endif
 		case JOIN_LEFT:
 		case JOIN_ANTI:

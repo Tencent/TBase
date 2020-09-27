@@ -2025,7 +2025,9 @@ adjust_rowcount_for_semijoins(PlannerInfo *root,
 		SpecialJoinInfo *sjinfo = (SpecialJoinInfo *) lfirst(lc);
 
 #ifdef __TBASE__
-        if ((sjinfo->jointype == JOIN_SEMI || sjinfo->jointype == JOIN_LEFT_SCALAR ) &&
+        if ((sjinfo->jointype == JOIN_SEMI ||
+        	 sjinfo->jointype == JOIN_LEFT_SCALAR ||
+			 sjinfo->jointype == JOIN_LEFT_SEMI) &&
             bms_is_member(cur_relid, sjinfo->syn_lefthand) &&
             bms_is_member(outer_relid, sjinfo->syn_righthand))
 #else

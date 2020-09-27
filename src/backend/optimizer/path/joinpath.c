@@ -145,6 +145,7 @@ add_paths_to_joinrel(PlannerInfo *root,
 		case JOIN_ANTI:
 #ifdef __TBASE__
         case JOIN_LEFT_SCALAR:
+        case JOIN_LEFT_SEMI:
 #endif
 			extra.inner_unique = false; /* well, unproven */
 			break;
@@ -191,7 +192,8 @@ add_paths_to_joinrel(PlannerInfo *root,
 	 */
 #ifdef __TBASE__
     if (jointype == JOIN_SEMI || jointype == JOIN_ANTI ||
-        jointype == JOIN_LEFT_SCALAR || extra.inner_unique)
+        jointype == JOIN_LEFT_SCALAR || jointype == JOIN_LEFT_SEMI ||
+		extra.inner_unique)
 #else
 	if (jointype == JOIN_SEMI || jointype == JOIN_ANTI || extra.inner_unique)
 #endif
@@ -1300,6 +1302,7 @@ match_unsorted_outer(PlannerInfo *root,
 		case JOIN_ANTI:
 #ifdef __TBASE__
         case JOIN_LEFT_SCALAR:
+        case JOIN_LEFT_SEMI:
 #endif
 			nestjoinOK = true;
 			useallclauses = false;

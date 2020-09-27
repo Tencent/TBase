@@ -2956,6 +2956,95 @@ get_or_exist_subquery_targetlist(PlannerInfo *root, Node *node, List **targetLis
 
 #ifdef __TBASE__
 /*
+ * simplify_TargetList_query:remove any useless stuff in an TargetList's
+ * subquery
+ *
+ * For subquery in targetlist, normally we use JOIN_LEFT_SCALAR type to
+ * make sure there will be only one row found. If subquery contains
+ * aggregation clause, then we are OK with JOIN_LEFT_SEMI. Further more, if
+ * subquery got 'limit 1' or  equivalent clauses such as Oracle 'rownum = 1'.
+ * Then we can remove the limit clause and use JOIN_SEMI to simplify the
+ * subquery.
+ *
+ * Returns TRUE if was able to discard the 'LIMIT 1' cluase or the subquery
+ * already simple enough, else FALSE.
+ */
+static bool
+simplify_TargetList_query(PlannerInfo *root, Query *query, bool *useLeftSemiJoin)
+{
+	/*
+	 * We don't try to simplify at all if the query uses set operations,
+	 * aggregates, grouping sets, SRFs, modifying CTEs, HAVING, OFFSET, or FOR
+	 * UPDATE/SHARE; none of these seem likely in normal usage and their
+	 * possible effects are complex.  (Note: we could ignore an "OFFSET 0"
+	 * clause, but that traditionally is used as an optimization fence, so we
+	 * don't.)
+	 */
+	if (query->commandType != CMD_SELECT ||
+		query->setOperations ||
+		query->groupingSets ||
+		query->hasWindowFuncs ||
+		query->hasTargetSRFs ||
+		query->hasModifyingCTE ||
+		query->havingQual ||
+		query->limitOffset ||
+		query->rowMarks)
+		return false;
+
+	/* By default, use JOIN_LEFT_SCALAR. */
+	Assert(useLeftSemiJoin);
+	*useLeftSemiJoin = false;
+
+	/* Handle 'limit 1' case as described above. */
+	if (query->limitCount)
+	{
+		/*
+		 * The LIMIT clause has not yet been through eval_const_expressions,
+		 * so we have to apply that here.  It might seem like this is a waste
+		 * of cycles, since the only case plausibly worth worrying about is
+		 * "LIMIT 1" ... but what we'll actually see is "LIMIT int8(1::int4)",
+		 * so we have to fold constants or we're not going to recognize it.
+		 */
+		Node	   *node = eval_const_expressions(root, query->limitCount);
+		Const	   *limit;
+		int64		limitValue;
+
+		/* Might as well update the query if we simplified the clause. */
+		query->limitCount = node;
+
+		if (!IsA(node, Const))
+			return false;
+
+		limit = (Const *) node;
+
+		Assert(limit->consttype == INT8OID);
+		limitValue = DatumGetInt64(limit->constvalue);
+
+		/* Invalid value, we have to get at least one row. */
+		if (!limit->constisnull && limitValue <= 0)
+			return false;
+
+		/*
+		 * If the SubQuery got limit 1(actually must be limit 1), then the
+		 * join Semantic equals JOIN_SEMI. We don't need to continue when got
+		 * one LHS match.
+		 */
+		if (limitValue == 1)
+		{
+			/*
+			 * Remove the limit clause for more possible subquery pullup
+			 * optimizations.
+			 */
+			query->limitCount = NULL;
+			/* Inform caller to use JOIN_LEFT_SEMI */
+			*useLeftSemiJoin = true;
+		}
+	}
+
+	return true;
+}
+
+/*
  * Try to convert an SubLink in targetlist to a join
  *
  * The sublink in targetlist has the semantic of SCALAR. Normal joins will join
@@ -2976,9 +3065,12 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
 	SubLink		*sublink = NULL;
 	RangeTblRef	*rtr = NULL;
 	RangeTblEntry *rte = NULL;
-	Node	   *target = NULL;
-	List 	 *sublinks = NIL;
-    bool     count_agg = false;
+	Node		*target = NULL;
+	List		*sublinks = NIL;
+    bool		 count_agg = false;
+    bool		 useLeftSemiJoin = false;
+    /* By default, JOIN_LEFT_SCALAR is the worst choice */
+    JoinType 	 finalJoinType = JOIN_LEFT_SCALAR;
 
 	/* Find sublinks in the targetlist entry */
 	find_sublink_walker((Node *)entry->expr, &sublinks);
@@ -3009,6 +3101,18 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
 	 */
 	if (subselect->jointree->fromlist == NIL)
 		return NULL;
+
+	/*
+	 * See if the subquery can be simplified. For now, we just try to remove
+	 * 'limit 1' clause. If it's been removed, we can use JOIN_LEFT_SEMI to
+	 * save more costs.
+	 */
+	if (!simplify_TargetList_query(root, subselect, &useLeftSemiJoin))
+		return NULL;
+
+	/* 'limit 1' optimized */
+	if (useLeftSemiJoin)
+		finalJoinType = JOIN_LEFT_SEMI;
 
 	/*
 	 * What we can not optimize.
@@ -3170,6 +3274,13 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
 
         	subselect->groupClause = lappend(subselect->groupClause, grpcl);
         }
+
+        /*
+         * If we got Aggregation clause, since there is only one TargetList,
+         * then we can use JOIN_LEFT_SEMI over JOIN_LEFT/JOIN_LEFT_SCALAR to
+         * save more costs.
+         */
+        finalJoinType = JOIN_LEFT_SEMI;
 	}
 
 	/*
@@ -3190,7 +3301,7 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
 	 * Form join node.
 	 */
 	joinExpr = makeNode(JoinExpr);
-	joinExpr->jointype = subselect->hasAggs? JOIN_LEFT : JOIN_LEFT_SCALAR;
+	joinExpr->jointype = finalJoinType;
 	joinExpr->isNatural = false;
 	joinExpr->larg = (Node *) root->parse->jointree;
 	joinExpr->rarg = (Node *) rtr;
@@ -3203,20 +3314,25 @@ convert_TargetList_sublink_to_join(PlannerInfo *root, TargetEntry *entry)
 	parse->jointree = makeFromExpr(list_make1(joinExpr), NULL);
 
 	/* Build a Var pointing to the subquery */
-	target = (Node *)makeVarFromTargetEntry(rtr->rtindex, linitial(subselect->targetList));
+	target = (Node *)makeVarFromTargetEntry(rtr->rtindex,
+											linitial(subselect->targetList));
 
 	/* Add Coalesce(count,0) */
     if (count_agg)
     {
         CoalesceExpr *coalesce = makeNode(CoalesceExpr);
-        coalesce->args = list_make2(target,
-                                    makeConst(INT8OID, -1, InvalidOid, sizeof(int64), Int64GetDatum(0), false, true));
+        Const *constExpr = makeConst(INT8OID, -1, InvalidOid, sizeof(int64),
+        							 Int64GetDatum(0), false, true);
+
+        coalesce->args = list_make2(target, constExpr);
         coalesce->coalescetype = INT8OID;
         target = (Node *) coalesce;
     }
 
 	/* Replace sublink node with Result. */
-	entry->expr = (Expr *)substitute_sublink_with_node((Node *)entry->expr, sublink, target);
+	entry->expr = (Expr *)substitute_sublink_with_node((Node *)entry->expr,
+													   sublink,
+													   target);
 	return entry;
 }
 #endif

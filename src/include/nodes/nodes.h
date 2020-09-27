@@ -794,8 +794,10 @@ typedef enum JoinType
 	JOIN_UNIQUE_INNER,			/* RHS path must be made unique */
 
 #ifdef __TBASE__
-	JOIN_LEFT_SCALAR            /* pairs + unmatched LHS tuples */
-	                            /* only 1 copy of echo LHS row else report error. */
+	JOIN_LEFT_SCALAR,			/* pairs + unmatched LHS tuples, only 1 copy of
+	 	 	 	 	 	 	 	 * each LHS row else report error. */
+	JOIN_LEFT_SEMI				/* 1 copy of each LHS row that has match(es) +
+								 * unmatched LHS tuples */
 #endif
 
 	/*
@@ -821,6 +823,7 @@ typedef enum JoinType
 #define IS_OUTER_JOIN(jointype) \
 	(((1 << (jointype)) & \
 	  ((1 << JOIN_LEFT) | \
+	   (1 << JOIN_LEFT_SEMI) | \
 	   (1 << JOIN_LEFT_SCALAR) | \
 	   (1 << JOIN_FULL) | \
 	   (1 << JOIN_RIGHT) | \

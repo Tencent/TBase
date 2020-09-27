@@ -910,6 +910,7 @@ deconstruct_recurse(PlannerInfo *root, Node *jtnode, bool below_outer_join,
 			case JOIN_ANTI:
 #ifdef __TBASE__
             case JOIN_LEFT_SCALAR:
+            case JOIN_LEFT_SEMI:
 #endif
 				leftjoinlist = deconstruct_recurse(root, j->larg,
 												   below_outer_join,
@@ -1354,6 +1355,7 @@ make_outerjoininfo(PlannerInfo *root,
                 (jointype == JOIN_SEMI ||
                  jointype == JOIN_ANTI ||
                  jointype == JOIN_LEFT_SCALAR ||
+				 jointype == JOIN_LEFT_SEMI ||
                  !bms_overlap(strict_relids, otherinfo->min_righthand)))
 #else
 			if (bms_overlap(clause_relids, otherinfo->syn_righthand) &&
@@ -1401,9 +1403,11 @@ make_outerjoininfo(PlannerInfo *root,
 				jointype == JOIN_SEMI ||
 				jointype == JOIN_ANTI ||
 				jointype == JOIN_LEFT_SCALAR ||
+				jointype == JOIN_LEFT_SEMI ||
 				otherinfo->jointype == JOIN_SEMI ||
 				otherinfo->jointype == JOIN_ANTI ||
                 otherinfo->jointype == JOIN_LEFT_SCALAR ||
+				otherinfo->jointype == JOIN_LEFT_SEMI ||
 				!otherinfo->lhs_strict || otherinfo->delay_upper_joins)
 #else
 			if (bms_overlap(clause_relids, otherinfo->syn_righthand) ||
@@ -1491,7 +1495,9 @@ compute_semijoin_info(SpecialJoinInfo *sjinfo, List *clause)
 
 	/* Nothing more to do if it's not a semijoin */
 #ifdef __TBASE__
-	if (sjinfo->jointype != JOIN_SEMI && sjinfo->jointype != JOIN_LEFT_SCALAR)
+	if (sjinfo->jointype != JOIN_SEMI &&
+		sjinfo->jointype != JOIN_LEFT_SCALAR &&
+		sjinfo->jointype != JOIN_LEFT_SEMI)
 #else
 	if (sjinfo->jointype != JOIN_SEMI)
 #endif

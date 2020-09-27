@@ -225,6 +225,7 @@ networkjoinsel(PG_FUNCTION_ARGS)
 		case JOIN_ANTI:
 #ifdef __TBASE__
         case JOIN_LEFT_SCALAR:
+        case JOIN_LEFT_SEMI:
 #endif
 			/* Here, it's important that we pass the outer var on the left. */
 			if (!join_is_reversed)

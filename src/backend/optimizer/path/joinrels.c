@@ -390,7 +390,9 @@ join_is_legal(PlannerInfo *root, RelOptInfo *rel1, RelOptInfo *rel2,
 		 * this join path.
 		 */
 #ifdef __TBASE__
-		if (sjinfo->jointype == JOIN_SEMI || sjinfo->jointype == JOIN_LEFT_SCALAR)
+		if (sjinfo->jointype == JOIN_SEMI ||
+			sjinfo->jointype == JOIN_LEFT_SCALAR ||
+			sjinfo->jointype == JOIN_LEFT_SEMI)
 #else
 		if (sjinfo->jointype == JOIN_SEMI)
 #endif
@@ -832,8 +834,8 @@ populate_joinrel_with_paths(PlannerInfo *root, RelOptInfo *rel1,
 		case JOIN_SEMI:
 #ifdef __TBASE__
         case JOIN_LEFT_SCALAR:
+        case JOIN_LEFT_SEMI:
 #endif
-
 			/*
 			 * We might have a normal semijoin, or a case where we don't have
 			 * enough rels to do the semijoin but can unique-ify the RHS and

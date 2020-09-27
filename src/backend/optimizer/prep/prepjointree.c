@@ -384,7 +384,9 @@ pull_up_sublinks_jointree_recurse(PlannerInfo *root, Node *jtnode,
 				break;
 			case JOIN_LEFT:
 #ifdef __TBASE__
+			case JOIN_SEMI:
             case JOIN_LEFT_SCALAR:
+            case JOIN_LEFT_SEMI:
 #endif
 				j->quals = pull_up_sublinks_qual_recurse(root, j->quals,
 														 &j->rarg,
@@ -1243,6 +1245,7 @@ pull_up_subqueries_recurse(PlannerInfo *root, Node *jtnode,
 			case JOIN_SEMI:
 #ifdef __TBASE__
             case JOIN_LEFT_SCALAR:
+            case JOIN_LEFT_SEMI:
 #endif
 			case JOIN_ANTI:
 				j->larg = pull_up_subqueries_recurse(root, j->larg,
@@ -3084,6 +3087,7 @@ reduce_outer_joins_pass2(Node *jtnode,
 			case JOIN_SEMI:
 			case JOIN_ANTI:
 			case JOIN_LEFT_SCALAR:
+			case JOIN_LEFT_SEMI:
 
 				/*
 				 * These could only have been introduced by pull_up_sublinks,
