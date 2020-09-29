@@ -153,6 +153,7 @@ static ExecNodes *pgxc_FQS_datanodes_for_rtr(Index varno, Query *query);
 #ifdef __TBASE__
 static ExecNodes* pgxc_is_group_subquery_shippable(Query *query, Shippability_context *sc_context);
 static void pgxc_is_rte_subquery_shippable(Node *node, Shippability_context *sc_context);
+static bool pgxc_is_simple_subquery(Query *subquery);
 static bool pgxc_FQS_check_subquery_const(Query *query);
 #endif
 /*
@@ -339,7 +340,8 @@ pgxc_FQS_datanodes_for_rtr(Index varno, Query *query)
         {
             /* For anything, other than a table, we can't find the datanodes */
 #ifdef __TBASE__
-			if (rte->relkind != RELKIND_RELATION && rte->relkind != RELKIND_PARTITIONED_TABLE)
+			if (rte->relkind != RELKIND_RELATION &&
+				rte->relkind != RELKIND_PARTITIONED_TABLE)
 			{
 				return NULL;
 			}
@@ -364,7 +366,8 @@ pgxc_FQS_datanodes_for_rtr(Index varno, Query *query)
 			 * all partitioned tables should have the same distribution, try to 
 			 * get execution datanodes
 			 */
-			if (rte->inh && has_subclass(rte->relid) && rte->relkind != RELKIND_PARTITIONED_TABLE)
+			if (rte->inh && has_subclass(rte->relid) &&
+				rte->relkind != RELKIND_PARTITIONED_TABLE)
 			{
 				return NULL;
 			}
@@ -379,23 +382,54 @@ pgxc_FQS_datanodes_for_rtr(Index varno, Query *query)
 		case RTE_SUBQUERY:
 #ifdef __TBASE__
 		{
-			Query *subquery = rte->subquery;
+			Query 		*subquery = rte->subquery;
+			ExecNodes 	*exec_nodes = NULL;
 
 			/*
-			 * Current we only consider the case if subquery only contains
-			 * constant values. If so, we can treat them as replicated RTE.
+			 * Consider the case if subquery only contains constant values.
+			 * If so, we can treat them as replicated RTE.
 			 */
 			if (enable_subquery_shipping &&
 				pgxc_FQS_check_subquery_const(subquery))
 			{
-				ExecNodes *exec_nodes = makeNode(ExecNodes);
+				exec_nodes = makeNode(ExecNodes);
 				exec_nodes->baselocatortype = LOCATOR_TYPE_REPLICATED;
-				/* No locate info stored for such subquery RTEs, we use this
-				 * flag to force using the other hand locate info */
+				/*
+				 * No locate info stored for such subquery RTEs, we use this
+				 * flag to force using the other hand locate info.
+				 */
 				exec_nodes->const_subquery = true;
 
 				return exec_nodes;
 			}
+
+			/* Try to process exec_nodes for simple Subquery */
+			if (enable_subquery_shipping &&
+				pgxc_is_simple_subquery(subquery))
+			{
+				Bitmapset	*relids = NULL;
+
+				/* Recurse into the subquery to find executable datanodes. */
+				exec_nodes = pgxc_FQS_find_datanodes_recurse((Node *)subquery->jointree,
+															 subquery, &relids);
+
+				/* Clean up the relids used in recursion function */
+				bms_free(relids);
+				relids = NULL;
+
+				/*
+				 * Currently we only support Subquery push down to single DN.
+				 * Multiple DN pushdown will have cross-phase issues between
+				 * main query and subquery, it needs more complicate
+				 * calculation. So we just skip the case by now.
+				 */
+				if (exec_nodes && exec_nodes->nodeList &&
+					(list_length(exec_nodes->nodeList) == 1))
+					return exec_nodes;
+				else
+					return NULL;
+			}
+
 			return NULL;
 		}
 #endif
@@ -1767,7 +1801,59 @@ pgxc_is_shard_in_same_group(Var *var1, Var *var2, List *rtable)
 
     return result;
 }
+
+/*
+ * Check is the subquery is simple enough to pushdown to DN
+ */
+static bool
+pgxc_is_simple_subquery(Query *query)
+{
+	/*
+	 * Let's just make sure it's a valid select ...
+	 */
+	if (!IsA(query, Query) || query->commandType != CMD_SELECT)
+		return false;
+
+	/*
+	 * Can't currently pushdown a query with setops (unless it's simple UNION
+	 * ALL, which is handled by a different code path).
+	 */
+	if (query->setOperations)
+		return false;
+
+	/*
+	 * Can't pushdown a subquery involving grouping, aggregation, SRFs,
+	 * sorting, limiting, or WITH.
+	 */
+	if (query->hasAggs ||
+		query->hasWindowFuncs ||
+		query->hasTargetSRFs ||
+		query->groupClause ||
+		query->groupingSets ||
+		query->havingQual ||
+		query->sortClause ||
+		query->distinctClause ||
+		query->limitOffset ||
+		query->limitCount ||
+		query->hasForUpdate ||
+		query->cteList)
+		return false;
+
+	/*
+	 * Don't pushdown a subquery that has any volatile functions in its
+	 * targetlist.  Otherwise we might introduce multiple evaluations of these
+	 * functions, if they get copied to multiple places in the upper query,
+	 * leading to surprising results.  (Note: the PlaceHolderVar mechanism
+	 * doesn't quite guarantee single evaluation; else we could pull up anyway
+	 * and just wrap such items in PlaceHolderVars ...)
+	 */
+	if (contain_volatile_functions((Node *) query->targetList))
+		return false;
+
+	return true;
+}
 #endif
+
 /*
  * Returns whether or not the rtable (and its subqueries)
  * only contain pg_catalog entries.
@@ -1794,7 +1880,6 @@ pgxc_query_contains_only_pg_catalog(List *rtable)
     return true;
 }
 
-
 /*
  * pgxc_is_query_shippable
  * This function calls the query walker to analyse the query to gather
@@ -1807,60 +1892,98 @@ pgxc_query_contains_only_pg_catalog(List *rtable)
  */
 ExecNodes *
 pgxc_is_query_shippable(Query *query, int query_level)
-{// #lizard forgives
-    Shippability_context sc_context;
-    ExecNodes    *exec_nodes;
-    bool        canShip = true;
-    Bitmapset    *shippability;
+{
+	Shippability_context sc_context;
+	ExecNodes	*exec_nodes;
+	bool		canShip = true;
+	Bitmapset	*shippability;
 
-    memset(&sc_context, 0, sizeof(sc_context));
-    /* let's assume that by default query is shippable */
-    sc_context.sc_query = query;
-    sc_context.sc_query_level = query_level;
-    sc_context.sc_for_expr = false;
+	memset(&sc_context, 0, sizeof(sc_context));
+	/* let's assume that by default query is shippable */
+	sc_context.sc_query = query;
+	sc_context.sc_query_level = query_level;
+	sc_context.sc_for_expr = false;
 
-    /*
-     * We might have already decided not to ship the query to the Datanodes, but
-     * still walk it anyway to find out if there are any subqueries which can be
-     * shipped.
-     */
-    pgxc_shippability_walker((Node *)query, &sc_context);
+	/*
+	 * We might have already decided not to ship the query to the Datanodes, but
+	 * still walk it anyway to find out if there are any subqueries which can be
+	 * shipped.
+	 */
+	pgxc_shippability_walker((Node *)query, &sc_context);
 
-    exec_nodes = sc_context.sc_exec_nodes;
-    /*
-     * The shippability context contains two ExecNodes, one for the subLinks
-     * involved in the Query and other for the relation involved in FromClause.
-     * They are computed at different times while scanning the query. Merge both
-     * of them if they are both replicated. If query doesn't have SubLinks, we
-     * don't need to consider corresponding ExecNodes.
-     * PGXC_FQS_TODO:
-     * Merge the subquery ExecNodes if both of them are replicated.
-     * The logic to merge node lists with other distribution
-     * strategy is not clear yet.
-     */
-    if (query->hasSubLinks)
-    {
-        if (exec_nodes && IsExecNodesReplicated(exec_nodes) &&
-            sc_context.sc_subquery_en &&
-            IsExecNodesReplicated(sc_context.sc_subquery_en))
-            exec_nodes = pgxc_merge_exec_nodes(exec_nodes,
-                                               sc_context.sc_subquery_en);
-        else
-            exec_nodes = NULL;
-    }
+	exec_nodes = sc_context.sc_exec_nodes;
+	/*
+	 * The shippability context contains two ExecNodes, one for the subLinks
+	 * involved in the Query and other for the relation involved in FromClause.
+	 * They are computed at different times while scanning the query. Merge both
+	 * of them if they are both replicated. If query doesn't have SubLinks, we
+	 * don't need to consider corresponding ExecNodes.
+	 * PGXC_FQS_TODO:
+	 * Merge the subquery ExecNodes if both of them are replicated.
+	 * The logic to merge node lists with other distribution
+	 * strategy is not clear yet.
+	 */
+	if (query->hasSubLinks)
+	{
 
-    /*
-     * Look at the information gathered by the walker in Shippability_context and that
-     * in the Query structure to decide whether we should ship this query
-     * directly to the Datanode or not
-     */
+#ifdef __TBASE__
+		int num_fromclause_nodes = 0;
+		int num_sublink_nodes = 0;
 
-    /*
-     * If the planner was not able to find the Datanodes to the execute the
-     * query, the query is not completely shippable. So, return NULL
-     */
-    if (!exec_nodes)
-        return NULL;
+		/* Get number of DN nodes for Main Query result */
+		if (exec_nodes && exec_nodes->nodeList)
+		{
+			num_fromclause_nodes = list_length(exec_nodes->nodeList);
+		}
+
+		/* Get number of DN nodes for Sublink result */
+		if (sc_context.sc_subquery_en && sc_context.sc_subquery_en->nodeList)
+		{
+			num_sublink_nodes = list_length(sc_context.sc_subquery_en->nodeList);
+		}
+
+		/*
+		 * Try to merge sublink nodelist only if:
+		 * XXX Only cover CMD_SELECT
+		 * XXX Both main query and sublink results got single DN node
+		 * XXX With same column distributed type
+		 */
+		if (enable_subquery_shipping &&
+			exec_nodes && sc_context.sc_subquery_en &&
+			query->commandType == CMD_SELECT &&
+			IsExecNodesColumnDistributed(exec_nodes) &&
+			IsExecNodesColumnDistributed(sc_context.sc_subquery_en) &&
+			exec_nodes->baselocatortype == sc_context.sc_subquery_en->baselocatortype &&
+			(num_fromclause_nodes == 1) && (num_sublink_nodes == 1))
+		{
+			exec_nodes = pgxc_merge_exec_nodes(exec_nodes, sc_context.sc_subquery_en);
+		}
+		/* Fall back to PGXC logic that only try with replicated type */
+#endif
+		else if (exec_nodes && IsExecNodesReplicated(exec_nodes) &&
+				 sc_context.sc_subquery_en &&
+				 IsExecNodesReplicated(sc_context.sc_subquery_en))
+		{
+			exec_nodes = pgxc_merge_exec_nodes(exec_nodes, sc_context.sc_subquery_en);
+		}
+		else
+		{
+			exec_nodes = NULL;
+		}
+	}
+
+	/*
+	 * Look at the information gathered by the walker in Shippability_context and that
+	 * in the Query structure to decide whether we should ship this query
+	 * directly to the Datanode or not
+	 */
+
+	/*
+	 * If the planner was not able to find the Datanodes to the execute the
+	 * query, the query is not completely shippable. So, return NULL
+	 */
+	if (!exec_nodes)
+		return NULL;
 
     /* Copy the shippability reasons. We modify the copy for easier handling.
      * The original can be saved away */

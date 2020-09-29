@@ -10613,17 +10613,12 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 			 * corresponding subquery RTE has its eref set to view name.
 			 * The remote query generated has this subquery of which the
 			 * columns can be referred to as view_name.col1, so it should
-			 * be possible to refer to this subquery object.
-			 */			
+			 * be possible to refer to this subquery object
+			 * We've finished the alias print here, no need to set printalias
+			 * again.
+			 */
 			appendStringInfo(buf, " %s",
 							 quote_identifier(rte->eref->aliasname));
-
-			/*
-			 * For 'dual' rte, the aliasname is also 'dual', print alias will
-			 * lead to syntax error.
-			 */
-			if (strcmp(rte->eref->aliasname, "dual") != 0)
-				printalias = true;
 		}
 #endif
         else if (rte->rtekind == RTE_FUNCTION)

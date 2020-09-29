@@ -283,9 +283,17 @@ insert into subquery_fqs values(1,'sz', 2);
 explain select * from subquery_fqs t join (select 1 id, 'gd' a, 2 c from dual union select 1 id, 'sz' a, 2 c union select 1 id, 'zj' a, 2 c from dual) t2 ON (t.id = t2.id and t.a = t2.a);
 select * from subquery_fqs t join (select 1 id, 'gd' a, 2 c from dual union select 1 id, 'sz' a, 2 c union select 1 id, 'zj' a, 2 c from dual) t2 ON (t.id = t2.id and t.a = t2.a);
 
+-- Support subquery FQS only if subquery distributed on same DN with main query(only 1 DN node)
+explain select * from subquery_fqs t1 where t1.id = 1 and t1.c IN (select c from subquery_fqs t2 where t2.id=1);
+select * from subquery_fqs t1 where t1.id = 1 and t1.c IN (select c from subquery_fqs t2 where t2.id=1);
+explain select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select c from subquery_fqs t2 where t2.id=1 order by c limit 1);
+select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select c from subquery_fqs t2 where t2.id=1 order by c limit 1);
+explain select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select max(c) from subquery_fqs t2 where t2.id=1);
+select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select max(c) from subquery_fqs t2 where t2.id=1);
 
 drop table tab1_rr;
 drop table tab1_hash;
 drop table tab1_modulo;
 drop table tab1_replicated;
+drop table subquery_fqs;
 drop function cr_table(varchar, int[], varchar); 

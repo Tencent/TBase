@@ -1637,8 +1637,76 @@ select * from subquery_fqs t join (select 1 id, 'gd' a, 2 c from dual union sele
   1 | sz | 2 |  1 | sz | 2
 (3 rows)
 
+-- Support subquery FQS only if subquery distributed on same DN with main query(only 1 DN node)
+explain select * from subquery_fqs t1 where t1.id = 1 and t1.c IN (select c from subquery_fqs t2 where t2.id=1);
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..142.30 rows=2 width=40)
+   ->  Nested Loop Semi Join  (cost=100.00..142.30 rows=2 width=40)
+         Join Filter: (t1.c = t2.c)
+         ->  Seq Scan on subquery_fqs t1  (cost=0.00..21.00 rows=4 width=40)
+               Filter: (id = 1)
+         ->  Materialize  (cost=100.00..121.07 rows=4 width=4)
+               ->  Remote Subquery Scan on all (datanode_1)  (cost=100.00..121.05 rows=4 width=4)
+                     ->  Seq Scan on subquery_fqs t2  (cost=0.00..21.00 rows=4 width=4)
+                           Filter: (id = 1)
+(9 rows)
+
+select * from subquery_fqs t1 where t1.id = 1 and t1.c IN (select c from subquery_fqs t2 where t2.id=1);
+ id | a  | c 
+----+----+---
+  1 | gd | 2
+  1 | zj | 2
+  1 | sz | 2
+(3 rows)
+
+explain select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select c from subquery_fqs t2 where t2.id=1 order by c limit 1);
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Node/s: datanode_1
+   ->  Seq Scan on subquery_fqs t1  (cost=21.02..44.22 rows=1 width=40)
+         Filter: ((id = 1) AND (c = $0))
+         InitPlan 1 (returns $0)
+           ->  Limit  (cost=21.02..21.02 rows=1 width=4)
+                 ->  Sort  (cost=21.02..21.03 rows=4 width=4)
+                       Sort Key: t2.c
+                       ->  Seq Scan on subquery_fqs t2  (cost=0.00..21.00 rows=4 width=4)
+                             Filter: (id = 1)
+(10 rows)
+
+select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select c from subquery_fqs t2 where t2.id=1 order by c limit 1);
+ id | a  | c 
+----+----+---
+  1 | gd | 2
+  1 | zj | 2
+  1 | sz | 2
+(3 rows)
+
+explain select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select max(c) from subquery_fqs t2 where t2.id=1);
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Node/s: datanode_1
+   ->  Seq Scan on subquery_fqs t1  (cost=21.02..44.22 rows=1 width=40)
+         Filter: ((id = 1) AND (c = $0))
+         InitPlan 1 (returns $0)
+           ->  Aggregate  (cost=21.01..21.02 rows=1 width=4)
+                 ->  Seq Scan on subquery_fqs t2  (cost=0.00..21.00 rows=4 width=4)
+                       Filter: (id = 1)
+(8 rows)
+
+select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select max(c) from subquery_fqs t2 where t2.id=1);
+ id | a  | c 
+----+----+---
+  1 | gd | 2
+  1 | zj | 2
+  1 | sz | 2
+(3 rows)
+
 drop table tab1_rr;
 drop table tab1_hash;
 drop table tab1_modulo;
 drop table tab1_replicated;
+drop table subquery_fqs;
 drop function cr_table(varchar, int[], varchar); 
