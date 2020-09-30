@@ -15835,27 +15835,30 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
                                       fmtId(tbinfo->attnames[hashkey - 1]));
                 }
 #ifdef __TBASE__
-                else if(tbinfo->pgxclocatortype == 'S' && !tbinfo->ispartition)
-                {
-                    int hashkey = tbinfo->pgxcattnum;
-                    int sechashkey = tbinfo->pgxcsecattnum;
+				else if(tbinfo->pgxclocatortype == 'S' && !tbinfo->ispartition)
+				{
+					int hashkey = tbinfo->pgxcattnum;
+					int sechashkey = tbinfo->pgxcsecattnum;
 
-                    if (sechashkey)
-                    {
-                        appendPQExpBuffer(q, "\nDISTRIBUTE BY SHARD (%s,",
-                                          fmtId(tbinfo->attnames[hashkey - 1]));
-                        appendPQExpBuffer(q, "%s)",
-                                          fmtId(tbinfo->attnames[sechashkey - 1]));
-                    }
-                    else
-                        appendPQExpBuffer(q, "\nDISTRIBUTE BY SHARD (%s)",
-                                          fmtId(tbinfo->attnames[hashkey - 1]));
+					if (sechashkey)
+					{
+						appendPQExpBuffer(q, "\nDISTRIBUTE BY SHARD (%s,",
+									  	fmtId(tbinfo->attnames[hashkey - 1]));
+						appendPQExpBuffer(q, "%s)",
+									  	fmtId(tbinfo->attnames[sechashkey - 1]));
+					}
+					else
+						appendPQExpBuffer(q, "\nDISTRIBUTE BY SHARD (%s)",
+									  	fmtId(tbinfo->attnames[hashkey - 1]));
 
-                    if (tbinfo->coldgroupname)
-                        appendPQExpBuffer(q, " to GROUP %s %s", tbinfo->groupname, tbinfo->coldgroupname);
-                    else
-                        appendPQExpBuffer(q, " to GROUP %s", tbinfo->groupname);
-                }
+					if (tbinfo->groupname)
+					{
+						if (tbinfo->coldgroupname)
+							appendPQExpBuffer(q, " to GROUP %s %s", tbinfo->groupname, tbinfo->coldgroupname);
+						else
+							appendPQExpBuffer(q, " to GROUP %s", tbinfo->groupname);
+					}
+				}
 #endif
             }
             if (include_nodes &&
