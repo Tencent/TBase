@@ -1092,28 +1092,28 @@ main(int argc, char *argv[])
             }
         } while(max_retry_times > 0);
 
-        if(ret)
-        {
-            elog(FATAL, "GTM_StoreMasterInit failed too many times exit, %s", strerror(errno));
-        }
-        
-        if (!gtm_standby_restore_next_gxid())
-        {
-            elog(FATAL, "Failed to restore next/last gxid from the active-GTM.");
-        }
-        elog(LOG, "Restoring next/last gxid from the active-GTM succeeded.");
+		if(ret)
+		{
+    		elog(FATAL, "GTM_StoreMasterInit failed too many times \"%s\", exit", strerror(errno));
+		}
+		
+		if (!gtm_standby_restore_next_gxid())
+		{
+			elog(FATAL, "Failed to restore next/last gxid from the active-GTM.");
+		}
+		elog(LOG, "Restoring next/last gxid from the active-GTM succeeded.");
 
-        if (!gtm_standby_restore_gxid())
-        {
-            elog(FATAL, "Failed to restore all of gxid(s) from the active-GTM.");
-        }
-        elog(LOG, "Restoring all of gxid(s) from the active-GTM succeeded.");
+		if (!gtm_standby_restore_gxid())
+		{
+			elog(FATAL, "Failed to restore all of gxid(s) from the active-GTM.");
+		}
+		elog(LOG, "Restoring all of gxid(s) from the active-GTM succeeded.");
 
-        if (!gtm_standby_restore_sequence())
-        {
-            elog(FATAL, "Failed to restore sequences from the active-GTM.");
-        }
-        elog(LOG, "Restoring sequences from the active-GTM succeeded.");
+		if (!gtm_standby_restore_sequence())
+		{
+			elog(FATAL, "Failed to restore sequences from the active-GTM.");
+		}
+		elog(LOG, "Restoring sequences from the active-GTM succeeded.");
 
 
 #else
