@@ -578,7 +578,22 @@ pq_copymsgbytes(StringInfo msg, char *buf, int datalen)
 }
 
 /* --------------------------------
- *        pq_getmsgtext    - get a counted text string (with conversion)
+ *		pq_updatemsgbytes - update the content of the specified location with buf
+ *
+ * --------------------------------
+ */
+void
+pq_updatemsgbytes(StringInfo msg, int offset, char *buf, int datalen)
+{
+    if (datalen < 0 || offset < 0 || offset + datalen > msg->len)
+        ereport(ERROR,
+                (EPROTO,
+                        errmsg("invalid update data in message")));
+    memcpy(&msg->data[offset], buf, datalen);
+}
+
+/* --------------------------------
+ *		pq_getmsgtext	- get a counted text string (with conversion)
  *
  *        Always returns a pointer to a freshly palloc'd result.
  *        The result has a trailing null, *and* we return its strlen in *nbytes.

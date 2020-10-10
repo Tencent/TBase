@@ -66,6 +66,7 @@
 #include "utils/varlena.h"
 #include "port.h"
 #include <math.h>
+#include <sys/timeb.h>
 
 /* the mini use conut of a connection */
 #define  MINI_USE_COUNT    10
@@ -138,6 +139,33 @@ typedef struct PoolerStatistics
 
 PoolerStatistics g_pooler_stat;
 
+/* global command statistics handle */
+PoolerCmdStatistics* g_pooler_cmd_stat = NULL;
+
+unsigned char g_pooler_cmd[POOLER_CMD_COUNT] =
+{
+    'a',                    /* ABORT */
+    'b',                    /* Fire transaction-block commands on given nodes */
+    'c',                    /* CONNECT */
+    'd',                    /* DISCONNECT */
+    'f',                    /* CLEAN CONNECTION */
+    'g',                    /* GET CONNECTIONS */
+    'h',                    /* Cancel SQL Command in progress on specified connections */
+    'o',                    /* Lock/unlock pooler */
+    'p',                    /* Reload connection info */
+    'P',                    /* Ping connection info */
+    'q',                    /* Check connection info consistency */
+    'r',                    /* RELEASE CONNECTIONS */
+    'R',                    /* Refresh connection info */
+    's',                    /* Session-related COMMAND */
+    't',                    /* Close pooler connections*/
+    'x',                    /* Get command statistics */
+    'y',                    /* Reset command statistics */
+    'z'                     /* Get connection statistics */
+};
+
+/* a map used to change msgtype to id */
+uint8 g_qtype2id[256];
 
 /* Flag to tell if we are Postgres-XC pooler process */
 static bool am_pgxc_pooler = false;
@@ -346,25 +374,27 @@ char *poolErrorMsg[] = {"No Error",
 
 typedef struct
 {
-    int32             cmd;            /* refer to handle_agent_input command tag */
-    bool              bCoord;          /* coordinator or datanode*/
-    PGXCASyncTaskCtl  *taskControl;    
-    PoolAgent         *agent;
-    PGXCNodePool      *nodepool;      /* node pool for current node */
-    PGXCNodePoolSlot  *slot;          /* connection slot , no need to free */
-    int32             current_status; /* currrent connect status*/
-    int32             final_status;   /* final status we are going to get to*/
-    int32             nodeindex;      /* node index of the remote peer */
-    bool              needfree;       /* whether need to free taskControl, last thread set the flag */
+	int32             cmd;  	      /* refer to handle_agent_input command tag */
+	bool              bCoord;		  /* coordinator or datanode*/
+	PGXCASyncTaskCtl  *taskControl;	
+	PoolAgent         *agent;
+	PGXCNodePool      *nodepool;	  /* node pool for current node */
+	PGXCNodePoolSlot  *slot;		  /* connection slot , no need to free */
+	int32             current_status; /* currrent connect status*/
+	int32             final_status;   /* final status we are going to get to*/
+	int32             nodeindex;      /* node index of the remote peer */
+	bool			  needfree;       /* whether need to free taskControl, last thread set the flag */
 
-    int32              req_seq;          /* req sequence number */
-    int32             pid;              /* pid that acquires the connection */
-    bool              needConnect;      /* check whether we need to build a new connection , we acquire new connections */    
-    bool              error_flag;      /* set when error */
-    SendSetQueryStatus setquery_status;    /* send set query status */ 
-    struct  timeval   start_time;        /* when acquire conn by sync thread, the time begin request */
-    struct  timeval   end_time;            /* when acquire conn by sync thread, the time finish request */
-    char              errmsg[POOLER_ERROR_MSG_LEN];
+	int32			  req_seq;		  /* req sequence number */
+	int32             pid;			  /* pid that acquires the connection */
+	bool              needConnect;	  /* check whether we need to build a new connection , we acquire new connections */	
+	bool			  error_flag;	  /* set when error */
+	SendSetQueryStatus setquery_status;    /* send set query status */ 
+	struct  timeval   start_time;		/* when acquire conn by sync thread, the time begin request */
+	struct  timeval   end_time;			/* when acquire conn by sync thread, the time finish request */
+	char              errmsg[POOLER_ERROR_MSG_LEN];
+	pg_time_t         cmd_start_time;   /* command start time, including the processing time in the main process */
+    pg_time_t         cmd_end_time;     /* command end time */
 }PGXCPoolAsyncReq;
 
 static inline void RebuildAgentIndex(void);
@@ -562,6 +592,11 @@ static int handle_close_pooled_connections(PoolAgent * agent, StringInfo s);
 static void ConnectPoolManager(void);
 #endif
 
+static void init_pooler_cmd_statistics(void);
+static void reset_pooler_cmd_statistics(void);
+static void update_pooler_cmd_statistics(unsigned char qtype, uint64 costtime);
+static void handle_get_cmd_statistics(PoolAgent *agent);
+static void handle_get_conn_statistics(PoolAgent *agent);
 
 #define IncreaseSlotRefCount(slot,filename,linenumber)\
 do\
@@ -692,8 +727,6 @@ do\
         elog(PANIC, POOL_MGR_PREFIX"[%s:%d] invalid node pool size: %d, freesize:%d, nwarming:%d, node:%u, connstr:%s", file, lineno, nodepool->size, nodepool->freeSize, nodepool->nwarming, nodepool->nodeoid, nodepool->connstr);\
     }\
 }while(0)
-
-
 
 void
 PGXCPoolerProcessIam(void)
@@ -1461,6 +1494,95 @@ PoolManagerLock(bool is_lock)
 }
 
 /*
+ * get pooler command statistics
+ */
+int
+PoolManagerGetCmdStatistics(char *s, int size)
+{
+    int qtype = 0;
+    char msgtype = 'x';
+    HOLD_POOLER_RELOAD();
+
+    if (poolHandle == NULL)
+    {
+        ConnectPoolManager();
+    }
+
+    /* Message type */
+    pool_putbytes(&poolHandle->port, &msgtype, 1);
+    pool_flush(&poolHandle->port);
+
+    qtype = pool_getbyte(&poolHandle->port);
+    if (qtype == EOF || (unsigned char)qtype != msgtype)
+    {
+        elog(ERROR, POOL_MGR_PREFIX"get command statistics error, qtype:%d", qtype);
+        RESUME_POOLER_RELOAD();
+        return -1;
+    }
+
+    /* get all command statistics messages */
+    pool_getbytes(&poolHandle->port, s, size);
+
+    RESUME_POOLER_RELOAD();
+    return 0;
+}
+
+/*
+ * reset command statistics
+ */
+void
+PoolManagerResetCmdStatistics(void)
+{
+    char msgtype = 'y';
+    HOLD_POOLER_RELOAD();
+
+    if (poolHandle == NULL)
+    {
+        ConnectPoolManager();
+    }
+
+    /* Message type */
+    pool_putbytes(&poolHandle->port, &msgtype, 1);
+    pool_flush(&poolHandle->port);
+
+    RESUME_POOLER_RELOAD();
+}
+
+/*
+ * get pooler connections statistics
+ */
+int
+PoolManagerGetConnStatistics(StringInfo s)
+{
+    int qtype = 0;
+    char msgtype = 'z';
+    HOLD_POOLER_RELOAD();
+
+    if (poolHandle == NULL)
+    {
+        ConnectPoolManager();
+    }
+
+    /* Message type */
+    pool_putbytes(&poolHandle->port, &msgtype, 1);
+    pool_flush(&poolHandle->port);
+
+    qtype = pool_getbyte(&poolHandle->port);
+    if (qtype == EOF || (unsigned char)qtype != msgtype)
+    {
+        elog(ERROR, POOL_MGR_PREFIX"get conn statistics error, qtype:%d", qtype);
+        RESUME_POOLER_RELOAD();
+        return -1;
+    }
+
+    /* get all the messages left */
+    pool_getmessage(&poolHandle->port, s, 0);
+
+    RESUME_POOLER_RELOAD();
+    return 0;
+}
+
+/*
  * Init PoolAgent
  */
 static void
@@ -1953,6 +2075,16 @@ PoolManagerReloadConnectionInfo(void)
     pool_flush(&poolHandle->port);
 }
 
+/*
+ * get systime time, ms
+ */
+static pg_time_t
+get_system_time()
+{
+    struct timeb t;
+    ftime(&t);
+    return 1000 * t.time + t.millitm;
+}
 
 /*
  * Handle messages to agent
@@ -5097,7 +5229,8 @@ PoolerLoop(void)
         pool_fd[i].events = POLLIN | POLLPRI | POLLRDNORM | POLLRDBAND;
     }
 
-    reset_pooler_statistics();
+	reset_pooler_statistics();
+    init_pooler_cmd_statistics();
 
     for (;;)
     {
@@ -8043,9 +8176,12 @@ static inline bool dispatch_connection_request(PGXCASyncTaskCtl  *taskControl,
     {
         taskControl->m_status     = PoolAyncCtlStaus_dispatched;
 
-        /* also use this request to response to session*/
-        req->final_status         = PoolConnectStaus_destory;
-    }        
+		/* also use this request to response to session*/
+		req->final_status         = PoolConnectStaus_destory;
+
+		/* if last request, transfer cmd_start_time to req */
+        req->cmd_start_time       = agent->cmd_start_time;
+	}
 
     if (PoolConnectDebugPrint)
     {
@@ -8081,8 +8217,16 @@ static inline bool dispatch_connection_request(PGXCASyncTaskCtl  *taskControl,
         snprintf(agent->port.err_msg, POOL_ERR_MSG_LEN, "%s", poolErrorMsg[agent->port.error_code]);
         SpinLockRelease(&agent->port.lock);
 #endif
+	}
+    else
+    {
+        if (dispatched)
+        {
+            /* dispatch success, clear cmd start time in agent */
+            agent->cmd_start_time = 0;
+        }
     }
-    return ret;
+	return ret;
 }
 
 
@@ -8116,31 +8260,43 @@ static inline bool dispatch_local_set_request(PGXCASyncTaskCtl  *taskControl,
     {
         taskControl->m_status     = PoolAyncCtlStaus_dispatched;
 
-        /* also use this request to response to session*/
-        req->final_status         = PoolLocalSetStatus_destory;
-        req->current_status          = PoolLocalSetStatus_destory;
-    }    
-    
+		/* also use this request to response to session*/
+		req->final_status         = PoolLocalSetStatus_destory;
+		req->current_status    	  = PoolLocalSetStatus_destory;
+
+        /* if last request, transfer cmd_start_time to req */
+        req->cmd_start_time       = agent->cmd_start_time;
+	}	
+	
 
     if (PoolConnectDebugPrint)
     {
         elog(LOG, POOL_MGR_PREFIX"pid:%d dispatch async local set nodeindex:%d connection, current status:%d final status:%d", agent->pid, nodeindex, req->current_status, req->final_status);
     }
 
-    if (dispatched)
+	if (dispatched)
+	{
+		if (PoolConnectDebugPrint)
+		{
+			elog(LOG, POOL_MGR_PREFIX"pid:%d dispatch last local set request!! nodeindex:%d connection, current status:%d final status:%d request_num:%d", agent->pid, nodeindex, req->current_status, req->final_status, taskControl->m_mumber_total);
+		}
+	}
+	ret = dispatch_async_network_operation(req);
+	if (!ret)
+	{
+		elog(LOG, POOL_MGR_PREFIX"pid:%d dispatch async local set request failed!! nodeindex:%d connection, current status:%d final status:%d request_num:%d", agent->pid, nodeindex, req->current_status, req->final_status, taskControl->m_mumber_total);		
+		pfree(req);
+	}
+    else
     {
-        if (PoolConnectDebugPrint)
+        if (dispatched)
         {
-            elog(LOG, POOL_MGR_PREFIX"pid:%d dispatch last local set request!! nodeindex:%d connection, current status:%d final status:%d request_num:%d", agent->pid, nodeindex, req->current_status, req->final_status, taskControl->m_mumber_total);
+            /* dispatch success, clear cmd start time in agent */
+            agent->cmd_start_time = 0;
         }
     }
-    ret = dispatch_async_network_operation(req);
-    if (!ret)
-    {
-        elog(LOG, POOL_MGR_PREFIX"pid:%d dispatch async local set request failed!! nodeindex:%d connection, current status:%d final status:%d request_num:%d", agent->pid, nodeindex, req->current_status, req->final_status, taskControl->m_mumber_total);        
-        pfree(req);
-    }
-    return ret;
+
+	return ret;
 }
 
 static inline bool dispatch_set_command_request(PGXCASyncTaskCtl  *taskControl,
@@ -8183,10 +8339,13 @@ static inline bool dispatch_set_command_request(PGXCASyncTaskCtl  *taskControl,
     {
         taskControl->m_status     = PoolAyncCtlStaus_dispatched;
 
-        /* also use this request to response to session*/
-        req->final_status         = PoolSetCommandStatus_destory;
-        req->current_status       = PoolSetCommandStatus_destory;
-    }    
+		/* also use this request to response to session*/
+		req->final_status         = PoolSetCommandStatus_destory;
+		req->current_status       = PoolSetCommandStatus_destory;
+
+        /* if last request, transfer cmd_start_time to req */
+        req->cmd_start_time       = agent->cmd_start_time;
+	}	
 
     if (PoolConnectDebugPrint)
     {
@@ -8207,14 +8366,22 @@ static inline bool dispatch_set_command_request(PGXCASyncTaskCtl  *taskControl,
         }
     }
 
-    ret = dispatch_async_network_operation(req); 
-    if (!ret)
+	ret = dispatch_async_network_operation(req); 
+	if (!ret)
+	{
+		if (slot)
+		{
+			elog(LOG, POOL_MGR_PREFIX"pid:%d dispatch async set command request failed!! nodeindex:%d connection nodename:%s backend_pid:%d current status:%d final status:%d request_num:%d command:%s", agent->pid, nodeindex, slot->node_name, slot->backend_pid, req->current_status, req->final_status, taskControl->m_mumber_total, taskControl->m_command);		
+		}
+		pfree(req);
+	}
+    else
     {
-        if (slot)
+        if (dispatched)
         {
-            elog(LOG, POOL_MGR_PREFIX"pid:%d dispatch async set command request failed!! nodeindex:%d connection nodename:%s backend_pid:%d current status:%d final status:%d request_num:%d command:%s", agent->pid, nodeindex, slot->node_name, slot->backend_pid, req->current_status, req->final_status, taskControl->m_mumber_total, taskControl->m_command);        
+            /* dispatch success, clear cmd start time in agent */
+            agent->cmd_start_time = 0;
         }
-        pfree(req);
     }
 
     if (PoolConnectDebugPrint)
@@ -8268,34 +8435,37 @@ static inline bool dispatch_cancle_request(PGXCASyncTaskCtl  *taskControl,
     {
         taskControl->m_status     = PoolAyncCtlStaus_dispatched;
 
-        /* use this request to response to session*/
-        req->current_status          = PoolCancelStatus_destory;
-        req->final_status            = PoolCancelStatus_destory;
-    }
-    
-    if (bCoord)
-    {
-        slot = agent->coord_connections[nodeindex];
-        
-    }
-    else
-    {
-        slot = agent->dn_connections[nodeindex];
-    }
-                            
-    if (PoolConnectDebugPrint)
-    {
-        if (slot)
-        {
-            elog(LOG, POOL_MGR_PREFIX"pid:%d dispatch async CANCLE_QUERY nodeindex:%d connection, nodename:%s backend_pid:%d current status:%d final status:%d", 
-                                                                                                            agent->pid, 
-                                                                                                            nodeindex, 
-                                                                                                            slot->node_name, 
-                                                                                                            slot->backend_pid, 
-                                                                                                            req->current_status, 
-                                                                                                            req->final_status);
-        }
-    }
+		/* use this request to response to session*/
+		req->current_status    	  = PoolCancelStatus_destory;
+		req->final_status      	  = PoolCancelStatus_destory;
+
+        /* if last request, transfer cmd_start_time to req */
+        req->cmd_start_time       = agent->cmd_start_time;
+	}
+	
+	if (bCoord)
+	{
+		slot = agent->coord_connections[nodeindex];
+		
+	}
+	else
+	{
+		slot = agent->dn_connections[nodeindex];
+	}
+							
+	if (PoolConnectDebugPrint)
+	{
+		if (slot)
+		{
+			elog(LOG, POOL_MGR_PREFIX"pid:%d dispatch async CANCLE_QUERY nodeindex:%d connection, nodename:%s backend_pid:%d current status:%d final status:%d", 
+																										    agent->pid, 
+																										    nodeindex, 
+																										    slot->node_name, 
+																										    slot->backend_pid, 
+																										    req->current_status, 
+																										    req->final_status);
+		}
+	}
 
     if (dispatched)
     {
@@ -8336,8 +8506,17 @@ static inline bool dispatch_cancle_request(PGXCASyncTaskCtl  *taskControl,
         snprintf(agent->port.err_msg, POOL_ERR_MSG_LEN, "%s", poolErrorMsg[agent->port.error_code]);
         SpinLockRelease(&agent->port.lock);
 #endif
+	}
+    else
+    {
+        if (dispatched)
+        {
+            /* dispatch success, clear cmd start time in agent */
+            agent->cmd_start_time = 0;
+        }
     }
-    return ret;
+
+	return ret;
 }
 
 
@@ -10761,3 +10940,211 @@ ConnectPoolManager(void)
 
 }
 #endif
+
+/*
+ * init pooler command statistics
+ */
+static void
+init_pooler_cmd_statistics(void)
+{
+    int i = 0;
+    memset(g_qtype2id, -1, sizeof(g_qtype2id));
+
+    /* init type to id map */
+    for (i = 0; i < POOLER_CMD_COUNT; i++)
+    {
+        g_qtype2id[g_pooler_cmd[i]] = i;
+    }
+
+    /* init global statistics array */
+    g_pooler_cmd_stat = (PoolerCmdStatistics*) palloc(POOLER_CMD_COUNT * sizeof(PoolerCmdStatistics));
+    for (i = 0; i < POOLER_CMD_COUNT; i++)
+    {
+        g_pooler_cmd_stat[i].total_request_times = 0;
+        g_pooler_cmd_stat[i].total_costtime = 0;
+        g_pooler_cmd_stat[i].max_costtime = 0;
+        g_pooler_cmd_stat[i].min_costtime = MAX_UINT64;
+    }
+}
+
+/*
+ * reset pooler command statistics
+ */
+static void
+reset_pooler_cmd_statistics(void)
+{
+    int i = 0;
+    /* reset global statistics array */
+    for (i = 0; i < POOLER_CMD_COUNT; i++)
+    {
+        g_pooler_cmd_stat[i].total_request_times = 0;
+        g_pooler_cmd_stat[i].total_costtime = 0;
+        g_pooler_cmd_stat[i].max_costtime = 0;
+        g_pooler_cmd_stat[i].min_costtime = MAX_UINT64;
+    }
+}
+
+/*
+ * update pooler command statistics info
+ */
+static void
+update_pooler_cmd_statistics(unsigned char qtype, uint64 costtime)
+{
+    uint8 id = g_qtype2id[qtype];
+    if (id == MAX_UINT8)
+    {
+        return;
+    }
+
+    g_pooler_cmd_stat[id].total_request_times += 1;
+    g_pooler_cmd_stat[id].total_costtime += costtime;
+
+    if (costtime > g_pooler_cmd_stat[id].max_costtime)
+    {
+        g_pooler_cmd_stat[id].max_costtime = costtime;
+    }
+
+    if (costtime < g_pooler_cmd_stat[id].min_costtime)
+    {
+        g_pooler_cmd_stat[id].min_costtime = costtime;
+    }
+}
+
+/*
+ * handle get command statistics
+ */
+static void
+handle_get_cmd_statistics(PoolAgent *agent)
+{
+    int    i = 0;
+    uint64 n64 = 0;
+    char   msgtype = 'x';
+
+    /* response message type */
+    pool_putbytes(&agent->port, &msgtype, 1);
+
+    /* fixed length command statistics info */
+    for (i = 0; i < POOLER_CMD_COUNT; i++)
+    {
+        n64 = htobe64(g_pooler_cmd_stat[i].total_request_times);
+        pool_putbytes(&agent->port, (char *) &n64, sizeof(n64));
+
+        n64 = htobe64(g_pooler_cmd_stat[i].total_costtime);
+        pool_putbytes(&agent->port, (char *) &n64, sizeof(n64));
+
+        n64 = htobe64(g_pooler_cmd_stat[i].max_costtime);
+        pool_putbytes(&agent->port, (char *) &n64, sizeof(n64));
+
+        n64 = htobe64(g_pooler_cmd_stat[i].min_costtime);
+        pool_putbytes(&agent->port, (char *) &n64, sizeof(n64));
+    }
+
+    pool_flush(&agent->port);
+}
+
+/*
+ * handle get connections statistics
+ */
+static void
+handle_get_conn_statistics(PoolAgent *agent)
+{
+    DatabasePool     *database_pool = databasePools;
+    HASH_SEQ_STATUS  hseq_status;
+    PGXCNodePool     *node_pool = NULL;
+
+    uint32           node_cnt = 0;         /* the nodes count use the same database and username */
+    uint32           total_node_cnt = 0;   /* total nodes count */
+
+    /* var offset in buf */
+    uint32           node_cnt_offset = 0;
+    uint32           total_node_cnt_offset = 0;
+
+    uint32           exceed_keepalive_cnt = 0;
+    uint32           exceed_deadtime_cnt = 0;
+    uint32           exceed_maxlifetime_cnt = 0;
+    int              i = 0;
+    PGXCNodePoolSlot *slot = NULL;
+    time_t           now = time(NULL);
+    StringInfoData   buf;
+
+    initStringInfo(&buf);
+    /* reserve a place for total_node_cnt, record the offset of total_node_cnt */
+    total_node_cnt_offset = buf.len;
+    pq_sendint(&buf, total_node_cnt, sizeof(uint32));
+
+    /* total node count | database | username | node count in the same database and username | node pool conn statistics | ... | database | username | ... */
+    while (database_pool)
+    {
+        pq_sendstring(&buf, database_pool->database);
+        pq_sendstring(&buf, database_pool->user_name);
+
+        /* reserve a place for node_cnt, record the offset of node_cnt */
+        node_cnt = 0;
+        node_cnt_offset = buf.len;
+        pq_sendint(&buf, node_cnt, sizeof(uint32));
+
+        /* traverse all node_pool in hashtable */
+        hash_seq_init(&hseq_status, database_pool->nodePools);
+        while ((node_pool = (PGXCNodePool *) hash_seq_search(&hseq_status)))
+        {
+            node_cnt++;
+
+            pq_sendstring(&buf, node_pool->node_name);
+            pq_sendint(&buf, node_pool->nodeoid, sizeof(Oid));
+            pq_sendint(&buf, node_pool->coord, sizeof(bool));
+            pq_sendint(&buf, node_pool->size, sizeof(uint32));
+            pq_sendint(&buf, node_pool->freeSize, sizeof(uint32));
+            pq_sendint(&buf, node_pool->nwarming, sizeof(uint32));
+            pq_sendint(&buf, node_pool->nquery, sizeof(uint32));
+
+            /* reset statistics count */
+            exceed_keepalive_cnt = 0;
+            exceed_deadtime_cnt = 0;
+            exceed_maxlifetime_cnt = 0;
+            /* statistical connection life cycle */
+            if (node_pool->slot)
+            {
+                for (i = 0; i < node_pool->freeSize; i++)
+                {
+                    slot = node_pool->slot[i];
+                    if (difftime(now, slot->released) > PoolConnKeepAlive)
+                    {
+                        exceed_keepalive_cnt++;
+                    }
+
+                    if (difftime(now, slot->created) > PoolConnDeadtime)
+                    {
+                        exceed_deadtime_cnt++;
+                    }
+
+                    if (difftime(now, slot->created) >= PoolConnMaxLifetime)
+                    {
+                        exceed_maxlifetime_cnt++;
+                    }
+                }
+            }
+
+            pq_sendint(&buf, exceed_keepalive_cnt, sizeof(uint32));
+            pq_sendint(&buf, exceed_deadtime_cnt, sizeof(uint32));
+            pq_sendint(&buf, exceed_maxlifetime_cnt, sizeof(uint32));
+        }
+
+
+        total_node_cnt += node_cnt;
+
+        /* change the nodes count in message buff */
+        node_cnt = htonl(node_cnt);
+        pq_updatemsgbytes(&buf, node_cnt_offset, (char*) &node_cnt, sizeof(uint32));
+        database_pool = database_pool->next;
+    }
+
+    /* change the total nodes count in message buff */
+    total_node_cnt = htonl(total_node_cnt);
+    pq_updatemsgbytes(&buf, total_node_cnt_offset, (char*) &total_node_cnt, sizeof(uint32));
+
+    /* send messages */
+    pool_putmessage(&agent->port, 'z', buf.data, buf.len);
+    pool_flush(&agent->port);
+
+    pfree(buf.data);
+}

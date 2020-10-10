@@ -1,0 +1,5 @@
+# tbase_pooler_stat extension
+comment = 'pooler statistics'
+default_version = '1.0'
+module_pathname = '$libdir/tbase_pooler_stat'
+relocatable = true
