@@ -52,7 +52,8 @@ SUBDIRS = \
                 tsm_system_time \
                 unaccent        \
                 vacuumlo        \
-                stormstats
+                stormstats		\
+				tbase_pooler_stat
 
 ifeq ($(with_openssl),yes)
 SUBDIRS += sslinfo
