@@ -7436,6 +7436,18 @@ PreCommit_Remote(char *prepareGID, char *nodestring, bool preparedLocalNode)
 }
 
 /*
+ * Whether node need clean: last command is not finished
+ * 'Z' message: ready for query
+ * 'C' message: command complete
+ */
+static inline bool
+node_need_clean(PGXCNodeHandle *handle)
+{
+	return handle->state != DN_CONNECTION_STATE_IDLE ||
+		(('Z' != handle->last_command) && ('C' != handle->last_command));
+}
+
+/*
  * Do abort processing for the transaction. We must abort the transaction on
  * all the involved nodes. If a node has already prepared a transaction, we run
  * ROLLBACK PREPARED command on the node. Otherwise, a simple ROLLBACK command
@@ -7495,21 +7507,21 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
     {
         PGXCNodeHandle *handle = all_handles->coord_handles[i];
 		if (handle->sock != NO_SOCKET)
-        {        
-            if ((handle->state != DN_CONNECTION_STATE_IDLE) || !node_ready_for_query(handle))
-            {
-                /*
-                 * Forget previous combiner if any since input will be handled by
-                 * different one.
-                 */
-                handle->combiner = NULL;
-                clean_nodes[node_count++] = handle;                
-                cancel_co_list[cancel_co_count++] = PGXCNodeGetNodeId(handle->nodeoid, NULL);            
-                
-#ifdef _PG_REGRESS_    
-                ereport(LOG,
-                        (errcode(ERRCODE_INTERNAL_ERROR),
-                         errmsg("PreAbort_Remote node:%s pid:%d status:%d need clean.", handle->nodename, handle->backend_pid, handle->state)));                                                    
+		{		
+			if (node_need_clean(handle))
+			{
+				/*
+				 * Forget previous combiner if any since input will be handled by
+				 * different one.
+				 */
+				handle->combiner = NULL;
+				clean_nodes[node_count++] = handle;				
+				cancel_co_list[cancel_co_count++] = PGXCNodeGetNodeId(handle->nodeoid, NULL);			
+				
+#ifdef _PG_REGRESS_	
+				ereport(LOG,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("PreAbort_Remote node:%s pid:%d status:%d need clean.", handle->nodename, handle->backend_pid, handle->state)));													
 #endif
                 if (handle->in_extended_query)
                 {                
@@ -7561,15 +7573,14 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
     {
         PGXCNodeHandle *handle = all_handles->datanode_handles[i];
 		if (handle->sock != NO_SOCKET)
-        {        
-            if (handle->state == DN_CONNECTION_STATE_COPY_IN  ||
-                handle->state == DN_CONNECTION_STATE_COPY_OUT || 
-                !node_ready_for_query(handle))
-            {
-#ifdef _PG_REGRESS_    
-                ereport(LOG,
-                        (errcode(ERRCODE_INTERNAL_ERROR),
-                         errmsg("PreAbort_Remote node:%s pid:%d status:%d need clean.", handle->nodename, handle->backend_pid, handle->state)));                                                 
+		{		
+			if (handle->state == DN_CONNECTION_STATE_COPY_IN ||
+				handle->state == DN_CONNECTION_STATE_COPY_OUT)
+			{
+#ifdef _PG_REGRESS_	
+				ereport(LOG,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("PreAbort_Remote node:%s pid:%d status:%d need clean.", handle->nodename, handle->backend_pid, handle->state))); 												
 #endif
                 if (handle->in_extended_query)
                 {                
@@ -7605,21 +7616,21 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
                     clean_nodes[node_count++] = handle;                
                     cancel_dn_list[cancel_dn_count++] = PGXCNodeGetNodeId(handle->nodeoid, NULL);
                 }
-#endif                
-            }
-            else if (handle->state != DN_CONNECTION_STATE_IDLE)
-            {
-                /*
-                 * Forget previous combiner if any since input will be handled by
-                 * different one.
-                 */
-                handle->combiner = NULL;
-                clean_nodes[node_count++] = handle;                
-                cancel_dn_list[cancel_dn_count++] = PGXCNodeGetNodeId(handle->nodeoid, NULL);
-#ifdef _PG_REGRESS_    
-                ereport(LOG,
-                        (errcode(ERRCODE_INTERNAL_ERROR),
-                         errmsg("PreAbort_Remote node:%s pid:%d status:%d need clean.", handle->nodename, handle->backend_pid, handle->state)));                                                
+#endif				
+			}
+			else if (node_need_clean(handle))
+			{
+				/*
+				 * Forget previous combiner if any since input will be handled by
+				 * different one.
+				 */
+				handle->combiner = NULL;
+				clean_nodes[node_count++] = handle;				
+				cancel_dn_list[cancel_dn_count++] = PGXCNodeGetNodeId(handle->nodeoid, NULL);
+#ifdef _PG_REGRESS_	
+				ereport(LOG,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("PreAbort_Remote node:%s pid:%d status:%d need clean.", handle->nodename, handle->backend_pid, handle->state)));												
 #endif
 
                 if (handle->in_extended_query)
