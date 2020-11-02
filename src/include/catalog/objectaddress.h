@@ -90,6 +90,14 @@ typedef struct ObjectAddress
 
 extern const ObjectAddress InvalidObjectAddress;
 
+/*
+ * Compare whether two ObjectAddress are the same
+ */
+#define ObjectAddressIsEqual(addr1, addr2) \
+	 ((addr1).classId == (addr2).classId &&  \
+		(addr1).objectId == (addr2).objectId &&  \
+		(addr1).objectSubId == (addr2).objectSubId)
+
 #define ObjectAddressSubSet(addr, class_id, object_id, object_sub_id) \
     do { \
         (addr).classId = (class_id); \

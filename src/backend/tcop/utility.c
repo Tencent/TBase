@@ -3853,67 +3853,70 @@ ProcessUtilitySlow(ParseState *pstate,
 
                     }
 #endif
-                    /*
-                     * Add the CREATE INDEX node itself to stash right away;
-                     * if there were any commands stashed in the ALTER TABLE
-                     * code, we need them to appear after this one.
-                     */
-                    EventTriggerCollectSimpleCommand(address, secondaryObject,
-                                                     parsetree);
-                    commandCollected = true;
-                    EventTriggerAlterTableEnd();
-                }
-                break;
+					/*
+					 * Add the CREATE INDEX node itself to stash right away;
+					 * if there were any commands stashed in the ALTER TABLE
+					 * code, we need them to appear after this one.
+					 */
+					EventTriggerCollectSimpleCommand(address, secondaryObject,
+													 parsetree);
+					commandCollected = true;
+					EventTriggerAlterTableEnd();
+				}
+				break;
 
-            case T_CreateExtensionStmt:
-#ifdef __TBASE__                
-                {
-                    CreateExtensionStmt *stmt = (CreateExtensionStmt *) parsetree;
-                    char *extension_query_string = NULL;
-                    if (IS_PGXC_LOCAL_COORDINATOR && CREATEEXT_CREATE == stmt->action)
-                    {
-                        StringInfo qstring;
-                        /* stage 1 */
-                        address = PrepareExtension(pstate, stmt);
+			case T_CreateExtensionStmt:
+#ifdef __TBASE__				
+				{
+					CreateExtensionStmt *stmt = (CreateExtensionStmt *) parsetree;
+					char *extension_query_string = NULL;
+					if (IS_PGXC_LOCAL_COORDINATOR && CREATEEXT_CREATE == stmt->action)
+					{
+						StringInfo qstring;
+						/* stage 1 */
+						address = PrepareExtension(pstate, stmt);
 
-                        qstring = makeStringInfo();
-                        initStringInfo(qstring);
-                    
-                        appendStringInfo(qstring, 
-                                        _("PREPARE %s"),
-                                        queryString);
-                        /* Send prepare extension msg to all other cn and dn */
-                        extension_query_string = qstring->data;
-                        ExecUtilityStmtOnNodes(parsetree, extension_query_string, NULL, sentToRemote, false, EXEC_ON_ALL_NODES, false, false);    
-                        
-                        /* stage 2 */
-                        ExecuteExtension(pstate, (CreateExtensionStmt *) parsetree);
-                        resetStringInfo(qstring);
-                        appendStringInfo(qstring, 
-                                        _("EXECUTE %s"),
-                                        queryString);
-                        /* Send execute extension msg to all other cn and dn */
-                        extension_query_string = qstring->data;
-                        ExecUtilityStmtOnNodes(parsetree, extension_query_string, NULL, sentToRemote, false, EXEC_ON_ALL_NODES, false, false);
+						if (ObjectAddressIsEqual(InvalidObjectAddress, address))
+							break;
 
-                        pfree(qstring->data);
-                        pfree(qstring);
-                    }
-                    else if (CREATEEXT_PREPARE == stmt->action)
-                    {
-                        address = PrepareExtension(pstate, stmt);
-                    }
-                    else if (CREATEEXT_EXECUTE == stmt->action)
-                    {
-                        ExecuteExtension(pstate, stmt);
-                    }
-                    else
-                    {
-                        address = CreateExtension(pstate, (CreateExtensionStmt *) parsetree);
-                    }
-                    
-                    break;
-                }
+						qstring = makeStringInfo();
+						initStringInfo(qstring);
+					
+						appendStringInfo(qstring, 
+										_("PREPARE %s"),
+										queryString);
+						/* Send prepare extension msg to all other cn and dn */
+						extension_query_string = qstring->data;
+						ExecUtilityStmtOnNodes(parsetree, extension_query_string, NULL, sentToRemote, false, EXEC_ON_ALL_NODES, false, false);	
+						
+						/* stage 2 */
+						ExecuteExtension(pstate, (CreateExtensionStmt *) parsetree);
+						resetStringInfo(qstring);
+						appendStringInfo(qstring, 
+										_("EXECUTE %s"),
+										queryString);
+						/* Send execute extension msg to all other cn and dn */
+						extension_query_string = qstring->data;
+						ExecUtilityStmtOnNodes(parsetree, extension_query_string, NULL, sentToRemote, false, EXEC_ON_ALL_NODES, false, false);
+
+						pfree(qstring->data);
+						pfree(qstring);
+					}
+					else if (CREATEEXT_PREPARE == stmt->action)
+					{
+						address = PrepareExtension(pstate, stmt);
+					}
+					else if (CREATEEXT_EXECUTE == stmt->action)
+					{
+						ExecuteExtension(pstate, stmt);
+					}
+					else
+					{
+						address = CreateExtension(pstate, (CreateExtensionStmt *) parsetree);
+					}
+					
+					break;
+				}
 #endif
             case T_AlterExtensionStmt:
                 address = ExecAlterExtensionStmt(pstate, (AlterExtensionStmt *) parsetree);
