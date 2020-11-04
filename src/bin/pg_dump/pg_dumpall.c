@@ -27,6 +27,7 @@
 
 /* version string we expect back from pg_dump */
 #define PGDUMP_VERSIONSTR "pg_dump (PostgreSQL) " PG_VERSION "\n"
+#define PGDUM_SERCURITY_VERSIONSTR "pg_dump_security (TBase) " PG_VERSION "\n"
 
 
 static void help(void);
@@ -48,7 +49,9 @@ static void makeAlterConfigCommand(PGconn *conn, const char *arrayitem,
 static void dumpDatabases(PGconn *conn);
 static void dumpTimestamp(const char *msg);
 
-static int    runPgDump(const char *dbname);
+static int	runPgDump(const char *dbname);
+static int  runPgDumpSecurity(PGconn *conn, const char *pghost, const char *pgport,
+                              const char *pguser, trivalue prompt_password);
 static void buildShSecLabels(PGconn *conn, const char *catalog_name,
                  uint32 objectId, PQExpBuffer buffer,
                  const char *target, const char *objname);
@@ -64,8 +67,10 @@ static void dumpNodeGroups(PGconn *conn);
 #endif /* PGXC */
 
 static char pg_dump_bin[MAXPGPATH];
+static char pg_dump_security_bin[MAXPGPATH];
 static const char *progname;
 static PQExpBuffer pgdumpopts;
+static PQExpBuffer pgdumpsecurityopts;
 static char *connstr = "";
 static bool skip_acls = false;
 static bool verbose = false;
@@ -98,6 +103,10 @@ static int    dump_nodes = 0;
 static int include_nodes = 0;
 #endif /* PGXC */
 #define exit_nicely(code) exit(code)
+
+#ifdef __TBASE__
+static int dump_security_data = 0;
+#endif
 
 int
 main(int argc, char *argv[])
@@ -152,270 +161,308 @@ main(int argc, char *argv[])
         {"dump-nodes", no_argument, &dump_nodes, 1},
         //{"include-nodes", no_argument, &include_nodes, 1},
 #endif
-        {NULL, 0, NULL, 0}
-    };
 
-    char       *pghost = NULL;
-    char       *pgport = NULL;
-    char       *pguser = NULL;
-    char       *pgdb = NULL;
-    char       *use_role = NULL;
-    trivalue    prompt_password = TRI_DEFAULT;
-    bool        data_only = false;
-    bool        globals_only = false;
-    bool        output_clean = false;
-    bool        roles_only = false;
-    bool        tablespaces_only = false;
-    PGconn       *conn;
-    int            encoding;
-    const char *std_strings;
-    int            c,
-                ret;
-    int            optindex;
+#ifdef __TBASE__
+		{"dump-security-data", no_argument, &dump_security_data, 1},
+#endif
+		{NULL, 0, NULL, 0}
+	};
 
-    set_pglocale_pgservice( argv[0], PG_TEXTDOMAIN("pg_dump") );
+	char	   *pghost = NULL;
+	char	   *pgport = NULL;
+	char	   *pguser = NULL;
+	char	   *pgdb = NULL;
+	char	   *use_role = NULL;
+	trivalue	prompt_password = TRI_DEFAULT;
+	bool		data_only = false;
+	bool		globals_only = false;
+	bool		output_clean = false;
+	bool		roles_only = false;
+	bool		tablespaces_only = false;
+	PGconn	   *conn;
+	int			encoding;
+	const char *std_strings;
+	int			c,
+				ret;
+	int			optindex;
 
-    progname = get_progname( argv[0] );
+	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_dump"));
 
-    if (argc > 1)
-    {
-        if ( strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-?") == 0)
-        {
-            help();
-            exit_nicely(0);
-        }
-        if ( strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)
-        {
-            puts("pg_dumpall(PostgreSQL) " PG_VERSION);
-            exit_nicely(0);
-        }
-    }
+	progname = get_progname(argv[0]);
 
-    if ((ret = find_other_exec(argv[0], "pg_dump", PGDUMP_VERSIONSTR,
-                               pg_dump_bin)) < 0)
-    {
-        char        full_path[MAXPGPATH];
+	if (argc > 1)
+	{
+		if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-?") == 0)
+		{
+			help();
+			exit_nicely(0);
+		}
+		if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)
+		{
+			puts("pg_dumpall (PostgreSQL) " PG_VERSION);
+			exit_nicely(0);
+		}
+	}
 
-        if (find_my_exec(argv[0], full_path) < 0)
-            strlcpy(full_path, progname, sizeof(full_path));
+	if ((ret = find_other_exec(argv[0], "pg_dump", PGDUMP_VERSIONSTR,
+							   pg_dump_bin)) < 0)
+	{
+		char		full_path[MAXPGPATH];
 
-        if (ret == -1)
-            fprintf(stderr,
-                    _("The program \"pg_dump\" is needed by %s "
-                      "but was not found in the\n"
-                      "same directory as \"%s\".\n"
-                      "Check your installation.\n"),
-                    progname, full_path);
-        else
-            fprintf(stderr,
-                    _("The program \"pg_dump\" was found by \"%s\"\n"
-                      "but was not the same version as %s.\n"
-                      "Check your installation.\n"),
-                    full_path, progname);
-        exit_nicely(1);
-    }
+		if (find_my_exec(argv[0], full_path) < 0)
+			strlcpy(full_path, progname, sizeof(full_path));
 
-    pgdumpopts = createPQExpBuffer();
+		if (ret == -1)
+			fprintf(stderr,
+					_("The program \"pg_dump\" is needed by %s "
+					  "but was not found in the\n"
+					  "same directory as \"%s\".\n"
+					  "Check your installation.\n"),
+					progname, full_path);
+		else
+			fprintf(stderr,
+					_("The program \"pg_dump\" was found by \"%s\"\n"
+					  "but was not the same version as %s.\n"
+					  "Check your installation.\n"),
+					full_path, progname);
+		exit_nicely(1);
+	}
 
-    while ((c = getopt_long(argc, argv, "acd:f:gh:l:oOp:rsS:tuU:vwWx", long_options, &optindex)) != -1)
-    {
-        switch (c)
-        {
-            case 'a':
-                data_only = true;
-                appendPQExpBufferStr(pgdumpopts, " -a");
-                break;
+	if ((ret = find_other_exec(argv[0], "pg_dump_security", PGDUM_SERCURITY_VERSIONSTR,
+			pg_dump_security_bin)) < 0)
+	{
+		char		full_path[MAXPGPATH];
 
-            case 'c':
-                output_clean = true;
-                break;
+		if (find_my_exec(argv[0], full_path) < 0)
+			strlcpy(full_path, progname, sizeof(full_path));
 
-            case 'd':
-                connstr = pg_strdup(optarg);
-                break;
+		if (ret == -1)
+			fprintf(stderr,
+			        _("The program \"pg_dump_security\" is needed by %s "
+			          "but was not found in the\n"
+			          "same directory as \"%s\".\n"
+			          "Check your installation.\n"),
+			        progname, full_path);
+		else
+			fprintf(stderr,
+			        _("The program \"pg_dump_security\" was found by \"%s\"\n"
+			          "but was not the same version as %s.\n"
+			          "Check your installation.\n"),
+			        full_path, progname);
+		exit_nicely(1);
+	}
 
-            case 'f':
-                filename = pg_strdup(optarg);
-                appendPQExpBufferStr(pgdumpopts, " -f ");
-                appendShellString(pgdumpopts, filename);
-                break;
+	pgdumpopts = createPQExpBuffer();
 
-            case 'g':
-                globals_only = true;
-                break;
+	pgdumpsecurityopts = createPQExpBuffer();
 
-            case 'h':
-                pghost = pg_strdup(optarg);
-                break;
+	while ((c = getopt_long(argc, argv, "acd:f:gh:l:oOp:rsS:tuU:vwWx", long_options, &optindex)) != -1)
+	{
+		switch (c)
+		{
+			case 'a':
+				data_only = true;
+				appendPQExpBufferStr(pgdumpopts, " -a");
+				break;
 
-            case 'l':
-                pgdb = pg_strdup(optarg);
-                break;
+			case 'c':
+				output_clean = true;
+				break;
 
-            case 'o':
-                appendPQExpBufferStr(pgdumpopts, " -o");
-                break;
+			case 'd':
+				connstr = pg_strdup(optarg);
+				break;
 
-            case 'O':
-                appendPQExpBufferStr(pgdumpopts, " -O");
-                break;
+			case 'f':
+				filename = pg_strdup(optarg);
+				appendPQExpBufferStr(pgdumpopts, " -f ");
+				appendShellString(pgdumpopts, filename);
 
-            case 'p':
-                pgport = pg_strdup(optarg);
-                break;
+				appendPQExpBufferStr(pgdumpsecurityopts, " -f ");
+				appendShellString(pgdumpsecurityopts, filename);
+				break;
 
-            case 'r':
-                roles_only = true;
-                break;
+			case 'g':
+				globals_only = true;
+				break;
 
-            case 's':
-                appendPQExpBufferStr(pgdumpopts, " -s");
-                break;
+			case 'h':
+				pghost = pg_strdup(optarg);
+				appendPQExpBufferStr(pgdumpsecurityopts, " -h");
+				appendShellString(pgdumpsecurityopts, pghost);
+				break;
 
-            case 'S':
-                appendPQExpBufferStr(pgdumpopts, " -S ");
-                appendShellString(pgdumpopts, optarg);
-                break;
+			case 'l':
+				pgdb = pg_strdup(optarg);
+				break;
 
-            case 't':
-                tablespaces_only = true;
-                break;
-            
+			case 'o':
+				appendPQExpBufferStr(pgdumpopts, " -o");
+				break;
+
+			case 'O':
+				appendPQExpBufferStr(pgdumpopts, " -O");
+				break;
+
+			case 'p':
+				pgport = pg_strdup(optarg);
+				appendPQExpBufferStr(pgdumpsecurityopts, " -p");
+				appendShellString(pgdumpsecurityopts, pgport);
+				break;
+
+			case 'r':
+				roles_only = true;
+				break;
+
+			case 's':
+				appendPQExpBufferStr(pgdumpopts, " -s");
+				break;
+
+			case 'S':
+				appendPQExpBufferStr(pgdumpopts, " -S ");
+				appendShellString(pgdumpopts, optarg);
+				break;
+
+			case 't':
+				tablespaces_only = true;
+				break;
+			
 #ifdef __TBASE__
             case 'u':            
                 appendPQExpBufferStr(pgdumpopts, " -u");
                 break;
 #endif
 
-            case 'U':
-                pguser = pg_strdup(optarg);
-                break;
+			case 'U':
+				pguser = pg_strdup(optarg);
+				break;
 
-            case 'v':
-                verbose = true;
-                appendPQExpBufferStr(pgdumpopts, " -v");
-                break;
+			case 'v':
+				verbose = true;
+				appendPQExpBufferStr(pgdumpopts, " -v");
+				appendPQExpBufferStr(pgdumpsecurityopts, " -v");
+				break;
 
-            case 'w':
-                prompt_password = TRI_NO;
-                appendPQExpBufferStr(pgdumpopts, " -w");
-                break;
+			case 'w':
+				prompt_password = TRI_NO;
+				appendPQExpBufferStr(pgdumpopts, " -w");
+				break;
 
-            case 'W':
-                prompt_password = TRI_YES;
-                appendPQExpBufferStr(pgdumpopts, " -W");
-                break;
+			case 'W':
+				prompt_password = TRI_YES;
+				appendPQExpBufferStr(pgdumpopts, " -W");
+				break;
 
-            case 'x':
-                skip_acls = true;
-                appendPQExpBufferStr(pgdumpopts, " -x");
-                break;
+			case 'x':
+				skip_acls = true;
+				appendPQExpBufferStr(pgdumpopts, " -x");
+				break;
 
-            case 0:
-                break;
+			case 0:
+				break;
 
-            case 2:
-                appendPQExpBufferStr(pgdumpopts, " --lock-wait-timeout ");
-                appendShellString(pgdumpopts, optarg);
-                break;
+			case 2:
+				appendPQExpBufferStr(pgdumpopts, " --lock-wait-timeout ");
+				appendShellString(pgdumpopts, optarg);
+				break;
 
-            case 3:
-                use_role = pg_strdup(optarg);
-                appendPQExpBufferStr(pgdumpopts, " --role ");
-                appendShellString(pgdumpopts, use_role);
-                break;
+			case 3:
+				use_role = pg_strdup(optarg);
+				appendPQExpBufferStr(pgdumpopts, " --role ");
+				appendShellString(pgdumpopts, use_role);
+				break;
 
-            case 4:
-                dosync = false;
-                appendPQExpBufferStr(pgdumpopts, " --no-sync");
-                break;
+			case 4:
+				dosync = false;
+				appendPQExpBufferStr(pgdumpopts, " --no-sync");
+				break;
 
-            default:
-                fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
-                exit_nicely(1);
-        }
-    }
+			default:
+				fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
+				exit_nicely(1);
+		}
+	}
 
-    /* Complain if any arguments remain */
-    if (optind < argc)
-    {
-        fprintf(stderr, _("%s: too many command-line arguments (first is \"%s\")\n"),
-                progname, argv[optind]);
-        fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
-                progname);
-        exit_nicely(1);
-    }
+	/* Complain if any arguments remain */
+	if (optind < argc)
+	{
+		fprintf(stderr, _("%s: too many command-line arguments (first is \"%s\")\n"),
+				progname, argv[optind]);
+		fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
+				progname);
+		exit_nicely(1);
+	}
 
-    /* Make sure the user hasn't specified a mix of globals-only options */
-    if (globals_only && roles_only)
-    {
-        fprintf(stderr, _("%s: options -g/--globals-only and -r/--roles-only cannot be used together\n"),
-                progname);
-        fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
-                progname);
-        exit_nicely(1);
-    }
+	/* Make sure the user hasn't specified a mix of globals-only options */
+	if (globals_only && roles_only)
+	{
+		fprintf(stderr, _("%s: options -g/--globals-only and -r/--roles-only cannot be used together\n"),
+				progname);
+		fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
+				progname);
+		exit_nicely(1);
+	}
 
-    if (globals_only && tablespaces_only)
-    {
-        fprintf(stderr, _("%s: options -g/--globals-only and -t/--tablespaces-only cannot be used together\n"),
-                progname);
-        fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
-                progname);
-        exit_nicely(1);
-    }
+	if (globals_only && tablespaces_only)
+	{
+		fprintf(stderr, _("%s: options -g/--globals-only and -t/--tablespaces-only cannot be used together\n"),
+				progname);
+		fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
+				progname);
+		exit_nicely(1);
+	}
 
-    if (if_exists && !output_clean)
-    {
-        fprintf(stderr, _("%s: option --if-exists requires option -c/--clean\n"),
-                progname);
-        exit_nicely(1);
-    }
+	if (if_exists && !output_clean)
+	{
+		fprintf(stderr, _("%s: option --if-exists requires option -c/--clean\n"),
+				progname);
+		exit_nicely(1);
+	}
 
-    if (roles_only && tablespaces_only)
-    {
-        fprintf(stderr, _("%s: options -r/--roles-only and -t/--tablespaces-only cannot be used together\n"),
-                progname);
-        fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
-                progname);
-        exit_nicely(1);
-    }
+	if (roles_only && tablespaces_only)
+	{
+		fprintf(stderr, _("%s: options -r/--roles-only and -t/--tablespaces-only cannot be used together\n"),
+				progname);
+		fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
+				progname);
+		exit_nicely(1);
+	}
 
-    /*
-     * If password values are not required in the dump, switch to using
-     * pg_roles which is equally useful, just more likely to have unrestricted
-     * access than pg_authid.
-     */
-    if (no_role_passwords)
-        sprintf(role_catalog, "%s", PG_ROLES);
-    else
-        sprintf(role_catalog, "%s", PG_AUTHID);
+	/*
+	 * If password values are not required in the dump, switch to using
+	 * pg_roles which is equally useful, just more likely to have unrestricted
+	 * access than pg_authid.
+	 */
+	if (no_role_passwords)
+		sprintf(role_catalog, "%s", PG_ROLES);
+	else
+		sprintf(role_catalog, "%s", PG_AUTHID);
 
-    /* Add long options to the pg_dump argument list */
-    if (binary_upgrade)
-        appendPQExpBufferStr(pgdumpopts, " --binary-upgrade");
-    if (column_inserts)
-        appendPQExpBufferStr(pgdumpopts, " --column-inserts");
-    if (disable_dollar_quoting)
-        appendPQExpBufferStr(pgdumpopts, " --disable-dollar-quoting");
-    if (disable_triggers)
-        appendPQExpBufferStr(pgdumpopts, " --disable-triggers");
-    if (inserts)
-        appendPQExpBufferStr(pgdumpopts, " --inserts");
-    if (no_tablespaces)
-        appendPQExpBufferStr(pgdumpopts, " --no-tablespaces");
-    if (quote_all_identifiers)
-        appendPQExpBufferStr(pgdumpopts, " --quote-all-identifiers");
-    if (use_setsessauth)
-        appendPQExpBufferStr(pgdumpopts, " --use-set-session-authorization");
-    if (no_publications)
-        appendPQExpBufferStr(pgdumpopts, " --no-publications");
-    if (no_security_labels)
-        appendPQExpBufferStr(pgdumpopts, " --no-security-labels");
-    if (no_subscriptions)
-        appendPQExpBufferStr(pgdumpopts, " --no-subscriptions");
-    if (no_unlogged_table_data)
-        appendPQExpBufferStr(pgdumpopts, " --no-unlogged-table-data");
+	/* Add long options to the pg_dump argument list */
+	if (binary_upgrade)
+		appendPQExpBufferStr(pgdumpopts, " --binary-upgrade");
+	if (column_inserts)
+		appendPQExpBufferStr(pgdumpopts, " --column-inserts");
+	if (disable_dollar_quoting)
+		appendPQExpBufferStr(pgdumpopts, " --disable-dollar-quoting");
+	if (disable_triggers)
+		appendPQExpBufferStr(pgdumpopts, " --disable-triggers");
+	if (inserts)
+		appendPQExpBufferStr(pgdumpopts, " --inserts");
+	if (no_tablespaces)
+		appendPQExpBufferStr(pgdumpopts, " --no-tablespaces");
+	if (quote_all_identifiers)
+		appendPQExpBufferStr(pgdumpopts, " --quote-all-identifiers");
+	if (use_setsessauth)
+		appendPQExpBufferStr(pgdumpopts, " --use-set-session-authorization");
+	if (no_publications)
+		appendPQExpBufferStr(pgdumpopts, " --no-publications");
+	if (no_security_labels)
+		appendPQExpBufferStr(pgdumpopts, " --no-security-labels");
+	if (no_subscriptions)
+		appendPQExpBufferStr(pgdumpopts, " --no-subscriptions");
+	if (no_unlogged_table_data)
+		appendPQExpBufferStr(pgdumpopts, " --no-unlogged-table-data");
 
 #ifdef PGXC
     if (include_nodes)
@@ -586,7 +633,21 @@ main(int argc, char *argv[])
     if (!globals_only && !roles_only && !tablespaces_only)
         dumpDatabases(conn);
 
-    PQfinish(conn);
+	/*
+	 * support to dump security meta data
+	 */
+	if (dump_security_data)
+	{
+		ret = runPgDumpSecurity(conn, pghost, pgport, pguser, prompt_password);
+
+		if (ret != 0)
+		{
+			fprintf(stderr, _("%s: pg_dump_security failed on database \"%s\", exiting\n"), progname, pgdb);
+			exit_nicely(1);
+		}
+	}
+
+	PQfinish(conn);
 
     if (verbose)
         dumpTimestamp("Completed on");
@@ -629,7 +690,8 @@ help(void)
     printf(_("  -S, --superuser=NAME         superuser user name to use in the dump\n"));
     printf(_("  -t, --tablespaces-only       dump only tablespaces, no databases or roles\n"));
 #ifdef __TBASE__
-    printf(_("    -u, --with-dropped-column     dump the table schema with dropped columns\n"));
+	printf(_("	-u, --with-dropped-column	 dump the table schema with dropped columns\n"));
+	printf(_("  --dump-security-data         dump security meta data\n"));
 #endif
     printf(_("  -x, --no-privileges          do not dump privileges (grant/revoke)\n"));
     printf(_("  --binary-upgrade             for use by upgrade utilities only\n"));
@@ -1832,7 +1894,62 @@ dumpDatabases(PGconn *conn)
     PQclear(res);
 }
 
+/*
+ *  run pg_dump_security to dump security metadata
+ */
+static int
+runPgDumpSecurity(PGconn *old_conn, const char *pghost, const char *pgport,
+                  const char *pguser, trivalue prompt_password)
+{
+	PQExpBuffer cmd = createPQExpBuffer();
+	PQExpBuffer buf = createPQExpBuffer();
+	PGresult   *extnames;
+	PGconn     *new_conn;
+	int			ret;
+	PGresult   *res;
+	int			i;
+	char       *dbname;
 
+	res = executeQuery(old_conn, "SELECT datname FROM pg_database WHERE datallowconn ORDER BY 1");
+
+	for (i = 0; i < PQntuples(res); i++)
+	{
+		dbname = PQgetvalue(res, i, 0);
+
+		new_conn = connectDatabase(dbname, NULL, pghost, pgport, pguser, prompt_password, false);
+
+		extnames = executeQuery(new_conn, "SELECT extname from pg_extension WHERE extname='tbase_mls' ORDERY BY 1");
+		if (PQntuples(extnames) > 0)
+		{
+			break;
+		}
+	}
+
+	fprintf(OPF, "\\c %s mls_admin\n\n", dbname);
+
+	appendPQExpBuffer(cmd, "\"%s\" %s", pg_dump_security_bin,
+	                  pgdumpsecurityopts->data);
+
+	appendPQExpBufferStr(cmd, " -l");
+
+	appendShellString(cmd, dbname);
+
+	if (verbose)
+		fprintf(stderr, _("%s: running \"%s\"\n"), progname, cmd->data);
+
+	fflush(stdout);
+	fflush(stderr);
+
+	ret = system(cmd->data);
+
+	PQclear(res);
+	PQclear(extnames);
+	destroyPQExpBuffer(cmd);
+	destroyPQExpBuffer(buf);
+	PQfinish(new_conn);
+
+	return ret;
+}
 
 /*
  * Run pg_dump on dbname.
