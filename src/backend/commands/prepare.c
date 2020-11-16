@@ -739,6 +739,13 @@ DropPreparedStatement(const char *stmt_name, bool showError)
 
     if (entry)
     {
+#ifdef XCP
+	    /* if a process SharedQueueRelease in DropCachedPlan, this SharedQueue
+	     * Can be created by another process, and SharedQueueDisconnectConsumer
+	     * will change the SharedQueue of another process's status,
+	     * so let SharedQueueDisconnectConsumer be in front of DropCachedPlan */
+        SharedQueueDisconnectConsumer(entry->stmt_name);
+#endif
         /* Release the plancache entry */
         DropCachedPlan(entry->plansource);
 
@@ -750,7 +757,6 @@ DropPreparedStatement(const char *stmt_name, bool showError)
         if (entry->use_resowner)
             ResourceOwnerForgetPreparedStmt(CurTransactionResourceOwner,
                     entry->stmt_name);
-        SharedQueueDisconnectConsumer(entry->stmt_name);
 #endif
 #ifdef __TBASE__
         if (distributed_query_analyze)

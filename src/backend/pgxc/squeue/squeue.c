@@ -977,11 +977,11 @@ tryagain:
             if (old_squeue)
             {
                 LWLockRelease(SQueuesLock);
-                pg_usleep(1000000L);
+				(trycount < 10) ? pg_usleep(10000L) : pg_usleep(1000000L);
                 elog(DEBUG1, "SQueue race condition, give the old producer to "
                         "finish the work and retry again");
                 trycount++;
-                if (trycount >= 10)
+                if (trycount >= 20)
                     elog(ERROR, "Couldn't resolve SQueue race condition after"
                             " %d tries", trycount);
                 goto tryagain;

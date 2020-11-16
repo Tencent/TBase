@@ -696,10 +696,15 @@ PortalStart(Portal portal, ParamListInfo params,
                  * NB: Check queryDesc->plannedstmt->nParamExec > 0 is incorrect
                  * here since queryDesc->plannedstmt->nParamExec may be used
                  * just to allocate space for them and no actual values passed.
+				 *
+				 * If distributionType is LOCATOR_TYPE_SHARD, even with parameters
+				 * PARAM_EXEC, still follow the redistribution logic, otherwise,
+				 * it may cause SharedQueue conflict in the lower layer redistribution
                  */
 #ifdef __TBASE__
                 if (!paramPassDown && queryDesc->plannedstmt->nParamRemote > 0 &&
-                        queryDesc->plannedstmt->remoteparams[queryDesc->plannedstmt->nParamRemote-1].paramkind == PARAM_EXEC)
+						queryDesc->plannedstmt->remoteparams[queryDesc->plannedstmt->nParamRemote-1].paramkind == PARAM_EXEC &&
+						queryDesc->plannedstmt->distributionType != LOCATOR_TYPE_SHARD)
 #else
                 if (queryDesc->plannedstmt->nParamRemote > 0 &&
                         queryDesc->plannedstmt->remoteparams[queryDesc->plannedstmt->nParamRemote-1].paramkind == PARAM_EXEC)
