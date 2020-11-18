@@ -776,9 +776,9 @@ PoolManagerInit()
      * processes do this.)
      */
 #ifdef HAVE_SETSID
-    if (setsid() < 0)
-        elog(LOG, POOL_MGR_PREFIX"setsid() failed: %m");
-        //elog(FATAL, POOL_MGR_PREFIX"setsid() failed: %m");
+	if (setsid() < 0)
+		elog(DEBUG1, POOL_MGR_PREFIX"setsid() failed: %m");
+		//elog(FATAL, POOL_MGR_PREFIX"setsid() failed: %m");
 #endif
     /*
      * Properly accept or ignore signals the postmaster might send us
