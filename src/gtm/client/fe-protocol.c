@@ -1262,9 +1262,11 @@ result->gr_status = GTM_RESULT_ERROR;
 
             break;
 
-        case NODE_LIST_RESULT:
-        {
-            int i;
+		case NODE_LIST_RESULT:
+		{
+			int i;
+            char *buf = NULL;
+            int   buf_size = 8192;
 
             if (gtmpqGetInt(&result->gr_resdata.grd_node_list.num_node, sizeof(int32), conn))
             {
@@ -1272,48 +1274,65 @@ result->gr_status = GTM_RESULT_ERROR;
                 break;
             }
 
-            for (i = 0; i < result->gr_resdata.grd_node_list.num_node; i++)
+            buf = (char *) malloc(buf_size);
+            if (buf == NULL)
             {
-                int size;
-                char buf[8092];
-                GTM_PGXCNodeInfo *data = (GTM_PGXCNodeInfo *) malloc(sizeof(GTM_PGXCNodeInfo));
-
-                if (gtmpqGetInt(&size, sizeof(int32), conn))
-                {
-                    result->gr_status = GTM_RESULT_ERROR;
-                    free(data);
-                    break;
-                }
-                if (size > 8092)
-                {
-                    result->gr_status = GTM_RESULT_ERROR;
-                    printfGTMPQExpBuffer(&conn->errorMessage, "buffer size not large enough for node list data");
-                    free(data);
-                    continue;
-                }
-
-                if (gtmpqGetnchar((char *) &buf, size, conn))
-                {
-                    result->gr_status = GTM_RESULT_ERROR;
-                    free(data);
-                    break;
-                }
-                if (!gtm_deserialize_pgxcnodeinfo(data, buf, size, &conn->errorMessage))
-                {
-                    result->gr_status = GTM_RESULT_ERROR;
-                    free(data);
-                    break;
-                }
-                else
-                {
-                    result->gr_resdata.grd_node_list.nodeinfo[i] = data;
-                }
+                result->gr_status = GTM_RESULT_ERROR;
+                printfGTMPQExpBuffer(&conn->errorMessage, "malloc buffer for node list data failed");
+                break;
             }
 
-            break;
-        }
-        case BARRIER_RESULT:
-            break;
+			for (i = 0; i < result->gr_resdata.grd_node_list.num_node; i++)
+			{
+				int size;
+				GTM_PGXCNodeInfo *data = (GTM_PGXCNodeInfo *) malloc(sizeof(GTM_PGXCNodeInfo));
+
+				if (gtmpqGetInt(&size, sizeof(int32), conn))
+				{
+					result->gr_status = GTM_RESULT_ERROR;
+					free(data);
+					break;
+				}
+
+				if (size > buf_size)
+				{
+                    buf = (char *) realloc(buf, size);
+                    if (buf == NULL)
+                    {
+                        result->gr_status = GTM_RESULT_ERROR;
+                        printfGTMPQExpBuffer(&conn->errorMessage, "realloc buffer for node list data failed");
+                        free(data);
+                        break;
+                    }
+                    buf_size = size;
+				}
+
+				if (gtmpqGetnchar(buf, size, conn))
+				{
+					result->gr_status = GTM_RESULT_ERROR;
+					free(data);
+					break;
+				}
+				if (!gtm_deserialize_pgxcnodeinfo(data, buf, size, &conn->errorMessage))
+				{
+					result->gr_status = GTM_RESULT_ERROR;
+					free(data);
+					break;
+				}
+				else
+				{
+					result->gr_resdata.grd_node_list.nodeinfo[i] = data;
+				}
+			}
+
+			if (buf != NULL)
+            {
+			    free(buf);
+            }
+			break;
+		}
+		case BARRIER_RESULT:
+			break;
 
         case REPORT_XMIN_RESULT:
             if (gtmpqGetnchar((char *) &result->gr_resdata.grd_report_xmin.latest_completed_xid,
