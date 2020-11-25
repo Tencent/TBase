@@ -2054,25 +2054,15 @@ static struct config_bool ConfigureNamesBool[] =
     },
 
 #ifdef __TBASE__
-    {
-        {"enable_statistic", PGC_SIGHUP, STATS_COLLECTOR,
-            gettext_noop("collect statistic information for debug."),
-            NULL
-        },
-        &enable_statistic,
-        false,
-        NULL, NULL, NULL
-    },
-    
-    {
-        {"use_data_pump", PGC_SIGHUP, CUSTOM_OPTIONS,
-            gettext_noop("use datapump to make data transfer more efficient."),
-            NULL
-        },
-        &g_UseDataPump,
-        true,
-        NULL, NULL, NULL
-    },
+	{
+		{"enable_statistic", PGC_SIGHUP, STATS_COLLECTOR,
+			gettext_noop("collect statistic information for debug."),
+			NULL
+		},
+		&enable_statistic,
+		false,
+		NULL, NULL, NULL
+	},
 
     {
         {"debug_data_pump", PGC_SIGHUP, CUSTOM_OPTIONS,

@@ -66,7 +66,7 @@ int   SQueueSize = 64;
 #ifdef __TBASE__
 extern ProtocolVersion FrontendProtocol;
 
-bool  g_UseDataPump         = false;/* Use data pumb, true default. */
+bool  g_UseDataPump         = true;/* Use data pumb, true default. */
 bool  g_DataPumpDebug       = false;/* enable debug info */
 int32 g_SndThreadNum        = 8;    /* Two sender threads default.  */
 int32 g_SndThreadBufferSize = 16;   /* in Kilo bytes. */

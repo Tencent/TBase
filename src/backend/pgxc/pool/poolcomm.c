@@ -1302,104 +1302,104 @@ failure:
  */
 int
 pool_recvres(PoolPort *port)
-{// #lizard forgives
-    int            r;
-    uint        n32 = 0;
-    uint        err = 0;
-    char        buf[SEND_RES_BUFFER_SIZE - POOL_ERR_MSG_LEN];
-    char        err_msg[POOL_ERR_MSG_LEN];
-    int recved_size = 0;
-    int size = SEND_RES_BUFFER_SIZE - POOL_ERR_MSG_LEN;
-    char *ptr = buf;
-    
-    /* receive message header first */
-    for(;;)
-    {
-        r = recv(Socket(*port), ptr + recved_size, size - recved_size, 0);
-        if (r < 0)
-        {
-            /*
-             * Report broken connection
-             */
-            elog(LOG, "recv size %d size %d n32 %d.", recved_size, size, n32);
-            ereport(LOG,
-                    (errcode_for_socket_access(),
-                     errmsg("could not receive data from client: %m")));
-            goto failure;
-        }
-        else if (r == 0)
-        {
-            if(recved_size == size)
-                break;
-            else
-                goto failure;
-        }
+{
+	int			r;
+	uint		n32 = 0;
+	uint        err = 0;
+	char		buf[SEND_RES_BUFFER_SIZE - POOL_ERR_MSG_LEN];
+	char        err_msg[POOL_ERR_MSG_LEN];
+	int recved_size = 0;
+	int size = SEND_RES_BUFFER_SIZE - POOL_ERR_MSG_LEN;
+	char *ptr = buf;
+	
+	/* receive message header first */
+	for(;;)
+	{
+		r = recv(Socket(*port), ptr + recved_size, size - recved_size, 0);
+		if (r < 0)
+		{
+			/*
+			 * Report broken connection
+			 */
+			elog(LOG, "recv size %d size %d n32 %d.", recved_size, size, n32);
+			ereport(LOG,
+					(errcode_for_socket_access(),
+					 errmsg("could not receive data from client: %m")));
+			goto failure;
+		}
+		else if (r == 0)
+		{
+			if(recved_size == size)
+				break;
+			else
+				goto failure;
+		}
 
-        recved_size += r;
-        if(recved_size == size)
-            break;
+		recved_size += r;
+		if(recved_size == size)
+			break;
 
-    }
-    /* Verify response */
-    if (buf[0] != 's')
-    {
-        ereport(LOG,
-                (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                 errmsg("unexpected message code:%c", buf[0])));
-        goto failure;
-    }
+	}
+	/* Verify response */
+	if (buf[0] != 's')
+	{
+		ereport(LOG,
+				(errcode(ERRCODE_PROTOCOL_VIOLATION),
+				 errmsg("unexpected message code:%c", buf[0])));
+		goto failure;
+	}
 
-    memcpy(&n32, buf + 1, 4);
-    n32 = ntohl(n32);
-    if (n32 != 0)
-    {
-        ereport(LOG,
-                (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                 errmsg("pool_recvres return code:%d", n32)));
-    }
+	memcpy(&n32, buf + 1, 4);
+	n32 = ntohl(n32);
+	if (n32 != 0)
+	{
+		ereport(DEBUG1,
+				(errcode(ERRCODE_PROTOCOL_VIOLATION),
+				 errmsg("pool_recvres return code:%d", n32)));
+	}
 
-    memcpy(&err, buf + 5, 4);
-    err = ntohl(err);
+	memcpy(&err, buf + 5, 4);
+	err = ntohl(err);
 
-    /* if has err_msg, receive error message */
-    if (PoolErrIsValid(err))
-    {
-        ptr = err_msg;
-        size = POOL_ERR_MSG_LEN;
-        recved_size = 0;
-        for(;;)
-        {
-            r = recv(Socket(*port), ptr + recved_size, size - recved_size, 0);
-            if (r < 0)
-            {
-                /*
-                 * Report broken connection
-                 */
-                elog(LOG, "recv size %d size %d n32 %d.", recved_size, size, n32);
-                ereport(LOG,
-                        (errcode_for_socket_access(),
-                         errmsg("could not receive data from client: %m")));
-                goto failure;
-            }
-            else if (r == 0)
-            {
-                if(recved_size == size)
-                    break;
-                else
-                    goto failure;
-            }
+	/* if has err_msg, receive error message */
+	if (PoolErrIsValid(err))
+	{
+		ptr = err_msg;
+		size = POOL_ERR_MSG_LEN;
+		recved_size = 0;
+		for(;;)
+		{
+			r = recv(Socket(*port), ptr + recved_size, size - recved_size, 0);
+			if (r < 0)
+			{
+				/*
+				 * Report broken connection
+				 */
+				elog(LOG, "recv size %d size %d n32 %d.", recved_size, size, n32);
+				ereport(LOG,
+						(errcode_for_socket_access(),
+						 errmsg("could not receive data from client: %m")));
+				goto failure;
+			}
+			else if (r == 0)
+			{
+				if(recved_size == size)
+					break;
+				else
+					goto failure;
+			}
 
-            recved_size += r;
-            if(recved_size == size)
-                break;
+			recved_size += r;
+			if(recved_size == size)
+				break;
 
-        }
+		}
 
-        elog(WARNING, "%s", err_msg);
-    }
-    
-    return n32;
-    
+		elog(WARNING, "%s", err_msg);
+	}
+	
+	return n32;
+	
 failure:
     return EOF;
 }
