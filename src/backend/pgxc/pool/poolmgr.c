@@ -1455,8 +1455,8 @@ PoolManagerSendLocalCommand(int dn_count, int* dn_list, int co_count, int* co_li
     pool_putmessage(&poolHandle->port, 'b', (char *) buf, (2 + dn_count + co_count) * sizeof(uint32));
     pool_flush(&poolHandle->port);
 
-    /* Get result */
-    return pool_recvres(&poolHandle->port);
+	/* Get result */
+	return pool_recvres(&poolHandle->port, true);
 }
 
 /*
@@ -2023,13 +2023,13 @@ PoolManagerCleanConnection(List *datanodelist, List *coordlist, char *dbname, ch
 
     RESUME_POOLER_RELOAD();
 
-    /* Receive result message */
-    if (pool_recvres(&poolHandle->port) != CLEAN_CONNECTION_COMPLETED)
-    {
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg(POOL_MGR_PREFIX"Clean connections not completed. HINT: cannot drop the currently open database")));
-    }
+	/* Receive result message */
+	if (pool_recvres(&poolHandle->port, true) != CLEAN_CONNECTION_COMPLETED)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg(POOL_MGR_PREFIX"Clean connections not completed. HINT: cannot drop the currently open database")));
+	}
 }
 
 
@@ -2054,7 +2054,7 @@ PoolManagerCheckConnectionInfo(void)
     pool_putmessage(&poolHandle->port, 'q', NULL, 0);
     pool_flush(&poolHandle->port);
 
-    res = pool_recvres(&poolHandle->port);
+	res = pool_recvres(&poolHandle->port, true);
 
     if (res == POOL_CHECK_SUCCESS)
         return true;
@@ -3874,7 +3874,7 @@ PoolManagerCancelQuery(int dn_count, int* dn_list, int co_count, int* co_list, i
     pool_putmessage(&poolHandle->port, 'h', (char *) buf, (2 + dn_count + co_count + 1) * sizeof(uint32));
     pool_flush(&poolHandle->port);
 
-    res = pool_recvres(&poolHandle->port);
+	res = pool_recvres(&poolHandle->port, false);
 
     if (res != (dn_count + co_count))
     {
@@ -10644,7 +10644,7 @@ PoolManagerRefreshConnectionInfo(void)
     pool_putmessage(&poolHandle->port, 'R', NULL, 0);
     pool_flush(&poolHandle->port);
 
-    res = pool_recvres(&poolHandle->port);
+	res = pool_recvres(&poolHandle->port, true);
 
     RESUME_POOLER_RELOAD();
 
@@ -10843,9 +10843,9 @@ PoolManagerClosePooledConnections(const char *dbname, const char *username)
 
     pool_flush(&poolHandle->port);
 
-    /* Then Get back Pids from Pooler */
-    res = pool_recvres(&poolHandle->port);
-    elog(LOG, "PoolManagerClosePooledConnections res:%d", res);
+	/* Then Get back Pids from Pooler */
+	res = pool_recvres(&poolHandle->port, true);
+	elog(LOG, "PoolManagerClosePooledConnections res:%d", res);
 
     RESUME_POOLER_RELOAD();
 

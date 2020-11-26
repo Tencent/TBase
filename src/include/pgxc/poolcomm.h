@@ -55,11 +55,11 @@ extern int    pool_putbytes(PoolPort *port, const char *s, size_t len);
 extern int    pool_flush(PoolPort *port);
 /*extern int    pool_sendfds(PoolPort *port, int *fds, int count);*/
 extern int  pool_sendfds(PoolPort *port, int *fds, int count, char *errbuf, int32 buf_len);
-extern int    pool_recvfds(PoolPort *port, int *fds, int count);
-extern int    pool_sendres(PoolPort *port, int res, char *errbuf, int32 buf_len, bool need_log);
-extern int    pool_recvres(PoolPort *port);
-extern int    pool_sendpids(PoolPort *port, int *pids, int count, char *errbuf, int32 buf_len);
-extern int    pool_recvpids(PoolPort *port, int **pids);
-extern int    pool_sendres_with_command_id(PoolPort *port, int res, CommandId cmdID, char *errbuf, int32 buf_len, char *errmsg, bool need_log);
+extern int	pool_recvfds(PoolPort *port, int *fds, int count);
+extern int	pool_sendres(PoolPort *port, int res, char *errbuf, int32 buf_len, bool need_log);
+extern int	pool_recvres(PoolPort *port, bool need_log);
+extern int	pool_sendpids(PoolPort *port, int *pids, int count, char *errbuf, int32 buf_len);
+extern int	pool_recvpids(PoolPort *port, int **pids);
+extern int	pool_sendres_with_command_id(PoolPort *port, int res, CommandId cmdID, char *errbuf, int32 buf_len, char *errmsg, bool need_log);
 extern int  pool_recvres_with_commandID(PoolPort *port, CommandId *cmdID, const char *sql);
 #endif   /* POOLCOMM_H */

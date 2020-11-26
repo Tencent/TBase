@@ -1301,7 +1301,7 @@ failure:
  * Return 0 at success or EOF at error.
  */
 int
-pool_recvres(PoolPort *port)
+pool_recvres(PoolPort *port, bool need_log)
 {
 	int			r;
 	uint		n32 = 0;
@@ -1351,9 +1351,9 @@ pool_recvres(PoolPort *port)
 
 	memcpy(&n32, buf + 1, 4);
 	n32 = ntohl(n32);
-	if (n32 != 0)
+	if (n32 != 0 && need_log)
 	{
-		ereport(DEBUG1,
+		ereport(LOG,
 				(errcode(ERRCODE_PROTOCOL_VIOLATION),
 				 errmsg("pool_recvres return code:%d", n32)));
 	}
