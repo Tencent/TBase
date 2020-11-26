@@ -9106,6 +9106,7 @@ set_config_option(const char *name, const char *value,
         /* force_autocommit is actually does not start transaction on nodes */
         step->force_autocommit = true;
         step->exec_type = EXEC_ON_CURRENT;
+		step->is_set = true;
         ExecRemoteUtility(step);
         pfree(step);
         pfree(poolcmd.data);

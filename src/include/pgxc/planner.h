@@ -224,7 +224,8 @@ typedef struct
     AttrNumber        jf_xc_wholerow;
     Bitmapset       *conflict_cols;
 
-    Node            *parsetree;  /* to recognise subtxn cmds(savepoint,rollback to,release savepoint) */
+	Node			*parsetree;  /* to recognize subtxn cmds (savepoint, rollback to, release savepoint) */
+	bool            is_set;      /* is SET statement ? */
 #endif
 } RemoteQuery;
 

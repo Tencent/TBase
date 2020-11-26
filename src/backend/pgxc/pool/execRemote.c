@@ -6617,6 +6617,7 @@ ExecRemoteUtility(RemoteQuery *node)
     ExecDirectType        exec_direct_type = node->exec_direct_type;
     int            i;
     CommandId    cid = GetCurrentCommandId(true);    
+	bool                utility_need_transcation = true;
 
     if (!force_autocommit)
         RegisterTransactionLocalNode(true);
@@ -6664,7 +6665,11 @@ ExecRemoteUtility(RemoteQuery *node)
     }
 
 #ifdef __TBASE__    
-    if (!ExecDDLWithoutAcquireXid(node->parsetree))
+	/* Some DDL such as ROLLBACK, SET does not need transaction */
+	utility_need_transcation =
+			(!ExecDDLWithoutAcquireXid(node->parsetree) && !node->is_set);
+
+	if (utility_need_transcation)
 #endif        
     {
         elog(LOG, "[SAVEPOINT] node->sql_statement:%s", node->sql_statement);
@@ -6675,7 +6680,7 @@ ExecRemoteUtility(RemoteQuery *node)
         snapshot = GetActiveSnapshot();
 
 #ifdef __TBASE__    
-    if (!ExecDDLWithoutAcquireXid(node->parsetree))
+	if (utility_need_transcation)
 #endif
     {
         if (!GlobalTransactionIdIsValid(gxid))
