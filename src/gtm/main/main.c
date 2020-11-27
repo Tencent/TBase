@@ -1090,27 +1090,24 @@ main(int argc, char *argv[])
 
         if(ret)
         {
-            elog(LOG, "GTM_StoreMasterInit failed too many times exit, %s", strerror(errno));
+            elog(FATAL, "GTM_StoreMasterInit failed too many times exit, %s", strerror(errno));
         }
         
         if (!gtm_standby_restore_next_gxid())
         {
-            elog(LOG, "Failed to restore next/last gxid from the active-GTM.");
-            exit(1);
+            elog(FATAL, "Failed to restore next/last gxid from the active-GTM.");
         }
         elog(LOG, "Restoring next/last gxid from the active-GTM succeeded.");
 
         if (!gtm_standby_restore_gxid())
         {
-            elog(LOG, "Failed to restore all of gxid(s) from the active-GTM.");
-            exit(1);
+            elog(FATAL, "Failed to restore all of gxid(s) from the active-GTM.");
         }
         elog(LOG, "Restoring all of gxid(s) from the active-GTM succeeded.");
 
         if (!gtm_standby_restore_sequence())
         {
-            elog(LOG, "Failed to restore sequences from the active-GTM.");
-            exit(1);
+            elog(FATAL, "Failed to restore sequences from the active-GTM.");
         }
         elog(LOG, "Restoring sequences from the active-GTM succeeded.");
 

@@ -4310,6 +4310,12 @@ coord_collect_extended_stats(Relation onerel, int attr_cnt)
         htup = SearchSysCache2(STATEXTNAMENSP,
                                NameGetDatum(stxname),
                                ObjectIdGetDatum(nspoid));
+							   
+		/* if relation is already dropped */
+		if (!htup)
+        {
+		    continue;
+        }
 
         stat_oid = HeapTupleGetOid(htup);
         ReleaseSysCache(htup);

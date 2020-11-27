@@ -80,8 +80,8 @@ typedef struct CommitTimestampEntry
 #define TLOG_XACTS_PER_LSN_GROUP    32    /* keep this a power of 2 */
 #define TLOG_LSNS_PER_PAGE    (COMMIT_TS_XACTS_PER_PAGE / TLOG_XACTS_PER_LSN_GROUP)
 
-#define GetLSNIndex(slotno, xid)    ((slotno) * TLOG_LSNS_PER_PAGE + \
-    ((xid) % (TransactionId) COMMIT_TS_XACTS_PER_PAGE) / TLOG_XACTS_PER_LSN_GROUP)
+#define GetLSNIndex(slotno, xid)	((slotno) * TLOG_LSNS_PER_PAGE + \
+	((xid) % (TransactionId) TLOG_LSNS_PER_PAGE))
 #endif
 
 /*

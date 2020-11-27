@@ -2068,10 +2068,10 @@ do_autovacuum(void)
 
     if (dbForm->datistemplate || !dbForm->datallowconn)
     {
-        default_freeze_min_age = 0;
-        default_freeze_table_age = 0;
-        default_multixact_freeze_min_age = 0;
-        default_multixact_freeze_table_age = 0;
+		default_freeze_min_age = vacuum_freeze_min_age;
+		default_freeze_table_age = 0;
+		default_multixact_freeze_min_age = vacuum_multixact_freeze_min_age;
+		default_multixact_freeze_table_age = 0;
     }
     else
     {

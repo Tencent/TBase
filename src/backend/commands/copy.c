@@ -3914,7 +3914,7 @@ readnextline:
             initStringInfo(sql);
 
             conn_count       = getLocatorNodeCount(rcstate->locator);
-            copy_connections = (PGXCNodeHandle**)getLocatorResults(rcstate->locator);
+            copy_connections = (PGXCNodeHandle**) getLocatorNodeMap(rcstate->locator);
             
             for(loop = 0; loop < conn_count; loop++)
             {
