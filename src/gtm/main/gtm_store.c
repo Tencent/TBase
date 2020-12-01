@@ -3117,9 +3117,9 @@ ProcessStorageTransferCommand(Port *myport, StringInfo message)
     g_GTM_Backup_Timer =  GTM_AddTimer(LockStoreStandbyCrashHandler, GTM_TIMER_TYPE_ONCE, LOCK_STORE_CRASH_HANDL_TIMEOUT, GetMyThreadInfo);
     if(g_GTM_Backup_Timer == INVALID_TIMER_HANDLE)
     {
+        GTM_RWLockRelease(&g_GTM_Backup_Timer_Lock);
         elog(ERROR, "Failed to register lock store crash handler, will exit!");
-        exit(1);
-    }   
+    }
     GTM_RWLockRelease(&g_GTM_Backup_Timer_Lock);
 
     /* send xlog replication relative data */

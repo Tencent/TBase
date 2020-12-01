@@ -3371,6 +3371,9 @@ GTM_ThreadBasebackup(void *argp)
     if (sigsetjmp(local_sigjmp_buf, 1) != 0)
     {
         bool    report = false;
+#ifdef __TBASE__
+        RWLockCleanUp();
+#endif
         /*
          * NOTE: if you are tempted to add more code in this if-block,
          * consider the high probability that it should be in
