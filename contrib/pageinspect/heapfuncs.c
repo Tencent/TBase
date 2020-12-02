@@ -215,69 +215,69 @@ heap_page_items(PG_FUNCTION_ARGS)
 #else
             values[10] = UInt8GetDatum(tuphdr->t_hoff);
 #endif
-            /* Copy raw tuple data into bytea attribute */
-            tuple_data_len = lp_len - tuphdr->t_hoff;
-            tuple_data_bytea = (bytea *) palloc(tuple_data_len + VARHDRSZ);
-            SET_VARSIZE(tuple_data_bytea, tuple_data_len + VARHDRSZ);
-            memcpy(VARDATA(tuple_data_bytea), (char *) tuphdr + tuphdr->t_hoff,
-                   tuple_data_len);
-            values[14] = PointerGetDatum(tuple_data_bytea);
+			/* Copy raw tuple data into bytea attribute */
+			tuple_data_len = lp_len - tuphdr->t_hoff;
+			tuple_data_bytea = (bytea *) palloc(tuple_data_len + VARHDRSZ);
+			SET_VARSIZE(tuple_data_bytea, tuple_data_len + VARHDRSZ);
+			memcpy(VARDATA(tuple_data_bytea), (char *) tuphdr + tuphdr->t_hoff,
+				   tuple_data_len);
+			values[14] = PointerGetDatum(tuple_data_bytea);
 
-            /*
-             * We already checked that the item is completely within the raw
-             * page passed to us, with the length given in the line pointer.
-             * Let's check that t_hoff doesn't point over lp_len, before using
-             * it to access t_bits and oid.
-             */
-            if (tuphdr->t_hoff >= SizeofHeapTupleHeader &&
-                tuphdr->t_hoff <= lp_len &&
-                tuphdr->t_hoff == MAXALIGN(tuphdr->t_hoff))
-            {
-                if (tuphdr->t_infomask & HEAP_HASNULL)
-                {
-                    int            bits_len;
+			/*
+			 * We already checked that the item is completely within the raw
+			 * page passed to us, with the length given in the line pointer.
+			 * Let's check that t_hoff doesn't point over lp_len, before using
+			 * it to access t_bits and oid.
+			 */
+			if (tuphdr->t_hoff >= SizeofHeapTupleHeader &&
+				tuphdr->t_hoff <= lp_len &&
+				tuphdr->t_hoff == MAXALIGN(tuphdr->t_hoff))
+			{
+				if (tuphdr->t_infomask & HEAP_HASNULL)
+				{
+					int			bits_len;
 
-                    bits_len =
-                        ((tuphdr->t_infomask2 & HEAP_NATTS_MASK) / 8 + 1) * 8;
-                    values[12] = CStringGetTextDatum(
-                                                     bits_to_text(tuphdr->t_bits, bits_len));
-                }
-                else
-                    nulls[12] = true;
+					bits_len =
+						((tuphdr->t_infomask2 & HEAP_NATTS_MASK) / 8 + 1) * 8;
+					values[12] = CStringGetTextDatum(
+													 bits_to_text(tuphdr->t_bits, bits_len));
+				}
+				else
+					nulls[12] = true;
 
-                if (tuphdr->t_infomask & HEAP_HASOID)
-                    values[13] = HeapTupleHeaderGetOid(tuphdr);
-                else
-                    nulls[13] = true;
-            }
-            else
-            {
-                nulls[12] = true;
-                nulls[13] = true;
-            }
-        }
-        else
-        {
-            /*
-             * The line pointer is not used, or it's invalid. Set the rest of
-             * the fields to NULL
-             */
-            int            i;
+				if (tuphdr->t_infomask & HEAP_HASOID)
+					values[13] = HeapTupleHeaderGetOid(tuphdr);
+				else
+					nulls[13] = true;
+			}
+			else
+			{
+				nulls[12] = true;
+				nulls[13] = true;
+			}
+		}
+		else
+		{
+			/*
+			 * The line pointer is not used, or it's invalid. Set the rest of
+			 * the fields to NULL
+			 */
+			int			i;
 
-            for (i = 4; i <= 13; i++)
-                nulls[i] = true;
-        }
+			for (i = 4; i <= 14; i++)
+				nulls[i] = true;
+		}
 
-        /* Build and return the result tuple. */
-        resultTuple = heap_form_tuple(inter_call_data->tupd, values, nulls);
-        result = HeapTupleGetDatum(resultTuple);
+		/* Build and return the result tuple. */
+		resultTuple = heap_form_tuple(inter_call_data->tupd, values, nulls);
+		result = HeapTupleGetDatum(resultTuple);
 
-        inter_call_data->offset++;
+		inter_call_data->offset++;
 
-        SRF_RETURN_NEXT(fctx, result);
-    }
-    else
-        SRF_RETURN_DONE(fctx);
+		SRF_RETURN_NEXT(fctx, result);
+	}
+	else
+		SRF_RETURN_DONE(fctx);
 }
 
 /*

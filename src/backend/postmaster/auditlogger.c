@@ -146,12 +146,12 @@
 
 typedef struct AuditLogQueue
 {
-    pid_t                    q_pid; 
-    int                        q_size; 
-    slock_t                    q_lock;     
-    volatile int            q_head;      
-    volatile int            q_tail;
-    char                    q_area[FLEXIBLE_ARRAY_MEMBER];
+	pid_t					q_pid;
+	int						q_size;
+	slock_t					q_lock;
+	volatile int			q_head;
+	volatile int			q_tail;
+	char					q_area[FLEXIBLE_ARRAY_MEMBER];
 } AlogQueue;
 
 typedef struct AuditLogQueueArray
@@ -163,16 +163,25 @@ typedef struct AuditLogQueueArray
 
 typedef struct AuditLogQueueCache
 {
-    ThreadSema                q_sema;                                /* local ThreadSema for CommonLogWriter and FGALogWriter */
-    int                        q_count;
-    AlogQueue              * q_cache[FLEXIBLE_ARRAY_MEMBER];
+	/* local ThreadSema for CommonLogWriter, FGALogWriter and TraceLogWriter. */
+	ThreadSema				q_sema;
+	int						q_count;
+	AlogQueue			  * q_cache[FLEXIBLE_ARRAY_MEMBER];
 } AlogQueueCache;
 
-/* shared memory queue array */
-static AlogQueueArray      * AuditCommonLogQueueArray = NULL;    /* store common audit logs, each elem for a backend */
-static AlogQueueArray      * AuditFGALogQueueArray = NULL;        /* store fga audit logs, each elem for a backend */
+/*
+ * shared memory queue array
+ *
+ * store common audit logs, each elem for a backend
+ */
+static AlogQueueArray	  * AuditCommonLogQueueArray = NULL;
+/* store fga audit logs, each elem for a backend */
+static AlogQueueArray	  * AuditFGALogQueueArray = NULL;
+/* store trace audit logs, each elem for a backend */
+static AlogQueueArray	  * AuditTraceLogQueueArray = NULL;
 
-/* shared memory bitmap to notify consumers to read audit log from AlogQueueArray above
+/*
+ * shared memory bitmap to notify consumers to read audit log from AlogQueueArray above
  * each element for one consumer
  */
 static int                  *    AuditConsumerNotifyBitmap = NULL;
@@ -180,35 +189,59 @@ static int                  *    AuditConsumerNotifyBitmap = NULL;
 /*
  * Postgres backend state, used in postgres backend only
  *
- * Postgres backend write common audit log into AuditCommonLogQueueArray->a_queue[idx] 
+ * Postgres backend write common audit log into AuditCommonLogQueueArray->a_queue[idx]
  * and write fga audit log info AuditFGALogQueueArray->a_queue[idx]
+ * and write trace audit log info AuditTraceLogQueueArray->a_queue[idx]
  *
- * Postgres backend acqurie free index by AuditLoggerQueueAcquire 
+ * Postgres backend acqurie free index by AuditLoggerQueueAcquire
  *
  */
 static int                    AuditPostgresAlogQueueIndex = 0;
 
-/* Consumer local queue cache for AuditLog_max_worker_number consumers, used in audit logger process only */
-static AlogQueueCache      * AuditCommonLogLocalCache = NULL;    /* store common audit logs, each elem for a thread Consumer */
-static AlogQueueCache      * AuditFGALogLocalCache = NULL;        /* store fga audit logs, each elem for a trhead Consumer */
+/*
+ * Consumer local queue cache for AuditLog_max_worker_number consumers, used in
+ * audit logger process only.
+ *
+ * store common audit logs, each elem for a thread Consumer
+ */
+static AlogQueueCache	  * AuditCommonLogLocalCache = NULL;
+/* store fga audit logs, each elem for a thread Consumer */
+static AlogQueueCache	  * AuditFGALogLocalCache = NULL;
+/* store trace audit logs, each elem for a thread Consumer */
+static AlogQueueCache	  * AuditTraceLogLocalCache = NULL;
 
-/* local ThreadSema array for AuditLog_max_worker_number consumers, used in audit logger process only */
-static ThreadSema          * AuditConsumerNotifySemas = NULL;    /* each elem for a trhead Consumer */
+/*
+ * local ThreadSema array for AuditLog_max_worker_number consumers, used in audit
+ * logger process only.
+ *
+ * each elem for a thread Consumer.
+ */
+static ThreadSema		  * AuditConsumerNotifySemas = NULL;
 
 /*
  * GUC parameters.    can change at SIGHUP.
  */
-int                            AuditLog_RotationAge = HOURS_PER_DAY * MINS_PER_HOUR;
-int                            AuditLog_RotationSize = 10 * 1024;
-char                      * AuditLog_filename = NULL;
-bool                        AuditLog_truncate_on_rotation = false;
-int                            AuditLog_file_mode = S_IRUSR | S_IWUSR;
+int							AuditLog_RotationAge = HOURS_PER_DAY * MINS_PER_HOUR;
+int							AuditLog_RotationSize = 10 * 1024;
+char					  * AuditLog_filename = NULL;
+static char				  * TraceLog_filename = "maintain-%A-%H.log";
+bool						AuditLog_truncate_on_rotation = false;
+int							AuditLog_file_mode = S_IRUSR | S_IWUSR;
 
-int                            AuditLog_max_worker_number = 16;        /* max number of worker thead to read audit log */
-int                            AuditLog_common_log_queue_size_kb = 64;    /* size of AlogQueue->q_area for each backend to store common audit log, KB */
-int                            AuditLog_fga_log_queue_size_kb = 64;    /* size of AlogQueue->q_area for each backend to store audit log, KB */
-int                            AuditLog_common_log_cache_size_kb = 64;    /* size of common audit log local buffer for each worker */    
-int                            AuditLog_fga_log_cacae_size_kb = 64;    /* size of fga audit log local buffer for eache worker */
+/* max number of worker thead to read audit log */
+int							AuditLog_max_worker_number = 16;
+/* size of AlogQueue->q_area for each backend to store common audit log, KB */
+int							AuditLog_common_log_queue_size_kb = 64;
+/* size of AlogQueue->q_area for each backend to store fga audit log, KB */
+int							AuditLog_fga_log_queue_size_kb = 64;
+/* size of AlogQueue->q_area for each backend to store trace audit log, KB */
+int							Maintain_trace_log_queue_size_kb = 64;
+/* size of common audit log local buffer for each worker */
+int							AuditLog_common_log_cache_size_kb = 64;
+/* size of fga audit log local buffer for each worker */
+int							AuditLog_fga_log_cacae_size_kb = 64;
+/* size of trace audit log local buffer for each worker */
+int							Maintain_trace_log_cache_size_kb = 64;
 
 /*
  * Globally visible state
@@ -219,19 +252,24 @@ bool                        enable_auditlogger_warning = false;
 /*
  * Logger Private state
  */
-static pg_time_t            audit_next_rotation_time = 0;
-static bool                    audit_rotation_disabled = false;
-static FILE                  * audit_comm_log_file = NULL;
-static FILE                  * audit_fga_log_file = NULL;
-static slock_t                audit_comm_log_file_lock;
-static slock_t                audit_fga_log_file_lock;
-NON_EXEC_STATIC pg_time_t    audit_first_log_file_time = 0;
-static char                  * audit_last_comm_log_file_name = NULL;
-static char                  * audit_last_fga_log_file_name = NULL;
-static char                  * audit_log_directory = NULL;
-static char                  * audit_curr_log_dir = NULL;
-static char                  * audit_curr_log_file_name = NULL;
-static int                    audit_curr_log_rotation_age = 0;
+static pg_time_t			audit_next_rotation_time = 0;
+static bool					audit_rotation_disabled = false;
+static FILE				  * audit_comm_log_file = NULL;
+static FILE				  * audit_fga_log_file = NULL;
+static FILE				  * audit_trace_log_file = NULL;
+static slock_t				audit_comm_log_file_lock;
+static slock_t				audit_fga_log_file_lock;
+static slock_t				audit_trace_log_file_lock;
+NON_EXEC_STATIC pg_time_t	audit_first_log_file_time = 0;
+static char				  * audit_last_comm_log_file_name = NULL;
+static char				  * audit_last_fga_log_file_name = NULL;
+static char				  * audit_last_trace_log_file_name = NULL;
+static char				  * audit_log_directory = NULL;
+static char				  * trace_log_directory = NULL;
+static char				  * audit_curr_log_dir = NULL;
+static char				  * trace_curr_log_dir = NULL;
+static char				  * audit_curr_log_file_name = NULL;
+static int					audit_curr_log_rotation_age = 0;
 
 /*
  * Flags set by interrupt handlers for later service in the main loop.
@@ -273,26 +311,30 @@ static void        audit_assign_log_dir(void);
 #endif
 
 #ifdef AuditLog_002_For_ShareMemoryQueue
-static Size     audit_queue_elem_size(int queue_size_kb);
+static Size 	audit_queue_elem_size(int queue_size_kb);
 
-static Size        audit_shared_queue_array_bitmap_offset(void);
-static Size        audit_shared_queue_array_header_size(void);
-static Size        audit_shared_common_queue_elem_size(void);
-static Size        audit_shared_common_queue_array_size(void);
-static Size        audit_shared_fga_queue_elem_size(void);
-static Size        audit_shared_fga_queue_array_size(void);
-static Size     audit_shared_consumer_bitmap_size(void);
-static int         audit_shared_consumer_bitmap_get_value(int consumer_id);
-static void     audit_shared_consumer_bitmap_set_value(int consumer_id, int value);
+static Size		audit_shared_queue_array_bitmap_offset(void);
+static Size		audit_shared_queue_array_header_size(void);
+static Size		audit_shared_common_queue_elem_size(void);
+static Size		audit_shared_common_queue_array_size(void);
+static Size		audit_shared_fga_queue_elem_size(void);
+static Size		audit_shared_fga_queue_array_size(void);
+static Size		audit_shared_trace_queue_elem_size(void);
+static Size		audit_shared_trace_queue_array_size(void);
+static Size 	audit_shared_consumer_bitmap_size(void);
+static int 		audit_shared_consumer_bitmap_get_value(int consumer_id);
+static void 	audit_shared_consumer_bitmap_set_value(int consumer_id, int value);
 #endif
 
 #ifdef AuditLog_003_For_LogFile
-static int        audit_write_log_file(const char *buffer, int count, int destination);
-static FILE *    audit_open_log_file(const char *filename, const char *mode, bool allow_errors);
-static void        aduit_open_fga_log_file(void);
-static void        audit_rotate_log_file(bool time_based_rotation, int size_rotation_for);
-static char *    audit_log_file_getname(pg_time_t timestamp, const char *suffix);
-static void        audit_set_next_rotation_time(void);
+static int		audit_write_log_file(const char *buffer, int count, int destination);
+static FILE *	audit_open_log_file(const char *filename, const char *mode, bool allow_errors);
+static void		audit_open_fga_log_file(void);
+static void		audit_open_trace_log_file(void);
+static void		audit_rotate_log_file(bool time_based_rotation, int size_rotation_for);
+static char *	audit_log_file_getname(pg_time_t timestamp, const char *suffix);
+static char *	trace_log_file_getname(pg_time_t timestamp, const char *suffix);
+static void		audit_set_next_rotation_time(void);
 #endif
 
 #ifdef AuditLog_004_For_QueueReadWrite
@@ -314,10 +356,12 @@ static bool     alog_queue_pop_to_file(AlogQueue * from, int destination);
 #endif
 
 #ifdef AuditLog_005_For_ThreadWorker
-static AlogQueue *        alog_get_shared_common_queue(int idx);
-static AlogQueue *         alog_get_shared_fga_queue(int idx);
-static AlogQueue *        alog_get_local_common_cache(int consumer_id);
-static AlogQueue *        alog_get_local_fga_cache(int consumer_id);
+static AlogQueue *		alog_get_shared_common_queue(int idx);
+static AlogQueue * 		alog_get_shared_fga_queue(int idx);
+static AlogQueue * 		alog_get_shared_trace_queue(int idx);
+static AlogQueue *		alog_get_local_common_cache(int consumer_id);
+static AlogQueue *		alog_get_local_fga_cache(int consumer_id);
+static AlogQueue *		alog_get_local_trace_cache(int consumer_id);
 static AlogQueueCache * alog_make_local_cache(int cache_number, int queue_size_kb);
 static ThreadSema *        alog_make_consumer_semas(int consumer_count);
 static void             alog_consumer_wakeup(int consumer_id);
@@ -484,71 +528,75 @@ AuditLoggerMain(int argc, char *argv[])
 static void
 audit_logger_MainLoop(void)
 {
-    /*
-     * Create log directory if not present; ignore errors
-     */
-    audit_assign_log_dir();
-    mkdir(audit_log_directory, S_IRWXU);
+	/*
+	 * Create log directory if not present; ignore errors
+	 */
+	audit_assign_log_dir();
+	mkdir(audit_log_directory, S_IRWXU);
+	mkdir(trace_log_directory, S_IRWXU);
 
-    /*
-     * Remember active logfile's name.    We recompute this from the reference
-     * time because passing down just the pg_time_t is a lot cheaper than
-     * passing a whole file path in the EXEC_BACKEND case.
-     */
-    audit_first_log_file_time = time(NULL);
-    audit_last_comm_log_file_name = audit_log_file_getname(audit_first_log_file_time, NULL);
-    audit_comm_log_file = audit_open_log_file(audit_last_comm_log_file_name, "a", false);
-    aduit_open_fga_log_file();
+	/*
+	 * Remember active logfile's name.	We recompute this from the reference
+	 * time because passing down just the pg_time_t is a lot cheaper than
+	 * passing a whole file path in the EXEC_BACKEND case.
+	 */
+	audit_first_log_file_time = time(NULL);
+	audit_last_comm_log_file_name = audit_log_file_getname(audit_first_log_file_time, NULL);
+	audit_comm_log_file = audit_open_log_file(audit_last_comm_log_file_name, "a", false);
+	audit_open_fga_log_file();
+	audit_open_trace_log_file();
 
-    /* remember active logfile parameters */
-    audit_curr_log_dir = pstrdup(audit_log_directory);
-    audit_curr_log_file_name = pstrdup(AuditLog_filename);
-    audit_curr_log_rotation_age = AuditLog_RotationAge;
+	/* remember active logfile parameters */
+	audit_curr_log_dir = pstrdup(audit_log_directory);
+	trace_curr_log_dir= pstrdup(trace_log_directory);
+	audit_curr_log_file_name = pstrdup(AuditLog_filename);
+	audit_curr_log_rotation_age = AuditLog_RotationAge;
 
-    SpinLockInit(&(audit_comm_log_file_lock));
-    SpinLockInit(&(audit_fga_log_file_lock));
+	SpinLockInit(&(audit_comm_log_file_lock));
+	SpinLockInit(&(audit_fga_log_file_lock));
+	SpinLockInit(&(audit_trace_log_file_lock));
 
-    /* set next planned rotation time */
-    audit_set_next_rotation_time();
+	/* set next planned rotation time */
+	audit_set_next_rotation_time();
 
-    /* start consumer and writer thread*/
-    alog_start_all_worker();
+	/* start consumer and writer thread*/
+	alog_start_all_worker();
 
-    /* main worker loop */
-    while (PostmasterIsAlive())
-    {
-        int    rc = 0;
+	/* main worker loop */
+	while (PostmasterIsAlive())
+	{
+		int	rc = 0;
 
-        /* Clear any already-pending wakeups */
-        ResetLatch(MyLatch);
+		/* Clear any already-pending wakeups */
+		ResetLatch(MyLatch);
 
-        audit_process_sighup();
-        audit_process_sigusr1();
-        audit_process_sigusr2();
-        audit_process_sigterm();
-        audit_process_sigint();
-        audit_process_sigquit();
-        audit_process_rotate();
-        audit_process_wakeup(false);
+		audit_process_sighup();
+		audit_process_sigusr1();
+		audit_process_sigusr2();
+		audit_process_sigterm();
+		audit_process_sigint();
+		audit_process_sigquit();
+		audit_process_rotate();
+		audit_process_wakeup(false);
 
-        rc = WaitLatch(MyLatch,
-                       WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
-                       AUDIT_LATCH_MICROSEC,
-                       WAIT_EVENT_AUDIT_LOGGER_MAIN);
+		rc = WaitLatch(MyLatch,
+					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+					   AUDIT_LATCH_MICROSEC,
+					   WAIT_EVENT_AUDIT_LOGGER_MAIN);
 
-        if (rc & WL_POSTMASTER_DEATH)
-        {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("audit logger exit after postmaster die")));
-            exit(2);
-        }
-        else if (rc & WL_TIMEOUT)
-        {
-            audit_consume_requested = true;
-            audit_process_wakeup(true);
-        }
-    }
+		if (rc & WL_POSTMASTER_DEATH)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("audit logger exit after postmaster die")));
+			exit(2);
+		}
+		else if (rc & WL_TIMEOUT)
+		{
+			audit_consume_requested = true;
+			audit_process_wakeup(true);
+		}
+	}
 }
 
 /* --------------------------------
@@ -765,101 +813,112 @@ static void audit_process_sigquit(void)
 }
 
 static void audit_process_rotate(void)
-{// #lizard forgives
-    bool        time_based_rotation = false;
-    int            size_rotation_for = 0;
-    pg_time_t    now = MyStartTime;
+{
+	bool		time_based_rotation = false;
+	int			size_rotation_for = 0;
+	pg_time_t	now = MyStartTime;
 
-    if (AuditLog_RotationAge > 0 && !audit_rotation_disabled)
-    {
-        /* Do a logfile rotation if it's time */
-        now = (pg_time_t) time(NULL);
-        if (now >= audit_next_rotation_time)
-            audit_rotation_requested = time_based_rotation = true;
-    }
+	if (AuditLog_RotationAge > 0 && !audit_rotation_disabled)
+	{
+		/* Do a logfile rotation if it's time */
+		now = (pg_time_t) time(NULL);
+		if (now >= audit_next_rotation_time)
+			audit_rotation_requested = time_based_rotation = true;
+	}
 
-    if (!audit_rotation_requested && AuditLog_RotationSize > 0 && !audit_rotation_disabled)
-    {
-        /* Do a rotation if file is too big */
-        if (ftell(audit_comm_log_file) >= AuditLog_RotationSize * 1024L)
-        {
-            audit_rotation_requested = true;
-            size_rotation_for |= AUDIT_COMMON_LOG;
-        }
+	if (!audit_rotation_requested && AuditLog_RotationSize > 0 && !audit_rotation_disabled)
+	{
+		/* Do a rotation if file is too big */
+		if (ftell(audit_comm_log_file) >= AuditLog_RotationSize * 1024L)
+		{
+			audit_rotation_requested = true;
+			size_rotation_for |= AUDIT_COMMON_LOG;
+		}
 
-        if (audit_fga_log_file != NULL &&
-            ftell(audit_fga_log_file) >= AuditLog_RotationSize * 1024L)
-        {
-            audit_rotation_requested = true;
-            size_rotation_for |= AUDIT_FGA_LOG;
-        }
-    }
+		if (audit_fga_log_file != NULL &&
+			ftell(audit_fga_log_file) >= AuditLog_RotationSize * 1024L)
+		{
+			audit_rotation_requested = true;
+			size_rotation_for |= AUDIT_FGA_LOG;
+		}
 
-    if (audit_rotation_requested)
-    {
-        /*
-         * Force rotation when both values are zero. It means the request
-         * was sent by pg_rotate_log_file.
-         */
-        if (!time_based_rotation && size_rotation_for == 0)
-            size_rotation_for = AUDIT_COMMON_LOG | AUDIT_FGA_LOG;
-        audit_rotate_log_file(time_based_rotation, size_rotation_for);
-    }
+		if (audit_trace_log_file != NULL &&
+			ftell(audit_trace_log_file) >= AuditLog_RotationSize * 1024L)
+		{
+			audit_rotation_requested = true;
+			size_rotation_for |= MAINTAIN_TRACE_LOG;
+		}
+	}
+
+	if (audit_rotation_requested)
+	{
+		/*
+		 * Force rotation when both values are zero. It means the request
+		 * was sent by pg_rotate_log_file.
+		 */
+		if (!time_based_rotation && size_rotation_for == 0)
+		{
+			size_rotation_for = AUDIT_COMMON_LOG | AUDIT_FGA_LOG | MAINTAIN_TRACE_LOG;
+		}
+		audit_rotate_log_file(time_based_rotation, size_rotation_for);
+	}
 }
 
 /*
  * if any audit log was coming,
  * wakeup a consumer to read
  */
-static void    audit_process_wakeup(bool timeout)
-{// #lizard forgives
-    if (audit_consume_requested)
-    {
-        int i = 0;
+static void	audit_process_wakeup(bool timeout)
+{
+	if (audit_consume_requested)
+	{
+		int i = 0;
 
-        if (timeout)
-        {
-            for (i = 0; i < MaxBackends; i++)
-            {
-                int sharedIdx = i;
-                int consumer_id = sharedIdx % AuditLog_max_worker_number;
+		if (timeout)
+		{
+			for (i = 0; i < MaxBackends; i++)
+			{
+				int sharedIdx = i;
+				int consumer_id = sharedIdx % AuditLog_max_worker_number;
 
-                AlogQueue * shared_common_queue = alog_get_shared_common_queue(sharedIdx);
-                AlogQueue * shared_fga_queue = alog_get_shared_fga_queue(sharedIdx);
-            
-                bool b_common_is_empty = alog_queue_is_empty2(shared_common_queue);
-                bool b_fga_is_empty = alog_queue_is_empty2(shared_fga_queue);
+				AlogQueue * shared_common_queue = alog_get_shared_common_queue(sharedIdx);
+				AlogQueue * shared_fga_queue = alog_get_shared_fga_queue(sharedIdx);
+				AlogQueue * shared_trace_queue = alog_get_shared_trace_queue(sharedIdx);
 
-                pg_memory_barrier();
+				bool b_common_is_empty = alog_queue_is_empty2(shared_common_queue);
+				bool b_fga_is_empty = alog_queue_is_empty2(shared_fga_queue);
+				bool b_trace_is_empty = alog_queue_is_empty2(shared_trace_queue);
 
-                if (!b_common_is_empty || !b_fga_is_empty)
-                {
-                    if (!audit_shared_consumer_bitmap_get_value(consumer_id))
-                    {
-                        audit_shared_consumer_bitmap_set_value(consumer_id, 1);
-                        alog_consumer_wakeup(consumer_id);
-                    }
-                }
-            }
-        }
-        else
-        {
-            for (i = 0; i < AuditLog_max_worker_number; i++)
-            {
-                int consumer_id = i;
-                int bitmap_value = audit_shared_consumer_bitmap_get_value(consumer_id);
+				pg_memory_barrier();
 
-                pg_memory_barrier();
+				if (!b_common_is_empty || !b_fga_is_empty || !b_trace_is_empty)
+				{
+					if (!audit_shared_consumer_bitmap_get_value(consumer_id))
+					{
+						audit_shared_consumer_bitmap_set_value(consumer_id, 1);
+						alog_consumer_wakeup(consumer_id);
+					}
+				}
+			}
+		}
+		else
+		{
+			for (i = 0; i < AuditLog_max_worker_number; i++)
+			{
+				int consumer_id = i;
+				int bitmap_value = audit_shared_consumer_bitmap_get_value(consumer_id);
 
-                if (bitmap_value)
-                {
-                    alog_consumer_wakeup(consumer_id);
-                }
-            }
-        }
+				pg_memory_barrier();
 
-        audit_consume_requested = false;
-    }    
+				if (bitmap_value)
+				{
+					alog_consumer_wakeup(consumer_id);
+				}
+			}
+		}
+
+		audit_consume_requested = false;
+	}
 }
 
 #endif
@@ -887,16 +946,19 @@ static void    audit_process_wakeup(bool timeout)
  * |         |                  |                       |                       |                                                                         |
  * |         |                  |                       |                       |<-------- audit_shared_common_queue_elem_size() * MaxBackends ---------->|
  * |<- 4B -> |<------ 4B ------>|<- 4 * MaxBackends B ->|<- AUDIT_BITMAP_SIZE ->|<--------- audit_shared_fga_queue_elem_size() * MaxBackends ------------>|
+ * |         |                  |                       |                       |<-------- audit_shared_trace_queue_elem_size() * MaxBackends ----------->|
  * |                                                                            |                                                                         |
  * |                                                                            |                                                                         |
- * |<------------------------- Shared Log Queue Array Header ------------------>|<------------------- AlogQueue Array [MaxBackends] --------------------->|                                                                   
+ * |<------------------------- Shared Log Queue Array Header ------------------>|<------------------- AlogQueue Array [MaxBackends] --------------------->|
  *
  *
  * 02. AlogQueue as follows
  *
- *                                             | q_area -> char[AuditLog_common_log_queue_size_kb * BYTES_PER_KB] | 
+ *                                             | q_area -> char[AuditLog_common_log_queue_size_kb * BYTES_PER_KB] |
  * | q_pid | q_size | q_lock | q_head | q_tail |                              OR                                  |
  *                                             | q_area ->  char[AuditLog_fga_log_queue_size_kb * BYTES_PER_KB]   |
+ *                                             |                              OR                                  |
+ *                                             | q_area ->  char[Maintain_trace_log_queue_size_kb * BYTES_PER_KB] |
  *
  * --------------------------------
  */
@@ -905,13 +967,13 @@ static Size audit_shared_queue_array_bitmap_offset(void)
 {
     Size alogQueueArrayBitmapOffset = 0;
 
-    /* store AlogQueueArray->a_count, a_bitmap */
-    alogQueueArrayBitmapOffset = add_size(alogQueueArrayBitmapOffset, 
-                                          offsetof(AlogQueueArray, a_queue));
+	/* store AlogQueueArray->a_count, a_bitmap */
+	alogQueueArrayBitmapOffset = add_size(alogQueueArrayBitmapOffset,
+										offsetof(AlogQueueArray, a_queue));
 
-    /* store AlogQueueArray->a_queue */
-    alogQueueArrayBitmapOffset = add_size(alogQueueArrayBitmapOffset, 
-                                          mul_size(sizeof(AlogQueue *), MaxBackends));
+	/* store AlogQueueArray->a_queue */
+	alogQueueArrayBitmapOffset = add_size(alogQueueArrayBitmapOffset,
+										  mul_size(sizeof(AlogQueue *), MaxBackends));
 
     return alogQueueArrayBitmapOffset;
 }
@@ -920,13 +982,13 @@ static Size audit_shared_queue_array_header_size(void)
 {
     Size alogQueueArrayHeaderSize = 0;
 
-    /* store AlogQueueArray->a_count, a_bitmap, a_queue */
-    alogQueueArrayHeaderSize = add_size(alogQueueArrayHeaderSize, 
-                                        audit_shared_queue_array_bitmap_offset());
+	/* store AlogQueueArray->a_count, a_bitmap, a_queue */
+	alogQueueArrayHeaderSize = add_size(alogQueueArrayHeaderSize,
+										audit_shared_queue_array_bitmap_offset());
 
-    /* store content of AlogQueueArray->a_bitmap */
-    alogQueueArrayHeaderSize = add_size(alogQueueArrayHeaderSize, 
-                                        AUDIT_BITMAP_SIZE);
+	/* store content of AlogQueueArray->a_bitmap */
+	alogQueueArrayHeaderSize = add_size(alogQueueArrayHeaderSize,
+										AUDIT_BITMAP_SIZE);
 
     return alogQueueArrayHeaderSize;
 }
@@ -989,6 +1051,30 @@ static Size audit_shared_fga_queue_array_size(void)
     return alogFgaQueueSize;
 }
 
+static Size audit_shared_trace_queue_elem_size(void)
+{
+	Size		alogTraceQueueItemSize = 0;
+
+	/* store content of trace audit log */
+	alogTraceQueueItemSize = audit_queue_elem_size(Maintain_trace_log_queue_size_kb);
+
+	return alogTraceQueueItemSize;
+}
+
+static Size audit_shared_trace_queue_array_size(void)
+{
+	Size		alogTraceQueueSize = 0;
+
+	/* store content of trace audit log */
+	alogTraceQueueSize = audit_shared_trace_queue_elem_size();
+	alogTraceQueueSize = mul_size(alogTraceQueueSize, MaxBackends);
+
+	alogTraceQueueSize = add_size(alogTraceQueueSize,
+								audit_shared_queue_array_header_size());
+
+	return alogTraceQueueSize;
+}
+
 static Size audit_shared_consumer_bitmap_size(void)
 {
     Size alogConsumerBitmapSize = 0;
@@ -1012,10 +1098,11 @@ static void audit_shared_consumer_bitmap_set_value(int consumer_id, int value)
 
 Size AuditLoggerShmemSize(void)
 {
-    Size        size = 0;
-    Size        alogCommonQueueSize = 0;
-    Size        alogFgaQueueSize = 0;
-    Size        alogConsumerBmpSize = 0;
+	Size		size = 0;
+	Size		alogCommonQueueSize = 0;
+	Size		alogFgaQueueSize = 0;
+	Size		alogTraceQueueSize = 0;
+	Size		alogConsumerBmpSize = 0;
 
     /* for common audit log */
     alogCommonQueueSize = audit_shared_common_queue_array_size();
@@ -1023,173 +1110,245 @@ Size AuditLoggerShmemSize(void)
     /* for fga audit log*/
     alogFgaQueueSize = audit_shared_fga_queue_array_size();
 
-    /* for consumer notify bitmap */
-    alogConsumerBmpSize = audit_shared_consumer_bitmap_size();
+	/* for trace audit log */
+	alogTraceQueueSize = audit_shared_trace_queue_array_size();
 
-    /* for total size */
-    size = add_size(alogCommonQueueSize, alogFgaQueueSize);
-    size = add_size(size, alogConsumerBmpSize);
+	/* for consumer notify bitmap */
+	alogConsumerBmpSize = audit_shared_consumer_bitmap_size();
+
+	/* for total size */
+	size = add_size(alogCommonQueueSize, alogFgaQueueSize);
+	size = add_size(size, alogTraceQueueSize);
+	size = add_size(size, alogConsumerBmpSize);
 
     return size;
 }
 
 void AuditLoggerShmemInit(void)
-{// #lizard forgives
-    Size        alogBmpOffset = 0;
-    Size        alogHeaderSize = 0;
-    Size        alogItemSize = 0;
-    Size        alogArraySize = 0;
-    Size        alogConsumerBmpSize = 0;
+{
+	Size		alogBmpOffset = 0;
+	Size		alogHeaderSize = 0;
+	Size		alogItemSize = 0;
+	Size		alogArraySize = 0;
+	Size		alogConsumerBmpSize = 0;
 
-    bool        found = false;
-    int            i = 0;
+	bool		found = false;
+	int			i = 0;
 
-    alogBmpOffset = audit_shared_queue_array_bitmap_offset();
-    alogHeaderSize = audit_shared_queue_array_header_size();
-    alogItemSize = audit_shared_common_queue_elem_size();
-    alogArraySize = audit_shared_common_queue_array_size();
+	alogBmpOffset = audit_shared_queue_array_bitmap_offset();
+	alogHeaderSize = audit_shared_queue_array_header_size();
+	alogItemSize = audit_shared_common_queue_elem_size();
+	alogArraySize = audit_shared_common_queue_array_size();
 
-    AuditCommonLogQueueArray = ShmemInitStruct("Audit Common Log Queue",
-                                                alogArraySize,
-                                                &found);
-    /* Mark it empty upon creation */
-    if (!found)
-    {
-        AlogQueueArray * alogQueueArray = AuditCommonLogQueueArray;
-        int falogQueueArray = 0;
-        Size sharedMemSize = 0;
+	AuditCommonLogQueueArray = ShmemInitStruct("Audit Common Log Queue",
+												alogArraySize,
+												&found);
+	/* Mark it empty upon creation */
+	if (!found)
+	{
+		AlogQueueArray * alogQueueArray = AuditCommonLogQueueArray;
+		int falogQueueArray = 0;
+		Size sharedMemSize = 0;
 
-        if (enable_auditlogger_warning)
-        {
-            sharedMemSize += alogHeaderSize;
-            MemSet(alogQueueArray, 'a', alogHeaderSize);
+		if (enable_auditlogger_warning)
+		{
+			sharedMemSize += alogHeaderSize;
+			MemSet(alogQueueArray, 'a', alogHeaderSize);
 
-            for (i = 0; i < MaxBackends; i++)
-            {
-                AlogQueue * alogQueueItem = NULL;
+			for (i = 0; i < MaxBackends; i++)
+			{
+				AlogQueue * alogQueueItem = NULL;
 
-                alogQueueItem = (AlogQueue *)(((char *) alogQueueArray) + alogHeaderSize + i * alogItemSize);
-                sharedMemSize += audit_shared_common_queue_elem_size();
-                MemSet(alogQueueItem, 'b', audit_shared_common_queue_elem_size());
-            }
+				alogQueueItem = (AlogQueue *)(((char *) alogQueueArray) + alogHeaderSize + i * alogItemSize);
+				sharedMemSize += audit_shared_common_queue_elem_size();
+				MemSet(alogQueueItem, 'b', audit_shared_common_queue_elem_size());
+			}
 
-            falogQueueArray = BasicOpenFile("AuditCommonLogQueueArray.txt", O_RDWR | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
-            if (falogQueueArray != -1)
-            {
-                write(falogQueueArray, alogQueueArray, alogArraySize);
-                write(falogQueueArray, "\nNew Line\n", strlen("\nNew Line\n"));
-            }
+			falogQueueArray = BasicOpenFile("AuditCommonLogQueueArray.txt", O_RDWR | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
+			if (falogQueueArray != -1)
+			{
+				write(falogQueueArray, alogQueueArray, alogArraySize);
+				write(falogQueueArray, "\nNew Line\n", strlen("\nNew Line\n"));
+			}
 
-            Assert(sharedMemSize == alogArraySize);
-        }
+			Assert(sharedMemSize == alogArraySize);
+		}
 
-        MemSet(alogQueueArray, 0, alogArraySize);
+		MemSet(alogQueueArray, 0, alogArraySize);
 
-        alogQueueArray->a_count = MaxBackends;        
-        alogQueueArray->a_bitmap = bms_make(((char *) alogQueueArray) + alogBmpOffset, 
-                                            MaxBackends);
-        for (i = 0; i < MaxBackends; i++)
-        {
-            AlogQueue * alogQueueItem = NULL;
+		alogQueueArray->a_count = MaxBackends;
+		alogQueueArray->a_bitmap = bms_make(((char *) alogQueueArray) + alogBmpOffset, 
+											MaxBackends);
+		for (i = 0; i < MaxBackends; i++)
+		{
+			AlogQueue * alogQueueItem = NULL;
 
-            alogQueueItem = (AlogQueue *)(((char *) alogQueueArray) + alogHeaderSize + i * alogItemSize);
+			alogQueueItem = (AlogQueue *)(((char *) alogQueueArray) + alogHeaderSize + i * alogItemSize);
 
-            alog_queue_init(alogQueueItem, AuditLog_common_log_queue_size_kb);
+			alog_queue_init(alogQueueItem, AuditLog_common_log_queue_size_kb);
 
-            alogQueueArray->a_queue[i] = alogQueueItem;
-        }
+			alogQueueArray->a_queue[i] = alogQueueItem;
+		}
 
-        if (enable_auditlogger_warning)
-        {
-            if (falogQueueArray != -1)
-            {
-                write(falogQueueArray, alogQueueArray, alogArraySize);
-                close(falogQueueArray);
-            }
-        }
-    }
+		if (enable_auditlogger_warning)
+		{
+			if (falogQueueArray != -1)
+			{
+				write(falogQueueArray, alogQueueArray, alogArraySize);
+				close(falogQueueArray);
+			}
+		}
+	}
 
-    found = false;
-    i = 0;
+	found = false;
+	i = 0;
 
-    alogBmpOffset = audit_shared_queue_array_bitmap_offset();
-    alogHeaderSize = audit_shared_queue_array_header_size();
-    alogItemSize = audit_shared_fga_queue_elem_size();
-    alogArraySize = audit_shared_fga_queue_array_size();
+	alogBmpOffset = audit_shared_queue_array_bitmap_offset();
+	alogHeaderSize = audit_shared_queue_array_header_size();
+	alogItemSize = audit_shared_fga_queue_elem_size();
+	alogArraySize = audit_shared_fga_queue_array_size();
 
-    AuditFGALogQueueArray = ShmemInitStruct("Audit FGA Log Queue",
-                                            alogArraySize,
-                                            &found);
-    /* Mark it empty upon creation */
-    if (!found)
-    {
-        AlogQueueArray * alogQueueArray = AuditFGALogQueueArray;
-        int falogQueueArray = 0;
-        Size sharedMemSize = 0;
+	AuditFGALogQueueArray = ShmemInitStruct("Audit FGA Log Queue",
+											alogArraySize,
+											&found);
+	/* Mark it empty upon creation */
+	if (!found)
+	{
+		AlogQueueArray * alogQueueArray = AuditFGALogQueueArray;
+		int falogQueueArray = 0;
+		Size sharedMemSize = 0;
 
-        if (enable_auditlogger_warning)
-        {
-            sharedMemSize += alogHeaderSize;
-            MemSet(alogQueueArray, 'c', alogHeaderSize);
+		if (enable_auditlogger_warning)
+		{
+			sharedMemSize += alogHeaderSize;
+			MemSet(alogQueueArray, 'c', alogHeaderSize);
 
-            for (i = 0; i < MaxBackends; i++)
-            {
-                AlogQueue * alogQueueItem = NULL;
+			for (i = 0; i < MaxBackends; i++)
+			{
+				AlogQueue * alogQueueItem = NULL;
 
-                alogQueueItem = (AlogQueue *)(((char *) alogQueueArray) + alogHeaderSize + i * alogItemSize);
-                sharedMemSize += audit_shared_fga_queue_elem_size();
-                MemSet(alogQueueItem, 'd', audit_shared_fga_queue_elem_size());
-            }
+				alogQueueItem = (AlogQueue *)(((char *) alogQueueArray) + alogHeaderSize + i * alogItemSize);
+				sharedMemSize += audit_shared_fga_queue_elem_size();
+				MemSet(alogQueueItem, 'd', audit_shared_fga_queue_elem_size());
+			}
 
-            falogQueueArray = BasicOpenFile("AuditFGALogQueueArray.txt", O_RDWR | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
-            if (falogQueueArray != -1)
-            {
-                write(falogQueueArray, alogQueueArray, alogArraySize);
-                write(falogQueueArray, "\nNew Line\n", strlen("\nNew Line\n"));
-            }
+			falogQueueArray = BasicOpenFile("AuditFGALogQueueArray.txt", O_RDWR | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
+			if (falogQueueArray != -1)
+			{
+				write(falogQueueArray, alogQueueArray, alogArraySize);
+				write(falogQueueArray, "\nNew Line\n", strlen("\nNew Line\n"));
+			}
 
-            Assert(sharedMemSize == alogArraySize);
-        }
+			Assert(sharedMemSize == alogArraySize);
+		}
 
-        MemSet(alogQueueArray, 0, alogArraySize);
+		MemSet(alogQueueArray, 0, alogArraySize);
 
-        alogQueueArray->a_count = MaxBackends;
-        alogQueueArray->a_bitmap = bms_make(((char *) alogQueueArray) + alogBmpOffset, 
-                                            MaxBackends);
-        for (i = 0; i < MaxBackends; i++)
-        {
-            AlogQueue * alogQueueItem = NULL;
+		alogQueueArray->a_count = MaxBackends;
+		alogQueueArray->a_bitmap = bms_make(((char *) alogQueueArray) + alogBmpOffset, 
+										MaxBackends);
+		for (i = 0; i < MaxBackends; i++)
+		{
+			AlogQueue * alogQueueItem = NULL;
 
-            alogQueueItem = (AlogQueue *)(((char *) alogQueueArray) + alogHeaderSize + i * alogItemSize);
+			alogQueueItem = (AlogQueue *)(((char *) alogQueueArray) + alogHeaderSize + i * alogItemSize);
 
-            alog_queue_init(alogQueueItem, AuditLog_fga_log_queue_size_kb);
+			alog_queue_init(alogQueueItem, AuditLog_fga_log_queue_size_kb);
 
-            alogQueueArray->a_queue[i] = alogQueueItem;
-        }
+			alogQueueArray->a_queue[i] = alogQueueItem;
+		}
 
-        if (enable_auditlogger_warning)
-        {
-            if (falogQueueArray != -1)
-            {
-                write(falogQueueArray, alogQueueArray, alogArraySize);
-                close(falogQueueArray);
-            }
-        }
-    }
+		if (enable_auditlogger_warning)
+		{
+			if (falogQueueArray != -1)
+			{
+				write(falogQueueArray, alogQueueArray, alogArraySize);
+				close(falogQueueArray);
+			}
+		}
+	}
 
-    found = false;
-    i = 0;
+	found = false;
+	i = 0;
 
-    alogConsumerBmpSize = audit_shared_consumer_bitmap_size();
+	alogBmpOffset = audit_shared_queue_array_bitmap_offset();
+	alogHeaderSize = audit_shared_queue_array_header_size();
+	alogItemSize = audit_shared_trace_queue_elem_size();
+	alogArraySize = audit_shared_trace_queue_array_size();
 
-    AuditConsumerNotifyBitmap = ShmemInitStruct("Audit Consumer Bitmap",
-                                          alogConsumerBmpSize,
-                                          &found);
-    /* Mark it empty upon creation */
-    if (!found)
-    {
-        MemSet(AuditConsumerNotifyBitmap, 0, alogConsumerBmpSize);
-    }
+	AuditTraceLogQueueArray = ShmemInitStruct("Audit Trace Log Queue",
+											alogArraySize,
+											&found);
+	/* Mark it empty upon creation */
+	if (!found)
+	{
+		AlogQueueArray * alogQueueArray = AuditTraceLogQueueArray;
+		int falogQueueArray = 0;
+		Size sharedMemSize = 0;
+
+		if (enable_auditlogger_warning)
+		{
+			sharedMemSize += alogHeaderSize;
+			MemSet(alogQueueArray, 'e', alogHeaderSize);
+
+			for (i = 0; i < MaxBackends; i++)
+			{
+				AlogQueue * alogQueueItem = NULL;
+
+				alogQueueItem = (AlogQueue *)(((char *) alogQueueArray) + alogHeaderSize + i * alogItemSize);
+				sharedMemSize += audit_shared_trace_queue_elem_size();
+				MemSet(alogQueueItem, 'f', audit_shared_trace_queue_elem_size());
+			}
+
+			falogQueueArray = BasicOpenFile("AuditTraceLogQueueArray.txt", O_RDWR | O_TRUNC | O_CREAT, S_IRUSR | S_IWUSR);
+			if (falogQueueArray != -1)
+			{
+				write(falogQueueArray, alogQueueArray, alogArraySize);
+				write(falogQueueArray, "\nNew Line\n", strlen("\nNew Line\n"));
+			}
+
+			Assert(sharedMemSize == alogArraySize);
+		}
+
+		MemSet(alogQueueArray, 0, alogArraySize);
+
+		alogQueueArray->a_count = MaxBackends;
+		alogQueueArray->a_bitmap = bms_make(((char *) alogQueueArray) + alogBmpOffset,
+											MaxBackends);
+		for (i = 0; i < MaxBackends; i++)
+		{
+			AlogQueue * alogQueueItem = NULL;
+
+			alogQueueItem = (AlogQueue *)(((char *) alogQueueArray) + alogHeaderSize + i * alogItemSize);
+
+			alog_queue_init(alogQueueItem, Maintain_trace_log_queue_size_kb);
+
+			alogQueueArray->a_queue[i] = alogQueueItem;
+		}
+
+		if (enable_auditlogger_warning)
+		{
+			if (falogQueueArray != -1)
+			{
+				write(falogQueueArray, alogQueueArray, alogArraySize);
+				close(falogQueueArray);
+			}
+		}
+	}
+
+	found = false;
+	i = 0;
+
+	alogConsumerBmpSize = audit_shared_consumer_bitmap_size();
+
+	AuditConsumerNotifyBitmap = ShmemInitStruct("Audit Consumer Bitmap",
+										  alogConsumerBmpSize,
+										  &found);
+	/* Mark it empty upon creation */
+	if (!found)
+	{
+		MemSet(AuditConsumerNotifyBitmap, 0, alogConsumerBmpSize);
+	}
 }
 
 #endif
@@ -1204,7 +1363,7 @@ void AuditLoggerShmemInit(void)
 /*
  * Make audit_log_directory from Log_directory
  */
-static void        
+static void
 audit_assign_log_dir(void)
 {
     if (audit_log_directory != NULL)
@@ -1221,12 +1380,19 @@ audit_assign_log_dir(void)
     {
         StringInfoData alog_dir;
 
-        memset(&alog_dir, 0, sizeof(alog_dir));
-        initStringInfo(&alog_dir);        
-        appendStringInfo(&alog_dir, "%s/audit", Log_directory);
+		memset(&alog_dir, 0, sizeof(alog_dir));
+		initStringInfo(&alog_dir);
+		appendStringInfo(&alog_dir, "%s/audit", Log_directory);
 
-        audit_log_directory = alog_dir.data;
-    }
+		audit_log_directory = alog_dir.data;
+	}
+
+	if (trace_log_directory != NULL)
+	{
+		pfree(trace_log_directory);
+		trace_log_directory = NULL;
+	}
+	trace_log_directory = pstrdup("pg_log/maintain");
 }
 
 /*
@@ -1241,15 +1407,19 @@ audit_write_log_file(const char *buffer, int count, int destination)
 {
     int            rc = 0;
 
-    if (destination == AUDIT_FGA_LOG)
-    {
-        rc = fwrite(buffer, 1, count, audit_fga_log_file);
-    }
-    else
-    {
-        Assert(destination == AUDIT_COMMON_LOG);
-        rc = fwrite(buffer, 1, count, audit_comm_log_file);
-    }
+	if (destination == AUDIT_FGA_LOG)
+	{
+		rc = fwrite(buffer, 1, count, audit_fga_log_file);
+	}
+	else if (destination == MAINTAIN_TRACE_LOG)
+	{
+		rc = fwrite(buffer, 1, count, audit_trace_log_file);
+	}
+	else
+	{
+		Assert(destination == AUDIT_COMMON_LOG);
+		rc = fwrite(buffer, 1, count, audit_comm_log_file);
+	}
 
     /* can't use ereport here because of possible recursion */
     if (rc != count)
@@ -1262,7 +1432,7 @@ audit_write_log_file(const char *buffer, int count, int destination)
 }
 
 static void
-aduit_open_fga_log_file(void)
+audit_open_fga_log_file(void)
 {
     char       *filename = NULL;
 
@@ -1274,6 +1444,25 @@ aduit_open_fga_log_file(void)
         pfree(audit_last_fga_log_file_name);
 
     audit_last_fga_log_file_name = filename;
+}
+
+
+static void
+audit_open_trace_log_file(void)
+{
+	char	   *filename = NULL;
+
+	filename = trace_log_file_getname(time(NULL), ".trace");
+
+	audit_trace_log_file = audit_open_log_file(filename, "a", false);
+
+	if (audit_last_trace_log_file_name != NULL)
+	{
+		/* probably shouldn't happen */
+		pfree(audit_last_trace_log_file_name);
+	}
+
+	audit_last_trace_log_file_name = filename;
 }
 
 /*
@@ -1325,128 +1514,192 @@ audit_open_log_file(const char *filename, const char *mode, bool allow_errors)
  */
 static void
 audit_rotate_log_file(bool time_based_rotation, int size_rotation_for)
-{// #lizard forgives
-    char       *filename = NULL;
-    char       *fgafilename = NULL;
-    pg_time_t    fntime = 0;
-    FILE       *fh = NULL;
+{
+	char	   *filename = NULL;
+	char	   *fgafilename = NULL;
+	char	   *tracefilename = NULL;
+	pg_time_t	fntime = 0;
+	FILE	   *fh = NULL;
 
-    audit_rotation_requested = false;
+	audit_rotation_requested = false;
 
-    /*
-     * When doing a time-based rotation, invent the new logfile name based on
-     * the planned rotation time, not current time, to avoid "slippage" in the
-     * file name when we don't do the rotation immediately.
-     */
-    if (time_based_rotation)
-        fntime = audit_next_rotation_time;
-    else
-        fntime = time(NULL);
-    filename = audit_log_file_getname(fntime, NULL);
-    if (audit_fga_log_file != NULL)
-        fgafilename = audit_log_file_getname(fntime, ".fga");
+	/*
+	 * When doing a time-based rotation, invent the new logfile name based on
+	 * the planned rotation time, not current time, to avoid "slippage" in the
+	 * file name when we don't do the rotation immediately.
+	 */
+	if (time_based_rotation)
+		fntime = audit_next_rotation_time;
+	else
+		fntime = time(NULL);
+	filename = audit_log_file_getname(fntime, NULL);
+	if (audit_fga_log_file != NULL)
+		fgafilename = audit_log_file_getname(fntime, ".fga");
+	if (audit_trace_log_file != NULL)
+		tracefilename = trace_log_file_getname(fntime, ".trace");
 
-    /*
-     * Decide whether to overwrite or append.  We can overwrite if (a)
-     * AuditLog_truncate_on_rotation is set, (b) the rotation was triggered by
-     * elapsed time and not something else, and (c) the computed file name is
-     * different from what we were previously logging into.
-     *
-     * Note: audit_last_comm_log_file_name should never be NULL here, but if it is, append.
-     */
-    if (time_based_rotation || (size_rotation_for & AUDIT_COMMON_LOG))
-    {
-        if (AuditLog_truncate_on_rotation && time_based_rotation &&
-            audit_last_comm_log_file_name != NULL &&
-            strcmp(filename, audit_last_comm_log_file_name) != 0)
-            fh = audit_open_log_file(filename, "w", true);
-        else
-            fh = audit_open_log_file(filename, "a", true);
+	/*
+	 * Decide whether to overwrite or append.  We can overwrite if (a)
+	 * AuditLog_truncate_on_rotation is set, (b) the rotation was triggered by
+	 * elapsed time and not something else, and (c) the computed file name is
+	 * different from what we were previously logging into.
+	 *
+	 * Note: audit_last_comm_log_file_name should never be NULL here, but if it is, append.
+	 */
+	if (time_based_rotation || (size_rotation_for & AUDIT_COMMON_LOG))
+	{
+		if (AuditLog_truncate_on_rotation && time_based_rotation &&
+			audit_last_comm_log_file_name != NULL &&
+			strcmp(filename, audit_last_comm_log_file_name) != 0)
+			fh = audit_open_log_file(filename, "w", true);
+		else
+			fh = audit_open_log_file(filename, "a", true);
 
-        if (!fh)
-        {
-            /*
-             * ENFILE/EMFILE are not too surprising on a busy system; just
-             * keep using the old file till we manage to get a new one.
-             * Otherwise, assume something's wrong with audit_log_directory and stop
-             * trying to create files.
-             */
-            if (errno != ENFILE && errno != EMFILE)
-            {
-                ereport(LOG,
-                        (errmsg("disabling automatic rotation audit log file (use SIGHUP to re-enable)")));
-                audit_rotation_disabled = true;
-            }
+		if (!fh)
+		{
+			/*
+			 * ENFILE/EMFILE are not too surprising on a busy system; just
+			 * keep using the old file till we manage to get a new one.
+			 * Otherwise, assume something's wrong with audit_log_directory and stop
+			 * trying to create files.
+			 */
+			if (errno != ENFILE && errno != EMFILE)
+			{
+				ereport(LOG,
+						(errmsg("disabling automatic rotation audit log file (use SIGHUP to re-enable)")));
+				audit_rotation_disabled = true;
+			}
 
-            pfree(filename);
-            if (fgafilename)
-                pfree(fgafilename);
-            return;
-        }
+			if (filename)
+				pfree(filename);
+			if (fgafilename)
+				pfree(fgafilename);
+			if (tracefilename)
+				pfree(tracefilename);
+			return;
+		}
 
-        SpinLockAcquire(&(audit_comm_log_file_lock));
-        fclose(audit_comm_log_file);
-        audit_comm_log_file = fh;
-        SpinLockRelease(&(audit_comm_log_file_lock));
+		SpinLockAcquire(&(audit_comm_log_file_lock));
+		fclose(audit_comm_log_file);
+		audit_comm_log_file = fh;
+		SpinLockRelease(&(audit_comm_log_file_lock));
 
-        /* instead of pfree'ing filename, remember it for next time */
-        if (audit_last_comm_log_file_name != NULL)
-            pfree(audit_last_comm_log_file_name);
-        audit_last_comm_log_file_name = filename;
-        filename = NULL;
-    }
+		/* instead of pfree'ing filename, remember it for next time */
+		if (audit_last_comm_log_file_name != NULL)
+			pfree(audit_last_comm_log_file_name);
+		audit_last_comm_log_file_name = filename;
+		filename = NULL;
+	}
 
-    /* Same as above, but for fga audit log file. */
+	/* Same as above, but for fga audit log file. */
+	if (audit_fga_log_file != NULL &&
+		(time_based_rotation || (size_rotation_for & AUDIT_FGA_LOG)))
+	{
+		if (AuditLog_truncate_on_rotation && time_based_rotation &&
+			audit_last_fga_log_file_name != NULL &&
+			strcmp(fgafilename, audit_last_fga_log_file_name) != 0)
+			fh = audit_open_log_file(fgafilename, "w", true);
+		else
+			fh = audit_open_log_file(fgafilename, "a", true);
 
-    if (audit_fga_log_file != NULL &&
-        (time_based_rotation || (size_rotation_for & AUDIT_FGA_LOG)))
-    {
-        if (AuditLog_truncate_on_rotation && time_based_rotation &&
-            audit_last_fga_log_file_name != NULL &&
-            strcmp(fgafilename, audit_last_fga_log_file_name) != 0)
-            fh = audit_open_log_file(fgafilename, "w", true);
-        else
-            fh = audit_open_log_file(fgafilename, "a", true);
+		if (!fh)
+		{
+			/*
+			 * ENFILE/EMFILE are not too surprising on a busy system; just
+			 * keep using the old file till we manage to get a new one.
+			 * Otherwise, assume something's wrong with audit_log_directory and stop
+			 * trying to create files.
+			 */
+			if (errno != ENFILE && errno != EMFILE)
+			{
+				ereport(LOG,
+						(errmsg("disabling automatic rotation audit log file (use SIGHUP to re-enable)")));
+				audit_rotation_disabled = true;
+			}
 
-        if (!fh)
-        {
-            /*
-             * ENFILE/EMFILE are not too surprising on a busy system; just
-             * keep using the old file till we manage to get a new one.
-             * Otherwise, assume something's wrong with audit_log_directory and stop
-             * trying to create files.
-             */
-            if (errno != ENFILE && errno != EMFILE)
-            {
-                ereport(LOG,
-                        (errmsg("disabling automatic rotation audit log file (use SIGHUP to re-enable)")));
-                audit_rotation_disabled = true;
-            }
+			if (filename)
+				pfree(filename);
+			if (fgafilename)
+				pfree(fgafilename);
+			if (tracefilename)
+				pfree(tracefilename);
+			return;
+		}
 
-            if (filename)
-                pfree(filename);
-            pfree(fgafilename);
-            return;
-        }
+		SpinLockAcquire(&(audit_fga_log_file_lock));
+		fclose(audit_fga_log_file);
+		audit_fga_log_file = fh;
+		SpinLockRelease(&(audit_fga_log_file_lock));
 
-        SpinLockAcquire(&(audit_fga_log_file_lock));
-        fclose(audit_fga_log_file);
-        audit_fga_log_file = fh;
-        SpinLockRelease(&(audit_fga_log_file_lock));
+		/* instead of pfree'ing filename, remember it for next time */
+		if (audit_last_fga_log_file_name != NULL)
+			pfree(audit_last_fga_log_file_name);
+		audit_last_fga_log_file_name = fgafilename;
+		fgafilename = NULL;
+	}
 
-        /* instead of pfree'ing filename, remember it for next time */
-        if (audit_last_fga_log_file_name != NULL)
-            pfree(audit_last_fga_log_file_name);
-        audit_last_fga_log_file_name = fgafilename;
-        fgafilename = NULL;
-    }
+	/* Same as above, but for trace audit log file. */
+	if (audit_trace_log_file != NULL &&
+		(time_based_rotation || (size_rotation_for & MAINTAIN_TRACE_LOG)))
+	{
+		/*
+		 * Only append write，do not consider overwrite for maintain trace log.
+		 * That is different from audit common log and fga log.
+		 *
+		if (AuditLog_truncate_on_rotation && time_based_rotation &&
+			audit_last_trace_log_file_name != NULL &&
+			strcmp(tracefilename, audit_last_trace_log_file_name) != 0)
+			fh = audit_open_log_file(tracefilename, "w", true);
+		else
+		*/
+		{
+			fh = audit_open_log_file(tracefilename, "a", true);
+		}
 
-    if (filename)
-        pfree(filename);
-    if (fgafilename)
-        pfree(fgafilename);
+		if (!fh)
+		{
+			/*
+			 * ENFILE/EMFILE are not too surprising on a busy system; just
+			 * keep using the old file till we manage to get a new one.
+			 * Otherwise, assume something's wrong with audit_log_directory and stop
+			 * trying to create files.
+			 */
+			if (errno != ENFILE && errno != EMFILE)
+			{
+				ereport(LOG,
+						(errmsg("disabling automatic rotation audit log file (use SIGHUP to re-enable)")));
+				audit_rotation_disabled = true;
+			}
 
-    audit_set_next_rotation_time();
+			if (filename)
+				pfree(filename);
+			if (fgafilename)
+				pfree(fgafilename);
+			if (tracefilename)
+				pfree(tracefilename);
+			return;
+		}
+
+		SpinLockAcquire(&(audit_trace_log_file_lock));
+		fclose(audit_trace_log_file);
+		audit_trace_log_file = fh;
+		SpinLockRelease(&(audit_trace_log_file_lock));
+
+		/* instead of pfree'ing filename, remember it for next time */
+		if (audit_last_trace_log_file_name != NULL)
+			pfree(audit_last_trace_log_file_name);
+		audit_last_trace_log_file_name = tracefilename;
+		tracefilename = NULL;
+	}
+
+	if (filename)
+		pfree(filename);
+	if (fgafilename)
+		pfree(fgafilename);
+	if (tracefilename)
+		pfree(tracefilename);
+
+	audit_set_next_rotation_time();
 }
 
 /*
@@ -1482,6 +1735,42 @@ audit_log_file_getname(pg_time_t timestamp, const char *suffix)
     }
 
     return filename;
+}
+
+/*
+ * construct logfile name using timestamp information.
+ * acoording to audit_log_file_getname().
+ *
+ * If suffix isn't NULL, append it to the name, replacing any ".log"
+ * that may be in the pattern.
+ *
+ * Result is palloc'd.
+ */
+static char *
+trace_log_file_getname(pg_time_t timestamp, const char *suffix)
+{
+	char	   *filename = NULL;
+	int			len = 0;
+
+	filename = palloc(MAXPGPATH);
+
+	snprintf(filename, MAXPGPATH, "%s/", trace_log_directory);
+
+	len = strlen(filename);
+
+	/* treat AuditLog_filename as a strftime pattern */
+	pg_strftime(filename + len, MAXPGPATH - len, TraceLog_filename,
+				pg_localtime(&timestamp, log_timezone));
+
+	if (suffix != NULL)
+	{
+		len = strlen(filename);
+		if (len > 4 && (strcmp(filename + (len - 4), ".log") == 0))
+			len -= 4;
+		strlcpy(filename + len, suffix, MAXPGPATH - len);
+	}
+
+	return filename;
 }
 
 /*
@@ -1589,9 +1878,9 @@ static bool alog_queue_is_empty(int q_size, int q_head, int q_tail)
 
 static bool alog_queue_is_empty2(AlogQueue * queue)
 {
-    volatile int q_head = queue->q_head;      
-    volatile int q_tail = queue->q_tail;
-    volatile int q_size = queue->q_size;
+	volatile int q_head = queue->q_head;
+	volatile int q_tail = queue->q_tail;
+	volatile int q_size = queue->q_size;
 
     pg_memory_barrier();
 
@@ -1603,12 +1892,12 @@ static bool alog_queue_is_empty2(AlogQueue * queue)
  */
 static int alog_queue_used(int q_size, int q_head, int q_tail)
 {
-     int used = (q_tail - q_head + q_size) % q_size;
+	int used = (q_tail - q_head + q_size) % q_size;
 
     Assert(q_size > 0 && q_head >= 0 && q_tail >= 0);
     Assert(q_head < q_size && q_tail < q_size);
 
-     return used;
+	return used;
 }
 
 /*
@@ -1662,9 +1951,9 @@ static bool alog_queue_push(AlogQueue * queue, char * buff, int len)
  * write buff1 and buff2 to queue
  */
 static bool alog_queue_push2(AlogQueue * queue, char * buff1, int len1, char * buff2, int len2)
-{    
-    char * buff_array[] = {buff1, buff2};
-    int len_array[] = {len1, len2};
+{
+	char * buff_array[] = {buff1, buff2};
+	int len_array[] = {len1, len2};
 
     return alog_queue_pushn(queue, buff_array, len_array, sizeof(len_array)/sizeof(len_array[0]));
 }
@@ -1673,25 +1962,25 @@ static bool alog_queue_push2(AlogQueue * queue, char * buff1, int len1, char * b
  * write n buffs to queue
  */
 static bool alog_queue_pushn(AlogQueue * queue, char * buff[], int len[], int n)
-{// #lizard forgives
-    volatile int q_head = queue->q_head;      
-    volatile int q_tail = queue->q_tail;
-    volatile int q_size = queue->q_size;
+{
+	volatile int q_head = queue->q_head;
+	volatile int q_tail = queue->q_tail;
+	volatile int q_size = queue->q_size;
 
-    int q_head_before = q_head;
-    int q_tail_before = q_tail;
-    int q_size_before = q_size;
+	int q_head_before = q_head;
+	int q_tail_before = q_tail;
+	int q_size_before = q_size;
 
-    int q_used_before = 0;
-    int q_used_after = 0;
-    
-    int total_len = 0;
-    int i = 0;
-    
-    for (i = 0; i < n; i++)
-    {
-        total_len += len[i];
-    }
+	int q_used_before = 0;
+	int q_used_after = 0;
+
+	int total_len = 0;
+	int i = 0;
+
+	for (i = 0; i < n; i++)
+	{
+		total_len += len[i];
+	}
 
     pg_memory_barrier();
     alog_just_caller(&q_used_before);
@@ -1764,9 +2053,9 @@ static bool alog_queue_pushn(AlogQueue * queue, char * buff[], int len[], int n)
 
 /*
  * |<- strlen value ->|<- string message content ->|
- * |                                               |
- * |                                               |
- * |<------------------ buff --------------------->| 
+ * |											   |
+ * |											   |
+ * |<------------------ buff --------------------->|
  *
  * len = size(int) + strlen(str)
  *
@@ -1820,9 +2109,9 @@ static int alog_queue_get_str_len(AlogQueue * queue, int offset)
  * copy message from queue to another as much as possible
  *
  * |<- strlen value ->|<- string message content ->|
- * |                                               |
- * |                                               |
- * |<------------------ buff --------------------->| 
+ * |											   |
+ * |											   |
+ * |<------------------ buff --------------------->|
  *
  * len = size(int) + strlen(str)
  *
@@ -1949,107 +2238,114 @@ static bool alog_queue_pop_to_queue(AlogQueue * from, AlogQueue * to)
  * copy message from queue to file as much as possible
  */
 static bool alog_queue_pop_to_file(AlogQueue * from, int destination)
-{// #lizard forgives
-    volatile int q_from_head = from->q_head;      
-    volatile int q_from_tail = from->q_tail;
-    volatile int q_from_size = from->q_size;
+{
+	volatile int q_from_head = from->q_head;
+	volatile int q_from_tail = from->q_tail;
+	volatile int q_from_size = from->q_size;
 
-    int from_head = q_from_head;      
-    int from_tail = q_from_tail;
-    int from_size = q_from_size;
+	int from_head = q_from_head;
+	int from_tail = q_from_tail;
+	int from_size = q_from_size;
 
-    int from_total = 0;
+	int from_total = 0;
 
-    int from_used = 0;
-    int from_copyed = 0;
+	int from_used = 0;
+	int from_copyed = 0;
 
-    volatile slock_t * file_lock = NULL;
+	volatile slock_t * file_lock = NULL;
 
-    pg_memory_barrier();
-    alog_just_caller(&from_total);
+	pg_memory_barrier();
+	alog_just_caller(&from_total);
 
-    from_total = from_used = alog_queue_used(from_size, from_head, from_tail);
+	from_total = from_used = alog_queue_used(from_size, from_head, from_tail);
 
-    Assert(from_size > 0 && from_head >= 0 && from_tail >= 0);
-    Assert(from_head < from_size && from_tail < from_size && from_used <= from_size);
-    Assert(destination == AUDIT_COMMON_LOG || destination == AUDIT_FGA_LOG);
+	Assert(from_size > 0 && from_head >= 0 && from_tail >= 0);
+	Assert(from_head < from_size && from_tail < from_size && from_used <= from_size);
+	Assert(destination == AUDIT_COMMON_LOG ||
+		destination == AUDIT_FGA_LOG ||
+		destination == MAINTAIN_TRACE_LOG);
 
-    if (destination == AUDIT_COMMON_LOG)
-    {
-        file_lock = &audit_comm_log_file_lock;
-    }
-    else
-    {
-        file_lock = &audit_fga_log_file_lock;
-    }
+	if (destination == AUDIT_COMMON_LOG)
+	{
+		file_lock = &audit_comm_log_file_lock;
+	}
+	else if (destination == AUDIT_FGA_LOG)
+	{
+		file_lock = &audit_fga_log_file_lock;
+	}
+	else
+	{
+		Assert(destination == MAINTAIN_TRACE_LOG);
+		file_lock = &audit_trace_log_file_lock;
+	}
 
-    /* from is empty, ignore */
-    if (alog_queue_is_empty(from_size, from_head, from_tail))
-    {
-        return false;
-    }
+	/* from is empty, ignore */
+	if (alog_queue_is_empty(from_size, from_head, from_tail))
+	{
+		return false;
+	}
 
-    /* copy message into file until from is empty */
-    do
-    {
-        int string_len = alog_queue_get_str_len(from, from_head);
-        int copy_len = sizeof(int) + string_len;
+	/* copy message into file until from is empty */
+	do
+	{
+		int string_len = alog_queue_get_str_len(from, from_head);
+		int copy_len = sizeof(int) + string_len;
 
-        pg_memory_barrier();
+		pg_memory_barrier();
 
-        /* just copy dierctly */
-        if (from_size - from_head >= copy_len)
-        {
-            char * p_start = alog_queue_offset_to(from, from_head + sizeof(int));
+		/* just copy dierctly */
+		if (from_size - from_head >= copy_len)
+		{
+			char * p_start = alog_queue_offset_to(from, from_head + sizeof(int));
 
-            /* only copy message content, not write message len */
-            SpinLockAcquire(file_lock);
-            audit_write_log_file(p_start, string_len, destination);
-            SpinLockRelease(file_lock);
-        }
-        else if (from_size - from_head > sizeof(int))
-        {
-            /* must copy as two parts */
-            int first_len = from_size - from_head - sizeof(int);
-            int second_len = string_len - first_len;
-            char * p_start = NULL;
+			/* only copy message content, not write message len */
+			SpinLockAcquire(file_lock);
+			audit_write_log_file(p_start, string_len, destination);
+			SpinLockRelease(file_lock);
+		}
+		else if (from_size - from_head > sizeof(int))
+		{
+			/* must copy as two parts */
+			int first_len = from_size - from_head - sizeof(int);
+			int second_len = string_len - first_len;
+			char * p_start = NULL;
 
-            Assert(first_len > 0 && first_len < from_size);
-            Assert(second_len > 0 && second_len < from_size);
+			Assert(first_len > 0 && first_len < from_size);
+			Assert(second_len > 0 && second_len < from_size);
 
-            SpinLockAcquire(file_lock);
-            p_start = alog_queue_offset_to(from, from_head + sizeof(int));
-            audit_write_log_file(p_start, first_len, destination);
+			SpinLockAcquire(file_lock);
+			p_start = alog_queue_offset_to(from, from_head + sizeof(int));
+			audit_write_log_file(p_start, first_len, destination);
 
-            p_start = alog_queue_offset_to(from, 0);
-            audit_write_log_file(p_start, second_len, destination);
-            SpinLockRelease(file_lock);
-        }
-        else 
-        {
-            /* just copy content only */
-            int cpy_offset = (from_head + sizeof(int)) % from_size;
-            char * p_start = alog_queue_offset_to(from, cpy_offset);
+			p_start = alog_queue_offset_to(from, 0);
+			audit_write_log_file(p_start, second_len, destination);
+			SpinLockRelease(file_lock);
+		}
+		else
+		{
+			/* just copy content only */
+			int cpy_offset = (from_head + sizeof(int)) % from_size;
+			char * p_start = alog_queue_offset_to(from, cpy_offset);
 
-            Assert(from_size - from_head <= sizeof(int));
-            SpinLockAcquire(file_lock);
-            audit_write_log_file(p_start, string_len, destination);
-            SpinLockRelease(file_lock);
-        }
+			Assert(from_size - from_head <= sizeof(int));
+			SpinLockAcquire(file_lock);
+			audit_write_log_file(p_start, string_len, destination);
+			SpinLockRelease(file_lock);
+		}
 
-        from_head = (from_head + copy_len) % from_size;
-        from_copyed += copy_len;
+		from_head = (from_head + copy_len) % from_size;
+		from_copyed += copy_len;
 
-        Assert(from_copyed <= from_total);
-        Assert(from_used - copy_len >= 0);
-        Assert(from_used - copy_len == alog_queue_used(from_size, from_head, from_tail));
+		Assert(from_copyed <= from_total);
+		Assert(from_used - copy_len >= 0);
+		Assert(from_used - copy_len == alog_queue_used(from_size, from_head, from_tail));
 
-        from_used = alog_queue_used(from_size, from_head, from_tail);
-    } while (!alog_queue_is_empty(from_size, from_head, from_tail));
+		from_used = alog_queue_used(from_size, from_head, from_tail);
+	} while (!alog_queue_is_empty(from_size, from_head, from_tail));
 
-    from->q_head = from_head;
+	from->q_head = from_head;
 
-    return true;
+	return true;
 }
 
 #endif
@@ -2057,16 +2353,18 @@ static bool alog_queue_pop_to_file(AlogQueue * from, int destination)
 #ifdef AuditLog_005_For_ThreadWorker
 
 /*
- * find an unused shard entry id in AuditCommonLogQueueArray and AuditFGALogQueueArray
- * 
+ * find an unused shard entry id in AuditCommonLogQueueArray, AuditFGALogQueueArray
+ * and AuditTraceLogQueueArray.
+ *
  * called by postgres backend to init AuditPostgresAlogQueueIndex
  */
 int AuditLoggerQueueAcquire(void)
 {
     int alogIdx = -1;
 
-    AlogQueue * common_queue = NULL;
-    AlogQueue * fga_queue = NULL;
+	AlogQueue * common_queue = NULL;
+	AlogQueue * fga_queue = NULL;
+	AlogQueue * trace_queue = NULL;
 
     if (!IsBackendPostgres)
     {
@@ -2079,14 +2377,17 @@ int AuditLoggerQueueAcquire(void)
     alogIdx = MyProc->pgprocno;
     Assert(alogIdx >= 0 && alogIdx < MaxBackends);
 
-    common_queue = alog_get_shared_common_queue(alogIdx);
-    fga_queue = alog_get_shared_fga_queue(alogIdx);
+	common_queue = alog_get_shared_common_queue(alogIdx);
+	fga_queue = alog_get_shared_fga_queue(alogIdx);
+	trace_queue = alog_get_shared_trace_queue(alogIdx);
 
-    Assert(common_queue->q_pid == fga_queue->q_pid);
+	Assert(common_queue->q_pid == fga_queue->q_pid);
+	Assert(common_queue->q_pid == trace_queue->q_pid);
 
-    AuditPostgresAlogQueueIndex = alogIdx;
-    common_queue->q_pid = MyProcPid;
-    fga_queue->q_pid = MyProcPid;
+	AuditPostgresAlogQueueIndex = alogIdx;
+	common_queue->q_pid = MyProcPid;
+	fga_queue->q_pid = MyProcPid;
+	trace_queue->q_pid = MyProcPid;
 
     if (enable_auditlogger_warning)
     {
@@ -2117,6 +2418,16 @@ static AlogQueue * alog_get_shared_fga_queue(int idx)
     return queue;
 }
 
+static AlogQueue * alog_get_shared_trace_queue(int idx)
+{
+	AlogQueue * queue = NULL;
+
+	Assert(idx >= 0 && idx < MaxBackends);
+	queue = AuditTraceLogQueueArray->a_queue[idx];
+
+	return queue;
+}
+
 static AlogQueue * alog_get_local_common_cache(int consumer_id)
 {
     AlogQueue * queue = NULL;
@@ -2137,12 +2448,27 @@ static AlogQueue * alog_get_local_fga_cache(int consumer_id)
     return queue;
 }
 
+static AlogQueue * alog_get_local_trace_cache(int consumer_id)
+{
+	AlogQueue * queue = NULL;
+
+	Assert(consumer_id >= 0 && consumer_id < AuditLog_max_worker_number);
+	queue = AuditTraceLogLocalCache->q_cache[consumer_id];
+
+	return queue;
+}
+
 /*
  * local cache for log Consumer
  *
- * AuditCommonLogLocalCache = alog_make_local_cache(AuditLog_max_worker_number, AuditLog_common_log_cache_size_kb);
+ * AuditCommonLogLocalCache = alog_make_local_cache(AuditLog_max_worker_number,
+ * 		AuditLog_common_log_cache_size_kb);
  *
- * AuditFGALogLocalCache = alog_make_local_cache(AuditLog_max_worker_number, AuditLog_fga_log_cacae_size_kb);
+ * AuditFGALogLocalCache = alog_make_local_cache(AuditLog_max_worker_number,
+ * 		AuditLog_fga_log_cacae_size_kb);
+ *
+ * AuditTraceLogLocalCache = alog_make_local_cache(AuditLog_max_worker_number,
+ * 		Maintain_trace_log_cache_size_kb);
  */
 static AlogQueueCache * alog_make_local_cache(int cache_number, int queue_size_kb)
 {
@@ -2218,7 +2544,7 @@ static void alog_consumer_wakeup(int consumer_id)
 }
 
 /*
- * Sleep if there is no log to read in 
+ * Sleep if there is no log to read in
  * shared audit log queue
  */
 static void alog_consumer_sleep(int consumer_id)
@@ -2234,98 +2560,122 @@ static void alog_consumer_sleep(int consumer_id)
 /*
  * AuditLog_max_worker_number consumers
  *
- * read log from part of AuditCommonLogQueueArray and AuditFGALogQueueArray
- * and write to one cache in AuditCommonLogLocalCache and AuditFgaLogQueueCache
+ * read log from part of AuditCommonLogQueueArray, AuditFGALogQueueArray and
+ * AuditTraceLogQueueArray; write to one cache in AuditCommonLogLocalCache,
+ * AuditFgaLogQueueCache and AuditTraceLogQueueCache.
  *
- */ 
+ */
 static void * alog_consumer_main(void * arg)
-{// #lizard forgives
-    int consumer_id = *((int *) arg);
-    int i = 0;
+{
+	int consumer_id = *((int *) arg);
+	int i = 0;
 
-    AlogQueue * local_common_cache = NULL;
-    AlogQueue * local_fga_cache = NULL;
+	AlogQueue * local_common_cache = NULL;
+	AlogQueue * local_fga_cache = NULL;
+	AlogQueue * local_trace_cache = NULL;
 
-    Assert(consumer_id >= 0 && consumer_id < AuditLog_max_worker_number);
+	Assert(consumer_id >= 0 && consumer_id < AuditLog_max_worker_number);
 
-    /* get local common queue cache entry from AuditCommonLogLocalCache */
-    local_common_cache = alog_get_local_common_cache(consumer_id);
+	/* get local common queue cache entry from AuditCommonLogLocalCache */
+	local_common_cache = alog_get_local_common_cache(consumer_id);
 
-    /* get local fga queue cache entry from AuditFgaLogQueueCache */
-    local_fga_cache = alog_get_local_fga_cache(consumer_id);
+	/* get local fga queue cache entry from AuditFgaLogQueueCache */
+	local_fga_cache = alog_get_local_fga_cache(consumer_id);
 
-    while (true)
-    {
-        bool shared_is_empty = true;
+	/* get local trace queue cache entry from AuditTraceLogQueueCache */
+	local_trace_cache = alog_get_local_trace_cache(consumer_id);
 
-        for (i = 0; i < ((MaxBackends / AuditLog_max_worker_number) + 1); i++)
-        {
-            int sharedIdx = consumer_id +  i * AuditLog_max_worker_number;
-            AlogQueue * shared_common_queue = NULL;
-            AlogQueue * shared_fga_queue = NULL;
+	while (true)
+	{
+		bool shared_is_empty = true;
 
-            Assert(consumer_id == (sharedIdx % AuditLog_max_worker_number));
+		for (i = 0; i < ((MaxBackends / AuditLog_max_worker_number) + 1); i++)
+		{
+			int sharedIdx = consumer_id +  i * AuditLog_max_worker_number;
+			AlogQueue * shared_common_queue = NULL;
+			AlogQueue * shared_fga_queue = NULL;
+			AlogQueue * shared_trace_queue = NULL;
 
-            if (sharedIdx < MaxBackends)
-            {
-                bool local_is_empty = false;
+			Assert(consumer_id == (sharedIdx % AuditLog_max_worker_number));
 
-                /* get shared common queue entry from AuditCommonLogQueueArray */
-                shared_common_queue = alog_get_shared_common_queue(sharedIdx);
+			if (sharedIdx < MaxBackends)
+			{
+				bool local_is_empty = false;
 
-                /* get shared fga queue entry from AuditFGALogQueueArray */
-                shared_fga_queue = alog_get_shared_fga_queue(sharedIdx);
+				/* get shared common queue entry from AuditCommonLogQueueArray */
+				shared_common_queue = alog_get_shared_common_queue(sharedIdx);
 
-                local_is_empty = false;
-                if (alog_queue_is_empty2(local_common_cache))
-                {
-                    local_is_empty = true;
-                }
+				/* get shared fga queue entry from AuditFGALogQueueArray */
+				shared_fga_queue = alog_get_shared_fga_queue(sharedIdx);
 
-                /* read from shared queue, and write to local cache queue */
-                if (alog_queue_pop_to_queue(shared_common_queue, local_common_cache))
-                {
-                    if (local_is_empty)
-                    {
-                        alog_writer_wakeup(AUDIT_COMMON_LOG);
-                    }
-                }
+				/* get shared trace queue entry from AuditTraceLogQueueArray */
+				shared_trace_queue = alog_get_shared_trace_queue(sharedIdx);
 
-                local_is_empty = false;
-                if (alog_queue_is_empty2(local_fga_cache))
-                {
-                    local_is_empty = true;
-                }
+				local_is_empty = false;
+				if (alog_queue_is_empty2(local_common_cache))
+				{
+					local_is_empty = true;
+				}
 
-                if (alog_queue_pop_to_queue(shared_fga_queue, local_fga_cache))
-                {
-                    if (local_is_empty)
-                    {
-                        alog_writer_wakeup(AUDIT_FGA_LOG);
-                    }
-                }
+				/* read from shared queue, and write to local cache queue */
+				if (alog_queue_pop_to_queue(shared_common_queue, local_common_cache))
+				{
+					if (local_is_empty)
+					{
+						alog_writer_wakeup(AUDIT_COMMON_LOG);
+					}
+				}
 
-                if (!alog_queue_is_empty2(shared_common_queue) ||
-                    !alog_queue_is_empty2(shared_fga_queue))
-                {
-                    shared_is_empty = false;
-                }
-            }
-        }
+				local_is_empty = false;
+				if (alog_queue_is_empty2(local_fga_cache))
+				{
+					local_is_empty = true;
+				}
 
-        if (shared_is_empty)
-        {
-            /*
-             * maybe shared input is empty, 
-             * local output is full,
-             * so wait a moment and retry
-             */
-            audit_shared_consumer_bitmap_set_value(consumer_id, 0);
-            alog_consumer_sleep(consumer_id);
-        }
-    }
+				if (alog_queue_pop_to_queue(shared_fga_queue, local_fga_cache))
+				{
+					if (local_is_empty)
+					{
+						alog_writer_wakeup(AUDIT_FGA_LOG);
+					}
+				}
 
-    return NULL;
+				local_is_empty = false;
+				if (alog_queue_is_empty2(local_trace_cache))
+				{
+					local_is_empty = true;
+				}
+
+				if (alog_queue_pop_to_queue(shared_trace_queue, local_trace_cache))
+				{
+					if (local_is_empty)
+					{
+						alog_writer_wakeup(MAINTAIN_TRACE_LOG);
+					}
+				}
+
+				if (!alog_queue_is_empty2(shared_common_queue) ||
+					!alog_queue_is_empty2(shared_fga_queue) ||
+					!alog_queue_is_empty2(shared_trace_queue))
+				{
+					shared_is_empty = false;
+				}
+			}
+		}
+
+		if (shared_is_empty)
+		{
+			/*
+			 * maybe shared input is empty,
+			 * local output is full,
+			 * so wait a moment and retry
+			 */
+			audit_shared_consumer_bitmap_set_value(consumer_id, 0);
+			alog_consumer_sleep(consumer_id);
+		}
+	}
+
+	return NULL;
 }
 
 /*
@@ -2337,24 +2687,30 @@ static void alog_writer_wakeup(int writer_destination)
     ThreadSema * sema = NULL;
     AlogQueueCache * local_cache = NULL;
 
-    Assert(writer_destination == AUDIT_COMMON_LOG || 
-           writer_destination == AUDIT_FGA_LOG);
+	Assert(writer_destination == AUDIT_COMMON_LOG ||
+		   writer_destination == AUDIT_FGA_LOG ||
+		   writer_destination == MAINTAIN_TRACE_LOG);
 
-    if (writer_destination == AUDIT_COMMON_LOG)
-    {
-        local_cache = AuditCommonLogLocalCache;
-    }
-    else
-    {
-        local_cache = AuditFGALogLocalCache;
-    }
+	if (writer_destination == AUDIT_COMMON_LOG)
+	{
+		local_cache = AuditCommonLogLocalCache;
+	}
+	else if (writer_destination == AUDIT_FGA_LOG)
+	{
+		local_cache = AuditFGALogLocalCache;
+	}
+	else
+	{
+		Assert(writer_destination == MAINTAIN_TRACE_LOG);
+		local_cache = AuditTraceLogLocalCache;
+	}
 
     sema = (&(local_cache->q_sema));
     ThreadSemaUp(sema);
 }
 
 /*
- * Sleep if there is no log to read in 
+ * Sleep if there is no log to read in
  * local audit log cache
  */
 static void alog_writer_sleep(int writer_destination)
@@ -2362,79 +2718,93 @@ static void alog_writer_sleep(int writer_destination)
     ThreadSema * sema = NULL;
     AlogQueueCache * local_cache = NULL;
 
-    Assert(writer_destination == AUDIT_COMMON_LOG || 
-           writer_destination == AUDIT_FGA_LOG);
+	Assert(writer_destination == AUDIT_COMMON_LOG ||
+		   writer_destination == AUDIT_FGA_LOG ||
+		   writer_destination == MAINTAIN_TRACE_LOG);
 
-    if (writer_destination == AUDIT_COMMON_LOG)
-    {
-        local_cache = AuditCommonLogLocalCache;
-    }
-    else
-    {
-        local_cache = AuditFGALogLocalCache;
-    }
+	if (writer_destination == AUDIT_COMMON_LOG)
+	{
+		local_cache = AuditCommonLogLocalCache;
+	}
+	else if (writer_destination == AUDIT_FGA_LOG)
+	{
+		local_cache = AuditFGALogLocalCache;
+	}
+	else
+	{
+		Assert(writer_destination == MAINTAIN_TRACE_LOG);
+		local_cache = AuditTraceLogLocalCache;
+	}
 
     sema = (&(local_cache->q_sema));
     ThreadSemaDown(sema);
 }
 
 /*
- * two writer, write log to logfile
- * 
+ * three writer, write log to logfile
+ *
  * one for AuditCommonLogLocalCache
  * one for AuditFgaLogQueueCache
+ * one for AuditTraceLogQueueCache
  */
 static void * alog_writer_main(void * arg)
-{// #lizard forgives
-    int writer_destination = *((int *) arg);
-    AlogQueueCache * local_cache = NULL;
+{
+	int writer_destination = *((int *) arg);
+	AlogQueueCache * local_cache = NULL;
 
-    Assert(writer_destination == AUDIT_COMMON_LOG || 
-           writer_destination == AUDIT_FGA_LOG);
+	Assert(writer_destination == AUDIT_COMMON_LOG ||
+		writer_destination == AUDIT_FGA_LOG ||
+		writer_destination == MAINTAIN_TRACE_LOG);
 
-    if (writer_destination == AUDIT_COMMON_LOG)
-    {
-        /* read from AuditCommonLogLocalCache, and write to fga log file */
-        local_cache = AuditCommonLogLocalCache;
-    }
-    else
-    {
-        /* read from AuditFgaLogQueueCache, and write to fga log file */
-        local_cache = AuditFGALogLocalCache;
-    }
+	if (writer_destination == AUDIT_COMMON_LOG)
+	{
+		/* read from AuditCommonLogLocalCache, and write to common log file */
+		local_cache = AuditCommonLogLocalCache;
+	}
+	else if (writer_destination == AUDIT_FGA_LOG)
+	{
+		/* read from AuditFgaLogQueueCache, and write to fga log file */
+		local_cache = AuditFGALogLocalCache;
+	}
+	else
+	{
+		/* read from AuditTraceLogQueueCache, and write to trace log file */
+		Assert(writer_destination == MAINTAIN_TRACE_LOG);
+		local_cache = AuditTraceLogLocalCache;
+	}
 
-    while (true)
-    {
-        int i = 0;
-        bool copy_nothing = true;
+	while (true)
+	{
+		int i = 0;
+		bool copy_nothing = true;
 
-        for (i = 0; i < AuditLog_max_worker_number; i++)
-        {
-            int consumer_id = i;
-            AlogQueue * local_queue = local_cache->q_cache[i];
+		for (i = 0; i < AuditLog_max_worker_number; i++)
+		{
+			int consumer_id = i;
+			AlogQueue * local_queue = local_cache->q_cache[i];
 
-            if (alog_queue_pop_to_file(local_queue, writer_destination))
-            {
-                copy_nothing = false;
-            }
+			if (alog_queue_pop_to_file(local_queue, writer_destination))
+			{
+				copy_nothing = false;
+			}
 
-            if (alog_queue_is_empty2(local_queue))
-            {
-                alog_consumer_wakeup(consumer_id);
-            }
-        }
+			if (alog_queue_is_empty2(local_queue))
+			{
+				alog_consumer_wakeup(consumer_id);
+			}
+		}
 
-        if (copy_nothing)
-        {
-            /*
-             * maybe local input is empty, 
-             * so wait a moment and retry
-             */
-            alog_writer_sleep(writer_destination);
-        }
-    }
+		if (copy_nothing)
+		{
+			/*
+			 * maybe local input is empty,
+			 * so wait a moment and retry
+			 */
+			alog_writer_sleep(writer_destination);
+		}
+	}
 
-    return NULL;
+	return NULL;
 }
 
 static void alog_start_writer(int writer_destination)
@@ -2442,21 +2812,22 @@ static void alog_start_writer(int writer_destination)
     int * des = NULL;
     int ret = 0;
 
-    Assert(writer_destination == AUDIT_COMMON_LOG || 
-           writer_destination == AUDIT_FGA_LOG);
+	Assert(writer_destination == AUDIT_COMMON_LOG ||
+		writer_destination == AUDIT_FGA_LOG ||
+		writer_destination == MAINTAIN_TRACE_LOG);
 
     des = palloc0(sizeof(int));
     *des = writer_destination;
 
-    ret = CreateThread(alog_writer_main, (void *)des, MT_THR_DETACHED);
-    if (ret != 0)
-    {
-        /* failed to create thread, exit */
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("could not start audit log write worker")));
-        exit(6);
-    }    
+	ret = CreateThread(alog_writer_main, (void *)des, MT_THR_DETACHED);
+	if (ret != 0)
+	{
+		/* failed to create thread, exit */
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("could not start audit log write worker")));
+		exit(6);
+	}
 }
 
 static void alog_start_consumer(int consumer_id)
@@ -2484,15 +2855,18 @@ static void alog_start_all_worker(void)
 {
     int i = 0;
 
-    AuditCommonLogLocalCache = alog_make_local_cache(AuditLog_max_worker_number, 
-                                                     AuditLog_common_log_cache_size_kb);
-    AuditFGALogLocalCache = alog_make_local_cache(AuditLog_max_worker_number, 
-                                                  AuditLog_fga_log_cacae_size_kb);
-    AuditConsumerNotifySemas = alog_make_consumer_semas(AuditLog_max_worker_number);
+	AuditCommonLogLocalCache = alog_make_local_cache(AuditLog_max_worker_number,
+											AuditLog_common_log_cache_size_kb);
+	AuditFGALogLocalCache = alog_make_local_cache(AuditLog_max_worker_number,
+											AuditLog_fga_log_cacae_size_kb);
+	AuditTraceLogLocalCache = alog_make_local_cache(AuditLog_max_worker_number,
+											Maintain_trace_log_cache_size_kb);
+	AuditConsumerNotifySemas = alog_make_consumer_semas(AuditLog_max_worker_number);
 
-    /* 00, start writer worker, one for common log, another for fga log */
-    alog_start_writer(AUDIT_COMMON_LOG);
-    alog_start_writer(AUDIT_FGA_LOG);
+	/* 00, start writer worker, one for common log, one for fga log, one for trace log. */
+	alog_start_writer(AUDIT_COMMON_LOG);
+	alog_start_writer(AUDIT_FGA_LOG);
+	alog_start_writer(MAINTAIN_TRACE_LOG);
 
     /* 001, start AuditLog_max_worker_number consumer worker */
     for (i = 0; i < AuditLog_max_worker_number; i++)
@@ -2509,92 +2883,110 @@ static void alog_start_all_worker(void)
 #ifdef AuditLog_006_For_Elog
 
 void alog(int destination, const char *fmt,...)
-{// #lizard forgives
-    StringInfoData buf;
-    AlogQueue * queue = NULL;
+{
+	StringInfoData buf;
+	AlogQueue * queue = NULL;
 
-    int len = 0;
-    int idx = 0;
-    int consumer_id = 0;
+	int len = 0;
+	int idx = 0;
+	int consumer_id = 0;
 
-    Assert(AuditPostgresAlogQueueIndex >= 0 &&
-           AuditPostgresAlogQueueIndex < MaxBackends);
+	Assert(AuditPostgresAlogQueueIndex >= 0 &&
+		   AuditPostgresAlogQueueIndex < MaxBackends);
 
-    idx = AuditPostgresAlogQueueIndex;
-    consumer_id = (idx % AuditLog_max_worker_number);
+	idx = AuditPostgresAlogQueueIndex;
+	consumer_id = (idx % AuditLog_max_worker_number);
 
-    if(destination != AUDIT_COMMON_LOG && 
-       destination != AUDIT_FGA_LOG)
-    {
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("only common audit log and fag audit log can be processed")));
-        return;
-    }
+	if(destination != AUDIT_COMMON_LOG &&
+		destination != AUDIT_FGA_LOG &&
+		destination != MAINTAIN_TRACE_LOG)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("only common/fga/trace audit log can be processed")));
+		return;
+	}
 
-    if (!IsBackendPostgres ||
-        !IsUnderPostmaster)
-    {
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("only postgres backend can write audit log")));
-        return;
-    }
+	if (!IsBackendPostgres ||
+		!IsUnderPostmaster)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("only postgres backend can write audit log")));
+		return;
+	}
 
-    if (destination == AUDIT_COMMON_LOG)
-    {
-        queue = alog_get_shared_common_queue(idx);
-    }
-    else 
-    {
-        queue = alog_get_shared_fga_queue(idx);
-    }
+	if (destination == AUDIT_COMMON_LOG)
+	{
+		queue = alog_get_shared_common_queue(idx);
+	}
+	else if (destination == AUDIT_FGA_LOG)
+	{
+		queue = alog_get_shared_fga_queue(idx);
+	}
+	else
+	{
+		Assert(destination == MAINTAIN_TRACE_LOG);
+		queue = alog_get_shared_trace_queue(idx);
+	}
 
-    Assert(queue->q_pid == getpid());
+	Assert(queue->q_pid == getpid());
 
-    initStringInfo(&buf);
-    appendBinaryStringInfo(&buf, (const char *)(&len), sizeof(len));
+	initStringInfo(&buf);
+	appendBinaryStringInfo(&buf, (const char *)(&len), sizeof(len));
 
-    for (;;)
-    {
-        va_list        args;
-        int            needed;
-        va_start(args, fmt);
-        needed = appendStringInfoVA(&buf, fmt, args);
-        va_end(args);
-        if (needed == 0)
-        {
-            break;
-        }
-        enlargeStringInfo(&buf, needed);
-    }
+	for (;;)
+	{
+		va_list		args;
+		int			needed;
+		va_start(args, fmt);
+		needed = appendStringInfoVA(&buf, fmt, args);
+		va_end(args);
+		if (needed == 0)
+		{
+			break;
+		}
+		enlargeStringInfo(&buf, needed);
+	}
 
-    appendStringInfoChar(&buf, '\n');
+	appendStringInfoChar(&buf, '\n');
 
-    /* push string len to header */
-    len = buf.len - sizeof(len);
-    memcpy(buf.data, (char *)(&len), sizeof(len));
+	/* push string len to header */
+	len = buf.len - sizeof(len);
+	memcpy(buf.data, (char *)(&len), sizeof(len));
 
-    /* push total buff into queue */
-    len = buf.len;
-    while (false == alog_queue_push(queue, buf.data, len))
-    {
-        pg_usleep(AUDIT_SLEEP_MICROSEC);
-    }
+	/* push total buff into queue */
+	len = buf.len;
+	while (false == alog_queue_push(queue, buf.data, len))
+	{
+		if (!audit_shared_consumer_bitmap_get_value(consumer_id))
+		{
+			/*
+			 * set shared consumer bitmap value to 1 to
+			 * notify consumer to read log
+			 */
+			audit_shared_consumer_bitmap_set_value(consumer_id, 1);
 
-    pfree(buf.data);
+			/* Notify logger process that it's got something to do */
+			SendPostmasterSignal(PMSIGNAL_WAKEN_AUDIT_LOGGER);
+		}
 
-    if (!audit_shared_consumer_bitmap_get_value(consumer_id))
-    {
-        /* 
-         * set shared consumer bitmap value to 1 to
-         * notify consumer to read audit log
-         */
-        audit_shared_consumer_bitmap_set_value(consumer_id, 1);
+		pg_usleep(AUDIT_SLEEP_MICROSEC);
+	}
 
-        /* Notify audit logger process that it's got something to do */
-        SendPostmasterSignal(PMSIGNAL_WAKEN_AUDIT_LOGGER);
-    }
+	pfree(buf.data);
+
+	if (!audit_shared_consumer_bitmap_get_value(consumer_id))
+	{
+		/*
+		 * set shared consumer bitmap value to 1 to
+		 * notify consumer to read audit log
+		 */
+		audit_shared_consumer_bitmap_set_value(consumer_id, 1);
+
+		/* Notify audit logger process that it's got something to do */
+		SendPostmasterSignal(PMSIGNAL_WAKEN_AUDIT_LOGGER);
+	}
 }
 
 #endif
@@ -2603,15 +2995,15 @@ void alog(int destination, const char *fmt,...)
 static void * alog_shard_stat_main(void * arg)
 {
 	atexit(FlushShardStatistic);
-	
-    while (true)
-    {
-        long shard_stat_interval = g_ShardInfoFlushInterval * 1000000L;
-        
-        FlushShardStatistic();
-        
-        pg_usleep(shard_stat_interval);
-    }
+
+	while (true)
+	{
+		long shard_stat_interval = g_ShardInfoFlushInterval * 1000000L;
+
+		FlushShardStatistic();
+
+		pg_usleep(shard_stat_interval);
+	}
 
     return NULL;
 }
@@ -2632,4 +3024,3 @@ static void    alog_start_shard_stat_worker(void)
 }
 
 #endif
-

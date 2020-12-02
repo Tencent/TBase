@@ -409,6 +409,11 @@ do { \
     ((tup)->t_infomask |= HEAP_XMIN_FROZEN) \
 )
 
+#define HeapTupleHeaderXmaxCommitted(tup) \
+( \
+	((tup)->t_infomask & HEAP_XMAX_COMMITTED) != 0 \
+)
+
 /*
  * HeapTupleHeaderGetRawXmax gets you the raw Xmax field.  To find out the Xid
  * that updated a tuple, you might need to resolve the MultiXactId if certain

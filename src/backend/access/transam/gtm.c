@@ -1382,36 +1382,28 @@ GetGlobalTimestampGTM(void)
     if (log_gtm_stats)
         ShowUsageCommon("BeginTranGTM", &start_r, &start_t);
 
-retry:
-    
-    latest_gts = GetLatestCommitTS();
-    if (gts_result.gts != InvalidGlobalTimestamp && latest_gts > (gts_result.gts + GTM_CHECK_DELTA))
-    {
-        if(retries < 3)
-        {
-            retries++;
-            goto retry;
-        }
-        
-        elog(ERROR, "global gts:%lu is earlier than local gts:%lu, please check GTM status!", gts_result.gts + GTM_CHECK_DELTA, latest_gts);
-    }
+	latest_gts = GetLatestCommitTS();
+	if (gts_result.gts != InvalidGlobalTimestamp && latest_gts > (gts_result.gts + GTM_CHECK_DELTA))
+	{
+		elog(ERROR, "global gts:%lu is earlier than local gts:%lu, please check GTM status!", gts_result.gts + GTM_CHECK_DELTA, latest_gts);
+	}
 
-    /* if we are standby, use timestamp subtracting given interval */
-    if (IsStandbyPostgres() && query_delay)
-    {
-        GTM_Timestamp  interval = query_delay * USECS_PER_SEC;
+	/* if we are standby, use timestamp subtracting given interval */
+	if (IsStandbyPostgres() && query_delay)
+	{
+		GTM_Timestamp  interval = query_delay * USECS_PER_SEC;
 
-        gts_result.gts = gts_result.gts - interval;
+		gts_result.gts = gts_result.gts - interval;
 
-        if (gts_result.gts < FirstGlobalTimestamp)
-        {
-            gts_result.gts = FirstGlobalTimestamp;
-        }
-    }
+		if (gts_result.gts < FirstGlobalTimestamp)
+		{
+			gts_result.gts = FirstGlobalTimestamp;
+		}
+	}
 
-    GTM_ReadOnly = gts_result.gtm_readonly;
-    
-    return gts_result.gts;
+	GTM_ReadOnly = gts_result.gtm_readonly;
+	
+	return gts_result.gts;
 }
 #endif
 

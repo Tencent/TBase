@@ -167,34 +167,38 @@ static bool XidInMVCCSnapshot(TransactionId xid, Snapshot snapshot);
 
 GlobalTimestamp HeapTupleHderGetXminTimestapAtomic(HeapTupleHeader tuple)
 {
-    if(HEAP_XMIN_TIMESTAMP_IS_UPDATED(tuple->t_infomask2))
-        return HeapTupleHeaderGetXminTimestamp(tuple);
-    else
-        return InvalidGlobalTimestamp;
-
+	if (HEAP_XMIN_TIMESTAMP_IS_UPDATED(tuple->t_infomask2))
+	{
+		return HeapTupleHeaderGetXminTimestamp(tuple);
+	}
+	else
+	{
+		return InvalidGlobalTimestamp;
+	}
 }
 
 GlobalTimestamp HeapTupleHderGetXmaxTimestapAtomic(HeapTupleHeader tuple)
 {
-    if(HEAP_XMAX_TIMESTAMP_IS_UPDATED(tuple->t_infomask2))
-        return HeapTupleHeaderGetXmaxTimestamp(tuple);
-    else
-        return InvalidGlobalTimestamp;
-
+	if (HEAP_XMAX_TIMESTAMP_IS_UPDATED(tuple->t_infomask2))
+	{
+		return HeapTupleHeaderGetXmaxTimestamp(tuple);
+	}
+	else
+	{
+		return InvalidGlobalTimestamp;
+	}
 }
 
 void HeapTupleHderSetXminTimestapAtomic(HeapTupleHeader tuple, GlobalTimestamp committs)
 {
-    HeapTupleHeaderSetXminTimestamp(tuple, committs);
-    tuple->t_infomask2 |= HEAP_XMIN_TIMESTAMP_UPDATED;
-
+	HeapTupleHeaderSetXminTimestamp(tuple, committs);
+	tuple->t_infomask2 |= HEAP_XMIN_TIMESTAMP_UPDATED;
 }
 
 void HeapTupleHderSetXmaxTimestapAtomic(HeapTupleHeader tuple, GlobalTimestamp committs)
 {
-    HeapTupleHeaderSetXmaxTimestamp(tuple, committs);
-    tuple->t_infomask2 |= HEAP_XMAX_TIMESTAMP_UPDATED;
-
+	HeapTupleHeaderSetXmaxTimestamp(tuple, committs);
+	tuple->t_infomask2 |= HEAP_XMAX_TIMESTAMP_UPDATED;
 }
 
 
@@ -263,6 +267,21 @@ SetHintBits(HeapTupleHeader tuple, Buffer buffer,
             if(TransactionIdIsNormal(xmin) && TransactionIdGetCommitTsData(xmin, &global_timestamp, NULL))
             {
             	HeapTupleHderSetXminTimestapAtomic(tuple, global_timestamp);
+                if (enable_committs_print)
+				{
+					BufferDesc *bufHdr = GetBufferDescriptor(buffer - 1);
+					RelFileNode *rnode = &bufHdr->tag.rnode;
+
+					elog(LOG,
+						"SetHintBits: relfilenode %u pageno %u "
+						"CTID %hu/%hu/%hu "
+						"infomask %d xmin %u xmin_gts "INT64_FORMAT,
+						rnode->relNode, bufHdr->tag.blockNum,
+						tuple->t_ctid.ip_blkid.bi_hi,
+						tuple->t_ctid.ip_blkid.bi_lo,
+						tuple->t_ctid.ip_posid,
+						tuple->t_infomask, xmin, global_timestamp);
+				}
             }
         }
 
@@ -275,6 +294,23 @@ SetHintBits(HeapTupleHeader tuple, Buffer buffer,
             if(TransactionIdIsNormal(xmax) && TransactionIdGetCommitTsData(xmax, &global_timestamp, NULL))
             {
             	HeapTupleHderSetXmaxTimestapAtomic(tuple, global_timestamp);
+                if (enable_committs_print)
+				{
+					BufferDesc *bufHdr = GetBufferDescriptor(buffer - 1);
+					RelFileNode *rnode = &bufHdr->tag.rnode;
+
+					elog(LOG,
+						"SetHintBits: relfilenode %u pageno %u "
+						"CTID %hu/%hu/%hu "
+						"infomask %d multixact %d "
+						"xid %u xmax %u xmax_gts "INT64_FORMAT,
+						rnode->relNode, bufHdr->tag.blockNum,
+						tuple->t_ctid.ip_blkid.bi_hi,
+						tuple->t_ctid.ip_blkid.bi_lo,
+						tuple->t_ctid.ip_posid,
+						tuple->t_infomask, tuple->t_infomask & HEAP_XMAX_IS_MULTI,
+						HeapTupleHeaderGetUpdateXid(tuple), xmax, global_timestamp);
+				}
             }
         }
     }

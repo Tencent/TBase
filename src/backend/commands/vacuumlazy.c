@@ -34,8 +34,10 @@
  */
 #include "postgres.h"
 
+#include <execinfo.h>
 #include <math.h>
 
+#include "access/commit_ts.h"
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/heapam_xlog.h"
@@ -45,6 +47,7 @@
 #include "access/visibilitymap.h"
 #include "access/xlog.h"
 #include "access/xlogutils.h"
+#include "bootstrap/bootstrap.h"
 #include "catalog/catalog.h"
 #include "catalog/storage.h"
 #include "commands/dbcommands.h"
@@ -53,7 +56,9 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "portability/instr_time.h"
+#include "postmaster/auditlogger.h"
 #include "postmaster/autovacuum.h"
+#include "postmaster/postmaster.h"
 #include "storage/bufmgr.h"
 #include "storage/freespace.h"
 #include "storage/lmgr.h"
@@ -135,6 +140,13 @@ typedef struct LVRelStats
     bool        lock_waiter_detected;
 } LVRelStats;
 
+int	gts_maintain_option;
+
+static void PrintStack(void);
+static void PrintData(RelFileNode *rnode,
+	BlockNumber blkno, Page page, OffsetNumber lineoff,
+	GlobalTimestamp tlog_xmin_gts, GlobalTimestamp tlog_xmax_gts);
+static void MaintainGTS(RelFileNode *rnode, BlockNumber blkno, Buffer buffer);
 
 /* A few variables that don't seem worth passing around as parameters */
 static int    elevel = -1;
@@ -991,192 +1003,198 @@ lazy_scan_heap(Relation onerel, int options, LVRelStats *vacrelstats,
                                 relname, blkno)));
                 PageInit(page, BufferGetPageSize(buf), 0);
 #endif
-                empty_pages++;
-                UnlockReleaseBuffer(buf);
-                RecordNewPageWithFullFreeSpace(onerel, blkno);
-            }
-            else
-            {
-                UnlockReleaseBuffer(buf);
-                freespace = PageGetHeapFreeSpace(page);
-                RecordPageWithFreeSpace(onerel, blkno, freespace);
-                MarkBufferDirty(buf);
-            }
-#endif                        
-            continue;
-        }
+				empty_pages++;
+				UnlockReleaseBuffer(buf);
+				RecordNewPageWithFullFreeSpace(onerel, blkno);
+			}
+			else
+			{
+				UnlockReleaseBuffer(buf);
+				freespace = PageGetHeapFreeSpace(page);
+				RecordPageWithFreeSpace(onerel, blkno, freespace);
+				MarkBufferDirty(buf);
+			}
+#endif						
+			continue;
+		}
 
-        if (PageIsEmpty(page))
-        {
-            empty_pages++;
-            freespace = PageGetHeapFreeSpace(page);
+		if (PageIsEmpty(page))
+		{
+			empty_pages++;
+			freespace = PageGetHeapFreeSpace(page);
 
-            /* empty pages are always all-visible and all-frozen */
-            if (!PageIsAllVisible(page))
-            {
-                START_CRIT_SECTION();
+			/* empty pages are always all-visible and all-frozen */
+			if (!PageIsAllVisible(page))
+			{
+				START_CRIT_SECTION();
 
-                /* mark buffer dirty before writing a WAL record */
-                MarkBufferDirty(buf);
+				/* mark buffer dirty before writing a WAL record */
+				MarkBufferDirty(buf);
 
-                /*
-                 * It's possible that another backend has extended the heap,
-                 * initialized the page, and then failed to WAL-log the page
-                 * due to an ERROR.  Since heap extension is not WAL-logged,
-                 * recovery might try to replay our record setting the page
-                 * all-visible and find that the page isn't initialized, which
-                 * will cause a PANIC.  To prevent that, check whether the
-                 * page has been previously WAL-logged, and if not, do that
-                 * now.
-                 */
-                if (RelationNeedsWAL(onerel) &&
-                    PageGetLSN(page) == InvalidXLogRecPtr)
-                    log_newpage_buffer(buf, true);
+				/*
+				 * It's possible that another backend has extended the heap,
+				 * initialized the page, and then failed to WAL-log the page
+				 * due to an ERROR.  Since heap extension is not WAL-logged,
+				 * recovery might try to replay our record setting the page
+				 * all-visible and find that the page isn't initialized, which
+				 * will cause a PANIC.  To prevent that, check whether the
+				 * page has been previously WAL-logged, and if not, do that
+				 * now.
+				 */
+				if (RelationNeedsWAL(onerel) &&
+					PageGetLSN(page) == InvalidXLogRecPtr)
+					log_newpage_buffer(buf, true);
 
-                PageSetAllVisible(page);
-                visibilitymap_set(onerel, blkno, buf, InvalidXLogRecPtr,
-                                  vmbuffer, InvalidTransactionId,
-                                  VISIBILITYMAP_ALL_VISIBLE | VISIBILITYMAP_ALL_FROZEN);
-                END_CRIT_SECTION();
-            }
+				PageSetAllVisible(page);
+				visibilitymap_set(onerel, blkno, buf, InvalidXLogRecPtr,
+								  vmbuffer, InvalidTransactionId,
+								  VISIBILITYMAP_ALL_VISIBLE | VISIBILITYMAP_ALL_FROZEN);
+				END_CRIT_SECTION();
+			}
 
-            UnlockReleaseBuffer(buf);
-            RecordPageWithFreeSpace(onerel, blkno, freespace);
-            continue;
-        }
+			UnlockReleaseBuffer(buf);
+			RecordPageWithFreeSpace(onerel, blkno, freespace);
+			continue;
+		}
 
+#ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
+		if (gts_maintain_option != GTS_MAINTAIN_NOTHING)
+		{
+			MaintainGTS(&onerel->rd_node, blkno, buf);
+		}
+#endif
 
-        /*
-         * Prune all HOT-update chains in this page.
-         *
-         * We count tuples removed by the pruning step as removed by VACUUM.
-         */
-        tups_vacuumed += heap_page_prune(onerel, buf, OldestXmin, false,
-                                         &vacrelstats->latestRemovedXid);
+		/*
+		 * Prune all HOT-update chains in this page.
+		 *
+		 * We count tuples removed by the pruning step as removed by VACUUM.
+		 */
+		tups_vacuumed += heap_page_prune(onerel, buf, OldestXmin, false,
+										 &vacrelstats->latestRemovedXid);
 
-        /*
-         * Now scan the page to collect vacuumable items and check for tuples
-         * requiring freezing.
-         */
-        all_visible = true;
-        has_dead_tuples = false;
-        nfrozen = 0;
-        hastup = false;
-        prev_dead_count = vacrelstats->num_dead_tuples;
-        maxoff = PageGetMaxOffsetNumber(page);
+		/*
+		 * Now scan the page to collect vacuumable items and check for tuples
+		 * requiring freezing.
+		 */
+		all_visible = true;
+		has_dead_tuples = false;
+		nfrozen = 0;
+		hastup = false;
+		prev_dead_count = vacrelstats->num_dead_tuples;
+		maxoff = PageGetMaxOffsetNumber(page);
 
-        /*
-         * Note: If you change anything in the loop below, also look at
-         * heap_page_is_all_visible to see if that needs to be changed.
-         */
-        for (offnum = FirstOffsetNumber;
-             offnum <= maxoff;
-             offnum = OffsetNumberNext(offnum))
-        {
-            ItemId        itemid;
+		/*
+		 * Note: If you change anything in the loop below, also look at
+		 * heap_page_is_all_visible to see if that needs to be changed.
+		 */
+		for (offnum = FirstOffsetNumber;
+			 offnum <= maxoff;
+			 offnum = OffsetNumberNext(offnum))
+		{
+			ItemId		itemid;
 
-            itemid = PageGetItemId(page, offnum);
+			itemid = PageGetItemId(page, offnum);
 
-            /* Unused items require no processing, but we count 'em */
-            if (!ItemIdIsUsed(itemid))
-            {
-                nunused += 1;
-                continue;
-            }
+			/* Unused items require no processing, but we count 'em */
+			if (!ItemIdIsUsed(itemid))
+			{
+				nunused += 1;
+				continue;
+			}
 
-            /* Redirect items mustn't be touched */
-            if (ItemIdIsRedirected(itemid))
-            {
-                hastup = true;    /* this page won't be truncatable */
-                continue;
-            }
+			/* Redirect items mustn't be touched */
+			if (ItemIdIsRedirected(itemid))
+			{
+				hastup = true;	/* this page won't be truncatable */
+				continue;
+			}
 
-            ItemPointerSet(&(tuple.t_self), blkno, offnum);
+			ItemPointerSet(&(tuple.t_self), blkno, offnum);
 
-            /*
-             * DEAD item pointers are to be vacuumed normally; but we don't
-             * count them in tups_vacuumed, else we'd be double-counting (at
-             * least in the common case where heap_page_prune() just freed up
-             * a non-HOT tuple).
-             */
-            if (ItemIdIsDead(itemid))
-            {
-                lazy_record_dead_tuple(vacrelstats, &(tuple.t_self));
-                all_visible = false;
-                continue;
-            }
+			/*
+			 * DEAD item pointers are to be vacuumed normally; but we don't
+			 * count them in tups_vacuumed, else we'd be double-counting (at
+			 * least in the common case where heap_page_prune() just freed up
+			 * a non-HOT tuple).
+			 */
+			if (ItemIdIsDead(itemid))
+			{
+				lazy_record_dead_tuple(vacrelstats, &(tuple.t_self));
+				all_visible = false;
+				continue;
+			}
 
-            Assert(ItemIdIsNormal(itemid));
+			Assert(ItemIdIsNormal(itemid));
 
-            tuple.t_data = (HeapTupleHeader) PageGetItem(page, itemid);
-            tuple.t_len = ItemIdGetLength(itemid);
-            tuple.t_tableOid = RelationGetRelid(onerel);
+			tuple.t_data = (HeapTupleHeader) PageGetItem(page, itemid);
+			tuple.t_len = ItemIdGetLength(itemid);
+			tuple.t_tableOid = RelationGetRelid(onerel);
 
-            tupgone = false;
+			tupgone = false;
 
-            switch (HeapTupleSatisfiesVacuum(&tuple, OldestXmin, buf))
-            {
-                case HEAPTUPLE_DEAD:
+			switch (HeapTupleSatisfiesVacuum(&tuple, OldestXmin, buf))
+			{
+				case HEAPTUPLE_DEAD:
 
-                    /*
-                     * Ordinarily, DEAD tuples would have been removed by
-                     * heap_page_prune(), but it's possible that the tuple
-                     * state changed since heap_page_prune() looked.  In
-                     * particular an INSERT_IN_PROGRESS tuple could have
-                     * changed to DEAD if the inserter aborted.  So this
-                     * cannot be considered an error condition.
-                     *
-                     * If the tuple is HOT-updated then it must only be
-                     * removed by a prune operation; so we keep it just as if
-                     * it were RECENTLY_DEAD.  Also, if it's a heap-only
-                     * tuple, we choose to keep it, because it'll be a lot
-                     * cheaper to get rid of it in the next pruning pass than
-                     * to treat it like an indexed tuple.
-                     */
-                    if (HeapTupleIsHotUpdated(&tuple) ||
-                        HeapTupleIsHeapOnly(&tuple))
-                        nkeep += 1;
-                    else
-                        tupgone = true; /* we can delete the tuple */
-                    all_visible = false;
-                    break;
-                case HEAPTUPLE_LIVE:
-                    /* Tuple is good --- but let's do some validity checks */
-                    if (onerel->rd_rel->relhasoids &&
-                        !OidIsValid(HeapTupleGetOid(&tuple)))
-                        elog(WARNING, "relation \"%s\" TID %u/%u: OID is invalid",
-                             relname, blkno, offnum);
+					/*
+					 * Ordinarily, DEAD tuples would have been removed by
+					 * heap_page_prune(), but it's possible that the tuple
+					 * state changed since heap_page_prune() looked.  In
+					 * particular an INSERT_IN_PROGRESS tuple could have
+					 * changed to DEAD if the inserter aborted.  So this
+					 * cannot be considered an error condition.
+					 *
+					 * If the tuple is HOT-updated then it must only be
+					 * removed by a prune operation; so we keep it just as if
+					 * it were RECENTLY_DEAD.  Also, if it's a heap-only
+					 * tuple, we choose to keep it, because it'll be a lot
+					 * cheaper to get rid of it in the next pruning pass than
+					 * to treat it like an indexed tuple.
+					 */
+					if (HeapTupleIsHotUpdated(&tuple) ||
+						HeapTupleIsHeapOnly(&tuple))
+						nkeep += 1;
+					else
+						tupgone = true; /* we can delete the tuple */
+					all_visible = false;
+					break;
+				case HEAPTUPLE_LIVE:
+					/* Tuple is good --- but let's do some validity checks */
+					if (onerel->rd_rel->relhasoids &&
+						!OidIsValid(HeapTupleGetOid(&tuple)))
+						elog(WARNING, "relation \"%s\" TID %u/%u: OID is invalid",
+							 relname, blkno, offnum);
 
-                    /*
-                     * Is the tuple definitely visible to all transactions?
-                     *
-                     * NB: Like with per-tuple hint bits, we can't set the
-                     * PD_ALL_VISIBLE flag if the inserter committed
-                     * asynchronously. See SetHintBits for more info. Check
-                     * that the tuple is hinted xmin-committed because of
-                     * that.
-                     */
-                    if (all_visible)
-                    {
-                        TransactionId xmin;
+					/*
+					 * Is the tuple definitely visible to all transactions?
+					 *
+					 * NB: Like with per-tuple hint bits, we can't set the
+					 * PD_ALL_VISIBLE flag if the inserter committed
+					 * asynchronously. See SetHintBits for more info. Check
+					 * that the tuple is hinted xmin-committed because of
+					 * that.
+					 */
+					if (all_visible)
+					{
+						TransactionId xmin;
 
-                        if (!HeapTupleHeaderXminCommitted(tuple.t_data))
-                        {
-                            all_visible = false;
-                            break;
-                        }
+						if (!HeapTupleHeaderXminCommitted(tuple.t_data))
+						{
+							all_visible = false;
+							break;
+						}
 
-                        /*
-                         * The inserter definitely committed. But is it old
-                         * enough that everyone sees it as committed?
-                         */
-                        xmin = HeapTupleHeaderGetXmin(tuple.t_data);
-                        if (!TransactionIdPrecedes(xmin, OldestXmin))
-                        {
-                            all_visible = false;
-                            break;
-                        }
-                    
+						/*
+						 * The inserter definitely committed. But is it old
+						 * enough that everyone sees it as committed?
+						 */
+						xmin = HeapTupleHeaderGetXmin(tuple.t_data);
+						if (!TransactionIdPrecedes(xmin, OldestXmin))
+						{
+							all_visible = false;
+							break;
+						}
+					
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
                         {
                             GlobalTimestamp committs = HeapTupleHderGetXminTimestapAtomic(tuple.t_data);
@@ -1203,220 +1221,227 @@ lazy_scan_heap(Relation onerel, int options, LVRelStats *vacrelstats,
                         }
 #endif
 
-                        /* Track newest xmin on page. */
-                        if (TransactionIdFollows(xmin, visibility_cutoff_xid))
-                            visibility_cutoff_xid = xmin;
-                    }
-                    break;
-                case HEAPTUPLE_RECENTLY_DEAD:
+						/* Track newest xmin on page. */
+						if (TransactionIdFollows(xmin, visibility_cutoff_xid))
+							visibility_cutoff_xid = xmin;
+					}
+					break;
+				case HEAPTUPLE_RECENTLY_DEAD:
 
-                    /*
-                     * If tuple is recently deleted then we must not remove it
-                     * from relation.
-                     */
-                    nkeep += 1;
-                    all_visible = false;
-                    break;
-                case HEAPTUPLE_INSERT_IN_PROGRESS:
-                    /* This is an expected case during concurrent vacuum */
-                    all_visible = false;
-                    break;
-                case HEAPTUPLE_DELETE_IN_PROGRESS:
-                    /* This is an expected case during concurrent vacuum */
-                    all_visible = false;
-                    break;
-                default:
-                    elog(ERROR, "unexpected HeapTupleSatisfiesVacuum result");
-                    break;
-            }
+					/*
+					 * If tuple is recently deleted then we must not remove it
+					 * from relation.
+					 */
+					nkeep += 1;
+					all_visible = false;
+					break;
+				case HEAPTUPLE_INSERT_IN_PROGRESS:
+					/* This is an expected case during concurrent vacuum */
+					all_visible = false;
+					break;
+				case HEAPTUPLE_DELETE_IN_PROGRESS:
+					/* This is an expected case during concurrent vacuum */
+					all_visible = false;
+					break;
+				default:
+					elog(ERROR, "unexpected HeapTupleSatisfiesVacuum result");
+					break;
+			}
 
-            if (tupgone)
-            {
-                lazy_record_dead_tuple(vacrelstats, &(tuple.t_self));
-                HeapTupleHeaderAdvanceLatestRemovedXid(tuple.t_data,
-                                                       &vacrelstats->latestRemovedXid);
-                tups_vacuumed += 1;
-                has_dead_tuples = true;
-            }
-            else
-            {
-                bool        tuple_totally_frozen;
+			if (tupgone)
+			{
+				lazy_record_dead_tuple(vacrelstats, &(tuple.t_self));
+				HeapTupleHeaderAdvanceLatestRemovedXid(tuple.t_data,
+													   &vacrelstats->latestRemovedXid);
+				tups_vacuumed += 1;
+				has_dead_tuples = true;
+			}
+			else
+			{
+				bool		tuple_totally_frozen;
 
-                num_tuples += 1;
-                hastup = true;
+				num_tuples += 1;
+				hastup = true;
 
-                /*
-                 * Each non-removable tuple must be checked to see if it needs
-                 * freezing.  Note we already have exclusive buffer lock.
-                 */
-                if (heap_prepare_freeze_tuple(tuple.t_data, FreezeLimit,
-                                              MultiXactCutoff, &frozen[nfrozen],
-                                              &tuple_totally_frozen))
-                    frozen[nfrozen++].offset = offnum;
+				/*
+				 * Each non-removable tuple must be checked to see if it needs
+				 * freezing.  Note we already have exclusive buffer lock.
+				 */
+				if (heap_prepare_freeze_tuple(tuple.t_data, FreezeLimit,
+											  MultiXactCutoff, &frozen[nfrozen],
+											  &tuple_totally_frozen))
+					frozen[nfrozen++].offset = offnum;
 
-                if (!tuple_totally_frozen)
-                    all_frozen = false;
-            }
-        }                        /* scan along page */
+				if (!tuple_totally_frozen)
+					all_frozen = false;
+			}
+		}						/* scan along page */
 
-        /*
-         * If we froze any tuples, mark the buffer dirty, and write a WAL
-         * record recording the changes.  We must log the changes to be
-         * crash-safe against future truncation of CLOG.
-         */
-        if (nfrozen > 0)
-        {
-            START_CRIT_SECTION();
+		/*
+		 * If we froze any tuples, mark the buffer dirty, and write a WAL
+		 * record recording the changes.  We must log the changes to be
+		 * crash-safe against future truncation of CLOG.
+		 */
+		if (nfrozen > 0)
+		{
+			START_CRIT_SECTION();
 
-            MarkBufferDirty(buf);
+			MarkBufferDirty(buf);
 
-            /* execute collected freezes */
-            for (i = 0; i < nfrozen; i++)
-            {
-                ItemId        itemid;
-                HeapTupleHeader htup;
+			/* execute collected freezes */
+			for (i = 0; i < nfrozen; i++)
+			{
+				ItemId		itemid;
+				HeapTupleHeader htup;
 
-                itemid = PageGetItemId(page, frozen[i].offset);
-                htup = (HeapTupleHeader) PageGetItem(page, itemid);
+				itemid = PageGetItemId(page, frozen[i].offset);
+				htup = (HeapTupleHeader) PageGetItem(page, itemid);
 
-                heap_execute_freeze_tuple(htup, &frozen[i]);
-            }
+				heap_execute_freeze_tuple(htup, &frozen[i]);
+			}
 
-            /* Now WAL-log freezing if necessary */
-            if (RelationNeedsWAL(onerel))
-            {
-                XLogRecPtr    recptr;
+			/* Now WAL-log freezing if necessary */
+			if (RelationNeedsWAL(onerel))
+			{
+				XLogRecPtr	recptr;
 
-                recptr = log_heap_freeze(onerel, buf, FreezeLimit,
-                                         frozen, nfrozen);
-                PageSetLSN(page, recptr);
-            }
+				recptr = log_heap_freeze(onerel, buf, FreezeLimit,
+										 frozen, nfrozen);
+				PageSetLSN(page, recptr);
+			}
 
-            END_CRIT_SECTION();
-        }
+			END_CRIT_SECTION();
+		}
 
-        /*
-         * If there are no indexes then we can vacuum the page right now
-         * instead of doing a second scan.
-         */
-        if (nindexes == 0 &&
-            vacrelstats->num_dead_tuples > 0)
-        {
-            /* Remove tuples from heap */
-            lazy_vacuum_page(onerel, blkno, buf, 0, vacrelstats, &vmbuffer);
-            has_dead_tuples = false;
+		/*
+		 * If there are no indexes then we can vacuum the page right now
+		 * instead of doing a second scan.
+		 */
+		if (nindexes == 0 &&
+			vacrelstats->num_dead_tuples > 0)
+		{
+			/* Remove tuples from heap */
+			lazy_vacuum_page(onerel, blkno, buf, 0, vacrelstats, &vmbuffer);
+			has_dead_tuples = false;
 
-            /*
-             * Forget the now-vacuumed tuples, and press on, but be careful
-             * not to reset latestRemovedXid since we want that value to be
-             * valid.
-             */
-            vacrelstats->num_dead_tuples = 0;
-            vacuumed_pages++;
-        }
+			/*
+			 * Forget the now-vacuumed tuples, and press on, but be careful
+			 * not to reset latestRemovedXid since we want that value to be
+			 * valid.
+			 */
+			vacrelstats->num_dead_tuples = 0;
+			vacuumed_pages++;
+		}
 
-        freespace = PageGetHeapFreeSpace(page);
+		freespace = PageGetHeapFreeSpace(page);
 
-        /* mark page all-visible, if appropriate */
-        if (all_visible && !all_visible_according_to_vm)
-        {
-            uint8        flags = VISIBILITYMAP_ALL_VISIBLE;
+		/* mark page all-visible, if appropriate */
+		if (all_visible && !all_visible_according_to_vm)
+		{
+			uint8		flags = VISIBILITYMAP_ALL_VISIBLE;
 
-            if (all_frozen)
-                flags |= VISIBILITYMAP_ALL_FROZEN;
+			if (all_frozen)
+				flags |= VISIBILITYMAP_ALL_FROZEN;
 
-            /*
-             * It should never be the case that the visibility map page is set
-             * while the page-level bit is clear, but the reverse is allowed
-             * (if checksums are not enabled).  Regardless, set the both bits
-             * so that we get back in sync.
-             *
-             * NB: If the heap page is all-visible but the VM bit is not set,
-             * we don't need to dirty the heap page.  However, if checksums
-             * are enabled, we do need to make sure that the heap page is
-             * dirtied before passing it to visibilitymap_set(), because it
-             * may be logged.  Given that this situation should only happen in
-             * rare cases after a crash, it is not worth optimizing.
-             */
-            PageSetAllVisible(page);
-            MarkBufferDirty(buf);
-            visibilitymap_set(onerel, blkno, buf, InvalidXLogRecPtr,
-                              vmbuffer, visibility_cutoff_xid, flags);
-        }
+			/*
+			 * It should never be the case that the visibility map page is set
+			 * while the page-level bit is clear, but the reverse is allowed
+			 * (if checksums are not enabled).  Regardless, set the both bits
+			 * so that we get back in sync.
+			 *
+			 * NB: If the heap page is all-visible but the VM bit is not set,
+			 * we don't need to dirty the heap page.  However, if checksums
+			 * are enabled, we do need to make sure that the heap page is
+			 * dirtied before passing it to visibilitymap_set(), because it
+			 * may be logged.  Given that this situation should only happen in
+			 * rare cases after a crash, it is not worth optimizing.
+			 */
+			PageSetAllVisible(page);
+			MarkBufferDirty(buf);
+			visibilitymap_set(onerel, blkno, buf, InvalidXLogRecPtr,
+							  vmbuffer, visibility_cutoff_xid, flags);
+		}
 
-        /*
-         * As of PostgreSQL 9.2, the visibility map bit should never be set if
-         * the page-level bit is clear.  However, it's possible that the bit
-         * got cleared after we checked it and before we took the buffer
-         * content lock, so we must recheck before jumping to the conclusion
-         * that something bad has happened.
-         */
-        else if (all_visible_according_to_vm && !PageIsAllVisible(page)
-                 && VM_ALL_VISIBLE(onerel, blkno, &vmbuffer))
-        {
-            elog(WARNING, "page is not marked all-visible but visibility map bit is set in relation \"%s\" page %u",
-                 relname, blkno);
-            visibilitymap_clear(onerel, blkno, vmbuffer,
-                                VISIBILITYMAP_VALID_BITS);
-        }
+		/*
+		 * As of PostgreSQL 9.2, the visibility map bit should never be set if
+		 * the page-level bit is clear.  However, it's possible that the bit
+		 * got cleared after we checked it and before we took the buffer
+		 * content lock, so we must recheck before jumping to the conclusion
+		 * that something bad has happened.
+		 */
+		else if (all_visible_according_to_vm && !PageIsAllVisible(page)
+				 && VM_ALL_VISIBLE(onerel, blkno, &vmbuffer))
+		{
+			elog(WARNING, "page is not marked all-visible but visibility map bit is set in relation \"%s\" page %u",
+				 relname, blkno);
+			visibilitymap_clear(onerel, blkno, vmbuffer,
+								VISIBILITYMAP_VALID_BITS);
+		}
 
-        /*
-         * It's possible for the value returned by GetOldestXmin() to move
-         * backwards, so it's not wrong for us to see tuples that appear to
-         * not be visible to everyone yet, while PD_ALL_VISIBLE is already
-         * set. The real safe xmin value never moves backwards, but
-         * GetOldestXmin() is conservative and sometimes returns a value
-         * that's unnecessarily small, so if we see that contradiction it just
-         * means that the tuples that we think are not visible to everyone yet
-         * actually are, and the PD_ALL_VISIBLE flag is correct.
-         *
-         * There should never be dead tuples on a page with PD_ALL_VISIBLE
-         * set, however.
-         */
-        else if (PageIsAllVisible(page) && has_dead_tuples)
-        {
-            elog(WARNING, "page containing dead tuples is marked as all-visible in relation \"%s\" page %u",
-                 relname, blkno);
-            PageClearAllVisible(page);
-            MarkBufferDirty(buf);
-            visibilitymap_clear(onerel, blkno, vmbuffer,
-                                VISIBILITYMAP_VALID_BITS);
-        }
+		/*
+		 * It's possible for the value returned by GetOldestXmin() to move
+		 * backwards, so it's not wrong for us to see tuples that appear to
+		 * not be visible to everyone yet, while PD_ALL_VISIBLE is already
+		 * set. The real safe xmin value never moves backwards, but
+		 * GetOldestXmin() is conservative and sometimes returns a value
+		 * that's unnecessarily small, so if we see that contradiction it just
+		 * means that the tuples that we think are not visible to everyone yet
+		 * actually are, and the PD_ALL_VISIBLE flag is correct.
+		 *
+		 * There should never be dead tuples on a page with PD_ALL_VISIBLE
+		 * set, however.
+		 */
+		else if (PageIsAllVisible(page) && has_dead_tuples)
+		{
+			elog(WARNING, "page containing dead tuples is marked as all-visible in relation \"%s\" page %u",
+				 relname, blkno);
+			PageClearAllVisible(page);
+			MarkBufferDirty(buf);
+			visibilitymap_clear(onerel, blkno, vmbuffer,
+								VISIBILITYMAP_VALID_BITS);
+		}
 
-        /*
-         * If the all-visible page is turned out to be all-frozen but not
-         * marked, we should so mark it.  Note that all_frozen is only valid
-         * if all_visible is true, so we must check both.
-         */
-        else if (all_visible_according_to_vm && all_visible && all_frozen &&
-                 !VM_ALL_FROZEN(onerel, blkno, &vmbuffer))
-        {
-            /*
-             * We can pass InvalidTransactionId as the cutoff XID here,
-             * because setting the all-frozen bit doesn't cause recovery
-             * conflicts.
-             */
-            visibilitymap_set(onerel, blkno, buf, InvalidXLogRecPtr,
-                              vmbuffer, InvalidTransactionId,
-                              VISIBILITYMAP_ALL_FROZEN);
-        }
+		/*
+		 * If the all-visible page is turned out to be all-frozen but not
+		 * marked, we should so mark it.  Note that all_frozen is only valid
+		 * if all_visible is true, so we must check both.
+		 */
+		else if (all_visible_according_to_vm && all_visible && all_frozen &&
+				 !VM_ALL_FROZEN(onerel, blkno, &vmbuffer))
+		{
+			/*
+			 * We can pass InvalidTransactionId as the cutoff XID here,
+			 * because setting the all-frozen bit doesn't cause recovery
+			 * conflicts.
+			 */
+			visibilitymap_set(onerel, blkno, buf, InvalidXLogRecPtr,
+							  vmbuffer, InvalidTransactionId,
+							  VISIBILITYMAP_ALL_FROZEN);
+		}
 
-        UnlockReleaseBuffer(buf);
+#ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
+		if (gts_maintain_option != GTS_MAINTAIN_NOTHING)
+		{
+			MaintainGTS(&onerel->rd_node, blkno, buf);
+		}
+#endif
 
-        /* Remember the location of the last page with nonremovable tuples */
-        if (hastup)
-            vacrelstats->nonempty_pages = blkno + 1;
+		UnlockReleaseBuffer(buf);
 
-        /*
-         * If we remembered any tuples for deletion, then the page will be
-         * visited again by lazy_vacuum_heap, which will compute and record
-         * its post-compaction free space.  If not, then we're done with this
-         * page, so remember its free space as-is.  (This path will always be
-         * taken if there are no indexes.)
-         */
-        if (vacrelstats->num_dead_tuples == prev_dead_count)
-            RecordPageWithFreeSpace(onerel, blkno, freespace);
-    }
+		/* Remember the location of the last page with nonremovable tuples */
+		if (hastup)
+			vacrelstats->nonempty_pages = blkno + 1;
+
+		/*
+		 * If we remembered any tuples for deletion, then the page will be
+		 * visited again by lazy_vacuum_heap, which will compute and record
+		 * its post-compaction free space.  If not, then we're done with this
+		 * page, so remember its free space as-is.  (This path will always be
+		 * taken if there are no indexes.)
+		 */
+		if (vacrelstats->num_dead_tuples == prev_dead_count)
+			RecordPageWithFreeSpace(onerel, blkno, freespace);
+	}
 
     /* report that everything is scanned and vacuumed */
     pgstat_progress_update_param(PROGRESS_VACUUM_HEAP_BLKS_SCANNED, blkno);
@@ -1593,6 +1618,7 @@ lazy_vacuum_heap(Relation onerel, LVRelStats *vacrelstats)
                     tupindex, npages),
              errdetail_internal("%s", pg_rusage_show(&ru0))));
 }
+
 
 /*
  *    lazy_vacuum_page() -- free dead tuples on a page
@@ -2655,3 +2681,297 @@ xlog_reinit_extent_pages(RelFileNode rnode, ExtentID eid)
 }
 
 #endif
+
+#define STACK_SIZE 64
+
+/*
+ * print error stack to maintain_trace file.
+ */
+static void
+PrintStack(void)
+{
+	void *trace[STACK_SIZE] = {0};
+	size_t size = backtrace(trace, STACK_SIZE);
+	char **symbols = (char **) backtrace_symbols(trace, size);
+	size_t i = 0;
+	time_t t = 0;
+	struct tm *timeInfo = NULL;
+
+	if (symbols == NULL)
+	{
+		return;
+	}
+
+	time(&t);
+	timeInfo = localtime(&t);
+	trace_log("Dumping stack starts at %s", asctime(timeInfo));
+	trace_log("backtrace() returned %zu addresses.", size);
+	for (i = 1; i < size; i++)
+	{
+		char syscom[MAXPGPATH] = {0};
+		FILE *fcmd = NULL;
+		char temp[MAXPGPATH] = {0};
+
+		trace_log("#%-2zu %s", i, symbols[i]);
+
+		snprintf(syscom, MAXPGPATH, "addr2line %p -e %s -f -C", trace[i], exename);
+		fcmd = popen(syscom, "r");
+		if (fcmd == NULL)
+		{
+			continue;
+		}
+		while (fgets(temp, sizeof(temp), fcmd) != NULL)
+		{
+			/* ignore the ending "\n" */
+			trace_log("    %.*s", (int) strlen(temp) - 1, temp);
+		}
+		pclose(fcmd);
+	}
+	trace_log("Dumping stack ends.\n");
+
+	free(symbols);
+}
+
+/*
+ * print error data to maintain file.
+ */
+static void
+PrintData(RelFileNode *rnode, BlockNumber blkno, Page page, OffsetNumber lineoff,
+	GlobalTimestamp tlog_xmin_gts, GlobalTimestamp tlog_xmax_gts)
+{
+	XLogRecPtr	lsn = PageGetLSN(page);
+	PageHeader pagehdr = (PageHeader) page;
+	ItemId id = PageGetItemId(page, lineoff);
+	uint16 lp_offset = 0;
+	uint16 lp_flags = 0;
+	uint16 lp_len = 0;
+	HeapTupleHeader tuphdr = NULL;
+	TransactionId xmin = 0;
+	TransactionId xmax = 0;
+	GlobalTimestamp tuple_xmin_gts = 0;
+	GlobalTimestamp tuple_xmax_gts = 0;
+	uint32 cid = 0;
+	uint32 infomask2 = 0;
+	uint32 infomask = 0;
+	ShardID shardid = 0;
+	uint8 hoff = 0;
+	time_t t = 0;
+	struct tm *timeInfo = NULL;
+
+	lp_offset = ItemIdGetOffset(id);
+	lp_flags = ItemIdGetFlags(id);
+	lp_len = ItemIdGetLength(id);
+
+	tuphdr = (HeapTupleHeader)PageGetItem(page, id);
+	xmin = HeapTupleHeaderGetRawXmin(tuphdr);
+	xmax = HeapTupleHeaderGetRawXmax(tuphdr);
+	tuple_xmin_gts = HeapTupleHeaderGetXminTimestamp(tuphdr);
+	tuple_xmax_gts = HeapTupleHeaderGetXmaxTimestamp(tuphdr);
+	cid = HeapTupleHeaderGetRawCommandId(tuphdr);
+	infomask2 = tuphdr->t_infomask2;
+	infomask = tuphdr->t_infomask;
+	shardid = tuphdr->t_shardid;
+	hoff = tuphdr->t_hoff;
+
+	time(&t);
+	timeInfo = localtime(&t);
+	trace_log("Printing error data starts at %s", asctime(timeInfo));
+	trace_log("relfilenode %u pageno %u \n"
+			"page: lsn=" UINT64_FORMAT " "
+			"checksum=%d flags=%d shard=%d "
+			"lower=%d upper=%d special=%d "
+			"pagesize=%zu version=%d "
+			"prune_xid=%u \n"
+			"item: lp=%d, lp_off=%d, lp_flags=%d, lp_len=%d \n"
+			"heaptuple header: t_xmin=%u t_xmax=%u t_xmin_gts=%ld t_xmax_gts=%ld "
+			"t_cid=%u t_infomask2=%u t_infomask=%u "
+			"t_shareid=%d t_hoff=%d \n"
+			"tlog: tlog_xmin_gts=%ld tlog_xmax_gts=%ld",
+		rnode->relNode, blkno,
+			lsn,
+			pagehdr->pd_checksum, pagehdr->pd_flags, pagehdr->pd_shard,
+			pagehdr->pd_lower, pagehdr->pd_upper, pagehdr->pd_special,
+			PageGetPageSize(page), (uint16) PageGetPageLayoutVersion(page),
+			pagehdr->pd_prune_xid,
+			lineoff, lp_offset, lp_flags, lp_len,
+			xmin, xmax, tuple_xmin_gts, tuple_xmax_gts,
+			cid, infomask2, infomask,
+			shardid, hoff,
+			tlog_xmin_gts, tlog_xmax_gts);
+	if (tlog_xmax_gts == 0)
+	{
+		trace_log("xmin_gts in tuple is not equal to xmin_gts in tlog!");
+	}
+	else
+	{
+		trace_log("xmax_gts in tuple is not equal to xmax_gts in tlog!");
+	}
+	trace_log("Printing error data ends.\n");
+}
+
+/*
+ *	MaintainGTS() -- check and reset gts in tuples according to gts in tlog.
+ *
+ * Buffer must be pinned and exclusive-locked.  (If caller does not hold
+ * exclusive lock, then somebody could be in process of writing the buffer,
+ * leading to risk of bad data written to disk.
+ *
+ *	Caller must hold pin and buffer cleanup lock on the buffer.
+ *	gts_maintain_option = 0: GTS_MAINTAIN_NOTHING, do nothing.
+ *	gts_maintain_option = 1: GTS_MAINTAIN_VACUUM_CHECK, check correctness of GTS
+ *	                         while doing vacuum.
+ *	gts_maintain_option = 2: GTS_MAINTAIN_VACUUM_RESET, check correctness of GTS
+ *                           and reset it according to tlog if it is wrong while
+ *                           doing vacuum.
+ */
+void
+MaintainGTS(RelFileNode *rnode, BlockNumber blkno, Buffer buffer)
+{
+	Page page;
+	int lines;
+	OffsetNumber lineoff;
+	ItemId itemid;
+	bool changed = false;
+	bool reset = false;
+
+	/* GTS is only used for normal user tables, not systems table and any index. */
+	if (GTS_MAINTAIN_NOTHING == gts_maintain_option)
+	{
+		return;
+	}
+
+	if (!PostmasterIsPrimaryAndNormal())
+	{
+		return;
+	}
+
+	if (!RelationHasGTS(rnode->spcNode, rnode->relNode))
+	{
+		return;
+	}
+
+	if (GTS_MAINTAIN_VACUUM_RESET == gts_maintain_option)
+	{
+		reset = true;
+	}
+
+	page = BufferGetPage(buffer);
+	lines = PageGetMaxOffsetNumber(page);
+	for (lineoff = FirstOffsetNumber, itemid = PageGetItemId(page, lineoff);
+			lineoff <= lines;
+			lineoff++, itemid++)
+	{
+		HeapTupleHeader tuphdr;
+		TransactionId xmin = InvalidTransactionId;
+		TransactionId xmax = InvalidTransactionId;
+		GlobalTimestamp tlog_xmin_gts = InvalidGlobalTimestamp;
+		GlobalTimestamp tlog_xmax_gts = InvalidGlobalTimestamp;
+
+		if (!ItemIdIsNormal(itemid))
+		{
+			continue;
+		}
+
+		tuphdr = (HeapTupleHeader) PageGetItem(page, itemid);
+
+		xmin = HeapTupleHeaderGetRawXmin(tuphdr);
+		if (TransactionIdIsNormal(xmin) &&
+			HeapTupleHeaderXminCommitted(tuphdr) &&
+			!HeapTupleHeaderXminFrozen(tuphdr))
+		{
+			GlobalTimestamp tuple_xmin_gts = HeapTupleHeaderGetXminTimestampAtomic(tuphdr);
+
+			if (GlobalTimestampIsValid(tuple_xmin_gts)
+				&& !CommitTimestampIsLocal(tuple_xmin_gts)
+				&& !GlobalTimestampIsFrozen(tuple_xmin_gts)
+				&& TransactionIdGetCommitTsData(xmin, &tlog_xmin_gts, NULL)
+				&& tuple_xmin_gts != tlog_xmin_gts)
+			{
+				elog(WARNING,
+					"relfilenode %u "
+					"pageno %u lineoff %u "
+					"CTID %hu/%hu/%hu "
+					"infomask %d multixact %d, "
+					"xmin %u xmin_gts "INT64_FORMAT" "
+					"in tuple is not equal to xmin_gts "INT64_FORMAT" in tlog.",
+					rnode->relNode,
+					blkno, lineoff,
+					tuphdr->t_ctid.ip_blkid.bi_hi,
+					tuphdr->t_ctid.ip_blkid.bi_lo,
+					tuphdr->t_ctid.ip_posid,
+					tuphdr->t_infomask, tuphdr->t_infomask & HEAP_XMAX_IS_MULTI,
+					xmin, tuple_xmin_gts, tlog_xmin_gts);
+
+				PrintStack();
+				PrintData(rnode, blkno, page, lineoff, tlog_xmin_gts, 0);
+
+				if (reset)
+				{
+					changed = true;
+					HeapTupleHeaderSetXminTimestampAtomic(tuphdr, tlog_xmin_gts);
+					elog(WARNING,
+						"relfilenode %u "
+						"pageno %u lineoff %u xmin %u xmin_gts "INT64_FORMAT" "
+						"in tuple has been reset to xmin_gts "INT64_FORMAT" in tlog.",
+						rnode->relNode,
+						blkno, lineoff,
+						xmin, tuple_xmin_gts,
+						HeapTupleHeaderGetXminTimestamp(tuphdr));
+				}
+			}
+		}
+
+		xmax = HeapTupleHeaderGetRawXmax(tuphdr);
+		if (TransactionIdIsNormal(xmax) &&
+			HeapTupleHeaderXmaxCommitted(tuphdr))
+		{
+			GlobalTimestamp tuple_xmax_gts = HeapTupleHeaderGetXmaxTimestampAtomic(tuphdr);
+
+			if (GlobalTimestampIsValid(tuple_xmax_gts)
+				&& !CommitTimestampIsLocal(tuple_xmax_gts)
+				&& !GlobalTimestampIsFrozen(tuple_xmax_gts)
+				&& TransactionIdGetCommitTsData(xmax, &tlog_xmax_gts, NULL)
+				&& tuple_xmax_gts != tlog_xmax_gts)
+			{
+				elog(WARNING,
+					"relfilenode %u "
+					"pageno %u lineoff %u "
+					"CTID %hu/%hu/%hu "
+					"infomask %d multixact %d "
+					"xid %u xmax %u xmax_gts "INT64_FORMAT" "
+					"in tuple is not equal to xmax_gts "INT64_FORMAT" in tlog.",
+					rnode->relNode,
+					blkno, lineoff,
+					tuphdr->t_ctid.ip_blkid.bi_hi,
+					tuphdr->t_ctid.ip_blkid.bi_lo,
+					tuphdr->t_ctid.ip_posid,
+					tuphdr->t_infomask, tuphdr->t_infomask & HEAP_XMAX_IS_MULTI,
+					HeapTupleHeaderGetUpdateXid(tuphdr), xmax, tuple_xmax_gts,
+					tlog_xmax_gts);
+
+				PrintStack();
+				PrintData(rnode, blkno, page, lineoff, 0, tlog_xmax_gts);
+
+				if (reset)
+				{
+					changed = true;
+					HeapTupleHeaderSetXmaxTimestampAtomic(tuphdr, tlog_xmax_gts);
+					elog(WARNING,
+						"relfilenode "
+						"%u pageno %u lineoff %u "
+						"xmax %u xmax_gts "INT64_FORMAT" "
+						"in tuple has been reset to xmax_gts "INT64_FORMAT" in tlog.",
+						rnode->relNode,
+						blkno, lineoff,
+						xmax, tuple_xmax_gts,
+						HeapTupleHeaderGetXminTimestamp(tuphdr));
+				}
+			}
+		}
+	}
+
+	if (changed)
+	{
+		MarkBufferDirtyHint(buffer, true);
+	}
+}

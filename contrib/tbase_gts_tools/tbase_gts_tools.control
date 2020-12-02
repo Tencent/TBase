@@ -1,0 +1,5 @@
+# tbase_gts_tools extension
+comment = 'GTS wrapper for Tbase'
+default_version = '1.0'
+module_pathname = '$libdir/tbase_gts_tools'
+relocatable = true

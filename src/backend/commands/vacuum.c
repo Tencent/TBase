@@ -86,8 +86,6 @@ int            vacuum_multixact_freeze_min_age;
 int            vacuum_multixact_freeze_table_age;
 int            vacuum_defer_freeze_min_age;
 
-
-
 /* A few variables that don't seem worth passing around as parameters */
 static MemoryContext vac_context = NULL;
 static BufferAccessStrategy vac_strategy;
@@ -1938,7 +1936,7 @@ vacuum_rel_coordinator(Relation onerel, bool is_outer, VacuumParams *params)
     relname = RelationGetRelationName(onerel);
     nspname = get_namespace_name(RelationGetNamespace(onerel));
 
-    elog(LOG, "Getting relation statistics for %s.%s", nspname, relname);
+	elog(DEBUG5, "Getting relation statistics for %s.%s", nspname, relname);
 
 #ifdef __TBASE__
 	if (params && onerel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)

@@ -485,6 +485,15 @@
 #update_process_title = on
 
 
+# - Maintain GTS -
+
+#gts_maintain_option = 0	# range: 0-2. the default is 0.
+				# 0: do nothing.
+				# 1: check the correctness of the GTS of tuples by referring to
+				#    tlog while doing vacuum.
+				# 2: check the correctness of the GTS of tuples by referring to
+				#    tlog, and reset it if it is wrong while doing vacuum.
+
 #------------------------------------------------------------------------------
 # RUNTIME STATISTICS
 #------------------------------------------------------------------------------

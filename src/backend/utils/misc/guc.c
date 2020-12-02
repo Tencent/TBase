@@ -3109,15 +3109,25 @@ static struct config_int ConfigureNamesInt[] =
         NULL, NULL, NULL
     },
 
-    {
-        {"max_files_per_process", PGC_POSTMASTER, RESOURCES_KERNEL,
-            gettext_noop("Sets the maximum number of simultaneously open files for each server process."),
-            NULL
-        },
-        &max_files_per_process,
-        1000, 25, INT_MAX,
-        NULL, NULL, NULL
-    },
+	{
+		{"gts_maintain_option", PGC_SIGHUP, DEVELOPER_OPTIONS,
+			gettext_noop("Enables check correctness of GTS and reseting it if it is wrong"),
+			NULL
+		},
+		&gts_maintain_option,
+		0, 0, 2,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"max_files_per_process", PGC_POSTMASTER, RESOURCES_KERNEL,
+			gettext_noop("Sets the maximum number of simultaneously open files for each server process."),
+			NULL
+		},
+		&max_files_per_process,
+		1000, 25, INT_MAX,
+		NULL, NULL, NULL
+	},
 
     /*
      * See also CheckRequiredParameterValues() if this parameter changes
@@ -3808,6 +3818,16 @@ static struct config_int ConfigureNamesInt[] =
         NULL, NULL, NULL
     },
     {
+		{"alog_trace_queue_size", PGC_POSTMASTER, LOGGING_WHERE,
+			gettext_noop("Size of share memory queue for each backend to store trace audit log, kilobytes."),
+			NULL,
+			GUC_UNIT_KB
+		},
+		&Maintain_trace_log_queue_size_kb,
+		64, 8, INT_MAX / 1024,
+		NULL, NULL, NULL
+	},
+    {
         {"alog_common_cache_size", PGC_POSTMASTER, LOGGING_WHERE,
             gettext_noop("Size of common audit log local buffer for each audit worker, kilobytes."),
             NULL,
@@ -3827,6 +3847,16 @@ static struct config_int ConfigureNamesInt[] =
         64, 8, INT_MAX / 1024,
         NULL, NULL, NULL
     },
+    {
+		{"alog_trace_cache_size", PGC_POSTMASTER, LOGGING_WHERE,
+			gettext_noop("Size of trace audit log local buffer for each audit worker, kilobytes."),
+			NULL,
+			GUC_UNIT_KB
+		},
+		&Maintain_trace_log_cache_size_kb,
+		64, 8, INT_MAX / 1024,
+		NULL, NULL, NULL
+	},
 #endif
     {
         {"max_function_args", PGC_INTERNAL, PRESET_OPTIONS,

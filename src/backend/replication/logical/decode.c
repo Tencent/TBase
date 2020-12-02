@@ -444,11 +444,11 @@ DecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
             break;
 
 #ifdef __TBASE__
-            case XLOG_XACT_ACQUIRE_GTS:
-            {
-                /* nothing to do. */                
-            }
-            break;
+		case XLOG_XACT_ACQUIRE_GTS:
+			{
+				/* nothing to do. */
+			}
+			break;
 #endif
         default:
             elog(ERROR, "unexpected RM_XACT_ID record type: %u", info);

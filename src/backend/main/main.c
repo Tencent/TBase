@@ -45,6 +45,7 @@
 
 
 const char *progname;
+const char *exename;
 
 
 static void startup_hacks(const char *progname);
@@ -58,33 +59,37 @@ static void check_root(const char *progname);
  */
 int
 main(int argc, char *argv[])
-{// #lizard forgives
-    bool        do_check_root = true;
+{
+	bool		do_check_root = true;
 
-    progname = get_progname(argv[0]);
+	progname = get_progname(argv[0]);
+	/*
+	 * Make a copy. Leaks memory, but called only once.
+	 */
+	exename = strdup(argv[0]);
 
-    /*
-     * Platform-specific startup hacks
-     */
-    startup_hacks(progname);
+	/*
+	 * Platform-specific startup hacks
+	 */
+	startup_hacks(progname);
 
-    /*
-     * Remember the physical location of the initially given argv[] array for
-     * possible use by ps display.  On some platforms, the argv[] storage must
-     * be overwritten in order to set the process title for ps. In such cases
-     * save_ps_display_args makes and returns a new copy of the argv[] array.
-     *
-     * save_ps_display_args may also move the environment strings to make
-     * extra room. Therefore this should be done as early as possible during
-     * startup, to avoid entanglements with code that might save a getenv()
-     * result pointer.
-     */
-    argv = save_ps_display_args(argc, argv);
+	/*
+	 * Remember the physical location of the initially given argv[] array for
+	 * possible use by ps display.  On some platforms, the argv[] storage must
+	 * be overwritten in order to set the process title for ps. In such cases
+	 * save_ps_display_args makes and returns a new copy of the argv[] array.
+	 *
+	 * save_ps_display_args may also move the environment strings to make
+	 * extra room. Therefore this should be done as early as possible during
+	 * startup, to avoid entanglements with code that might save a getenv()
+	 * result pointer.
+	 */
+	argv = save_ps_display_args(argc, argv);
 
-    /*
-     * If supported on the current platform, set up a handler to be called if
-     * the backend/postmaster crashes with a fatal signal or exception.
-     */
+	/*
+	 * If supported on the current platform, set up a handler to be called if
+	 * the backend/postmaster crashes with a fatal signal or exception.
+	 */
 #if defined(WIN32) && defined(HAVE_MINIDUMP_TYPE)
     pgwin32_install_crashdump_handler();
 #endif

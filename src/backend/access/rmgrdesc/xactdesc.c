@@ -338,41 +338,41 @@ xact_desc_assignment(StringInfo buf, xl_xact_assignment *xlrec)
 void
 xact_desc(StringInfo buf, XLogReaderState *record)
 {
-    char       *rec = XLogRecGetData(record);
-    uint8        info = XLogRecGetInfo(record) & XLOG_XACT_OPMASK;
+	char	   *rec = XLogRecGetData(record);
+	uint8		info = XLogRecGetInfo(record) & XLOG_XACT_OPMASK;
 
-    if (info == XLOG_XACT_COMMIT || info == XLOG_XACT_COMMIT_PREPARED)
-    {
-        xl_xact_commit *xlrec = (xl_xact_commit *) rec;
+	if (info == XLOG_XACT_COMMIT || info == XLOG_XACT_COMMIT_PREPARED)
+	{
+		xl_xact_commit *xlrec = (xl_xact_commit *) rec;
 
-        xact_desc_commit(buf, XLogRecGetInfo(record), xlrec,
-                         XLogRecGetOrigin(record));
-    }
-    else if (info == XLOG_XACT_ABORT || info == XLOG_XACT_ABORT_PREPARED)
-    {
-        xl_xact_abort *xlrec = (xl_xact_abort *) rec;
+		xact_desc_commit(buf, XLogRecGetInfo(record), xlrec,
+						 XLogRecGetOrigin(record));
+	}
+	else if (info == XLOG_XACT_ABORT || info == XLOG_XACT_ABORT_PREPARED)
+	{
+		xl_xact_abort *xlrec = (xl_xact_abort *) rec;
 
-        xact_desc_abort(buf, XLogRecGetInfo(record), xlrec);
-    }
-    else if (info == XLOG_XACT_ASSIGNMENT)
-    {
-        xl_xact_assignment *xlrec = (xl_xact_assignment *) rec;
+		xact_desc_abort(buf, XLogRecGetInfo(record), xlrec);
+	}
+	else if (info == XLOG_XACT_ASSIGNMENT)
+	{
+		xl_xact_assignment *xlrec = (xl_xact_assignment *) rec;
 
-        /*
-         * Note that we ignore the WAL record's xid, since we're more
-         * interested in the top-level xid that issued the record and which
-         * xids are being reported here.
-         */
-        appendStringInfo(buf, "xtop %u: ", xlrec->xtop);
-        xact_desc_assignment(buf, xlrec);
-    }
-    #ifdef __TBASE__
-    else if (info == XLOG_XACT_ACQUIRE_GTS)
-    {
-        xl_xact_acquire_gts *xlrec = (xl_xact_acquire_gts *) rec;
-        appendStringInfo(buf, "acquire global timestamp "INT64_FORMAT" ", xlrec->global_timestamp);
-    }
-    #endif
+		/*
+		 * Note that we ignore the WAL record's xid, since we're more
+		 * interested in the top-level xid that issued the record and which
+		 * xids are being reported here.
+		 */
+		appendStringInfo(buf, "xtop %u: ", xlrec->xtop);
+		xact_desc_assignment(buf, xlrec);
+	}
+#ifdef __TBASE__
+	else if (info == XLOG_XACT_ACQUIRE_GTS)
+	{
+		xl_xact_acquire_gts *xlrec = (xl_xact_acquire_gts *) rec;
+		appendStringInfo(buf, "acquire global timestamp "INT64_FORMAT" ", xlrec->global_timestamp);
+	}
+#endif
 }
 
 const char *

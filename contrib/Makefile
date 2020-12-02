@@ -46,6 +46,7 @@ SUBDIRS = \
                 seg             \
                 spi             \
                 tablefunc       \
+				tbase_gts_tools \
                 tcn             \
                 test_decoding   \
                 tsm_system_rows \

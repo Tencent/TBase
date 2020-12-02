@@ -211,12 +211,13 @@ typedef struct VacuumParams
 } VacuumParams;
 
 /* GUC parameters */
-extern PGDLLIMPORT int default_statistics_target;    /* PGDLLIMPORT for PostGIS */
-extern int    vacuum_freeze_min_age;
-extern int	  vacuum_defer_freeze_min_age;
-extern int    vacuum_freeze_table_age;
-extern int    vacuum_multixact_freeze_min_age;
-extern int    vacuum_multixact_freeze_table_age;
+extern PGDLLIMPORT int default_statistics_target;	/* PGDLLIMPORT for PostGIS */
+extern int	vacuum_freeze_min_age;
+extern int	vacuum_defer_freeze_min_age;
+extern int	vacuum_freeze_table_age;
+extern int	vacuum_multixact_freeze_min_age;
+extern int	vacuum_multixact_freeze_table_age;
+
 #ifdef __TBASE__
 extern bool	enable_sampling_analyze;
 extern bool distributed_query_analyze;
@@ -365,6 +366,17 @@ extern void ClearQueryAnalyzeInfo(void);
 extern char *GetAnalyzeInfo(int nodeid, char *key);
 
 extern void ExecSample(SampleStmt *stmt, DestReceiver *dest);
+
+extern int     gts_maintain_option;
+typedef enum
+{
+	GTS_MAINTAIN_NOTHING			= 0, /* do nothing */
+	GTS_MAINTAIN_VACUUM_CHECK		= 1, /* check correctness of GTS while
+										  *	doing vacuum. */
+	GTS_MAINTAIN_VACUUM_RESET		= 2, /* check correctness of GTS and reset
+										  * it according to tlog if it is wrong
+										  * while doing vacuum. */
+} GTSMaintainOption;
 #endif
 
 #endif                            /* VACUUM_H */

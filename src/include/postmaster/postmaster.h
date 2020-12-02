@@ -109,5 +109,6 @@ extern void ShmemBackendArrayAllocation(void);
 #ifdef __TBASE__
 extern void PostmasterEnableLogTimeout(void);
 extern void PostmasterDisableTimeout(void);
+extern bool PostmasterIsPrimaryAndNormal(void);
 #endif
 #endif                            /* _POSTMASTER_H */

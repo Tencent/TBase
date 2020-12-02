@@ -9805,19 +9805,19 @@ TryPingUnhealthyNode(Oid nodeoid)
 void
 PoolPingNodeRecheck(Oid nodeoid)
 {
-    int status;
-    NodeDefinition *nodeDef;
-    char connstr[MAXPGPATH * 2 + 256];
-    bool    healthy;
-    const char *username = NULL;
-    char *errstr = NULL;
+	int status;
+	NodeDefinition *nodeDef;
+	char connstr[MAXPGPATH * 2 + 256];
+	bool	healthy;
+	const char *username = NULL;
+	char *errstr = NULL;
 
-    username = get_user_name(&errstr);
-    if (errstr != NULL)
-    {
-        elog(WARNING, "Could not get current username errmsg: %s", errstr);
-        return;
-    }
+	username = get_user_name(&errstr);
+	if (errstr != NULL)
+	{
+		elog(WARNING, "Could not get current username errmsg: %s", errstr);
+		return;
+	}
 
     nodeDef = PgxcNodeGetDefinition(nodeoid);
     if (nodeDef == NULL)

@@ -7247,6 +7247,26 @@ void PostmasterDisableTimeout(void)
     }
 }
 
+/*
+ * Whether the database is primary instance and it is normal.
+ */
+bool PostmasterIsPrimaryAndNormal(void)
+{
+	/*
+	 * Do not consider: pmState == PM_HOT_STANDBY. Because the original data may
+	 * be retained in the slave instance, which is inconsistent with the reset
+	 * data in the primary instance.
+	 */
+	if (pmState == PM_RUN)
+	{
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+
 void InitPostmasterLatch(void)
 {
     /* Initialize process-local latch support */
