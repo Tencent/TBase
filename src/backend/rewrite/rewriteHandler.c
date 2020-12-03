@@ -21,6 +21,7 @@
 #include "postgres.h"
 
 #include "access/sysattr.h"
+#include "access/xact.h"
 #include "catalog/dependency.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
@@ -37,6 +38,7 @@
 #include "rewrite/rowsecurity.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
+#include "utils/snapmgr.h"
 #include "utils/rel.h"
 
 #ifdef PGXC
@@ -4109,6 +4111,10 @@ QueryRewriteCTAS(Query *parsetree)
     /* Finally, fire off the query to run the DDL */
     ProcessUtility(wrapper, cquery.data, PROCESS_UTILITY_QUERY,
             NULL, NULL, NULL, false, NULL);
+
+    PopActiveSnapshot();
+    PushActiveSnapshot(GetTransactionSnapshot());
+
 
     /*
      * Now fold the CTAS statement into an INSERT INTO statement. The
