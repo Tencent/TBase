@@ -1429,124 +1429,125 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
 #else
         else if (onerel->rd_rel->relnamespace == PG_CATALOG_NAMESPACE)
 #endif
-            ereport(WARNING,
-                    (errmsg("skipping \"%s\" --- only superuser or database owner can vacuum it",
-                            RelationGetRelationName(onerel))));
-        else
-            ereport(WARNING,
-                    (errmsg("skipping \"%s\" --- only table or database owner can vacuum it",
-                            RelationGetRelationName(onerel))));
-        relation_close(onerel, lmode);
-        PopActiveSnapshot();
-        CommitTransactionCommand();
-        return false;
-    }
+			ereport(WARNING,
+					(errmsg("skipping \"%s\" --- only superuser or database owner can vacuum it",
+							RelationGetRelationName(onerel))));
+		else
+			ereport(WARNING,
+					(errmsg("skipping \"%s\" --- only table or database owner can vacuum it",
+							RelationGetRelationName(onerel))));
+		relation_close(onerel, lmode);
+		PopActiveSnapshot();
+		CommitTransactionCommand();
+		return false;
+	}
 
-    /*
-     * Check that it's a vacuumable relation; we used to do this in
-     * get_rel_oids() but seems safer to check after we've locked the
-     * relation.
-     */
-    if (onerel->rd_rel->relkind != RELKIND_RELATION &&
-        onerel->rd_rel->relkind != RELKIND_MATVIEW &&
-        onerel->rd_rel->relkind != RELKIND_TOASTVALUE &&
-        onerel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
-    {
-        ereport(WARNING,
-                (errmsg("skipping \"%s\" --- cannot vacuum non-tables or special system tables",
-                        RelationGetRelationName(onerel))));
-        relation_close(onerel, lmode);
-        PopActiveSnapshot();
-        CommitTransactionCommand();
-        return false;
-    }
+	/*
+	 * Check that it's a vacuumable relation; we used to do this in
+	 * get_rel_oids() but seems safer to check after we've locked the
+	 * relation.
+	 */
+	if (onerel->rd_rel->relkind != RELKIND_RELATION &&
+		onerel->rd_rel->relkind != RELKIND_MATVIEW &&
+		onerel->rd_rel->relkind != RELKIND_TOASTVALUE &&
+		onerel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
+	{
+		ereport(WARNING,
+				(errmsg("skipping \"%s\" --- cannot vacuum non-tables or special system tables",
+						RelationGetRelationName(onerel))));
+		relation_close(onerel, lmode);
+		PopActiveSnapshot();
+		CommitTransactionCommand();
+		return false;
+	}
 
-    /*
-     * Silently ignore tables that are temp tables of other backends ---
-     * trying to vacuum these will lead to great unhappiness, since their
-     * contents are probably not up-to-date on disk.  (We don't throw a
-     * warning here; it would just lead to chatter during a database-wide
-     * VACUUM.)
-     */
-    if (RELATION_IS_OTHER_TEMP(onerel))
-    {
-        relation_close(onerel, lmode);
-        PopActiveSnapshot();
-        CommitTransactionCommand();
-        return false;
-    }
+	/*
+	 * Silently ignore tables that are temp tables of other backends ---
+	 * trying to vacuum these will lead to great unhappiness, since their
+	 * contents are probably not up-to-date on disk.  (We don't throw a
+	 * warning here; it would just lead to chatter during a database-wide
+	 * VACUUM.)
+	 */
+	if (RELATION_IS_OTHER_TEMP(onerel))
+	{
+		relation_close(onerel, lmode);
+		PopActiveSnapshot();
+		CommitTransactionCommand();
+		return false;
+	}
 
-    /*
-     * Get a session-level lock too. This will protect our access to the
-     * relation across multiple transactions, so that we can vacuum the
-     * relation's TOAST table (if any) secure in the knowledge that no one is
-     * deleting the parent relation.
-     *
-     * NOTE: this cannot block, even if someone else is waiting for access,
-     * because the lock manager knows that both lock requests are from the
-     * same process.
-     */
-    onerelid = onerel->rd_lockInfo.lockRelId;
-    LockRelationIdForSession(&onerelid, lmode);
+	/*
+	 * Get a session-level lock too. This will protect our access to the
+	 * relation across multiple transactions, so that we can vacuum the
+	 * relation's TOAST table (if any) secure in the knowledge that no one is
+	 * deleting the parent relation.
+	 *
+	 * NOTE: this cannot block, even if someone else is waiting for access,
+	 * because the lock manager knows that both lock requests are from the
+	 * same process.
+	 */
+	onerelid = onerel->rd_lockInfo.lockRelId;
+	LockRelationIdForSession(&onerelid, lmode);
 
-    /*
-     * Remember the relation's TOAST relation for later, if the caller asked
-     * us to process it.  In VACUUM FULL, though, the toast table is
-     * automatically rebuilt by cluster_rel so we shouldn't recurse to it.
-     */
-    if (!(options & VACOPT_SKIPTOAST) && !(options & VACOPT_FULL))
-        toast_relid = onerel->rd_rel->reltoastrelid;
-    else
-        toast_relid = InvalidOid;
+	/*
+	 * Remember the relation's TOAST relation for later, if the caller asked
+	 * us to process it.  In VACUUM FULL, though, the toast table is
+	 * automatically rebuilt by cluster_rel so we shouldn't recurse to it.
+	 */
+	if (!(options & VACOPT_SKIPTOAST) && !(options & VACOPT_FULL))
+		toast_relid = onerel->rd_rel->reltoastrelid;
+	else
+		toast_relid = InvalidOid;
 
-    /*
-     * Switch to the table owner's userid, so that any index functions are run
-     * as that user.  Also lock down security-restricted operations and
-     * arrange to make GUC variable changes local to this command. (This is
-     * unnecessary, but harmless, for lazy VACUUM.)
-     */
-    GetUserIdAndSecContext(&save_userid, &save_sec_context);
-    SetUserIdAndSecContext(onerel->rd_rel->relowner,
-                           save_sec_context | SECURITY_RESTRICTED_OPERATION);
-    save_nestlevel = NewGUCNestLevel();
+	/*
+	 * Switch to the table owner's userid, so that any index functions are run
+	 * as that user.  Also lock down security-restricted operations and
+	 * arrange to make GUC variable changes local to this command. (This is
+	 * unnecessary, but harmless, for lazy VACUUM.)
+	 */
+	GetUserIdAndSecContext(&save_userid, &save_sec_context);
+	SetUserIdAndSecContext(onerel->rd_rel->relowner,
+						   save_sec_context | SECURITY_RESTRICTED_OPERATION);
+	save_nestlevel = NewGUCNestLevel();
 
-    /*
-     * Ignore partitioned tables as there is no work to be done.  Since we
-     * release the lock here, it's possible that any partitions added from
-     * this point on will not get processed, but that seems harmless.
-     */
-    if (onerel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
-    {
-        /* Roll back any GUC changes executed by index functions */
-        AtEOXact_GUC(false, save_nestlevel);
+	/*
+	 * Ignore partitioned tables as there is no work to be done.  Since we
+	 * release the lock here, it's possible that any partitions added from
+	 * this point on will not get processed, but that seems harmless.
+	 */
+	if (onerel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+	{
+		/* Roll back any GUC changes executed by index functions */
+		AtEOXact_GUC(false, save_nestlevel);
 
-        /* Restore userid and security context */
-        SetUserIdAndSecContext(save_userid, save_sec_context);
+		/* Restore userid and security context */
+		SetUserIdAndSecContext(save_userid, save_sec_context);
 
-        relation_close(onerel, NoLock);
-        PopActiveSnapshot();
-        CommitTransactionCommand();
+		relation_close(onerel, NoLock);
+		PopActiveSnapshot();
+		CommitTransactionCommand();
 
-        /*
-         * If the relation has a secondary toast rel, vacuum that too while we
-         * still hold the session lock on the master table.  Note however that
-         * "analyze" will not get done on the toast table.  This is good, because
-         * the toaster always uses hardcoded index access and statistics are
-         * totally unimportant for toast relations.
-         */
-        if (toast_relid != InvalidOid)
-        {
-            vacuum_rel(toast_relid, relation, options, params);
-        }
+		/*
+		 * If the relation has a secondary toast rel, vacuum that too while we
+		 * still hold the session lock on the master table.  Note however that
+		 * "analyze" will not get done on the toast table.  This is good, because
+		 * the toaster always uses hardcoded index access and statistics are
+		 * totally unimportant for toast relations.
+		 */
+		if (toast_relid != InvalidOid)
+		{
+			vacuum_rel(toast_relid, relation, options, params);
+		}
 
-        /*
-         * Now release the session-level lock on the master table.
-         */
-        UnlockRelationIdForSession(&onerelid, lmode);
+		/*
+		 * Now release the session-level lock on the master table.
+		 */
+		UnlockRelationIdForSession(&onerelid, lmode);
 
-        /* It's OK for other commands to look at this table */
-        return true;
-    }
+		/* It's OK for other commands to look at this table */
+		return true;
+	}
+
 
 #ifdef XCP
     /*

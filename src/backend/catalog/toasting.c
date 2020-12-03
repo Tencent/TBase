@@ -457,56 +457,57 @@ create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid,
  * (1) there are any toastable attributes, and (2) the maximum length
  * of a tuple could exceed TOAST_TUPLE_THRESHOLD.  (We don't want to
  * create a toast table for something like "f1 varchar(20)".)
+ * No need to create a TOAST table for partitioned tables.
  */
 static bool
 needs_toast_table(Relation rel)
-{// #lizard forgives
-    int32        data_length = 0;
-    bool        maxlength_unknown = false;
-    bool        has_toastable_attrs = false;
-    TupleDesc    tupdesc;
-    Form_pg_attribute *att;
-    int32        tuple_length;
-    int            i;
+{
+	int32		data_length = 0;
+	bool		maxlength_unknown = false;
+	bool		has_toastable_attrs = false;
+	TupleDesc	tupdesc;
+	Form_pg_attribute *att;
+	int32		tuple_length;
+	int			i;
 
-    /* No TOAST for partitioned tables */
-    if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
-    {
-        return false;
-    }
+	/* No TOAST for partitioned tables */
+	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+	{
+		return false;
+	}
 
-    tupdesc = rel->rd_att;
-    att = tupdesc->attrs;
+	tupdesc = rel->rd_att;
+	att = tupdesc->attrs;
 
-    for (i = 0; i < tupdesc->natts; i++)
-    {
-        if (att[i]->attisdropped)
-            continue;
-        data_length = att_align_nominal(data_length, att[i]->attalign);
-        if (att[i]->attlen > 0)
-        {
-            /* Fixed-length types are never toastable */
-            data_length += att[i]->attlen;
-        }
-        else
-        {
-            int32        maxlen = type_maximum_size(att[i]->atttypid,
-                                                   att[i]->atttypmod);
+	for (i = 0; i < tupdesc->natts; i++)
+	{
+		if (att[i]->attisdropped)
+			continue;
+		data_length = att_align_nominal(data_length, att[i]->attalign);
+		if (att[i]->attlen > 0)
+		{
+			/* Fixed-length types are never toastable */
+			data_length += att[i]->attlen;
+		}
+		else
+		{
+			int32		maxlen = type_maximum_size(att[i]->atttypid,
+												   att[i]->atttypmod);
 
-            if (maxlen < 0)
-                maxlength_unknown = true;
-            else
-                data_length += maxlen;
-            if (att[i]->attstorage != 'p')
-                has_toastable_attrs = true;
-        }
-    }
-    if (!has_toastable_attrs)
-        return false;            /* nothing to toast? */
-    if (maxlength_unknown)
-        return true;            /* any unlimited-length attrs? */
-    tuple_length = MAXALIGN(SizeofHeapTupleHeader +
-                            BITMAPLEN(tupdesc->natts)) +
-        MAXALIGN(data_length);
-    return (tuple_length > TOAST_TUPLE_THRESHOLD);
+			if (maxlen < 0)
+				maxlength_unknown = true;
+			else
+				data_length += maxlen;
+			if (att[i]->attstorage != 'p')
+				has_toastable_attrs = true;
+		}
+	}
+	if (!has_toastable_attrs)
+		return false;			/* nothing to toast? */
+	if (maxlength_unknown)
+		return true;			/* any unlimited-length attrs? */
+	tuple_length = MAXALIGN(SizeofHeapTupleHeader +
+							BITMAPLEN(tupdesc->natts)) +
+		MAXALIGN(data_length);
+	return (tuple_length > TOAST_TUPLE_THRESHOLD);
 }

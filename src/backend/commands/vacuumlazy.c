@@ -187,20 +187,20 @@ lazy_vacuum_interval_rel(Relation onerel, VacuumParams *params)
 	int nindexes;
 	Relation *Irel;
 	bool hasindex;
-	TransactionId oldestXmin = InvalidTransactionId;
-	TransactionId freezeLimit = InvalidTransactionId;
-	MultiXactId multiXactCutoff = InvalidMultiXactId;
+    TransactionId oldestXmin = InvalidTransactionId;
+    TransactionId freezeLimit = InvalidTransactionId;
+    MultiXactId multiXactCutoff = InvalidMultiXactId;
 
-	if (params && onerel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
-	{
-	    vacuum_set_xid_limits(onerel,
+    if (params && onerel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
+    {
+        vacuum_set_xid_limits(onerel,
                               params->freeze_min_age,
                               params->freeze_table_age,
                               params->multixact_freeze_min_age,
                               params->multixact_freeze_table_age,
                               &oldestXmin, &freezeLimit, NULL,
                               &multiXactCutoff, NULL);
-	}
+    }
 
 	childs = RelationGetAllPartitions(onerel);
 
@@ -260,14 +260,15 @@ lazy_vacuum_interval_rel(Relation onerel, VacuumParams *params)
 	pgstat_progress_update_param(PROGRESS_VACUUM_PHASE,
 								 PROGRESS_VACUUM_PHASE_FINAL_CLEANUP);
 
-	vac_update_relstats(onerel,
-						pages,
-						tuples,
-						visiblepages,
-						hasindex,
-						freezeLimit,
-						multiXactCutoff,
-						false);
+    /* save changes */
+    vac_update_relstats(onerel,
+                        pages,
+                        tuples,
+                        visiblepages,
+                        hasindex,
+                        freezeLimit,
+                        multiXactCutoff,
+                        false);
 
 	pgstat_report_vacuum(RelationGetRelid(onerel),
 						 onerel->rd_rel->relisshared,
@@ -313,10 +314,10 @@ lazy_vacuum_rel(Relation onerel, int options, VacuumParams *params,
     Assert(params != NULL);
 
 #ifdef __TBASE__
+	/* update statistic info for interval partition parent table */
 	if (RELATION_IS_INTERVAL(onerel))
 	{
-	    /* update statistic info for interval partition parent table */
-	    lazy_vacuum_interval_rel(onerel, params);
+		lazy_vacuum_interval_rel(onerel, params);
 		return;
 	}
 #endif
