@@ -174,7 +174,7 @@ static bool heap_page_is_all_visible(Relation rel, Buffer buf,
 
 #ifdef __TBASE__
 static void 
-lazy_vacuum_interval_rel(Relation onerel)
+lazy_vacuum_interval_rel(Relation onerel, VacuumParams *params)
 {
 
 	List *childs;
@@ -187,6 +187,20 @@ lazy_vacuum_interval_rel(Relation onerel)
 	int nindexes;
 	Relation *Irel;
 	bool hasindex;
+	TransactionId oldestXmin = InvalidTransactionId;
+	TransactionId freezeLimit = InvalidTransactionId;
+	MultiXactId multiXactCutoff = InvalidMultiXactId;
+
+	if (params && onerel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
+	{
+	    vacuum_set_xid_limits(onerel,
+                              params->freeze_min_age,
+                              params->freeze_table_age,
+                              params->multixact_freeze_min_age,
+                              params->multixact_freeze_table_age,
+                              &oldestXmin, &freezeLimit, NULL,
+                              &multiXactCutoff, NULL);
+	}
 
 	childs = RelationGetAllPartitions(onerel);
 
@@ -251,8 +265,8 @@ lazy_vacuum_interval_rel(Relation onerel)
 						tuples,
 						visiblepages,
 						hasindex,
-						InvalidTransactionId,
-						InvalidMultiXactId,
+						freezeLimit,
+						multiXactCutoff,
 						false);
 
 	pgstat_report_vacuum(RelationGetRelid(onerel),
@@ -301,7 +315,8 @@ lazy_vacuum_rel(Relation onerel, int options, VacuumParams *params,
 #ifdef __TBASE__
 	if (RELATION_IS_INTERVAL(onerel))
 	{
-		lazy_vacuum_interval_rel(onerel);
+	    /* update statistic info for interval partition parent table */
+	    lazy_vacuum_interval_rel(onerel, params);
 		return;
 	}
 #endif

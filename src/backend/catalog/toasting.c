@@ -469,6 +469,12 @@ needs_toast_table(Relation rel)
     int32        tuple_length;
     int            i;
 
+    /* No TOAST for partitioned tables */
+    if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+    {
+        return false;
+    }
+
     tupdesc = rel->rd_att;
     att = tupdesc->attrs;
 

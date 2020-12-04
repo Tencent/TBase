@@ -1477,21 +1477,6 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
     }
 
     /*
-     * Ignore partitioned tables as there is no work to be done.  Since we
-     * release the lock here, it's possible that any partitions added from
-     * this point on will not get processed, but that seems harmless.
-     */
-    if (onerel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
-    {
-        relation_close(onerel, lmode);
-        PopActiveSnapshot();
-        CommitTransactionCommand();
-
-        /* It's OK for other commands to look at this table */
-        return true;
-    }
-
-    /*
      * Get a session-level lock too. This will protect our access to the
      * relation across multiple transactions, so that we can vacuum the
      * relation's TOAST table (if any) secure in the knowledge that no one is
@@ -1524,6 +1509,44 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
     SetUserIdAndSecContext(onerel->rd_rel->relowner,
                            save_sec_context | SECURITY_RESTRICTED_OPERATION);
     save_nestlevel = NewGUCNestLevel();
+
+    /*
+     * Ignore partitioned tables as there is no work to be done.  Since we
+     * release the lock here, it's possible that any partitions added from
+     * this point on will not get processed, but that seems harmless.
+     */
+    if (onerel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+    {
+        /* Roll back any GUC changes executed by index functions */
+        AtEOXact_GUC(false, save_nestlevel);
+
+        /* Restore userid and security context */
+        SetUserIdAndSecContext(save_userid, save_sec_context);
+
+        relation_close(onerel, NoLock);
+        PopActiveSnapshot();
+        CommitTransactionCommand();
+
+        /*
+         * If the relation has a secondary toast rel, vacuum that too while we
+         * still hold the session lock on the master table.  Note however that
+         * "analyze" will not get done on the toast table.  This is good, because
+         * the toaster always uses hardcoded index access and statistics are
+         * totally unimportant for toast relations.
+         */
+        if (toast_relid != InvalidOid)
+        {
+            vacuum_rel(toast_relid, relation, options, params);
+        }
+
+        /*
+         * Now release the session-level lock on the master table.
+         */
+        UnlockRelationIdForSession(&onerelid, lmode);
+
+        /* It's OK for other commands to look at this table */
+        return true;
+    }
 
 #ifdef XCP
     /*
