@@ -1771,12 +1771,12 @@ forward_ddl_to_leader_cn(Node *node, const char *queryString)
     leader_cn = get_pgxc_nodeoid(leader_name);
 
     /* Set flag to indicate forwarded request */
-    PGXCNodeSetParam(false, "is_forward_request", "true", 0);
+    forward_mode = true;
 
     pgxc_execute_on_nodes(1, &leader_cn, pstrdup(queryString));
 
     /* Cancel forwarded flag for subsequent requests */
-    PGXCNodeSetParam(false, "is_forward_request", "false", 0);
+	forward_mode = false;
 
     return true;
 }
