@@ -112,7 +112,7 @@ select name, setting from pg_settings where name like 'enable%';
  enable_nestloop_suppression       | off
  enable_null_string                | off
  enable_oracle_compatible          | off
- enable_parallel_ddl               | on
+ enable_parallel_ddl               | off
  enable_pgbouncer                  | off
  enable_plpgsql_debug_print        | off
  enable_pooler_debug_print         | on
