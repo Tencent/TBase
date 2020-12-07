@@ -37,6 +37,10 @@
 #include "utils/nabstime.h"
 #endif
 
+#ifdef __TBASE__
+#include "utils/lsyscache.h"
+#endif
+
 /*
  * Datatype-specific hash functions.
  *
@@ -300,6 +304,34 @@ hashvarlena(PG_FUNCTION_ARGS)
 
     return result;
 }
+#ifdef __TBASE__
+static Datum
+hashcustomtype(PG_FUNCTION_ARGS)
+{
+    Oid type = PG_GETARG_OID(0);
+    Datum value = PG_GETARG_DATUM(1);
+    Oid			typsend;
+    bool		typisvarlena;
+    bytea	   *outputbytes;
+    Datum		result;
+
+    /*
+     * Convert the column value to binary
+     */
+    getTypeBinaryOutputInfo(type, &typsend, &typisvarlena);
+
+    outputbytes = OidSendFunctionCall(typsend, value);
+
+    /*
+     * Compute hash
+     */
+    result = hash_any((unsigned char *) VARDATA(outputbytes),
+                      VARSIZE(outputbytes) - VARHDRSZ);
+
+    pfree(outputbytes);
+    return result;
+}
+#endif
 
 Datum
 hashvarlenaextended(PG_FUNCTION_ARGS)
@@ -1043,6 +1075,10 @@ compute_hash(Oid type, Datum value, char locator)
 		    return DirectFunctionCall1(jsonb_hash, value);
 #endif
         default:
+#ifdef __TBASE__
+            if (locator == LOCATOR_TYPE_SHARD)
+                return DirectFunctionCall2(hashcustomtype, type, value);
+#endif
             ereport(ERROR,(errmsg("Unhandled datatype:%d for modulo or hash distribution in compute_hash", type)));
     }
     /* Control should not come here. */

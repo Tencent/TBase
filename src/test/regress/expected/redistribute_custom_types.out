@@ -1,0 +1,132 @@
+--
+-- redistribute custom types
+--
+-- enum type
+drop table if exists enum_test;
+NOTICE:  table "enum_test" does not exist, skipping
+drop type if exists enumtype;
+NOTICE:  type "enumtype" does not exist, skipping
+create type enumtype AS enum ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun');
+create table enum_test(a int, b enumtype) distribute by shard(a);
+NOTICE:  Replica identity is needed for shard table, please add to this table through "alter table" command.
+insert into enum_test(a,b) values(1,'Mon');
+insert into enum_test(a,b) values(2,'Tue');
+insert into enum_test(a,b) values(3,'Wed');
+insert into enum_test(a,b) values(4,'Thu');
+insert into enum_test(a,b) values(5,'Fri');
+insert into enum_test(a,b) values(6,'Sat');
+insert into enum_test(a,b) values(7,'Sun');
+explain select count(*) from enum_test where a < 100 group by b;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=132.87..134.74 rows=187 width=12)
+   ->  Finalize HashAggregate  (cost=132.87..134.74 rows=187 width=12)
+         Group Key: b
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=129.12..131.93 rows=187 width=0)
+               Distribute results by S: b
+               ->  Partial HashAggregate  (cost=29.12..31.00 rows=187 width=12)
+                     Group Key: b
+                     ->  Seq Scan on enum_test  (cost=0.00..26.88 rows=450 width=4)
+                           Filter: (a < 100)
+(9 rows)
+
+select count(*) from enum_test where a < 100 group by b;
+ count 
+-------
+     1
+     1
+     1
+     1
+     1
+     1
+     1
+(7 rows)
+
+-- composite type
+drop table if exists comptype_test;
+NOTICE:  table "comptype_test" does not exist, skipping
+drop type if exists comptype;
+NOTICE:  type "comptype" does not exist, skipping
+create type comptype as (f1 int, f2 int);
+create table comptype_test(a int, b comptype) distribute by shard(a);
+NOTICE:  Replica identity is needed for shard table, please add to this table through "alter table" command.
+insert into comptype_test(a,b) values(1,(1,2));
+insert into comptype_test(a,b) values(2,(2,3));
+insert into comptype_test(a,b) values(3,(3,4));
+insert into comptype_test(a,b) values(4,(4,5));
+insert into comptype_test(a,b) values(5,(5,6));
+insert into comptype_test(a,b) values(6,(6,7));
+explain select count(*) from comptype_test where a < 100 group by b;
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=145.27..147.81 rows=169 width=40)
+   ->  Finalize GroupAggregate  (cost=145.27..147.81 rows=169 width=40)
+         Group Key: b
+         ->  Sort  (cost=145.27..145.70 rows=169 width=0)
+               Sort Key: b
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=134.18..139.02 rows=169 width=0)
+                     Distribute results by S: b
+                     ->  Partial GroupAggregate  (cost=34.18..38.17 rows=169 width=40)
+                           Group Key: b
+                           ->  Sort  (cost=34.18..34.95 rows=307 width=32)
+                                 Sort Key: b
+                                 ->  Seq Scan on comptype_test  (cost=0.00..21.50 rows=307 width=32)
+                                       Filter: (a < 100)
+(13 rows)
+
+select count(*) from comptype_test where a < 100 group by b;
+ count 
+-------
+     1
+     1
+     1
+     1
+     1
+     1
+(6 rows)
+
+-- domain type
+drop table if exists domaintype_test;
+NOTICE:  table "domaintype_test" does not exist, skipping
+drop domain if exists domaintype;
+NOTICE:  type "domaintype" does not exist, skipping
+create domain domaintype as int check(value < 100);
+create table domaintype_test(a int, b domaintype) distribute by shard(a);
+NOTICE:  Replica identity is needed for shard table, please add to this table through "alter table" command.
+insert into domaintype_test(a,b) values(1,1);
+insert into domaintype_test(a,b) values(2,2);
+insert into domaintype_test(a,b) values(3,3);
+insert into domaintype_test(a,b) values(4,4);
+insert into domaintype_test(a,b) values(5,5);
+insert into domaintype_test(a,b) values(6,6);
+explain select count(*) from domaintype_test where a < 100 group by b;
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=132.87..134.74 rows=187 width=12)
+   ->  Finalize HashAggregate  (cost=132.87..134.74 rows=187 width=12)
+         Group Key: b
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=129.12..131.93 rows=187 width=0)
+               Distribute results by S: b
+               ->  Partial HashAggregate  (cost=29.12..31.00 rows=187 width=12)
+                     Group Key: b
+                     ->  Seq Scan on domaintype_test  (cost=0.00..26.88 rows=450 width=4)
+                           Filter: (a < 100)
+(9 rows)
+
+select count(*) from domaintype_test where a < 100 group by b;
+ count 
+-------
+     1
+     1
+     1
+     1
+     1
+     1
+(6 rows)
+
+drop table enum_test;
+drop table comptype_test;
+drop table domaintype_test;
+drop type enumtype;
+drop type comptype;
+drop type domaintype;
