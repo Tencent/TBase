@@ -112,7 +112,11 @@
 #include "utils/ruleutils.h"
 #endif
 
+/* 12 month for a year */
+#define COLD_HOT_INTERVAL_YEAR 12
+
 bool g_IsExtension;
+bool enable_cold_hot_router_print;
 extern bool trace_extent;
 
 typedef struct
@@ -4569,12 +4573,24 @@ static bool IsTempColdData(Datum secValue, RelationAccessType access, int32 inte
 bool IsHotData(Datum secValue, RelationAccessType access, int32 interval,
                   int step, Datum startValue)
 {
-    //int32 gap;
     Timestamp hotDataTime;    
     
+	if (enable_cold_hot_router_print)
+	{
+		elog(LOG, "IsHotData Check value "INT64_FORMAT" access %d interval %d step %d "INT64_FORMAT,
+		     DatumGetInt64(secValue),
+		     access, interval, step,
+		     DatumGetInt64(startValue));
+	}
+
+
     /* trade temp cold data as cold data. checking is needed if data would satisfy temp_cold_date guc option */
     if (true == IsTempColdData(secValue, access, interval, step, startValue))
     {
+    	if (enable_cold_hot_router_print)
+	    {
+		    elog(LOG, "Return from TempColdData Value: %s", g_TempColdDate ? g_TempColdDate : "(null)");
+	    }
         return false;
     }
 #if 0
@@ -4588,6 +4604,27 @@ bool IsHotData(Datum secValue, RelationAccessType access, int32 interval,
             (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
              errmsg("timestamp out of range")));
     }
+
+	if (enable_cold_hot_router_print)
+	{
+		elog(LOG,"IsHotData Check hotDateTime "INT64_FORMAT
+				" Manual hot data time "
+				"{ tm_sec:%d tm_min:%d tm_hour:%d tm_mday:%d tm_mon:%d tm_year:%d tm_wday:%d tm_yday:%d"
+				"  tm_isdst:%d tm_gmtoff:%ld tm_zone:%s } ret: %d",
+             (int64)hotDataTime,
+			 g_ManualHotDataTime.tm_sec,
+			 g_ManualHotDataTime.tm_min,
+			 g_ManualHotDataTime.tm_hour,
+			 g_ManualHotDataTime.tm_mday,
+			 g_ManualHotDataTime.tm_mon,
+			 g_ManualHotDataTime.tm_year,
+			 g_ManualHotDataTime.tm_wday,
+			 g_ManualHotDataTime.tm_yday,
+			 g_ManualHotDataTime.tm_isdst,
+			 g_ManualHotDataTime.tm_gmtoff,
+			 g_ManualHotDataTime.tm_zone,
+			 ((Timestamp)secValue >= hotDataTime));
+	}
 
     return ((Timestamp)secValue >= hotDataTime);
 }
@@ -4618,6 +4655,7 @@ List* ShardMapRouter(Oid group, Oid coldgroup, Oid relation, Oid type, Datum dva
     TimestampTz  start_timestamp          = 0;
     Relation                 rel          = NULL;
     Form_pg_partition_interval routerinfo = NULL;    
+	bool         router_log_print         = false;
 
     rel = relation_open(relation, NoLock);
 
@@ -4627,6 +4665,9 @@ List* ShardMapRouter(Oid group, Oid coldgroup, Oid relation, Oid type, Datum dva
     }
 
     relation_close(rel, NoLock);
+
+	router_log_print = (enable_cold_hot_router_print && accessType == RELATION_ACCESS_INSERT &&
+						(RELATION_IS_INTERVAL(rel) || RELATION_IS_CHILD(rel)));
 
     if (g_EnableKeyValue)
     {
@@ -4655,7 +4696,11 @@ List* ShardMapRouter(Oid group, Oid coldgroup, Oid relation, Oid type, Datum dva
         bdualwrite = false;
     }
     
-    
+	if (router_log_print)
+	{
+		elog(LOG, "Group %d coldgroup %d relation %d secAttr %d isSecNull %d dualwrite %d",
+		     group, coldgroup, relation, secAttr, isSecNull, bdualwrite);
+	}
     
     /* get partition stragegy first */
     if (!isSecNull && secAttr != InvalidAttrNumber)
@@ -4669,7 +4714,7 @@ List* ShardMapRouter(Oid group, Oid coldgroup, Oid relation, Oid type, Datum dva
                 partitionStrategy = routerinfo->partinterval_type;
 
                 if (partitionStrategy == IntervalType_Month &&
-                    routerinfo->partinterval_int == 12)
+					routerinfo->partinterval_int == COLD_HOT_INTERVAL_YEAR)
                 {
                     partitionStrategy = IntervalType_Year;
                 }
@@ -4677,7 +4722,17 @@ List* ShardMapRouter(Oid group, Oid coldgroup, Oid relation, Oid type, Datum dva
 
             interval_step = routerinfo->partinterval_int;
             start_timestamp = routerinfo->partstartvalue_ts;
+
+			if (router_log_print)
+			{
+                elog(LOG, "has routerinfo %d", partitionStrategy);
+			}
         }
+		else if (router_log_print)
+        {
+            elog(LOG, "no routerinfo %d", partitionStrategy);
+        }
+
         relation_close(rel, NoLock);
     }
 

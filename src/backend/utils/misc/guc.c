@@ -178,6 +178,7 @@ extern char *default_tablespace;
 extern char *temp_tablespaces;
 extern bool ignore_checksum_failure;
 extern bool synchronize_seqscans;
+extern bool enable_cold_hot_router_print;
 #ifdef _PUB_SUB_RELIABLE_
 static char * g_wal_stream_type_str;
 #endif
@@ -2718,6 +2719,16 @@ static struct config_bool ConfigureNamesBool[] =
         false,
         NULL, NULL, NULL
     },
+	{
+		{"enable_cold_hot_router_print", PGC_USERSET, CUSTOM_OPTIONS,
+			 gettext_noop("Whether print cold hot router."),
+			 NULL
+		},
+		&enable_cold_hot_router_print,
+		false,
+		NULL, NULL, NULL
+	},
+
 #endif
 
     /* End-of-list marker */
