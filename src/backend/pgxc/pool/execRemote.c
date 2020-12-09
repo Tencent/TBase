@@ -11634,7 +11634,6 @@ ExecEndRemoteSubplan(RemoteSubplanState *node)
 
     ValidateAndCloseCombiner(combiner);
     combiner->conn_count = 0;
-    //pfree(node);
 
     if (log_remotesubplan_stats)
         ShowUsageCommon("ExecEndRemoteSubplan", &start_r, &start_t);
