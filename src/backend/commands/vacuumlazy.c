@@ -142,11 +142,10 @@ typedef struct LVRelStats
 
 int	gts_maintain_option;
 
-static void PrintStack(void);
 static void PrintData(RelFileNode *rnode,
 	BlockNumber blkno, Page page, OffsetNumber lineoff,
 	GlobalTimestamp tlog_xmin_gts, GlobalTimestamp tlog_xmax_gts);
-static void MaintainGTS(RelFileNode *rnode, BlockNumber blkno, Buffer buffer);
+static void MaintainGTS(Relation rel, BlockNumber blkno, Buffer buffer);
 
 /* A few variables that don't seem worth passing around as parameters */
 static int    elevel = -1;
@@ -1060,7 +1059,7 @@ lazy_scan_heap(Relation onerel, int options, LVRelStats *vacrelstats,
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
 		if (gts_maintain_option != GTS_MAINTAIN_NOTHING)
 		{
-			MaintainGTS(&onerel->rd_node, blkno, buf);
+			MaintainGTS(onerel, blkno, buf);
 		}
 #endif
 
@@ -1422,7 +1421,7 @@ lazy_scan_heap(Relation onerel, int options, LVRelStats *vacrelstats,
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
 		if (gts_maintain_option != GTS_MAINTAIN_NOTHING)
 		{
-			MaintainGTS(&onerel->rd_node, blkno, buf);
+			MaintainGTS(onerel, blkno, buf);
 		}
 #endif
 
@@ -2685,54 +2684,6 @@ xlog_reinit_extent_pages(RelFileNode rnode, ExtentID eid)
 #define STACK_SIZE 64
 
 /*
- * print error stack to maintain_trace file.
- */
-static void
-PrintStack(void)
-{
-	void *trace[STACK_SIZE] = {0};
-	size_t size = backtrace(trace, STACK_SIZE);
-	char **symbols = (char **) backtrace_symbols(trace, size);
-	size_t i = 0;
-	time_t t = 0;
-	struct tm *timeInfo = NULL;
-
-	if (symbols == NULL)
-	{
-		return;
-	}
-
-	time(&t);
-	timeInfo = localtime(&t);
-	trace_log("Dumping stack starts at %s", asctime(timeInfo));
-	trace_log("backtrace() returned %zu addresses.", size);
-	for (i = 1; i < size; i++)
-	{
-		char syscom[MAXPGPATH] = {0};
-		FILE *fcmd = NULL;
-		char temp[MAXPGPATH] = {0};
-
-		trace_log("#%-2zu %s", i, symbols[i]);
-
-		snprintf(syscom, MAXPGPATH, "addr2line %p -e %s -f -C", trace[i], exename);
-		fcmd = popen(syscom, "r");
-		if (fcmd == NULL)
-		{
-			continue;
-		}
-		while (fgets(temp, sizeof(temp), fcmd) != NULL)
-		{
-			/* ignore the ending "\n" */
-			trace_log("    %.*s", (int) strlen(temp) - 1, temp);
-		}
-		pclose(fcmd);
-	}
-	trace_log("Dumping stack ends.\n");
-
-	free(symbols);
-}
-
-/*
  * print error data to maintain file.
  */
 static void
@@ -2825,8 +2776,9 @@ PrintData(RelFileNode *rnode, BlockNumber blkno, Page page, OffsetNumber lineoff
  *                           doing vacuum.
  */
 void
-MaintainGTS(RelFileNode *rnode, BlockNumber blkno, Buffer buffer)
+MaintainGTS(Relation rel, BlockNumber blkno, Buffer buffer)
 {
+	RelFileNode *rnode = &rel->rd_node;
 	Page page;
 	int lines;
 	OffsetNumber lineoff;
@@ -2845,7 +2797,7 @@ MaintainGTS(RelFileNode *rnode, BlockNumber blkno, Buffer buffer)
 		return;
 	}
 
-	if (!RelationHasGTS(rnode->spcNode, rnode->relNode))
+	if (!RelationHasGTS(rel))
 	{
 		return;
 	}
@@ -2902,9 +2854,6 @@ MaintainGTS(RelFileNode *rnode, BlockNumber blkno, Buffer buffer)
 					tuphdr->t_infomask, tuphdr->t_infomask & HEAP_XMAX_IS_MULTI,
 					xmin, tuple_xmin_gts, tlog_xmin_gts);
 
-				PrintStack();
-				PrintData(rnode, blkno, page, lineoff, tlog_xmin_gts, 0);
-
 				if (reset)
 				{
 					changed = true;
@@ -2917,6 +2866,10 @@ MaintainGTS(RelFileNode *rnode, BlockNumber blkno, Buffer buffer)
 						blkno, lineoff,
 						xmin, tuple_xmin_gts,
 						HeapTupleHeaderGetXminTimestamp(tuphdr));
+				}
+				else
+				{
+					PrintData(rnode, blkno, page, lineoff, tlog_xmin_gts, 0);
 				}
 			}
 		}
@@ -2949,9 +2902,6 @@ MaintainGTS(RelFileNode *rnode, BlockNumber blkno, Buffer buffer)
 					HeapTupleHeaderGetUpdateXid(tuphdr), xmax, tuple_xmax_gts,
 					tlog_xmax_gts);
 
-				PrintStack();
-				PrintData(rnode, blkno, page, lineoff, 0, tlog_xmax_gts);
-
 				if (reset)
 				{
 					changed = true;
@@ -2965,6 +2915,10 @@ MaintainGTS(RelFileNode *rnode, BlockNumber blkno, Buffer buffer)
 						blkno, lineoff,
 						xmax, tuple_xmax_gts,
 						HeapTupleHeaderGetXminTimestamp(tuphdr));
+				}
+				else
+				{
+					PrintData(rnode, blkno, page, lineoff, 0, tlog_xmax_gts);
 				}
 			}
 		}

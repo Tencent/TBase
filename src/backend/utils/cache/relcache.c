@@ -2368,89 +2368,21 @@ RelationIdGetRelation(Oid relationId)
  * Whether a relation has xmin_gts and max_gts.
  */
 bool
-RelationHasGTS(Oid reltablespace, Oid relfilenode)
+RelationHasGTS(Relation rel)
 {
 	bool		has = false;
-	SysScanDesc scandesc = NULL;
-	Relation	relation = NULL;
-	HeapTuple	ntp = NULL;
-	ScanKeyData skey[2];
-	bool		found = false;
-	Oid			relid = InvalidOid;
-	Form_pg_class	classform = NULL;
 
-	/* zero means this is a "mapped" relation */
-	if (0 == relfilenode || relfilenode < FirstNormalObjectId)
+	if (!RelationIsValid(rel))
 	{
 		return false;
 	}
 
-	if (GLOBALTABLESPACE_OID == reltablespace)
-	{
-		return false;
-	}
-
-	/* pg_class will show 0 when the value is actually MyDatabaseTableSpace */
-	if (reltablespace == MyDatabaseTableSpace)
-	{
-		reltablespace = 0;
-	}
-
-	/*
-	 * Not a shared table, could either be a plain relation or a
-	 * non-shared, nailed one, like e.g. pg_class.
-	 *
-	 * check for plain relations by looking in pg_class
-	 */
-	relation = heap_open(RelationRelationId, AccessShareLock);
-
-	ScanKeyInit(&skey[0],
-				Anum_pg_class_reltablespace,
-				BTEqualStrategyNumber,
-				F_OIDEQ,
-				ObjectIdGetDatum(reltablespace));
-	ScanKeyInit(&skey[1],
-				Anum_pg_class_relfilenode,
-				BTEqualStrategyNumber,
-				F_OIDEQ,
-				ObjectIdGetDatum(relfilenode));
-
-	scandesc = systable_beginscan(relation,
-				ClassTblspcRelfilenodeIndexId,
-				true,
-				NULL,
-				2,
-				skey);
-
-	while (HeapTupleIsValid(ntp = systable_getnext(scandesc)))
-	{
-		if (found)
-		{
-			elog(ERROR,
-				"unexpected duplicate for tablespace %u, relfilenode %u",
-				reltablespace, relfilenode);
-		}
-
-		found = true;
-		relid = HeapTupleGetOid(ntp);
-		classform = (Form_pg_class) GETSTRUCT(ntp);
-	}
-
-	if (!found)
-	{
-		elog(WARNING,
-				"unexpected none for tablespace %u, relfilenode %u",
-				reltablespace, relfilenode);
-	}
-	else if ((classform->relkind == RELKIND_RELATION ||
-			classform->relkind == RELPERSISTENCE_UNLOGGED) &&
-			!IsSystemClass(relid, classform))
+	if ((rel->rd_rel->relkind == RELKIND_RELATION ||
+		rel->rd_rel->relkind == RELPERSISTENCE_UNLOGGED) &&
+		!IsSystemRelation(rel))
 	{
 		has = true;
 	}
-
-	systable_endscan(scandesc);
-	heap_close(relation, AccessShareLock);
 
 	return has;
 }
