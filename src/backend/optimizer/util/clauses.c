@@ -5256,4 +5256,32 @@ bool find_sublink_walker(Node *node, List **list)
 
 	return expression_tree_walker(node, find_sublink_walker, list);
 }
+
+/*
+ * replace_eval_sql_value_function:
+ *  eval SQLValueFunction and replace as Const value.
+ */
+Node*
+replace_eval_sql_value_function(Node *node)
+{
+	if (node == NULL)
+		return NULL;
+
+	if (node->type == T_SQLValueFunction)
+	{
+		/*
+		 * All variants of SQLValueFunction are stable, so if we are
+		 * evaluating the expression's value, we should evaluate the
+		 * current function value.  Otherwise just copy.
+		 */
+		SQLValueFunction *svf = (SQLValueFunction *) node;
+
+		return (Node *) evaluate_expr((Expr *) svf,
+		                              svf->type,
+		                              svf->typmod,
+		                              InvalidOid);
+	}
+
+	return expression_tree_mutator(node, replace_eval_sql_value_function, NULL);
+}
 #endif

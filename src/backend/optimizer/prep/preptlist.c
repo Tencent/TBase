@@ -229,13 +229,18 @@ preprocess_targetlist(PlannerInfo *root, List *tlist)
 
                                     secDataType = exprType((Node *)keyTle->expr);
 
+									/* evaluate sql value function on coordinator */
+									keyTle->expr = (Expr *) replace_eval_sql_value_function(
+											(Node *)keyTle->expr);
+
                                     secConstExpr = (Const *) eval_const_expressions(root,
                                                              (Node *)keyTle->expr);
+
+									/* cold hot insert router must be on coordinator */
                                     if (!IsA(secConstExpr, Const) ||
                                                 secConstExpr->consttype != secDataType)
                                     {
-                                        list_free(nodeList);
-                                        goto END_restrict;
+										elog(ERROR, "expression on cold-hot separation column must be const.");
                                     }
 
                                     secisnull = secConstExpr->constisnull;
