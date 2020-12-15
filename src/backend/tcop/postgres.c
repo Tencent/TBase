@@ -977,7 +977,6 @@ static List *
 pg_rewrite_query(Query *query)
 {
 	List	   *querytree_list;
-	char       *leader_cn = NULL;
 
     if (Debug_print_parse)
         elog_node_display(LOG, "parse tree", query,
@@ -987,13 +986,8 @@ pg_rewrite_query(Query *query)
         ResetUsage();
 
 #ifdef PGXC
-	/* directly forward the request */
-	leader_cn = find_ddl_leader_cn();
-
     if (query->commandType == CMD_UTILITY &&
-        IsA(query->utilityStmt, CreateTableAsStmt) &&
-		((enable_parallel_ddl && is_ddl_leader_cn(leader_cn) ||
-		  !enable_parallel_ddl)))
+	    IsA(query->utilityStmt, CreateTableAsStmt))
 	{
 		/*
 		 * CREATE TABLE AS SELECT and SELECT INTO are rewritten so that the

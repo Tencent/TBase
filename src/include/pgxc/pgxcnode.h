@@ -143,8 +143,6 @@ typedef struct
 	PGXCNodeHandle	  **coord_handles;	/* an array of Coordinator handles */
 } PGXCNodeAllHandles;
 
-extern bool forward_mode;
-
 extern void InitMultinodeExecutor(bool is_force);
 extern Oid get_nodeoid_from_nodeid(int nodeid, char node_type);
 

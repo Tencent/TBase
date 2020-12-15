@@ -2710,16 +2710,6 @@ static struct config_bool ConfigureNamesBool[] =
         NULL, NULL, NULL
     },
     {
-        {"is_forward_request", PGC_USERSET, CUSTOM_OPTIONS,
-            gettext_noop("Whether DDL is forwarded from another coordinator."),
-            NULL,
-            GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_AUTO_FILE | GUC_DISALLOW_IN_FILE | GUC_NO_SHOW_ALL
-        },
-        &is_forward_request,
-        false,
-        NULL, NULL, NULL
-    },
-	{
 		{"enable_cold_hot_router_print", PGC_USERSET, CUSTOM_OPTIONS,
 			 gettext_noop("Whether print cold hot router."),
 			 NULL
@@ -8252,9 +8242,10 @@ set_config_option(const char *name, const char *value,
 	 */
     if ((source == PGC_S_SESSION || source == PGC_S_CLIENT)
         && (IS_PGXC_DATANODE || !IsConnFromCoord())
-        && (strcmp(name,"remotetype") != 0 && strcmp(name,"parentnode") != 0 &&
-            strcmp(name,"is_forward_request") != 0))
+        && (strcmp(name,"remotetype") != 0 && strcmp(name,"parentnode") != 0))
+    {
         send_to_nodes = true;
+    }
 #endif
 
 #ifdef PGXC

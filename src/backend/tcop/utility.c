@@ -146,7 +146,6 @@ static bool IsStmtAllowedInLockedMode(Node *parsetree, const char *queryString);
 static void ExecCreateKeyValuesStmt(Node *parsetree);
 static void RemoveSequeceBarely(DropStmt *stmt);
 extern void RegisterSeqDrop(char *name, int32 type);
-static bool forward_ddl_to_leader_cn(Node *node, const char *queryString);
 
 extern bool    g_GTM_skip_catalog;
 
@@ -1412,8 +1411,22 @@ ProcessUtilityPost(PlannedStmt *pstmt,
                         break;
                     }
                 }
+
+				/*
+				 * Also truncate on coordinators which makes parallel ddl possible.
+				 * temp table only exists on current coordinator
+				 * which parallel ddl has no effect.
+				 */
+				if (!is_temp)
+				{
+					exec_type = EXEC_ON_ALL_NODES;
+				}
+				else
+				{
                 exec_type = EXEC_ON_DATANODES;
             }
+
+			}
             break;
 
         case T_AlterDatabaseStmt:
@@ -1737,48 +1750,40 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 
 #ifdef __TBASE__
 /*
- * Forward specific DDLs request to leader cn.
- *
- * On success return true else false.
+ * Enable parallel ddl for specific query.
  */
-static bool
-forward_ddl_to_leader_cn(Node *node, const char *queryString)
+static void
+parallel_ddl_process(Node *node)
 {
-    Oid  leader_cn = InvalidOid;
-    char *leader_name = NULL;
-
-    /* avoid forward recurse */
-    if (!enable_parallel_ddl || !IS_PGXC_LOCAL_COORDINATOR || is_forward_request)
+    if (!enable_parallel_ddl || !IS_PGXC_LOCAL_COORDINATOR)
     {
-        return false;
+        return ;
     }
 
+	switch (nodeTag(node))
+	{
+		case T_CreateStmt:
+		case T_CreateForeignTableStmt:
+		case T_CreateTableAsStmt:
+		case T_CreateSchemaStmt:
+		case T_AlterTableStmt:
+		case T_DefineStmt:
+		case T_DropStmt:
+		case T_RenameStmt:
+		case T_TruncateStmt:
+		case T_IndexStmt:
     /* CONCURRENT INDEX is not supported */
     if (IsA(node,IndexStmt) && castNode(IndexStmt,node)->concurrent)
     {
-        return false;
+				return ;
+    }
+			break;
+		default:
+			return ;
     }
 
-    /* Set parallel ddl flag */
+    /* Parallel ddl is enabled, set parallel ddl flag */
     is_txn_has_parallel_ddl = true;
-
-    leader_name = find_ddl_leader_cn();
-    if(is_ddl_leader_cn(leader_name))
-    {
-        return false;
-    }
-
-    leader_cn = get_pgxc_nodeoid(leader_name);
-
-    /* Set flag to indicate forwarded request */
-    forward_mode = true;
-
-    pgxc_execute_on_nodes(1, &leader_cn, pstrdup(queryString));
-
-    /* Cancel forwarded flag for subsequent requests */
-	forward_mode = false;
-
-    return true;
 }
 #endif
 
@@ -1807,6 +1812,10 @@ standard_ProcessUtility(PlannedStmt *pstmt,
     bool        isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
     ParseState *pstate;
 
+#ifdef __TBASE__
+	 /* parallel enable check */
+	 parallel_ddl_process(parsetree);
+#endif
     /*
      * For more detail see comments in function pgxc_lock_for_backup.
      *

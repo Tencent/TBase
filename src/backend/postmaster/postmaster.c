@@ -671,10 +671,6 @@ bool isRestoreMode = false;
 
 int remoteConnType = REMOTE_CONN_APP;
 
-#ifdef __TBASE__
-bool is_forward_request = false;
-#endif
-
 /* key pair to be used as object id while using advisory lock for backup */
 Datum xc_lockForBackupKey1;
 Datum xc_lockForBackupKey2;

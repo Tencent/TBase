@@ -133,9 +133,6 @@ static List    *local_param_list = NIL;
 static StringInfo     session_params;
 static StringInfo    local_params;
 
-/* Is forward request to leader coordinator */
-bool   forward_mode = false;
-
 typedef struct
 {
     NameData name;
@@ -4638,20 +4635,6 @@ PGXCNodeGetSessionParamStr(void)
 		{
             appendStringInfo(session_params, "SET global_session TO %s_%d;",
                              PGXCNodeName, MyProcPid);
-		}
-
-		/*
-		 * If forward_mode is true, target node must regard it as normal client
-		 * instead of internal connections ,so is_forward_request must be ahead of
-		 * any guc variables else they will be considered internal variables.
-		 */
-		if (forward_mode)
-		{
-			appendStringInfo(session_params, "SET is_forward_request to true;");
-		}
-		else
-		{
-			appendStringInfo(session_params, "SET is_forward_request to false;");
 		}
 
         get_set_command(session_param_list, session_params, false);
