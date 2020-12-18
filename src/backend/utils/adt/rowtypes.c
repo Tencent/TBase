@@ -25,6 +25,10 @@
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/typcache.h"
+#include "utils/relcrypt.h"
+#include "commands/relcryptcommand.h"
+#include "utils/mls.h"
+#include "utils/datamask.h"
 
 
 /*
@@ -311,6 +315,8 @@ record_out(PG_FUNCTION_ARGS)
     Datum       *values;
     bool       *nulls;
     StringInfoData buf;
+	Oid         parentOid = InvalidOid;
+	Form_pg_attribute *att = NULL;
 
     check_stack_depth();        /* recurses for record-type columns */
 
@@ -319,6 +325,7 @@ record_out(PG_FUNCTION_ARGS)
     tupTypmod = HeapTupleHeaderGetTypMod(rec);
     tupdesc = lookup_rowtype_tupdesc(tupType, tupTypmod);
     ncolumns = tupdesc->natts;
+	att = tupdesc->attrs;
 
     /* Build a temporary HeapTuple control structure */
     tuple.t_len = HeapTupleHeaderGetDatumLength(rec);
@@ -360,8 +367,31 @@ record_out(PG_FUNCTION_ARGS)
     values = (Datum *) palloc(ncolumns * sizeof(Datum));
     nulls = (bool *) palloc(ncolumns * sizeof(bool));
 
-    /* Break down the tuple into fields */
+	/* Break down the tuple into fields, if the table use encrypt, should
+	 * decrypt the data after deform_tuple on datanode.
+	 */
+	if (IS_PGXC_DATANODE && tupdesc->attrs_ext)
+	{
+		transparent_crypt_decrypt_all_cols_value_copy(&tuple, tupdesc, values, nulls);
+	}
+	else
+	{
     heap_deform_tuple(&tuple, tupdesc, values, nulls);
+	}
+
+	/*
+	 * Check table or parent table has datamask policy, if true, change data to
+	 * datamask to avoid data leak.
+	 */
+	if (tupdesc->natts > 0)
+	{
+		parentOid = mls_get_parent_oid_by_relid(att[0]->attrelid);
+	}
+
+	if (OidIsValid(parentOid) && datamask_check_table_has_datamask(parentOid))
+	{
+		datamask_exchange_all_cols_value_copy(tupdesc, values, nulls, parentOid);
+	}
 
     /* And build the result string */
     initStringInfo(&buf);

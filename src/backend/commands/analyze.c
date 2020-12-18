@@ -697,7 +697,7 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
             stats->tupDesc = onerel->rd_att;
 #ifdef _MLS_
             /* has column crypt */
-            if (stats->tupDesc->attrs_ext)
+            if (stats->tupDesc->attrs_ext && IS_PGXC_DATANODE)
             {
                 TRANSP_CRYPT_ATTRS_EXT_ENABLE(stats->tupDesc);
             }
@@ -707,7 +707,7 @@ do_analyze_rel(Relation onerel, int options, VacuumParams *params,
                                      numrows,
                                      totalrows);
 #ifdef _MLS_
-            if (stats->tupDesc->attrs_ext)
+            if (stats->tupDesc->attrs_ext && IS_PGXC_DATANODE)
             {
                 TRANSP_CRYPT_ATTRS_EXT_DISABLE(stats->tupDesc);
             }
@@ -2610,9 +2610,15 @@ compute_scalar_stats(VacAttrStatsP stats,
             {
                 if (0 != stats->tupDesc->transp_crypt[curr_attnum - 1].algo_id)
                 {
+                	if (stats->tupDesc->attrs_ext && IS_PGXC_DATANODE)
+	                {
                     TRANSP_CRYPT_ATTRS_EXT_ENABLE(stats->tupDesc);
+	                }
                     heap_deform_tuple(stats->rows[i], stats->tupDesc, tuple_values, tuple_isnull);
+	                if (stats->tupDesc->attrs_ext && IS_PGXC_DATANODE)
+	                {
                     TRANSP_CRYPT_ATTRS_EXT_DISABLE(stats->tupDesc);
+	                }
 
                     if (tuple_isnull[curr_attnum - 1])
                     {

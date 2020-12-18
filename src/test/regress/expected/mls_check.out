@@ -1284,6 +1284,14 @@ select * from alter_order_range_201702 order by f1 asc;
   2 | 9999 | 9999 | 9999 | XXXXe | XXXXe  | XXXXoworld           | XXXXe | 9999 | Tue May 05 05:05:05 2015 | 9999 | 9999
 (1 row)
 
+sample alter_order_range(3000);
+ samplenum | totalnum | deadnum | totalpages | visiblepages |                                                   rows                                                   
+-----------+----------+---------+------------+--------------+----------------------------------------------------------------------------------------------------------
+         2 |        2 |       0 |         40 |            0 | 
+           |          |         |            |              | (1,9999,9999,9999,XXXXe,"XXXXe ","XXXXoworld          ",XXXXe,9999,"Tue May 05 05:05:05 2015",9999,9999)
+           |          |         |            |              | (2,9999,9999,9999,XXXXe,"XXXXe ","XXXXoworld          ",XXXXe,9999,"Tue May 05 05:05:05 2015",9999,9999)
+(3 rows)
+
 alter table alter_order_range detach partition alter_order_range_201701;
 ERROR:  could not detach partition for table:alter_order_range, cause mls poilcy is bound
 \c - mls_admin
@@ -2509,6 +2517,8 @@ select * from tbl_mls_test where f1 = 1024 and f2 >= '2018-05-01' and f2 < '2018
  1024 | Tue May 01 00:00:00 2018 | 1024
 (1 row)
 
+-- test vacuum analyze
+vacuum analyze tbl_mls_test;
 --case: orignal partition, interval partition with index
 \c - godlike
 create table tbl_mls_part_list( a int ,b int ) PARTITION BY LIST (b) ;

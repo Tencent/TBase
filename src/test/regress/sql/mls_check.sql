@@ -478,6 +478,8 @@ select * from alter_order_range order by f1 asc;
 select * from alter_order_range_201701 order by f1 asc;
 select * from alter_order_range_201702 order by f1 asc;
 
+sample alter_order_range(3000);
+
 alter table alter_order_range detach partition alter_order_range_201701;
 
 \c - mls_admin
@@ -847,6 +849,9 @@ checkpoint;
 
 --explain select * from tbl_mls_test where f1 = 1024 and f2 >= '2018-05-01' and f2 < '2018-06-01' order by f1 limit 10 ;      
 select * from tbl_mls_test where f1 = 1024 and f2 >= '2018-05-01' and f2 < '2018-06-01' order by f1 limit 10 ;      
+
+-- test vacuum analyze
+vacuum analyze tbl_mls_test;
 
 --case: orignal partition, interval partition with index
 \c - godlike

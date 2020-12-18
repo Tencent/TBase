@@ -1578,7 +1578,7 @@ bool trsprt_crypt_chk_tbl_has_col_crypt(Oid relid)
     
     while (HeapTupleIsValid(htup = systable_getnext(scan)))
     {
-        Form_pg_transparent_crypt_policy_map form = (Form_pg_transparent_crypt_policy_map)htup;
+        Form_pg_transparent_crypt_policy_map form = (Form_pg_transparent_crypt_policy_map) GETSTRUCT(htup);
 
         if (form->attnum > InvalidAttrNumber)
         {
