@@ -703,8 +703,7 @@ PortalStart(Portal portal, ParamListInfo params,
                  */
 #ifdef __TBASE__
                 if (!paramPassDown && queryDesc->plannedstmt->nParamRemote > 0 &&
-						queryDesc->plannedstmt->remoteparams[queryDesc->plannedstmt->nParamRemote-1].paramkind == PARAM_EXEC &&
-						queryDesc->plannedstmt->distributionType != LOCATOR_TYPE_SHARD)
+						queryDesc->plannedstmt->remoteparams[queryDesc->plannedstmt->nParamRemote-1].paramkind == PARAM_EXEC)
 #else
                 if (queryDesc->plannedstmt->nParamRemote > 0 &&
                         queryDesc->plannedstmt->remoteparams[queryDesc->plannedstmt->nParamRemote-1].paramkind == PARAM_EXEC)
