@@ -316,6 +316,10 @@ InitMultinodeExecutor(bool is_force)
         {
             node_handle_ent->nodeoid = dn_handles[count].nodeoid;
             node_handle_ent->nodeidx = count;
+
+			elog(DEBUG5,
+				"node_handles_hash enter primary datanode nodeoid: %d",
+				node_handle_ent->nodeoid);
         }
 #endif        
         
@@ -342,6 +346,10 @@ InitMultinodeExecutor(bool is_force)
         {
             node_handle_ent->nodeoid = sdn_handles[count].nodeoid;
             node_handle_ent->nodeidx = count;
+
+			elog(DEBUG5,
+				"node_handles_hash enter slave datanode nodeoid: %d",
+				node_handle_ent->nodeoid);
         }
 #endif        
         
@@ -367,6 +375,10 @@ InitMultinodeExecutor(bool is_force)
         {
             node_handle_ent->nodeoid = co_handles[count].nodeoid;
             node_handle_ent->nodeidx = count;
+
+			elog(DEBUG5,
+				"node_handles_hash enter coordinator nodeoid: %d",
+				node_handle_ent->nodeoid);
         }
 #endif    
     }
@@ -655,7 +667,7 @@ pgxc_node_init(PGXCNodeHandle *handle, int sock, bool global_session, int pid)
 #ifdef DN_CONNECTION_DEBUG
     handle->have_row_desc = false;
 #endif
-    memset(handle->error, 0X00, MAX_ERROR_MSG_LENGTH);
+	handle->error[0] = '\0';
     handle->outEnd = 0;
     handle->inStart = 0;
     handle->inEnd = 0;
@@ -1405,7 +1417,7 @@ release_handles(bool force)
         {
             /*
              * Connections at this point should be completely inactive,
-             * otherwise abaandon them. We can not allow not cleaned up
+			 * otherwise abandon them. We can not allow not cleaned up
              * connection is returned to pool.
              */
             if (handle->state != DN_CONNECTION_STATE_IDLE ||
@@ -1442,7 +1454,7 @@ release_handles(bool force)
 		{
 			/*
 			 * Connections at this point should be completely inactive,
-			 * otherwise abaandon them. We can not allow not cleaned up
+			 * otherwise abandon them. We can not allow not cleaned up
 			 * connection is returned to pool.
 			 */
 			if (handle->state != DN_CONNECTION_STATE_IDLE ||
@@ -1519,6 +1531,67 @@ release_handles(bool force)
     datanode_count = 0;
     coord_count = 0;
     slavedatanode_count = 0;
+}
+
+/*
+ * Reset all Datanode and Coordinator connections occupied memory.
+ */
+void
+reset_handles(void)
+{
+	int			i;
+
+	/* don't reset connection if holding a cluster lock */
+	if (cluster_ex_lock_held)
+	{
+		return;
+	}
+
+	if (datanode_count == 0 && coord_count == 0 && slavedatanode_count == 0)
+	{
+		return;
+	}
+
+	/* Do not reset connections if we have prepared statements on nodes */
+	if (HaveActiveDatanodeStatements())
+	{
+		return;
+	}
+
+	/* Reset Datanodes handles occupied memory */
+	for (i = 0; i < NumDataNodes; i++)
+	{
+		PGXCNodeHandle *handle = &dn_handles[i];
+
+		if (handle->sock != NO_SOCKET)
+		{
+			pgxc_node_init(handle, handle->sock, true, handle->backend_pid);
+		}
+	}
+
+	for (i = 0; i < NumSlaveDataNodes; i++)
+	{
+		PGXCNodeHandle *handle = &sdn_handles[i];
+
+		if (handle->sock != NO_SOCKET)
+		{
+			pgxc_node_init(handle, handle->sock, true, handle->backend_pid);
+		}
+	}
+
+	if (IS_PGXC_COORDINATOR)
+	{
+		/* Collect Coordinator handles */
+		for (i = 0; i < NumCoords; i++)
+		{
+			PGXCNodeHandle *handle = &co_handles[i];
+
+			if (handle->sock != NO_SOCKET)
+			{
+				pgxc_node_init(handle, handle->sock, true, handle->backend_pid);
+			}
+		}
+	}
 }
 
 /*
@@ -3052,8 +3125,6 @@ int
 pgxc_node_send_snapshot(PGXCNodeHandle *handle, Snapshot snapshot)
 {// #lizard forgives
     int            msglen PG_USED_FOR_ASSERTS_ONLY;
-    int            nval PG_USED_FOR_ASSERTS_ONLY;
-    int            i PG_USED_FOR_ASSERTS_ONLY;
 
     /* Invalid connection state, return error */
     if (handle->state != DN_CONNECTION_STATE_IDLE)
@@ -3272,7 +3343,10 @@ pgxc_node_send_timestamp(PGXCNodeHandle *handle, TimestampTz timestamp)
     /* Invalid connection state, return error */
     if (handle->state != DN_CONNECTION_STATE_IDLE)
     {
-        elog(WARNING, "pgxc_node_send_timestamp datanode:%u invalid stauts:%d, no need to send data, return NOW", handle->nodeoid, handle->state);
+		elog(WARNING,
+			"pgxc_node_send_timestamp datanode:%u invalid stauts:%d, "
+			"no need to send data, return NOW",
+			handle->nodeoid, handle->state);
         return EOF;
     }
 
@@ -3311,7 +3385,7 @@ pgxc_node_send_timestamp(PGXCNodeHandle *handle, TimestampTz timestamp)
 /*
  * Send the Coordinator info down to the PGXC node at the beginning of transaction,
  * In this way, Datanode can print this Coordinator info into logfile, 
- * and those infos can be found in Datanode logifile if needed during debugging
+ * and those infos can be found in Datanode logfile if needed during debugging
  */
 int
 pgxc_node_send_coord_info(PGXCNodeHandle * handle, int coord_pid, TransactionId coord_vxid)
@@ -4249,13 +4323,23 @@ pfree_pgxc_all_handles(PGXCNodeAllHandles *pgxc_handles)
 #endif
 
     if (pgxc_handles->primary_handle)
+	{
         pfree(pgxc_handles->primary_handle);
+		pgxc_handles->primary_handle = NULL;
+	}
     if (pgxc_handles->datanode_handles)
+	{
         pfree(pgxc_handles->datanode_handles);
+		pgxc_handles->datanode_handles = NULL;
+	}
     if (pgxc_handles->coord_handles)
+	{
         pfree(pgxc_handles->coord_handles);
+		pgxc_handles->coord_handles = NULL;
+	}
 
     pfree(pgxc_handles);
+	pgxc_handles = NULL;
 }
 
 /* Do translation for non-main cluster */
@@ -4314,13 +4398,15 @@ PGXCNodeGetNodeId(Oid nodeoid, char *node_type)
     
     if (NULL == node_handles_hash)
     {
+		elog(DEBUG5, "node_handles_hash is null.");
         goto NOT_FOUND;
     }
-    nodeoid = PGXCGetLocalNodeOid(nodeoid);
     
+	nodeoid = PGXCGetLocalNodeOid(nodeoid);
     entry = (PGXCNodeHandlesLookupEnt *) hash_search(node_handles_hash, &nodeoid, HASH_FIND, &found);
     if (false == found)
     {
+		elog(DEBUG5, "node_handles_hash does not has %d", nodeoid);
         goto NOT_FOUND;
     }
 
@@ -4721,11 +4807,23 @@ get_set_command(List *param_list, StringInfo command, bool local)
             {
                 search_path_value[index++] = '"';
             }
+
+			if ((char *) strstr(search_path_value, "public") ||
+				(char *) strstr(search_path_value, "PUBLIC"))
+			{
             appendStringInfo(command, "SET %s %s TO %s;", local ? "LOCAL" : "",
              NameStr(entry->name), search_path_value);
         }
         else
         {
+				appendStringInfo(command, "SET %s %s TO %s, public;", local ? "LOCAL" : "",
+					NameStr(entry->name), search_path_value);
+			}
+
+			elog(DEBUG5, "get_set_command: %s", command->data);
+		}
+		else
+		{
             appendStringInfo(command, "SET %s %s TO %s;", local ? "LOCAL" : "",
              NameStr(entry->name), value);
         }
@@ -4735,7 +4833,7 @@ get_set_command(List *param_list, StringInfo command, bool local)
 
 /*
  * Returns SET commands needed to initialize remote session.
- * The command may already be biult and valid, return it right away if the case.
+ * The command may already be built and valid, return it right away if the case.
  * Otherwise build it up.
  * To support Distributed Session machinery coordinator should generate and
  * send a distributed session identifier to remote nodes. Generate it here.
@@ -4777,7 +4875,7 @@ PGXCNodeGetSessionParamStr(void)
 
 /*
  * Returns SET commands needed to initialize transaction on a remote session.
- * The command may already be biult and valid, return it right away if the case.
+ * The command may already be built and valid, return it right away if the case.
  * Otherwise build it up.
  */
 char *
@@ -5214,8 +5312,16 @@ PgxcNodeDiffBackendHandles(List **nodes_alter,
         Oid nodeoid;
         char ntype = PGXC_NODE_NONE;
 
-        if(enable_multi_cluster && strcmp(NameStr(nodeForm->node_cluster_name), PGXCClusterName))
+		if (enable_multi_cluster &&
+			strcmp(NameStr(nodeForm->node_cluster_name), PGXCClusterName))
+		{
+			continue;
+		}
+
+		if (PGXC_NODE_GTM == nodeForm->node_type)
+		{
             continue;
+		}
         
         nodeoid = HeapTupleGetOid(tuple);
         catoids = lappend_oid(catoids, nodeoid);

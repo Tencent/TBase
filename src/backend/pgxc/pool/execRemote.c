@@ -3454,11 +3454,11 @@ pgxc_node_begin(int conn_count, PGXCNodeHandle **connections,
         /* Send GXID and check for errors */
         if (pgxc_node_send_gxid(connections[i], gxid))
         {
-            elog(WARNING, "pgxc_node_begin gxid is invalid.");
+			elog(WARNING, "pgxc_node_begin gxid %u is invalid.", gxid);
             return EOF;
         }
-        /* Send timestamp and check for errors */
 
+		/* Send timestamp and check for errors */
 		if (GlobalTimestampIsValid(timestamp) &&
 			pgxc_node_send_timestamp(connections[i], timestamp))
 		{
@@ -3565,21 +3565,6 @@ pgxc_node_begin(int conn_count, PGXCNodeHandle **connections,
 					connections[i]->nodename, connections[i]->backend_pid);
 			new_connections[new_count++] = connections[i];
         }
-        
-#if 0        
-        /* Send BEGIN if not already in transaction */
-        if (need_tran_block && connections[i]->transaction_status == 'I')
-        {
-            /* Send the BEGIN TRANSACTION command and check for errors */
-            if (pgxc_node_send_query(connections[i], cmd))
-            {
-                return EOF;
-            }
-
-            elog(LOG, "pgxc_node_begin send BEGIN to node %s, pid:%d", connections[i]->nodename, connections[i]->backend_pid);
-            new_connections[new_count++] = connections[i];
-        }
-#endif        
     }
 
     /*
@@ -3627,6 +3612,8 @@ pgxc_node_begin(int conn_count, PGXCNodeHandle **connections,
         for (i = 0; i < new_count; i++)
         {
             pgxc_node_set_query(new_connections[i], init_str);
+			elog(DEBUG5, "pgxc_node_begin send %s to node %s, pid:%d", init_str,
+					new_connections[i]->nodename, new_connections[i]->backend_pid);
         }
     }
 
@@ -3869,6 +3856,7 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
             elog(LOG, "prepare remote transaction xid %d gid %s", GetTopTransactionIdIfAny(), prepareGID);
         }
         global_prepare_ts = GetGlobalTimestampGTM();
+
 #ifdef __TWO_PHASE_TESTS__
     if (PART_PREPARE_GET_TIMESTAMP == twophase_exception_case)
     {
@@ -4397,15 +4385,6 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
 
         clear_handles();
         pfree_pgxc_all_handles(handles);
-
-#if 0
-        if (!temp_object_included && !PersistentConnections)
-        {
-            /* Clean up remote sessions */
-            pgxc_node_remote_cleanup_all();
-            release_handles();
-        }
-#endif        
     }
 
     pfree(prepare_cmd);
@@ -4505,6 +4484,7 @@ prepare_err:
             }
             g_twophase_state.datanode_state[conn_state_index].state = TWO_PHASE_ABORTTING;
 #endif
+
             /* Send down abort prepared command */
 #ifdef __USE_GLOBAL_SNAPSHOT__
             if (pgxc_node_send_gxid(conn, auxXid))
@@ -4512,7 +4492,8 @@ prepare_err:
 #ifdef __TWO_PHASE_TRANS__
                 g_twophase_state.datanode_state[conn_state_index].conn_state = 
                     TWO_PHASE_SEND_GXID_ERROR;
-                g_twophase_state.datanode_state[conn_state_index].state = TWO_PHASE_ABORT_ERROR;
+				g_twophase_state.datanode_state[conn_state_index].state =
+					TWO_PHASE_ABORT_ERROR;
 #endif
                 /*
                  * Prepared transaction is left on the node, but we can not
@@ -4520,10 +4501,11 @@ prepare_err:
                  */
                 ereport(WARNING,
                         (errcode(ERRCODE_INTERNAL_ERROR),
-                         errmsg("failed to send xid to "
-                                "the node %u", conn->nodeoid)));
+						 errmsg("failed to send xid %u to "
+								"the node %u", auxXid, conn->nodeoid)));
             }
 #endif
+
             if (pgxc_node_send_query(conn, abort_cmd))
             {
 #ifdef __TWO_PHASE_TRANS__
@@ -4598,7 +4580,8 @@ prepare_err:
 #ifdef __TWO_PHASE_TRANS__
                 g_twophase_state.coord_state[conn_state_index].conn_state = 
                     TWO_PHASE_SEND_GXID_ERROR;
-                g_twophase_state.coord_state[conn_state_index].state = TWO_PHASE_ABORT_ERROR;
+				g_twophase_state.coord_state[conn_state_index].state =
+					TWO_PHASE_ABORT_ERROR;
 #endif
                 /*
                  * Prepared transaction is left on the node, but we can not
@@ -4606,10 +4589,11 @@ prepare_err:
                  */
                 ereport(WARNING,
                         (errcode(ERRCODE_INTERNAL_ERROR),
-                         errmsg("failed to send xid to "
-                                "the node %u", conn->nodeoid)));
+						errmsg("failed to send xid %u to "
+								"the node %u", auxXid, conn->nodeoid)));
             }
 #endif
+
             if (pgxc_node_send_query(conn, abort_cmd))
             {
 #ifdef __TWO_PHASE_TRANS__
@@ -4662,12 +4646,20 @@ prepare_err:
     else
         elog(ERROR, "failed to PREPARE transaction on one or more nodes");
 
-    if (!temp_object_included && !PersistentConnections)
+	if (!temp_object_included)
     {
         /* Clean up remote sessions */
         pgxc_node_remote_cleanup_all();
+
+		if (PersistentConnections)
+		{
+			reset_handles();
+		}
+		else
+		{
         release_handles(false);
     }
+	}
     
     clear_handles();
 
@@ -4700,7 +4692,7 @@ prepare_err:
  * Release remote connection after completion.
  *
  * For DDL, DN will commit before CN does.
- * Because DDLs normally have conflict locks, when CN gets committed,
+ * Because DDL normally has conflict locks, when CN gets committed,
  * DNs will be in a consistent state for blocked user transactions.
  */
 static void
@@ -4722,22 +4714,21 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
 
     stat_transaction(conn_count);
 
-    if (need_release_handle)
-    {
-        if (!temp_object_included && !PersistentConnections)
+	if (!temp_object_included)
         {
             /* Clean up remote sessions */
             pgxc_node_remote_cleanup_all();
-            release_handles(false);
-        }
+
+		if (need_release_handle)
+		{
+			if (PersistentConnections)
+			{
+				reset_handles();
     }
     else
     {
-        /* in subtxn, we just cleanup the connections. not release the handles. */
-        if (!temp_object_included && !PersistentConnections)
-        {
-            /* Clean up remote sessions without release handles. */
-            pgxc_node_remote_cleanup_all();
+				release_handles(false);
+			}
         }
     }
 
@@ -4783,7 +4774,6 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
 
     if(IS_PGXC_COORDINATOR)
     {
-        
         global_committs = GetGlobalTimestampGTM();
         if(!GlobalTimestampIsValid(global_committs)){
             ereport(ERROR,
@@ -4955,23 +4945,21 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
 #ifndef __TBASE__
 	stat_transaction(conn_count);
 
+	if (!temp_object_included)
+	{
+		/* Clean up remote sessions */
+		pgxc_node_remote_cleanup_all();
 	
 	if (need_release_handle)
 	{
-		if (!temp_object_included && !PersistentConnections)
+			if (PersistentConnections)
 		{
-			/* Clean up remote sessions */
-			pgxc_node_remote_cleanup_all();
-			release_handles(false);
-		}
+				reset_handles();
 	}
 	else
 	{
-		/* in subtxn, we just cleanup the connections. not release the handles. */
-		if (!temp_object_included && !PersistentConnections)
-		{
-			/* Clean up remote sessions without release handles. */
-			pgxc_node_remote_cleanup_all();
+				release_handles(false);
+			}
 		}
 	}
 	
@@ -4992,7 +4980,7 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
 }
 
 /*
- * Set the node begein transaction in plpgsql function
+ * Set the node begin transaction in plpgsql function
  */
 static void
 SetPlpgsqlTransactionBegin(PGXCNodeHandle *conn)
@@ -5802,22 +5790,21 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
     }
 #endif    
     
-    if (need_release_handle)
-    {
+	/*
+	 * Drop the connections to ensure aborts are handled properly.
+	 *
+	 * XXX We should really be consulting PersistentConnections parameter and
+	 * keep the connections if its set. But as a short term measure, to address
+	 * certain issues for aborted transactions, we drop the connections.
+	 * Revisit and fix the issue
+	 */
         if (!temp_object_included)
         {
             /* Clean up remote sessions */
             pgxc_node_remote_cleanup_all();
-			release_handles(false);
-        }
-    }
-    else
-    {
-        /* in subtxn, we just cleanup the connections. not release the handles. */
-        if (!temp_object_included)
+		if (need_release_handle)
         {
-            /* Clean up remote sessions without release handles. */
-            pgxc_node_remote_cleanup_all();
+			release_handles(false);
         }
     }
     
@@ -6647,7 +6634,9 @@ pgxc_start_command_on_connection(PGXCNodeHandle *connection,
 
     if (snapshot && pgxc_node_send_snapshot(connection, snapshot))
         return false;
-    if (step->statement || step->cursor || remotestate->rqs_num_params)
+	if ((step->statement && step->statement[0] != '\0') ||
+		step->cursor ||
+		remotestate->rqs_num_params)
     {
         /* need to use Extended Query Protocol */
         int    fetch = 0;
@@ -7878,29 +7867,6 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
 
     pgxc_node_remote_abort(txn_type, need_release_handle);
 
-    /*
-     * Drop the connections to ensure aborts are handled properly.
-     *
-     * XXX We should really be consulting PersistentConnections parameter and
-     * keep the connections if its set. But as a short term measure, to address
-     * certain issues for aborted transactions, we drop the connections.
-     * Revisit and fix the issue
-     */
-    elog(DEBUG5, "temp_object_included %d", temp_object_included);
-    /* cleanup and release handles is already done in pgxc_node_remote_abort */
-#if 0    
-    if (release_handle)
-    {
-        if (!temp_object_included)
-        {
-            /* Clean up remote sessions */
-            pgxc_node_remote_cleanup_all();
-            release_handles();
-        }
-    }
-    
-    clear_handles();
-#endif
     pfree_pgxc_all_handles(all_handles);
 
     if (log_gtm_stats)
@@ -8844,12 +8810,19 @@ pgxc_node_remote_finish(char *prepareGID, bool commit,
     }
 #endif    
 
-    if (!temp_object_included && !PersistentConnections)
+	if (!temp_object_included)
     {
         /* Clean up remote sessions */
         pgxc_node_remote_cleanup_all();
+		if (PersistentConnections)
+		{
+			reset_handles();
+		}
+		else
+		{
         release_handles(false);
     }
+	}
     clear_handles();
     pfree_pgxc_all_handles(pgxc_handles);
     pfree(finish_cmd);
@@ -9050,8 +9023,9 @@ ExecRemoteQuery(PlanState *pstate)
 		if (step->force_autocommit)
 			need_tran_block = false;
 		else
-			need_tran_block = step->cursor ||
-					step->statement || node->rqs_num_params ||
+			need_tran_block = (step->statement && step->statement[0] != '\0') ||
+				step->cursor ||
+				node->rqs_num_params ||
 					(!step->read_only && total_conn_count > 1) ||
 					(TransactionBlockStatusCode() == 'T');
 

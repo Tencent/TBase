@@ -267,9 +267,9 @@ INSERT INTO xl_names("name", "name1")VALUES ('X', 'X1');
 INSERT INTO xl_names("name", "name1")VALUES ('Y', 'Y1');
 INSERT INTO xl_names("name", "name1")VALUES ('Z', 'Z1');
 
-select xl_nodename_from_id(xc_node_id), * from xl_t order by 1;
+select xl_nodename_from_id(xc_node_id), * from xl_t order by 1, 2, 3;
 
-select xl_nodename_from_id(xc_node_id), * from xl_t1 order by 1;
+select xl_nodename_from_id(xc_node_id), * from xl_t1 order by 1, 2, 3;
 
 select xl_nodename_from_id(xc_node_id), * from xl_names order by name;
 
@@ -282,8 +282,8 @@ update xl_t1  set name1 = T1.name1
 from (select name,name1 from xl_names) T1 
 where xl_t1.name1 = T1.name;
 
-select xl_nodename_from_id(xc_node_id), * from xl_t order by 1;
-select xl_nodename_from_id(xc_node_id), * from xl_t1 order by 1;
+select xl_nodename_from_id(xc_node_id), * from xl_t order by 1, 2, 3;
+select xl_nodename_from_id(xc_node_id), * from xl_t1 order by 1, 2, 3;
 
 --testing correlated delete:
 delete from xl_t 
@@ -295,9 +295,9 @@ delete from xl_t1
 where xl_t1.name1 in (select name1 from xl_names where name in ('Z', 'X'))
 ;
 
-select xl_nodename_from_id(xc_node_id), * from xl_t order by 1;
+select xl_nodename_from_id(xc_node_id), * from xl_t order by 1, 2, 3;
 
-select xl_nodename_from_id(xc_node_id), * from xl_t1 order by 1;
+select xl_nodename_from_id(xc_node_id), * from xl_t1 order by 1, 2, 3;
 
 drop table xl_t;
 drop table xl_t1;

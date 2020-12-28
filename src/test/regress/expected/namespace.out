@@ -69,3 +69,45 @@ SELECT COUNT(*) FROM pg_class WHERE relnamespace =
      0
 (1 row)
 
+CREATE SCHEMA test_schema_2
+       CREATE TABLE ab (
+              a serial,
+              b int UNIQUE
+       );
+CREATE SCHEMA test_schema_3;
+CREATE SCHEMA test_schema_4
+       CREATE TABLE ab (
+              a serial,
+              b int UNIQUE
+       );
+INSERT INTO test_schema_2.ab(b) VALUES(1);
+INSERT INTO test_schema_2.ab(b) VALUES(2);
+SELECT * FROM test_schema_2.ab ORDER BY a, b;
+ a | b 
+---+---
+ 1 | 1
+ 2 | 2
+(2 rows)
+
+INSERT INTO test_schema_3.ab(b) VALUES(3);
+ERROR:  relation "test_schema_3.ab" does not exist
+LINE 1: INSERT INTO test_schema_3.ab(b) VALUES(3);
+                    ^
+SELECT * FROM test_schema_3.ab ORDER BY a, b;
+ERROR:  relation "test_schema_3.ab" does not exist
+LINE 1: SELECT * FROM test_schema_3.ab ORDER BY a, b;
+                      ^
+INSERT INTO test_schema_4.ab(b) VALUES(4);
+INSERT INTO test_schema_4.ab(b) VALUES(5);
+SELECT * FROM test_schema_4.ab ORDER BY a, b;
+ a | b 
+---+---
+ 1 | 4
+ 2 | 5
+(2 rows)
+
+DROP SCHEMA test_schema_2 CASCADE;
+NOTICE:  drop cascades to table test_schema_2.ab
+DROP SCHEMA test_schema_3 CASCADE;
+DROP SCHEMA test_schema_4 CASCADE;
+NOTICE:  drop cascades to table test_schema_4.ab

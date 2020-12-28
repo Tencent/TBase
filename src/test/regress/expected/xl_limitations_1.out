@@ -514,7 +514,7 @@ INSERT INTO xl_names("name", "name1")VALUES ('W', 'W1');
 INSERT INTO xl_names("name", "name1")VALUES ('X', 'X1');
 INSERT INTO xl_names("name", "name1")VALUES ('Y', 'Y1');
 INSERT INTO xl_names("name", "name1")VALUES ('Z', 'Z1');
-select xl_nodename_from_id(xc_node_id), * from xl_t order by 1;
+select xl_nodename_from_id(xc_node_id), * from xl_t order by 1, 2, 3;
  xl_nodename_from_id | no | name 
 ---------------------+----+------
  datanode_1          |  1 | A
@@ -523,7 +523,7 @@ select xl_nodename_from_id(xc_node_id), * from xl_t order by 1;
  datanode_2          |  4 | D
 (4 rows)
 
-select xl_nodename_from_id(xc_node_id), * from xl_t1 order by 1;
+select xl_nodename_from_id(xc_node_id), * from xl_t1 order by 1, 2, 3;
  xl_nodename_from_id | no1 | name1 
 ---------------------+-----+-------
  datanode_1          |   1 | Z
@@ -552,7 +552,7 @@ where xl_t.no = T1.no1;
 update xl_t1  set name1 = T1.name1 
 from (select name,name1 from xl_names) T1 
 where xl_t1.name1 = T1.name;
-select xl_nodename_from_id(xc_node_id), * from xl_t order by 1;
+select xl_nodename_from_id(xc_node_id), * from xl_t order by 1, 2, 3;
  xl_nodename_from_id | no | name 
 ---------------------+----+------
  datanode_1          |  1 | Z
@@ -561,13 +561,13 @@ select xl_nodename_from_id(xc_node_id), * from xl_t order by 1;
  datanode_2          |  4 | W
 (4 rows)
 
-select xl_nodename_from_id(xc_node_id), * from xl_t1 order by 1;
+select xl_nodename_from_id(xc_node_id), * from xl_t1 order by 1, 2, 3;
  xl_nodename_from_id | no1 | name1 
 ---------------------+-----+-------
- datanode_1          |   2 | Y1
  datanode_1          |   1 | Z1
- datanode_2          |   4 | W1
+ datanode_1          |   2 | Y1
  datanode_2          |   3 | X1
+ datanode_2          |   4 | W1
 (4 rows)
 
 --testing correlated delete:
@@ -578,7 +578,7 @@ where xl_t.no in (select no1 from xl_t1 where name1 in ('Z', 'X'))
 delete from xl_t1  
 where xl_t1.name1 in (select name1 from xl_names where name in ('Z', 'X'))
 ;
-select xl_nodename_from_id(xc_node_id), * from xl_t order by 1;
+select xl_nodename_from_id(xc_node_id), * from xl_t order by 1, 2, 3;
  xl_nodename_from_id | no | name 
 ---------------------+----+------
  datanode_1          |  1 | Z
@@ -587,7 +587,7 @@ select xl_nodename_from_id(xc_node_id), * from xl_t order by 1;
  datanode_2          |  4 | W
 (4 rows)
 
-select xl_nodename_from_id(xc_node_id), * from xl_t1 order by 1;
+select xl_nodename_from_id(xc_node_id), * from xl_t1 order by 1, 2, 3;
  xl_nodename_from_id | no1 | name1 
 ---------------------+-----+-------
  datanode_1          |   2 | Y1

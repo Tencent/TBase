@@ -889,7 +889,9 @@ static void InsertShardMap_CN(int32 map, Form_pgxc_shard_map record)
             nodeindex = PGXCNodeGetNodeId(record->primarycopy, &node_type);
             if (nodeindex < 0)
             {
-                elog(ERROR, " get node:%u for index failed", record->primarycopy);
+				elog(ERROR,
+					"InsertShardMap_CN get node:%u for index failed",
+					record->primarycopy);
             }
             
             g_GroupShardingMgr->members[map]->shmemshardmap[record->shardgroupid].primarycopy  = record->primarycopy;
@@ -898,7 +900,11 @@ static void InsertShardMap_CN(int32 map, Form_pgxc_shard_map record)
         }
         else
         {
-            elog(ERROR, " invalid pgxc_shard_map record with shardgroupid:%d", record->shardgroupid);
+			elog(ERROR,
+				"invalid pgxc_shard_map record with shardgroupid: %d, map %d "
+				"and shmemNum: %d",
+				record->shardgroupid, map,
+				g_GroupShardingMgr->members[map]->shmemNumShardGroups);
         }        
     }
 }
@@ -918,7 +924,9 @@ static void InsertShardMap_DN(Form_pgxc_shard_map record)
         nodeindex = PGXCNodeGetNodeId(record->primarycopy, &node_type);
         if (nodeindex < 0)
         {
-            elog(ERROR, " get node:%u for index failed", record->primarycopy);
+			elog(ERROR,
+				"InsertShardMap_DN get node:%u for index failed",
+				record->primarycopy);
         }
         
         g_GroupShardingMgr_DN->members->shmemshardmap[record->shardgroupid].primarycopy  = record->primarycopy;
@@ -927,7 +935,10 @@ static void InsertShardMap_DN(Form_pgxc_shard_map record)
     }
     else
     {
-        elog(ERROR, "[InsertShardMap_DN]invalid pgxc_shard_map record with shardgroupid:%d", record->shardgroupid);
+		elog(ERROR,
+			"InsertShardMap_DN has invalid pgxc_shard_map record with shardgroupid: "
+			"%d and shmemNum: %d",
+			record->shardgroupid, g_GroupShardingMgr_DN->members->shmemNumShardGroups);
     }
 }
 

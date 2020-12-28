@@ -5573,10 +5573,10 @@ drop table lala;
 drop table lala2;
 drop table lala3;
 \c - mls_admin
-select * from pg_cls_table;
- polid | attnum | relid | enable | nspname | tblname | reloptions 
--------+--------+-------+--------+---------+---------+------------
-    99 |      3 | 17061 | t      | public  | xixi    | 
+select polid, attnum, enable, nspname, tblname, reloptions from pg_cls_table;
+ polid | attnum | enable | nspname | tblname | reloptions 
+-------+--------+--------+---------+---------+------------
+    99 |      3 | t      | public  | xixi    | 
 (1 row)
 
 select MLS_CLS_DROP_TABLE_LABEL('cls_compare', 'public', 'xixi');
@@ -5585,9 +5585,9 @@ select MLS_CLS_DROP_TABLE_LABEL('cls_compare', 'public', 'xixi');
  t
 (1 row)
 
-select * from pg_cls_table;
- polid | attnum | relid | enable | nspname | tblname | reloptions 
--------+--------+-------+--------+---------+---------+------------
+select polid, attnum, enable, nspname, tblname, reloptions from pg_cls_table;
+ polid | attnum | enable | nspname | tblname | reloptions 
+-------+--------+--------+---------+---------+------------
 (0 rows)
 
 --everything is done

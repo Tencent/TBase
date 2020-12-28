@@ -2168,9 +2168,9 @@ drop table lala2;
 drop table lala3;
 
 \c - mls_admin
-select * from pg_cls_table;
+select polid, attnum, enable, nspname, tblname, reloptions from pg_cls_table;
 select MLS_CLS_DROP_TABLE_LABEL('cls_compare', 'public', 'xixi');
-select * from pg_cls_table;
+select polid, attnum, enable, nspname, tblname, reloptions from pg_cls_table;
 
 --everything is done
 \c - godlike
