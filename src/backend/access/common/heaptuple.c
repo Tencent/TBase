@@ -78,6 +78,8 @@
 #ifdef __TBASE__
 #include "utils/typcache.h"
 #include "pgxc/execRemote.h"
+#include "catalog/pg_type.h"
+#include "mb/pg_wchar.h"
 #endif
 
 /* Does att's datatype allow packing into the 1-byte-header varlena format? */
@@ -1328,6 +1330,30 @@ slot_deform_tuple(TupleTableSlot *slot, int natts)
     slot->tts_slow = slow;
 }
 
+/**
+ * get maximum bytes number from column define size, if column is bounded string, return -1
+ * then InputFunctionCall -> varchar2_input|varchar_input|varchar2_input|nvarchar2_input
+ * avoid to verification the length of string which encoded by client encode
+ */
+static int
+get_typioparam_mod(Oid typioparam, int32 typmod)
+{
+    switch (typioparam)
+    {
+        case CHAROID:
+        case BPCHAROID:
+        case VARCHAROID:
+#ifdef _PG_ORCL_
+        case VARCHAR2OID:
+		case NVARCHAR2OID:
+#endif
+            return -1;
+
+        default:
+            return typmod;
+    }
+}
+
 /*
  * slot_deform_datarow
  *         Extract data from the DataRow message into Datum/isnull arrays.
@@ -1480,13 +1506,18 @@ slot_deform_datarow(TupleTableSlot *slot)
 #endif
         else
         {
+            int typmod = slot->tts_attinmeta->atttypmods[i];
             appendBinaryStringInfo(buffer, cur, len);
             cur += len;
+
+            if (GetDatabaseEncoding() != pg_get_client_encoding() &&
+                            pg_get_client_encoding() != PG_SQL_ASCII && IS_PGXC_LOCAL_COORDINATOR)
+                typmod = get_typioparam_mod(slot->tts_attinmeta->attioparams[i], typmod);
 
             slot->tts_values[i] = InputFunctionCall(slot->tts_attinmeta->attinfuncs + i,
                                                     buffer->data,
                                                     slot->tts_attinmeta->attioparams[i],
-                                                    slot->tts_attinmeta->atttypmods[i]);
+                                                    typmod);
             slot->tts_isnull[i] = false;
 
             resetStringInfo(buffer);

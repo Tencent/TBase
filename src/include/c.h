@@ -1047,6 +1047,9 @@ typedef NameData *Name;
 /* msb for char */
 #define HIGHBIT                    (0x80)
 #define IS_HIGHBIT_SET(ch)        ((unsigned char)(ch) & HIGHBIT)
+#define GB18030_2ND_MIX			(0x30)
+#define GB18030_2ND_MAX			(0x39)
+#define IS_GB18030_SET(ch)		((ch) <= GB18030_2ND_MAX && (ch) >= GB18030_2ND_MIX)
 
 #define STATUS_OK                (0)
 #define STATUS_ERROR            (-1)

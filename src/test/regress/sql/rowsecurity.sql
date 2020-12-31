@@ -887,12 +887,12 @@ GRANT SELECT ON rls_view TO regress_rls_bob;
 
 -- Query as role that is not owner of view or table.  Should return all records.
 SET SESSION AUTHORIZATION regress_rls_bob;
-SELECT * FROM rls_view;
+SELECT * FROM rls_view ORDER BY a,b;
 EXPLAIN (COSTS OFF) SELECT * FROM rls_view;
 
 -- Query as view/table owner.  Should return all records.
 SET SESSION AUTHORIZATION regress_rls_alice;
-SELECT * FROM rls_view order by 1;
+SELECT * FROM rls_view ORDER BY a,b;
 EXPLAIN (COSTS OFF) SELECT * FROM rls_view;
 DROP VIEW rls_view;
 
@@ -904,13 +904,13 @@ GRANT SELECT ON rls_view TO regress_rls_alice;
 -- Query as role that is not owner of view but is owner of table.
 -- Should return records based on view owner policies.
 SET SESSION AUTHORIZATION regress_rls_alice;
-SELECT * FROM rls_view;
+SELECT * FROM rls_view ORDER BY a,b;
 EXPLAIN (COSTS OFF) SELECT * FROM rls_view;
 
 -- Query as role that is not owner of table but is owner of view.
 -- Should return records based on view owner policies.
 SET SESSION AUTHORIZATION regress_rls_bob;
-SELECT * FROM rls_view;
+SELECT * FROM rls_view ORDER BY a,b;
 EXPLAIN (COSTS OFF) SELECT * FROM rls_view;
 
 -- Query as role that is not the owner of the table or view without permissions.
@@ -921,7 +921,7 @@ EXPLAIN (COSTS OFF) SELECT * FROM rls_view; --fail - permission denied.
 -- Query as role that is not the owner of the table or view with permissions.
 SET SESSION AUTHORIZATION regress_rls_bob;
 GRANT SELECT ON rls_view TO regress_rls_carol;
-SELECT * FROM rls_view;
+SELECT * FROM rls_view ORDER BY a,b;
 EXPLAIN (COSTS OFF) SELECT * FROM rls_view;
 
 SET SESSION AUTHORIZATION regress_rls_bob;

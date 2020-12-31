@@ -335,6 +335,7 @@ printtup(TupleTableSlot *slot, DestReceiver *self)
     int            natts = typeinfo->natts;
     int            i;
     bool        binary = false;
+    bool        needEncodingConvert = false;
 
 #ifdef __TBASE__
     if (end_query_requested)
@@ -399,6 +400,12 @@ printtup(TupleTableSlot *slot, DestReceiver *self)
 
     pq_sendint(&buf, natts, 2);
 
+	/* encoding convert only on datanode when connect from coordinator node or connect from app */
+	if (isPGXCDataNode && (IsConnFromCoord() || IsConnFromApp()))
+    {
+        needEncodingConvert = true;
+    }
+
     /*
      * send the attributes of this tuple
      */
@@ -430,10 +437,20 @@ printtup(TupleTableSlot *slot, DestReceiver *self)
             char       *outputstr;
 
             outputstr = OutputFunctionCall(&thisState->finfo, attr);
+
+            if (needEncodingConvert)
+            {
             pq_sendcountedtext(&buf, outputstr, strlen(outputstr), false);
         }
         else
         {
+                int len = strlen(outputstr);
+                pq_sendint(&buf, len, 4);
+                appendBinaryStringInfo(&buf, outputstr, len);
+            }
+		}
+		else
+		{
             /* Binary output */
             bytea       *outputbytes;
 

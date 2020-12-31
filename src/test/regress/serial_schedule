@@ -34,6 +34,8 @@ test: rangetypes
 test: pg_lsn
 test: regproc
 test: strings
+test: zhcn_utf8
+test: zhcn_gb18030
 test: numerology
 test: point
 test: lseg

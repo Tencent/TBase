@@ -501,7 +501,9 @@ ExecClearTuple(TupleTableSlot *slot)    /* slot in which to store tuple */
         heap_free_minimal_tuple(slot->tts_mintuple);
 #ifdef PGXC
     if (slot->tts_shouldFreeRow)
+    {
         pfree(slot->tts_datarow);
+    }
 
     slot->tts_shouldFreeRow = false;
     slot->tts_datarow = NULL;

@@ -1,0 +1,132 @@
+--
+-- gbk
+--
+\c db_gbk;
+SET client_encoding = gbk;
+-- regular expression query
+SELECT * FROM tbl_gbk WHERE f1 ~ '^王' ORDER BY f1;
+   f1   
+--------
+ 王家坝
+ 王一位
+(2 rows)
+
+DROP TABLE tbl_gbk;
+CREATE TABLE tbl_gbk(f1 varchar(3));
+INSERT INTO tbl_gbk (f1) VALUES ('邓东宝');
+INSERT INTO tbl_gbk (f1) VALUES ('李尔王');
+-- 镕 is not support by euc_cn, but support on gbk
+INSERT INTO tbl_gbk (f1) VALUES ('朱镕非');
+INSERT INTO tbl_gbk (f1) VALUES ('王家坝');
+INSERT INTO tbl_gbk (f1) VALUES ('王一位');
+INSERT INTO tbl_gbk (f1) VALUES ('怡宝');
+-- error
+INSERT INTO tbl_gbk (f1) VALUES ('王家坝2');
+ERROR:  value too long for type character varying(3)
+-- order by
+SELECT * FROM tbl_gbk ORDER BY f1;
+   f1   
+--------
+ 邓东宝
+ 李尔王
+ 王家坝
+ 王一位
+ 怡宝
+ 朱镕非
+(6 rows)
+
+-- regular expression query
+SELECT * FROM tbl_gbk WHERE f1 ~ '^王' ORDER BY f1;
+   f1   
+--------
+ 王家坝
+ 王一位
+(2 rows)
+
+-- query encoding length
+SELECT OCTET_LENGTH(f1) FROM tbl_gbk ORDER BY f1;
+ octet_length 
+--------------
+            6
+            6
+            6
+            6
+            4
+            6
+(6 rows)
+
+--
+-- gb18030
+--
+\c db_gb18030;
+SET client_encoding = gb18030;
+-- regular expression query
+SELECT * FROM tbl_gb18030 WHERE f1 ~ '^王' ORDER BY f1;
+   f1   
+--------
+ 王家坝
+ 王一位
+(2 rows)
+
+SELECT * FROM tbl_gb18030 WHERE f1 ~ '^' ORDER BY f1;
+   f1   
+--------
+ 𣘗𧄧
+(1 row)
+
+DROP TABLE tbl_gb18030;
+CREATE TABLE tbl_gb18030(f1 varchar(3));
+INSERT INTO tbl_gb18030 (f1) VALUES ('邓东宝');
+INSERT INTO tbl_gb18030 (f1) VALUES ('李尔王');
+-- 镕 is not support by euc_cn, but support on gb18030
+INSERT INTO tbl_gb18030 (f1) VALUES ('朱镕非');
+INSERT INTO tbl_gb18030 (f1) VALUES ('王家坝');
+INSERT INTO tbl_gb18030 (f1) VALUES ('王一位');
+INSERT INTO tbl_gb18030 (f1) VALUES ('怡宝');
+-- which not support by gbk, but support on gb18030
+INSERT INTO tbl_gb18030 (f1) VALUES ('𣘗𧄧');
+-- out of bound error
+INSERT INTO tbl_gb18030 (f1) VALUES ('王家坝2');
+ERROR:  value too long for type character varying(3)
+INSERT INTO tbl_gb18030 (f1) VALUES ('𣘗𧄧2');
+ERROR:  value too long for type character varying(3)
+-- order by
+SELECT * FROM tbl_gb18030 ORDER BY f1;
+   f1   
+--------
+ 𣘗𧄧
+ 邓东宝
+ 李尔王
+ 王家坝
+ 王一位
+ 怡宝
+ 朱镕非
+(7 rows)
+
+-- regular expression query
+SELECT * FROM tbl_gb18030 WHERE f1 ~ '^王' ORDER BY f1;
+   f1   
+--------
+ 王家坝
+ 王一位
+(2 rows)
+
+SELECT * FROM tbl_gb18030 WHERE f1 ~ '^' ORDER BY f1;
+   f1   
+--------
+ 𣘗𧄧
+(1 row)
+
+-- query encoding length
+SELECT OCTET_LENGTH(f1) FROM tbl_gb18030 ORDER BY f1;
+ octet_length 
+--------------
+           12
+            6
+            6
+            6
+            6
+            4
+            6
+(7 rows)
+

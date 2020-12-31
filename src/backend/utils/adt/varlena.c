@@ -2220,6 +2220,19 @@ varstrfastcmp_locale(Datum x, Datum y, SortSupport ssup)
      * memcmp() compares data from cachelines that are needed in L1 cache even
      * when the last comparison's result cannot be reused.
      */
+#ifdef __TBASE__
+	/**
+	 * on cn node, when client encoding is not equals server encoding, a1p is client encoding
+	 * so must convert a1p to server encoding
+	 */
+	if (GetDatabaseEncoding() != pg_get_client_encoding() &&
+			pg_get_client_encoding() != PG_SQL_ASCII && IS_PGXC_LOCAL_COORDINATOR)
+	{
+		a1p = pg_client_to_server(a1p, strnlen(a1p, len1));
+		len1 = strlen(a1p);
+	}
+#endif
+
     arg1_match = true;
     if (len1 != sss->last_len1 || memcmp(sss->buf1, a1p, len1) != 0)
     {
@@ -2235,6 +2248,19 @@ varstrfastcmp_locale(Datum x, Datum y, SortSupport ssup)
      * it seems (at least with moderate to low cardinality sets), because
      * quicksort compares the same pivot against many values.
      */
+#ifdef __TBASE__
+    /**
+     * on cn node, when client encoding is not equals server encoding, a2p is client encoding
+     * so must convert a2p to server encoding
+     */
+	if (GetDatabaseEncoding() != pg_get_client_encoding() &&
+			pg_get_client_encoding() != PG_SQL_ASCII && IS_PGXC_LOCAL_COORDINATOR)
+	{
+		a2p = pg_client_to_server(a2p, strnlen(a2p, len2));
+		len2 = strlen(a2p);
+	}
+#endif
+
     if (len2 != sss->last_len2 || memcmp(sss->buf2, a2p, len2) != 0)
     {
         memcpy(sss->buf2, a2p, len2);

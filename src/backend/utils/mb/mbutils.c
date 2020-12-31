@@ -574,6 +574,12 @@ pg_any_to_server(const char *s, int len, int encoding)
     if (len <= 0)
         return (char *) s;        /* empty string is always valid */
 
+	/*
+	 * no need to convert on datanode node
+	 */
+    if (IsConnFromCoord() || IsConnFromDatanode())
+        return (char *) s;
+
     if (encoding == DatabaseEncoding->encoding ||
         encoding == PG_SQL_ASCII)
     {

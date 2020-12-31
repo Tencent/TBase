@@ -449,6 +449,11 @@ static const char *const pg_enc2icu_tbl[] =
     "CP1255",                    /* PG_WIN1255 */
     "CP1257",                    /* PG_WIN1257 */
     "KOI8-U",                    /* PG_KOI8U */
+    NULL,					    /* Shift JIS (Windows-932) */
+    NULL,					    /* Big5 (Windows-950) */
+    "GBK",						/* GBK (Windows-936) */
+    NULL,						/* UHC (Windows-949) */
+    "GB18030",     				/* GB18030 */
 };
 
 bool
@@ -462,7 +467,7 @@ get_encoding_name_for_icu(int encoding)
 {
     const char *icu_encoding_name;
 
-    StaticAssertStmt(lengthof(pg_enc2icu_tbl) == PG_ENCODING_BE_LAST + 1,
+	StaticAssertStmt(lengthof(pg_enc2icu_tbl) == PG_SERVER_ENCODING_BE_LAST + 1,
                      "pg_enc2icu_tbl incomplete");
 
     icu_encoding_name = pg_enc2icu_tbl[encoding];

@@ -871,7 +871,8 @@ set_node_config_file(PGXCNodeTypeNum node)
 
     fputs("log_min_messages = log\n", pg_conf);
     fputs("log_min_error_statement = log\n", pg_conf);
-    fputs("max_connections = 300\n", pg_conf);
+	fputs("max_connections = 500\n", pg_conf);
+	fputs("max_pool_size = 500\n", pg_conf);
     fputs("max_worker_processes = 256\n", pg_conf);
     fputs("max_parallel_workers  = 256\n", pg_conf);
     fputs("enable_statistic = on\n", pg_conf);

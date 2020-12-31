@@ -23,10 +23,10 @@ test: tablespace
 # ----------
 # The first group of parallel tests
 # ----------
-test: boolean char name varchar text int2 int4 int8 oid float4 float8 bit numeric txid uuid enum money rangetypes pg_lsn regproc
+test: boolean char name varchar text int2 int4 int8 oid float4 float8 bit numeric txid uuid enum money rangetypes pg_lsn regproc zhcn_utf8
 
 # Depends on things setup during char, varchar and text
-test: strings
+test: strings zhcn_gb18030
 # Depends on int2, int4, int8, float4, float8
 test: numerology
 

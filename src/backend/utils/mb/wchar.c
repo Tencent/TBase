@@ -1021,6 +1021,31 @@ pg_big5_dsplen(const unsigned char *s)
  * GBK
  */
 static int
+pg_gbk2wchar_with_len(const unsigned char *from, pg_wchar *to, int len)
+{
+    int			cnt = 0;
+
+    while (len > 0 && *from)
+    {
+        if (IS_HIGHBIT_SET(*from) && len >= 2) /* code set 1 */
+        {
+            *to = *from++ << 8;
+            *to |= *from++;
+            len -= 2;
+        }
+        else        /* should be ASCII */
+        {
+            *to = *from++;
+            len--;
+        }
+        to++;
+        cnt++;
+    }
+    *to = 0;
+    return cnt;
+}
+
+static int
 pg_gbk_mblen(const unsigned char *s)
 {
     int            len;
@@ -1075,6 +1100,42 @@ pg_uhc_dsplen(const unsigned char *s)
  * GB18030
  *    Added by Bill Huang <bhuang@redhat.com>,<bill_huanghb@ybb.ne.jp>
  */
+static int
+pg_gb18030_2_wchar_with_len(const unsigned char *from, pg_wchar *to, int len)
+{
+    int			cnt = 0;
+
+    while (len > 0 && *from)
+    {
+        if (IS_HIGHBIT_SET(*from) && len >= 2) /* 2 bytes */
+        {
+            if (IS_GB18030_SET(*(from + 1)) && len >= 4) /* 4 bytes for CJK */
+            {
+                *to = *from++ << 24;
+                *to |= *from++ << 16;
+                *to |= *from++ << 8;
+                *to |= *from++;
+                len -= 4;
+            }
+            else
+            {
+                *to = *from++ << 8;
+                *to |= *from++;
+                len -= 2;
+            }
+        }
+        else        /* should be ASCII */
+        {
+            *to = *from++;
+            len--;
+        }
+        to++;
+        cnt++;
+    }
+    *to = 0;
+    return cnt;
+}
+
 static int
 pg_gb18030_mblen(const unsigned char *s)
 {
@@ -1766,9 +1827,9 @@ const pg_wchar_tbl pg_wchar_table[] = {
     {pg_latin12wchar_with_len, pg_wchar2single_with_len, pg_latin1_mblen, pg_latin1_dsplen, pg_latin1_verifier, 1}, /* PG_KOI8U */
     {0, 0, pg_sjis_mblen, pg_sjis_dsplen, pg_sjis_verifier, 2}, /* PG_SJIS */
     {0, 0, pg_big5_mblen, pg_big5_dsplen, pg_big5_verifier, 2}, /* PG_BIG5 */
-    {0, 0, pg_gbk_mblen, pg_gbk_dsplen, pg_gbk_verifier, 2},    /* PG_GBK */
+	{pg_gbk2wchar_with_len, pg_wchar2euc_with_len, pg_gbk_mblen, pg_gbk_dsplen, pg_gbk_verifier, 2},	/* PG_GBK */
     {0, 0, pg_uhc_mblen, pg_uhc_dsplen, pg_uhc_verifier, 2},    /* PG_UHC */
-    {0, 0, pg_gb18030_mblen, pg_gb18030_dsplen, pg_gb18030_verifier, 4},    /* PG_GB18030 */
+	{pg_gb18030_2_wchar_with_len, pg_wchar2euc_with_len, pg_gb18030_mblen, pg_gb18030_dsplen, pg_gb18030_verifier, 4},	/* PG_GB18030 */
     {0, 0, pg_johab_mblen, pg_johab_dsplen, pg_johab_verifier, 3},    /* PG_JOHAB */
     {0, 0, pg_sjis_mblen, pg_sjis_dsplen, pg_sjis_verifier, 2}    /* PG_SHIFT_JIS_2004 */
 };
