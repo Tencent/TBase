@@ -6122,16 +6122,19 @@ ReDistributeHash(Oid dataType, int numWorkers, Datum value, LocatorHashFunc hash
                 int64 val = DatumGetInt64(value);
                 result = (val % num) % numWorkers;
             }
+			break;
         case INT2OID:
             {
                 int16 val = DatumGetInt16(value);
                 result = (val % num) % numWorkers;
             }
+			break;
         case OIDOID:
             {
                 uint32 val = (uint32)DatumGetObjectId(value);
                 result = (val % num) % numWorkers;
             }
+			break;
         case INT4OID:
         case ABSTIMEOID:
         case RELTIMEOID:
@@ -6140,12 +6143,14 @@ ReDistributeHash(Oid dataType, int numWorkers, Datum value, LocatorHashFunc hash
                 int32 val = DatumGetInt32(value);
                 result = (val % num) % numWorkers;
             }
+			break;
         case BOOLOID:
         case CHAROID:
             {
                 int32 val = (int32)DatumGetChar(value);
                 result = (val % num) % numWorkers;
             }
+			break;
         case TIMEOID:
         case TIMESTAMPOID:
         case TIMESTAMPTZOID:
@@ -6153,6 +6158,7 @@ ReDistributeHash(Oid dataType, int numWorkers, Datum value, LocatorHashFunc hash
                 int64 val = DatumGetInt64(value);
                 result = (val % num) % numWorkers;
             }
+			break;
         default:
             {
                 unsigned int hashvalue = 0;
