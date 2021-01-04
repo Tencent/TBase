@@ -156,5 +156,4 @@ select * from xc_tab1 order by id;
 \c regression
 clean connection to all for database xc_db;
 drop database xc_db;
-ERROR:  database "xc_db" is being accessed by other users
 drop tablespace xc_testspace1;

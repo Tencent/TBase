@@ -95,7 +95,9 @@ SubTransSetParent(TransactionId xid, TransactionId parent)
     if (*ptr != parent)
     {
         Assert(*ptr == InvalidTransactionId);
+		SlruClogDisableMemoryProtection(SubTransCtl->shared->page_buffer[slotno]);
         *ptr = parent;
+		SlruClogEnableMemoryProtection(SubTransCtl->shared->page_buffer[slotno]);
         SubTransCtl->shared->page_dirty[slotno] = true;
     }
 

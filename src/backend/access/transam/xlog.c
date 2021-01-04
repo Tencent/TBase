@@ -24,6 +24,7 @@
 
 #include "access/clog.h"
 #include "access/commit_ts.h"
+#include "access/lru.h"
 #include "access/multixact.h"
 #include "access/rewriteheap.h"
 #include "access/subtrans.h"
@@ -244,6 +245,8 @@ bool        InRecovery = false;
 
 /* Are we in Hot Standby mode? Only valid in startup process, see xlog.h */
 HotStandbyState standbyState = STANDBY_DISABLED;
+
+bool enable_xlog_mprotect = false;
 
 static XLogRecPtr LastRec;
 
@@ -1575,7 +1578,9 @@ CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata,
              * Write what fits on this page, and continue on the next page.
              */
             Assert(CurrPos % XLOG_BLCKSZ >= SizeOfXLogShortPHD || freespace == 0);
+			XlogDisableMemoryProtection(XLogCtl->pages + XLogRecPtrToBufIdx(CurrPos) * (Size) XLOG_BLCKSZ);
             memcpy(currpos, rdata_data, freespace);
+			XlogEnableMemoryProtection(XLogCtl->pages + XLogRecPtrToBufIdx(CurrPos) * (Size) XLOG_BLCKSZ);
             rdata_data += freespace;
             rdata_len -= freespace;
             written += freespace;
@@ -1592,8 +1597,10 @@ CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata,
              */
             currpos = GetXLogBuffer(CurrPos);
             pagehdr = (XLogPageHeader) currpos;
+			XlogDisableMemoryProtection(XLogCtl->pages + XLogRecPtrToBufIdx(CurrPos) * (Size) XLOG_BLCKSZ);
             pagehdr->xlp_rem_len = write_len - written;
             pagehdr->xlp_info |= XLP_FIRST_IS_CONTRECORD;
+			XlogEnableMemoryProtection(XLogCtl->pages + XLogRecPtrToBufIdx(CurrPos) * (Size) XLOG_BLCKSZ);
 
             /* skip over the page header */
             if (CurrPos % XLogSegSize == 0)
@@ -1623,7 +1630,9 @@ CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata,
 #endif
 
         Assert(CurrPos % XLOG_BLCKSZ >= SizeOfXLogShortPHD || rdata_len == 0);
+		XlogDisableMemoryProtection(XLogCtl->pages + XLogRecPtrToBufIdx(CurrPos) * (Size) XLOG_BLCKSZ);
         memcpy(currpos, rdata_data, rdata_len);
+		XlogEnableMemoryProtection(XLogCtl->pages + XLogRecPtrToBufIdx(CurrPos) * (Size) XLOG_BLCKSZ);
         currpos += rdata_len;
         CurrPos += rdata_len;
         freespace -= rdata_len;
@@ -2247,6 +2256,7 @@ AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic)
          * Be sure to re-zero the buffer so that bytes beyond what we've
          * written will look like zeroes and not valid XLOG records...
          */
+		XlogDisableMemoryProtection((char *) NewPage);
         MemSet((char *) NewPage, 0, XLOG_BLCKSZ);
 
         /*
@@ -2288,6 +2298,8 @@ AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic)
             NewLongPage->xlp_xlog_blcksz = XLOG_BLCKSZ;
             NewPage->xlp_info |= XLP_LONG_HEADER;
         }
+
+		XlogEnableMemoryProtection((char *) NewPage);
 
         /*
          * Make sure the initialization of the page becomes visible to others
@@ -5067,6 +5079,13 @@ XLOGShmemInit(void)
     allocptr = (char *) TYPEALIGN(XLOG_BLCKSZ, allocptr);
     XLogCtl->pages = allocptr;
     memset(XLogCtl->pages, 0, (Size) XLOG_BLCKSZ * XLOGbuffers);
+	if (enable_xlog_mprotect)
+	{
+		for (i = 0; i < XLOGbuffers; i++)
+		{
+			XlogEnableMemoryProtection(XLogCtl->pages + XLOG_BLCKSZ * i);
+		}
+	}
 
     /*
      * Do basic initialization of XLogCtl shared data. (StartupXLOG will fill
@@ -7968,8 +7987,10 @@ StartupXLOG(void)
         /* Copy the valid part of the last block, and zero the rest */
         page = &XLogCtl->pages[firstIdx * XLOG_BLCKSZ];
         len = EndOfLog % XLOG_BLCKSZ;
+		XlogDisableMemoryProtection(page);
         memcpy(page, xlogreader->readBuf, len);
         memset(page + len, 0, XLOG_BLCKSZ - len);
+		XlogEnableMemoryProtection(page);
 
         XLogCtl->xlblocks[firstIdx] = pageBeginPtr + XLOG_BLCKSZ;
         XLogCtl->InitializedUpTo = pageBeginPtr + XLOG_BLCKSZ;
@@ -13267,3 +13288,26 @@ void wal_reset_stream(void)
 
 #endif
 
+/*
+ * enable xlog memory protection
+ */
+inline void
+XlogEnableMemoryProtection(char *address)
+{
+	if (enable_xlog_mprotect)
+	{
+		SetPageReadOnly(address);
+	}
+}
+
+/*
+ * disable xlog memory protection
+ */
+inline void
+XlogDisableMemoryProtection(char *address)
+{
+	if (enable_xlog_mprotect)
+	{
+		SetPageReadWrite(address);
+	}
+}

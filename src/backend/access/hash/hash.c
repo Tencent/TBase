@@ -26,6 +26,7 @@
 #include "miscadmin.h"
 #include "optimizer/plancat.h"
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/index_selfuncs.h"
 #include "utils/rel.h"
 #include "miscadmin.h"
@@ -482,7 +483,14 @@ hashrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
      */
     if (so->numKilled > 0)
     {
+		if (enable_buffer_mprotect)
+		{
+			LockBuffer(so->hashso_curbuf, BUFFER_LOCK_EXCLUSIVE);
+		}
+		else
+		{
         LockBuffer(so->hashso_curbuf, BUFFER_LOCK_SHARE);
+		}
         _hash_kill_items(scan);
         LockBuffer(so->hashso_curbuf, BUFFER_LOCK_UNLOCK);
     }
@@ -520,7 +528,14 @@ hashendscan(IndexScanDesc scan)
      */
     if (so->numKilled > 0)
     {
+		if (enable_buffer_mprotect)
+		{
+			LockBuffer(so->hashso_curbuf, BUFFER_LOCK_EXCLUSIVE);
+		}
+		else
+		{
         LockBuffer(so->hashso_curbuf, BUFFER_LOCK_SHARE);
+		}
         _hash_kill_items(scan);
         LockBuffer(so->hashso_curbuf, BUFFER_LOCK_UNLOCK);
     }

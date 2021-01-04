@@ -2044,7 +2044,9 @@ TrimMultiXact(void)
         offptr = (MultiXactOffset *) MultiXactOffsetCtl->shared->page_buffer[slotno];
         offptr += entryno;
 
+		SlruClogDisableMemoryProtection(MultiXactOffsetCtl->shared->page_buffer[slotno]);
         MemSet(offptr, 0, BLCKSZ - (entryno * sizeof(MultiXactOffset)));
+		SlruClogEnableMemoryProtection(MultiXactOffsetCtl->shared->page_buffer[slotno]);
 
         MultiXactOffsetCtl->shared->page_dirty[slotno] = true;
     }

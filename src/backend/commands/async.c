@@ -1374,9 +1374,11 @@ asyncQueueAddEntries(ListCell *nextNotify)
         }
 
         /* Now copy qe into the shared buffer page */
+		SlruClogDisableMemoryProtection(AsyncCtl->shared->page_buffer[slotno]);
         memcpy(AsyncCtl->shared->page_buffer[slotno] + offset,
                &qe,
                qe.length);
+		SlruClogEnableMemoryProtection(AsyncCtl->shared->page_buffer[slotno]);
 
         /* Advance queue_head appropriately, and detect if page is full */
         if (asyncQueueAdvance(&(queue_head), qe.length))

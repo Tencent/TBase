@@ -365,7 +365,9 @@ TransactionIdSetStatusBit(TransactionId xid, XidStatus status, XLogRecPtr lsn, i
     byteval = *byteptr;
     byteval &= ~(((1 << CLOG_BITS_PER_XACT) - 1) << bshift);
     byteval |= (status << bshift);
+	SlruClogDisableMemoryProtection(ClogCtl->shared->page_buffer[slotno]);
     *byteptr = byteval;
+	SlruClogEnableMemoryProtection(ClogCtl->shared->page_buffer[slotno]);
 
     /*
      * Update the group LSN if the transaction completion LSN is higher.
@@ -570,9 +572,11 @@ TrimCLOG(void)
         byteptr = ClogCtl->shared->page_buffer[slotno] + byteno;
 
         /* Zero so-far-unused positions in the current byte */
+		SlruClogDisableMemoryProtection(ClogCtl->shared->page_buffer[slotno]);
         *byteptr &= (1 << bshift) - 1;
         /* Zero the rest of the page */
         MemSet(byteptr + 1, 0, BLCKSZ - byteno - 1);
+		SlruClogEnableMemoryProtection(ClogCtl->shared->page_buffer[slotno]);
 
         ClogCtl->shared->page_dirty[slotno] = true;
     }

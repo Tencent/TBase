@@ -51,6 +51,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "access/lru.h"
 #include "access/slru.h"
 #include "access/transam.h"
 #include "access/xlog.h"
@@ -123,6 +124,7 @@ typedef enum
 static SlruErrorCause slru_errcause;
 static int    slru_errno;
 
+bool enable_clog_mprotect = false;
 
 static void SimpleLruZeroLSNs(SlruCtl ctl, int slotno);
 static void SimpleLruWaitIO(SlruCtl ctl, int slotno);
@@ -157,6 +159,12 @@ SimpleLruShmemSize(int nslots, int nlsns)
 
     if (nlsns > 0)
         sz += MAXALIGN(nslots * nlsns * sizeof(XLogRecPtr));    /* group_lsn[] */
+
+	if (enable_clog_mprotect)
+	{
+		/* add BLCKSZ for memory protect */
+		return BUFFERALIGN(sz) + BLCKSZ + BLCKSZ * nslots;
+	}
 
     return BUFFERALIGN(sz) + BLCKSZ * nslots;
 }
@@ -220,11 +228,16 @@ SimpleLruInit(SlruCtl ctl, const char *name, int nslots, int nlsns,
         shared->lwlock_tranche_id = tranche_id;
 
         ptr += BUFFERALIGN(offset);
+		if (enable_clog_mprotect)
+		{
+			ptr = (char *) BLOCKALIGN(ptr);
+		}
         for (slotno = 0; slotno < nslots; slotno++)
         {
             LWLockInitialize(&shared->buffer_locks[slotno].lock,
                              shared->lwlock_tranche_id);
 
+			SlruClogEnableMemoryProtection(ptr);
             shared->page_buffer[slotno] = ptr;
             shared->page_status[slotno] = SLRU_PAGE_EMPTY;
             shared->page_dirty[slotno] = false;
@@ -278,8 +291,10 @@ SimpleLruZeroPage(SlruCtl ctl, int pageno)
     shared->page_dirty[slotno] = true;
     SlruRecentlyUsed(shared, slotno);
 
+	SlruClogDisableMemoryProtection(shared->page_buffer[slotno]);
     /* Set the buffer to zeroes */
     MemSet(shared->page_buffer[slotno], 0, BLCKSZ);
+	SlruClogEnableMemoryProtection(shared->page_buffer[slotno]);
 
     /* Set the LSNs for this new page to zero */
     SimpleLruZeroLSNs(ctl, slotno);
@@ -681,7 +696,9 @@ SlruPhysicalReadPage(SlruCtl ctl, int pageno, int slotno)
         ereport(LOG,
                 (errmsg("file \"%s\" doesn't exist, reading as zeroes",
                         path)));
+		SlruClogDisableMemoryProtection(shared->page_buffer[slotno]);
         MemSet(shared->page_buffer[slotno], 0, BLCKSZ);
+		SlruClogEnableMemoryProtection(shared->page_buffer[slotno]);
         return true;
     }
 
@@ -695,14 +712,18 @@ SlruPhysicalReadPage(SlruCtl ctl, int pageno, int slotno)
 
     errno = 0;
     pgstat_report_wait_start(WAIT_EVENT_SLRU_READ);
+	SlruClogDisableMemoryProtection(shared->page_buffer[slotno]);
     if (read(fd, shared->page_buffer[slotno], BLCKSZ) != BLCKSZ)
     {
+		SlruClogEnableMemoryProtection(shared->page_buffer[slotno]);
         pgstat_report_wait_end();
         slru_errcause = SLRU_READ_FAILED;
         slru_errno = errno;
         CloseTransientFile(fd);
         return false;
     }
+
+	SlruClogEnableMemoryProtection(shared->page_buffer[slotno]);
     pgstat_report_wait_end();
 
     if (CloseTransientFile(fd))
@@ -1419,4 +1440,28 @@ SlruScanDirectory(SlruCtl ctl, SlruScanCallback callback, void *data)
     FreeDir(cldir);
 
     return retval;
+}
+
+/*
+ * enable clog memory protection
+ */
+inline void
+SlruClogEnableMemoryProtection(char *address)
+{
+	if (enable_clog_mprotect)
+	{
+		SetPageReadOnly(address);
+	}
+}
+
+/*
+ * disable clog memory protection
+ */
+inline void
+SlruClogDisableMemoryProtection(char *address)
+{
+	if (enable_clog_mprotect)
+	{
+		SetPageReadWrite(address);
+	}
 }

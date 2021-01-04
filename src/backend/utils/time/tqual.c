@@ -256,7 +256,11 @@ SetHintBits(HeapTupleHeader tuple, Buffer buffer,
         }
     }
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-    
+	if (enable_buffer_mprotect)
+	{
+		LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+		LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+	}
     if(infomask & HEAP_XMIN_COMMITTED)
     {
 

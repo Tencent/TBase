@@ -109,6 +109,7 @@
 
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #include "access/lru.h"
@@ -117,6 +118,7 @@
 #include "pgstat.h"
 #include "storage/fd.h"
 #include "storage/shmem.h"
+#include "utils/guc.h"
 #include "miscadmin.h"
 
 
@@ -184,6 +186,9 @@ static LruErrorCause lru_errcause;
 static int    lru_errno;
 
 
+bool enable_tlog_mprotect = false;
+
+
 static void LruZeroLSNs(LruCtl ctl, int partitionno, int slotno);
 static void LruWaitIO(LruCtl ctl, int partitionno, int slotno);
 static void LruInternalWritePage(LruCtl ctl, int partitionno, int slotno, LruFlushPt fdata);
@@ -196,6 +201,71 @@ static int    LruSelectLRUPage(LruCtl ctl, int partitionno, int pageno);
 static bool LruScanDirCbDeleteCutoff(LruCtl ctl, char *filename,
                           int segpage, void *data);
 static void LruInternalDeleteSegment(LruCtl ctl, char *filename);
+
+/*
+ * Set a page [ptr, ptr + BLCKSZ - 1] with read only constraint.
+ *
+ * Coredump when being written without setting it writable.
+ */
+void
+SetPageReadOnly(char *address)
+{
+	/* prevent wild pointer */
+	if (((uint64) address) % BLCKSZ != 0)
+	{
+		elog(PANIC, "address %p is not aligned with page", address);
+	}
+
+	/* set page read only with syscall */
+	if (mprotect(address, BLCKSZ, PROT_READ) != 0)
+	{
+		elog(PANIC, "mprotect failed %s at %p", strerror(errno), address);
+	}
+}
+
+/*
+ * Set a page [ptr, ptr + BLCKSZ - 1] with writable attribute
+ * which cooperates with SetPageReadOnly.
+ */
+void
+SetPageReadWrite(char *address)
+{
+	/* prevent wild pointer */
+	if (((uint64) address) % BLCKSZ != 0)
+	{
+		elog(PANIC, "address %p is not aligned with page", address);
+	}
+
+	/* set page read write with syscall */
+	if (mprotect(address, BLCKSZ, PROT_WRITE | PROT_READ) != 0)
+	{
+		elog(PANIC, "mprotect failed %s at %p", strerror(errno), address);
+	}
+}
+
+/*
+ * enable tlog memory protection
+ */
+inline void
+LruTlogEnableMemoryProtection(char *address)
+{
+	if (enable_tlog_mprotect)
+	{
+		SetPageReadOnly(address);
+	}
+}
+
+/*
+ * disable tlog memory protection
+ */
+inline void
+LruTlogDisableMemoryProtection(char *address)
+{
+	if (enable_tlog_mprotect)
+	{
+		SetPageReadWrite(address);
+	}
+}
 
 /*
  * Initialization of shared memory
@@ -217,6 +287,12 @@ LruShmemSize(int nslots, int nlsns)
 
     if (nlsns > 0)
         sz += MAXALIGN(nslots * nlsns * sizeof(XLogRecPtr));    /* group_lsn[] */
+
+	if (enable_tlog_mprotect)
+	{
+		/* add BLCKSZ for memory protect */
+		return BUFFERALIGN(sz) + BLCKSZ + BLCKSZ * nslots;
+	}
 
     return BUFFERALIGN(sz) + BLCKSZ * nslots;
 }
@@ -397,8 +473,12 @@ LruInit(LruCtl ctl, const char *name, int nslots, int nlsns, int nbufs,
         global_shared->ControlLock = ctllock;
         global_shared->latest_page_number = 0;
         
-    }else
+	}
+	else
+	{	
         Assert(found);
+	}
+	
     ctl->global_shared = global_shared;
     for(partitionno = 0; partitionno < NUM_PARTITIONS; partitionno++){
         snprintf(full_name, 64, "%s:%d", name, partitionno);
@@ -451,13 +531,21 @@ LruInit(LruCtl ctl, const char *name, int nslots, int nlsns, int nbufs,
             strlcpy(shared->lwlock_tranche_name, name, LRU_MAX_NAME_LENGTH);
             shared->lwlock_tranche_id = tranche_id;
 
-
             ptr += BUFFERALIGN(offset);
+			if (enable_tlog_mprotect)
+			{
+				ptr = (char *) BLOCKALIGN(ptr);
+			}
             for (slotno = 0; slotno < nslots; slotno++)
             {
                 LWLockInitialize(&shared->buffer_locks[slotno].lock,
                                  shared->lwlock_tranche_id);
 
+				if (enable_tlog_mprotect)
+				{
+					/* protect page */
+					SetPageReadOnly(ptr);
+				}
                 shared->page_buffer[slotno] = ptr;
                 shared->page_status[slotno] = LRU_PAGE_EMPTY;
                 shared->page_dirty[slotno] = false;
@@ -531,8 +619,10 @@ LruZeroPage(LruCtl ctl, int partitionno, int pageno)
     shared->page_dirty[slotno] = true;
     LruRecentlyUsed(shared, slotno);
 
+	LruTlogDisableMemoryProtection(shared->page_buffer[slotno]);
     /* Set the buffer to zeroes */
     MemSet(shared->page_buffer[slotno], 0, BLCKSZ);
+	LruTlogEnableMemoryProtection(shared->page_buffer[slotno]);
 
     /* Set the LSNs for this new page to zero */
     LruZeroLSNs(ctl, partitionno, slotno);
@@ -1056,7 +1146,9 @@ LruPhysicalReadPage(LruCtl ctl, int partitionno, int pageno, int slotno)
         ereport(LOG,
                 (errmsg("file \"%s\" doesn't exist, reading as zeroes",
                         path)));
+		LruTlogDisableMemoryProtection(shared->page_buffer[slotno]);
         MemSet(shared->page_buffer[slotno], 0, BLCKSZ);
+		LruTlogEnableMemoryProtection(shared->page_buffer[slotno]);
         return true;
     }
 
@@ -1070,16 +1162,20 @@ LruPhysicalReadPage(LruCtl ctl, int partitionno, int pageno, int slotno)
 
     errno = 0;
     pgstat_report_wait_start(WAIT_EVENT_SLRU_READ);
+	LruTlogDisableMemoryProtection(shared->page_buffer[slotno]);
     if (read(fd, shared->page_buffer[slotno], BLCKSZ) != BLCKSZ)
     {
-        elog(ERROR, "read fails path %s partitionno %d slotno %d pageno %d ", 
-                                                path, partitionno, slotno, pageno);
+		LruTlogEnableMemoryProtection(shared->page_buffer[slotno]);
         pgstat_report_wait_end();
         lru_errcause = LRU_READ_FAILED;
         lru_errno = errno;
         CloseTransientFile(fd);
-        return false;
+		elog(ERROR, "read fails path %s partitionno %d slotno %d pageno %d ",
+			 path, partitionno, slotno, pageno);
     }
+
+	LruTlogEnableMemoryProtection(shared->page_buffer[slotno]);
+
     pgstat_report_wait_end();
 
     if (CloseTransientFile(fd))

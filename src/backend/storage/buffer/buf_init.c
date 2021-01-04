@@ -16,6 +16,7 @@
 
 #include "storage/bufmgr.h"
 #include "storage/buf_internals.h"
+#include "utils/guc.h"
 
 
 BufferDescPadded *BufferDescriptors;
@@ -80,9 +81,19 @@ InitBufferPool(void)
                         NBuffers * sizeof(BufferDescPadded),
                         &foundDescs);
 
+	if (enable_buffer_mprotect)
+	{
+		BufferBlocks = (char *)
+			ShmemInitStruct("Buffer Blocks",
+						NBuffers * (Size) BLCKSZ + BLCKSZ, &foundBufs);
+		BufferBlocks = (char *) BLOCKALIGN(BufferBlocks);
+	}
+	else
+	{
     BufferBlocks = (char *)
         ShmemInitStruct("Buffer Blocks",
                         NBuffers * (Size) BLCKSZ, &foundBufs);
+	}
 
     /* Align lwlocks to cacheline boundary */
     BufferIOLWLockArray = (LWLockMinimallyPadded *)
@@ -134,6 +145,8 @@ InitBufferPool(void)
              * management of this list is done by freelist.c.
              */
             buf->freeNext = i + 1;
+
+			BufEnableMemoryProtection(BufferBlocks + i * BLCKSZ, false);
 
             LWLockInitialize(BufferDescriptorGetContentLock(buf),
                              LWTRANCHE_BUFFER_CONTENT);

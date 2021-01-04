@@ -34,6 +34,7 @@
 #include <sys/file.h>
 #include <unistd.h>
 
+#include "access/lru.h"
 #include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "catalog/storage.h"
@@ -124,6 +125,8 @@ int            effective_io_concurrency = 0;
 int            checkpoint_flush_after = 0;
 int            bgwriter_flush_after = 0;
 int            backend_flush_after = 0;
+
+bool		enable_buffer_mprotect = false;
 
 /*
  * How many buffers PrefetchBuffer callers should try to stay ahead of their
@@ -818,8 +821,12 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
             if (!isLocalBuf)
             {
                 if (mode == RBM_ZERO_AND_LOCK)
+				{
+					BufDisableMemoryProtection(BufferGetPage(
+						BufferDescriptorGetBuffer(bufHdr)), isLocalBuf);
                     LWLockAcquire(BufferDescriptorGetContentLock(bufHdr),
                                   LW_EXCLUSIVE);
+				}
                 else if (mode == RBM_ZERO_AND_CLEANUP_LOCK)
                     LockBufferForCleanup(BufferDescriptorGetBuffer(bufHdr));
             }
@@ -899,7 +906,10 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
     if (isExtend)
     {
         /* new buffers are zero-filled */
+		BufDisableMemoryProtection(bufBlock, isLocalBuf);
         MemSet((char *) bufBlock, 0, BLCKSZ);
+		BufEnableMemoryProtection(bufBlock, isLocalBuf);
+
         /* don't set checksum for all-zero page */
         smgrextend(smgr, forkNum, blockNum, (char *) bufBlock, false);
 
@@ -917,7 +927,11 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
          * just wants us to allocate a buffer.
          */
         if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK)
+		{
+			BufDisableMemoryProtection(bufBlock, isLocalBuf);
             MemSet((char *) bufBlock, 0, BLCKSZ);
+			BufEnableMemoryProtection(bufBlock, isLocalBuf);
+		}
         else
         {
             instr_time    io_start,
@@ -926,7 +940,9 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
             if (track_io_timing)
                 INSTR_TIME_SET_CURRENT(io_start);
 
+			BufDisableMemoryProtection(bufBlock, isLocalBuf);
             smgrread(smgr, forkNum, blockNum, (char *) bufBlock);
+			BufEnableMemoryProtection(bufBlock, isLocalBuf);
 
             if (track_io_timing)
             {
@@ -944,7 +960,9 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
                 {
                     if (algo_id == smgr->smgr_relcrypt.algo_id)
                     {
+						BufDisableMemoryProtection(bufBlock, isLocalBuf);
                         rel_crypt_page_decrypt(&(smgr->smgr_relcrypt), (Page)bufBlock);
+						BufEnableMemoryProtection(bufBlock, isLocalBuf);
                     }
                     else
                     {
@@ -967,7 +985,10 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
                              errmsg("invalid page in block %u of relation %s; zeroing out page",
                                     blockNum,
                                     relpath(smgr->smgr_rnode, forkNum))));
+
+					BufDisableMemoryProtection(bufBlock, isLocalBuf);
                     MemSet((char *) bufBlock, 0, BLCKSZ);
+					BufEnableMemoryProtection(bufBlock, isLocalBuf);
                 }
                 else
                 {
@@ -995,6 +1016,8 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
     if ((mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK) &&
         !isLocalBuf)
     {
+		BufDisableMemoryProtection(BufferGetPage(
+			BufferDescriptorGetBuffer(bufHdr)), isLocalBuf);
         LWLockAcquire(BufferDescriptorGetContentLock(bufHdr), LW_EXCLUSIVE);
     }
 
@@ -1180,8 +1203,26 @@ BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
              * happens to be trying to split the page the first one got from
              * StrategyGetBuffer.)
              */
-            if (LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf),
-                                         LW_SHARED))
+			bool ret = false;
+
+			if (enable_buffer_mprotect)
+			{
+				/* Encrypting buffer needs LW_EXCLUSIVE */
+				ret = LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf),
+					LW_EXCLUSIVE);
+				if (ret)
+				{
+					BufDisableMemoryProtection(
+						BufferGetPage(BufferDescriptorGetBuffer(buf)), false);
+				}
+			}
+			else
+			{
+				ret = LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf),
+					LW_SHARED);
+			}
+
+			if (ret)
             {
                 /*
                  * If using a nondefault strategy, and writing the buffer
@@ -1202,6 +1243,8 @@ BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
                     if (XLogNeedsFlush(lsn) &&
                         StrategyRejectBuffer(strategy, buf))
                     {
+						BufEnableMemoryProtection(
+							BufferGetPage(BufferDescriptorGetBuffer(buf)), false);
                         /* Drop lock/pin and loop around for another buffer */
                         LWLockRelease(BufferDescriptorGetContentLock(buf));
                         UnpinBuffer(buf, true);
@@ -1216,6 +1259,8 @@ BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
                                                           smgr->smgr_rnode.node.relNode);
 
                 FlushBuffer(buf, NULL);
+				BufEnableMemoryProtection(
+					BufferGetPage(BufferDescriptorGetBuffer(buf)), false);
                 LWLockRelease(BufferDescriptorGetContentLock(buf));
 
                 ScheduleBufferTagForWriteback(&BackendWritebackContext,
@@ -3844,13 +3889,28 @@ LockBuffer(Buffer buffer, int mode)
     buf = GetBufferDescriptor(buffer - 1);
 
     if (mode == BUFFER_LOCK_UNLOCK)
+	{
+		if (enable_buffer_mprotect &&
+			LWLockHeldByMeInMode(BufferDescriptorGetContentLock(buf), LW_EXCLUSIVE))
+		{
+			BufEnableMemoryProtection(BufferGetPage(buffer), false);
+		}
+
         LWLockRelease(BufferDescriptorGetContentLock(buf));
+	}
     else if (mode == BUFFER_LOCK_SHARE)
+	{
         LWLockAcquire(BufferDescriptorGetContentLock(buf), LW_SHARED);
+	}
     else if (mode == BUFFER_LOCK_EXCLUSIVE)
+	{
+		BufDisableMemoryProtection(BufferGetPage(buffer), false);
         LWLockAcquire(BufferDescriptorGetContentLock(buf), LW_EXCLUSIVE);
+	}
     else
+	{
         elog(ERROR, "unrecognized buffer lock mode: %d", mode);
+}
 }
 
 /*
@@ -3867,6 +3927,7 @@ ConditionalLockBuffer(Buffer buffer)
     if (BufferIsLocal(buffer))
         return true;            /* act as though we got it */
 
+	BufDisableMemoryProtection(BufferGetPage(buffer), false);
     buf = GetBufferDescriptor(buffer - 1);
 
     return LWLockConditionalAcquire(BufferDescriptorGetContentLock(buf),
@@ -4800,7 +4861,16 @@ static int SyncBufferPrePhase1(int buf_id)
      * try to lock the buffer, returning false means other process(start or backend) having lock the buffer in LW_EXCLUSIVE,
      * so, we skip this buffer, it would be treated in next checkpoint round.
      */
-	ret = LWLockConditionalAcquire(BufferDescriptorGetContentLock(bufHdr), LW_SHARED);
+	if (enable_buffer_mprotect && !BufferIsLocal(buf_id) && BufferIsValid(buf_id))
+	{
+		ret = LWLockConditionalAcquire(
+			BufferDescriptorGetContentLock(bufHdr), LW_EXCLUSIVE);
+	}
+	else
+	{
+		ret = LWLockConditionalAcquire(
+			BufferDescriptorGetContentLock(bufHdr), LW_SHARED);
+	}
     if (false == ret)
     {
         return SYNC_BUF_LWLOCK_CONFLICT;
@@ -5052,7 +5122,6 @@ static List* SyncBufferPostPhase1(List * buf_id_list, WritebackContext *wb_conte
         info = (SyncBufIdInfo *) lfirst(l);
 
         buf = GetBufferDescriptor(info->buf_id);
-        
         LWLockRelease(BufferDescriptorGetContentLock(buf));
 
         tag = buf->tag;
@@ -5234,4 +5303,36 @@ char * BufHdrGetBlockFunc(BufferDesc * buf)
 
 #endif
 
+/*
+ * enable buffer memory protection
+ */
+inline void
+BufEnableMemoryProtection(char *address, bool localbuffer)
+{
+	if (localbuffer)
+	{
+		return;
+	}
 
+	if (enable_buffer_mprotect)
+	{
+		SetPageReadOnly(address);
+	}
+}
+
+/*
+ * disable buffer memory protection
+ */
+inline void
+BufDisableMemoryProtection(char *address, bool localbuffer)
+{
+	if (localbuffer)
+	{
+		return;
+	}
+
+	if (enable_buffer_mprotect)
+	{
+		SetPageReadWrite(address);
+	}
+}

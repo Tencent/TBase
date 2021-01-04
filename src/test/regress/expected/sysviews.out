@@ -76,7 +76,9 @@ select name, setting from pg_settings where name like 'enable%';
  enable_audit_warning              | off
  enable_auditlogger_warning        | off
  enable_bitmapscan                 | on
+ enable_buffer_mprotect            | on
  enable_check_password             | off
+ enable_clog_mprotect              | on
  enable_cls                        | on
  enable_cold_hot_router_print      | off
  enable_cold_hot_visible           | off
@@ -127,9 +129,11 @@ select name, setting from pg_settings where name like 'enable%';
  enable_statistic                  | on
  enable_subquery_shipping          | on
  enable_tidscan                    | on
+ enable_tlog_mprotect              | on
  enable_transparent_crypt          | on
  enable_user_authority_force_check | off
-(57 rows)
+ enable_xlog_mprotect              | on
+(61 rows)
 
 -- Test that the pg_timezone_names and pg_timezone_abbrevs views are
 -- more-or-less working.  We can't test their contents in any great detail

@@ -2280,6 +2280,7 @@ ERROR:  failed to set the requested LC_COLLATE value [Nls_sortR =  tt_RU.utf8@iq
 drop table test_sort;
 \c postgres
 DROP DATABASE IF EXISTS regression_sort;
+ERROR:  database "regression_sort" is being accessed by other users
 SET client_encoding to default;
 -- test !=- operator
 set enable_oracle_compatible = off;

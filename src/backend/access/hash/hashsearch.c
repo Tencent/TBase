@@ -18,6 +18,7 @@
 #include "access/relscan.h"
 #include "miscadmin.h"
 #include "pgstat.h"
+#include "utils/guc.h"
 #include "utils/rel.h"
 
 
@@ -467,7 +468,18 @@ _hash_step(IndexScanDesc scan, Buffer *bufP, ScanDirection dir)
 
                     /* Before leaving current page, deal with any killed items */
                     if (so->numKilled > 0)
+					{
+						if (enable_buffer_mprotect)
+						{
+							LockBuffer(so->hashso_curbuf, BUFFER_LOCK_UNLOCK);
+							LockBuffer(so->hashso_curbuf, BUFFER_LOCK_EXCLUSIVE);
+							_hash_kill_items(scan);
+						}
+						else
+						{
                         _hash_kill_items(scan);
+						}
+					}
 
                     /*
                      * ran off the end of this page, try the next
@@ -524,7 +536,18 @@ _hash_step(IndexScanDesc scan, Buffer *bufP, ScanDirection dir)
 
                     /* Before leaving current page, deal with any killed items */
                     if (so->numKilled > 0)
+					{
+						if (enable_buffer_mprotect)
+						{
+							LockBuffer(so->hashso_curbuf, BUFFER_LOCK_UNLOCK);
+							LockBuffer(so->hashso_curbuf, BUFFER_LOCK_EXCLUSIVE);
+							_hash_kill_items(scan);
+						}
+						else
+						{
                         _hash_kill_items(scan);
+						}
+					}
 
                     /*
                      * ran off the end of this page, try the next

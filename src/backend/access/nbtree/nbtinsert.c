@@ -23,6 +23,7 @@
 #include "miscadmin.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
+#include "utils/guc.h"
 #include "utils/tqual.h"
 
 
@@ -472,7 +473,15 @@ _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel,
             for (;;)
             {
                 nblkno = opaque->btpo_next;
+				if (enable_buffer_mprotect)
+				{
+					nbuf = _bt_relandgetbuf(rel, nbuf, nblkno, BT_WRITE);
+				}
+				else
+				{
                 nbuf = _bt_relandgetbuf(rel, nbuf, nblkno, BT_READ);
+				}
+				
                 page = BufferGetPage(nbuf);
                 opaque = (BTPageOpaque) PageGetSpecialPointer(page);
                 if (!P_IGNORE(opaque))

@@ -412,4 +412,7 @@ extern void AtEOXact_LocalBuffers(bool isCommit);
 #ifdef _MLS_
 extern char * BufHdrGetBlockFunc(BufferDesc *buf);
 #endif
+
+extern void BufEnableMemoryProtection(char *address, bool localbuffer);
+extern void BufDisableMemoryProtection(char *address, bool localbuffer);
 #endif                            /* BUFMGR_INTERNALS_H */

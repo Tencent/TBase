@@ -39,6 +39,7 @@
 #include "access/xact.h"
 #include "access/xlog_internal.h"
 #include "access/heapam_xlog.h"
+#include "access/lru.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_authid.h"
 #include "commands/async.h"
@@ -2698,6 +2699,62 @@ static struct config_bool ConfigureNamesBool[] =
         NULL, NULL, NULL
     },
     {
+		{"enable_buffer_mprotect", PGC_POSTMASTER, CUSTOM_OPTIONS,
+			gettext_noop("Protect memory corruption for share buffer"),
+			NULL,
+			GUC_NOT_IN_SAMPLE,
+		},
+		&enable_buffer_mprotect,
+#ifdef _PG_REGRESS_
+		true,
+#else
+		false,
+#endif
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_clog_mprotect", PGC_POSTMASTER, CUSTOM_OPTIONS,
+			gettext_noop("Protect memory corruption for clog"),
+			NULL,
+			GUC_NOT_IN_SAMPLE,
+		},
+		&enable_clog_mprotect,
+#ifdef _PG_REGRESS_
+		true,
+#else
+		false,
+#endif
+		NULL, NULL, NULL
+	},
+	{
+	{"enable_tlog_mprotect", PGC_POSTMASTER, CUSTOM_OPTIONS,
+		gettext_noop("Protect memory corruption for tlog"),
+		NULL,
+		GUC_NOT_IN_SAMPLE,
+		},
+		&enable_tlog_mprotect,
+#ifdef _PG_REGRESS_
+		true,
+#else
+		false,
+#endif
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_xlog_mprotect", PGC_POSTMASTER, CUSTOM_OPTIONS,
+			gettext_noop("Protect memory corruption for xlog"),
+			NULL,
+			GUC_NOT_IN_SAMPLE,
+		},
+		&enable_xlog_mprotect,
+#ifdef _PG_REGRESS_
+		true,
+#else
+		false,
+#endif
+		NULL, NULL, NULL
+	},
+	{
 		{"enable_cold_hot_router_print", PGC_USERSET, CUSTOM_OPTIONS,
 			 gettext_noop("Whether print cold hot router."),
 			 NULL

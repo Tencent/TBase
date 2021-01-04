@@ -31,6 +31,7 @@
 #include "storage/extentmapping.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
+#include "utils/guc.h"
 
 
 /*
@@ -779,7 +780,6 @@ fsm_set_and_search(Relation rel, FSMAddress addr, uint16 slot,
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
     page = BufferGetPage(buf);
-
     if (fsm_set_avail_extent(page, slot, newValue, &root_modified, &new_root, &old_root))
         MarkBufferDirtyHint(buf, false);
 
@@ -978,7 +978,16 @@ fsm_vacuum_page(Relation rel, FSMAddress addr, bool *eof_p)
      * pages, increasing the chances that a later vacuum can truncate the
      * relation.
      */
+	if (enable_buffer_mprotect)
+	{
+		LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
     ((FSMPage) PageGetContents(page))->fp_next_slot = 0;
+		LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+	}
+	else
+	{
+		((FSMPage) PageGetContents(page))->fp_next_slot = 0;
+	}
 
     ReleaseBuffer(buf);
 

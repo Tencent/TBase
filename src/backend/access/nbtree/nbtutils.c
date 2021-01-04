@@ -22,6 +22,7 @@
 #include "access/relscan.h"
 #include "miscadmin.h"
 #include "utils/array.h"
+#include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -1756,7 +1757,14 @@ _bt_killitems(IndexScanDesc scan)
          * re-use of any TID on the page, so there is no need to check the
          * LSN.
          */
+		if (enable_buffer_mprotect)
+		{
+			LockBuffer(so->currPos.buf, BT_WRITE);
+		}
+		else
+		{
         LockBuffer(so->currPos.buf, BT_READ);
+		}
 
         page = BufferGetPage(so->currPos.buf);
     }
@@ -1765,7 +1773,14 @@ _bt_killitems(IndexScanDesc scan)
         Buffer        buf;
 
         /* Attempt to re-read the buffer, getting pin and lock. */
+		if (enable_buffer_mprotect)
+		{
+			buf = _bt_getbuf(scan->indexRelation, so->currPos.currPage, BT_WRITE);
+		}
+		else
+		{
         buf = _bt_getbuf(scan->indexRelation, so->currPos.currPage, BT_READ);
+		}
 
         /* It might not exist anymore; in which case we can't hint it. */
         if (!BufferIsValid(buf))

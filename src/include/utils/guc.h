@@ -269,6 +269,10 @@ extern int32   g_TransferSpeed;
 /* slicent copy from */
 extern bool g_enable_copy_silence;
 extern bool g_enable_user_authority_force_check;
+extern bool enable_buffer_mprotect;
+extern bool enable_clog_mprotect;
+extern bool enable_tlog_mprotect;
+extern bool enable_xlog_mprotect;
 extern int query_delay;
 #endif
 extern int    log_min_error_statement;

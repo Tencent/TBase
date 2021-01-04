@@ -717,6 +717,8 @@ static void* mls_crypt_worker(void * input)
 
     for (;;)
     {
+        bool need_mprotect = false;
+
         if (false == g_crypt_parellel_main_running)
         {
             break;
@@ -747,7 +749,18 @@ static void* mls_crypt_worker(void * input)
         buf_need_encrypt = page_new + BLCKSZ;
 
         /* 2.2 do the encrypt */
+        need_mprotect = enable_buffer_mprotect &&
+            !BufferIsLocal(encrypt_element.buf_id) &&
+            BufferIsValid(encrypt_element.buf_id);
+        if (need_mprotect)
+        {
+            BufDisableMemoryProtection(buf, false);
+        }
         ret      = rel_crypt_page_encrypting_parellel(encrypt_element.algo_id, buf, buf_need_encrypt, page_new, encrypt_element.cryptkey, workerid);
+        if (need_mprotect)
+        {
+            BufEnableMemoryProtection(buf, false);
+        }
 
         /* 3. put it to crypted queue */
         while (QueueIsFull(crypted_queue))

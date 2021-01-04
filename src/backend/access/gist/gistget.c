@@ -21,6 +21,7 @@
 #include "pgstat.h"
 #include "lib/pairingheap.h"
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 
@@ -52,7 +53,16 @@ gistkillitems(IndexScanDesc scan)
     if (!BufferIsValid(buffer))
         return;
 
+	if (enable_buffer_mprotect)
+	{
+		/* ItemIdMarkDead() will write pages */
+		LockBuffer(buffer, GIST_EXCLUSIVE);
+	}
+	else
+	{
     LockBuffer(buffer, GIST_SHARE);
+	}
+	
     gistcheckpage(scan->indexRelation, buffer);
     page = BufferGetPage(buffer);
 

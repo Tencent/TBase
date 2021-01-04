@@ -485,6 +485,14 @@
 #update_process_title = on
 
 
+# - Memory Protection -
+
+#enable_buffer_mprotect = off
+#enable_clog_mprotect = off
+#enable_tlog_mprotect = off
+#enable_xlog_mprotect = off
+
+
 # - Maintain GTS -
 
 #gts_maintain_option = 0	# range: 0-2. the default is 0.

@@ -24,6 +24,7 @@
 
 #include "storage/bufmgr.h"
 #include "storage/fsm_internals.h"
+#include "utils/guc.h"
 
 /* Macros to navigate the tree within a page. Root has index zero. */
 #define leftchild(x)    (2 * (x) + 1)
@@ -325,6 +326,11 @@ restart:
      *
      * Wrap-around is handled at the beginning of this function.
      */
+	if (enable_buffer_mprotect && !exclusive_lock_held)
+	{
+		LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+		LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+	}
     fsmpage->fp_next_slot = slot + (advancenext ? 1 : 0);
 
     return slot;

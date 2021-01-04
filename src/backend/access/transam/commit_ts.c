@@ -24,6 +24,9 @@
  */
 #include "postgres.h"
 
+#include <unistd.h>
+#include <sys/mman.h>
+
 #include "access/commit_ts.h"
 #include "access/htup_details.h"
 #include "access/lru.h"
@@ -330,9 +333,11 @@ TransactionIdSetCommitTs(TransactionId xid, TimestampTz gts, TimestampTz ts,
 	entry.time = ts;
 	entry.nodeid = nodeid;
 
+	LruTlogDisableMemoryProtection(CommitTsCtl->shared[partitionno]->page_buffer[slotno]);
 	memcpy(CommitTsCtl->shared[partitionno]->page_buffer[slotno] +
 		   SizeOfCommitTimestampEntry * entryno,
 		   &entry, SizeOfCommitTimestampEntry);
+	LruTlogEnableMemoryProtection(CommitTsCtl->shared[partitionno]->page_buffer[slotno]);
 
 #ifdef __TBASE__
     /*
@@ -868,7 +873,7 @@ TrimCommitTs(void)
     CommitTsCtl->global_shared->latest_page_number = pageno;
     LWLockRelease(CommitTsControlLock);
     
-    elog(LOG, "Trim committs next xid %d latest page number %d entryno %d", xid, pageno, entryno);
+	elog(DEBUG10, "Trim committs next xid %d latest page number %d entryno %d", xid, pageno, entryno);
     
     
     /*
@@ -902,9 +907,12 @@ TrimCommitTs(void)
         
         byteptr = CommitTsCtl->shared[partitionno]->page_buffer[slotno] + byteno;
         
+		LruTlogDisableMemoryProtection(CommitTsCtl->shared[partitionno]->page_buffer[slotno]);
         /* Zero the rest of the page */
         MemSet(byteptr, 0, BLCKSZ - byteno);
-        elog(LOG, "zero out the remaining page starting from byteno %d len BLCKSZ -byteno %d entryno %d sizeofentry %lu", 
+		LruTlogEnableMemoryProtection(CommitTsCtl->shared[partitionno]->page_buffer[slotno]);
+
+        elog(DEBUG10, "zero out the remaining page starting from byteno %d len BLCKSZ -byteno %d entryno %d sizeofentry %lu",
             byteno, BLCKSZ - byteno, entryno, SizeOfCommitTimestampEntry);
         CommitTsCtl->shared[partitionno]->page_dirty[slotno] = true;
         

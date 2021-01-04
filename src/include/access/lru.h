@@ -215,7 +215,6 @@ typedef struct LruCtlData
 
 typedef LruCtlData *LruCtl;
 
-
 #define PARTITION_LOCK_IDX(shared) ((shared)->num_slots)
 
 extern Size LruShmemSize(int nslots, int nlsns);
@@ -244,6 +243,10 @@ extern bool LruScanDirCbReportPresence(LruCtl ctl, char *filename,
                             int segpage, void *data);
 extern bool LruScanDirCbDeleteAll(LruCtl ctl, char *filename, int segpage,
                        void *data);
+extern void LruTlogEnableMemoryProtection(char *address);
+extern void LruTlogDisableMemoryProtection(char *address);
+extern void SetPageReadOnly(char *address);
+extern void SetPageReadWrite(char *address);
  
 
 #endif                            /* SLRU_H */
