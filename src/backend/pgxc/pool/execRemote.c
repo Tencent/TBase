@@ -3664,6 +3664,12 @@ pgxc_node_remote_cleanup_all(void)
         return;
     }
 
+	/* Do not cleanup connections if we have prepared statements on nodes */
+	if (HaveActiveDatanodeStatements())
+	{
+		return;
+	}
+
     /*
      * Send down snapshot followed by DISCARD ALL command.
      */
