@@ -703,6 +703,30 @@ select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);
 
 drop table tbl_a;
 drop table tbl_b;
+
+-- more RTEs in subquery
+CREATE TABLE sub_t1 (a int4, b int4);
+CREATE TABLE sub_t2 (a int4, b int4);
+CREATE TABLE sub_interfere1 (a int4, b int4);
+CREATE TABLE sub_interfere2 (a int4, b int4);
+explain (costs off)
+select 1 from 
+	sub_t1 t1,
+	sub_t2 t2
+where t2.a = (
+	select 
+		min(t2.a)
+	from
+		sub_t2 t2,
+		sub_interfere1,
+		sub_interfere2
+	where
+		t1.a = t2.a
+);
+DROP TABLE sub_t1;
+DROP TABLE sub_t2;
+DROP TABLE sub_interfere1;
+DROP TABLE sub_interfere2;
 set enable_pullup_subquery to false;
 
 --

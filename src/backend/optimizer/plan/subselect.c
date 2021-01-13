@@ -1713,6 +1713,7 @@ simplify_EXPR_query(PlannerInfo *root, Query *query)
         query->hasModifyingCTE ||
         query->havingQual ||
         query->limitOffset ||
+		query->limitCount ||
         query->rowMarks ||
         query->hasSubLinks ||
         query->cteList ||
@@ -2600,11 +2601,6 @@ convert_EXPR_sublink_to_join(PlannerInfo *root, OpExpr *expr,
 
     /* only process agg case */
     if (!((Query *)sublink->subselect)->hasAggs)
-    {
-        return NULL;
-    }
-
-    if (list_length(((Query *)sublink->subselect)->rtable) > 2)
     {
         return NULL;
     }

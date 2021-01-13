@@ -1730,6 +1730,56 @@ select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);
 
 drop table tbl_a;
 drop table tbl_b;
+-- more RTEs in subquery
+CREATE TABLE sub_t1 (a int4, b int4);
+CREATE TABLE sub_t2 (a int4, b int4);
+CREATE TABLE sub_interfere1 (a int4, b int4);
+CREATE TABLE sub_interfere2 (a int4, b int4);
+explain (costs off)
+select 1 from 
+	sub_t1 t1,
+	sub_t2 t2
+where t2.a = (
+	select 
+		min(t2.a)
+	from
+		sub_t2 t2,
+		sub_interfere1,
+		sub_interfere2
+	where
+		t1.a = t2.a
+);
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Hash Join
+   Hash Cond: ("EXPR_subquery".min = t2.a)
+   ->  Hash Left Join
+         Hash Cond: (t1.a = "EXPR_subquery".a)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               ->  Seq Scan on sub_t1 t1
+         ->  Hash
+               ->  Subquery Scan on "EXPR_subquery"
+                     ->  HashAggregate
+                           Group Key: t2_1.a
+                           ->  Nested Loop
+                                 ->  Nested Loop
+                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                             ->  Seq Scan on sub_t2 t2_1
+                                       ->  Materialize
+                                             ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                                   ->  Seq Scan on sub_interfere1
+                                 ->  Materialize
+                                       ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                             ->  Seq Scan on sub_interfere2
+   ->  Hash
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               ->  Seq Scan on sub_t2 t2
+(23 rows)
+
+DROP TABLE sub_t1;
+DROP TABLE sub_t2;
+DROP TABLE sub_interfere1;
+DROP TABLE sub_interfere2;
 set enable_pullup_subquery to false;
 --
 -- Tests for CTE inlining behavior
