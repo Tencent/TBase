@@ -11163,6 +11163,8 @@ ExecDisconnectRemoteSubplan(RemoteSubplanState *node)
 
             if (conn)
             {
+                CHECK_OWNERSHIP(conn, combiner);
+				
                 if (pgxc_node_send_disconnect(conn, cursor, list_length(plan->distributionRestrict)) != 0)
                     ereport(ERROR,
                             (errcode(ERRCODE_INTERNAL_ERROR),
