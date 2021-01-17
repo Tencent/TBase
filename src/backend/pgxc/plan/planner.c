@@ -349,24 +349,6 @@ pgxc_FQS_planner(Query *query, int cursorOptions, ParamListInfo boundParams)
     result->invalItems = glob->invalItems;
     result->rowMarks = glob->finalrowmarks;
 
-#ifdef __TBASE__
-    /* 
-      * sanity check 
-      * tables from different groups can not be joined, and shard table join with other table type 
-      * also permitted.
-      */
-    {
-        if (list_length(groupOids) > 1 && !enable_group_across_query)
-        {
-            groupOids = NULL;
-            elog(ERROR, "Shard tables from different groups should not be invloved in one Query,\n"
-                        "Shard tables should not be invloved in one Query with other tables, such as hash table.");
-        }
-
-        groupOids = NULL;
-    }
-#endif
-
     return result;
 }
 

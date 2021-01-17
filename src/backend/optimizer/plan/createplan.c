@@ -108,7 +108,6 @@ bool enable_group_across_query = false;
 bool enable_distributed_unique_plan = false;
 #endif
 #ifdef __COLD_HOT__
-bool has_distribute_remote_plan = false;
 bool has_cold_hot_table = false;
 #endif
 static Plan *create_plan_recurse(PlannerInfo *root, Path *best_path,
@@ -701,26 +700,11 @@ create_scan_plan(PlannerInfo *root, Path *best_path, int flags)
 
             if (AttributeNumberIsValid(loc->secAttrNum) || OidIsValid(loc->coldGroupId))
             {
-                if (has_distribute_remote_plan && list_length(groupOids) != 1)
-                {
-                    error = true;
-                }
-                else
-                {
                     has_cold_hot_table = true;
                 }
             }
-        }
 
         heap_close(relation, NoLock);
-
-        if (error)
-        {
-            has_distribute_remote_plan = false;
-            has_cold_hot_table = false;
-
-            elog(ERROR, "Tables which located in more than one group could not involved in query with join or redistribution");
-        }
     }
 #endif
 
@@ -6407,22 +6391,6 @@ make_remotesubplan(PlannerInfo *root,
     /* Sanity checks */
     Assert(!equal(resultDistribution, execDistribution));
     Assert(!IsA(lefttree, RemoteSubplan));
-
-#ifdef __COLD_HOT__
-    if (distributionType != LOCATOR_TYPE_NONE)
-    {
-        if (has_cold_hot_table && list_length(groupOids) != 1 && root->parse->commandType != CMD_INSERT)
-        {
-            has_cold_hot_table = false;
-            has_distribute_remote_plan = false;
-            elog(ERROR, "Tables which located in more than one group could not involved in query with join or redistribution");
-        }
-        else
-        {
-            has_distribute_remote_plan = true;
-        }
-    }
-#endif
 
 #ifdef __TBASE__
     if((IsA(lefttree, HashJoin) || IsA(lefttree, SeqScan) 

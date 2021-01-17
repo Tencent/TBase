@@ -1682,6 +1682,33 @@ set_joinpath_distribution(PlannerInfo *root, JoinPath *pathnode)
         goto pull_up;
     }
 
+	/*
+	 * If outer or inner subpaths are distributed by shard and they do not exist
+	 * in same node set, which means we may need to redistribute tuples to data
+	 * nodes which use different router map to producer.
+	 * We don't support that, so pull it up to CN to accomplish the join.
+	 * 
+	 * TODO:
+	 *      1. if the join is "REPLICATION join SHARD", and node set of SHARD table
+	 *      is subset of REPLICATION table, no need to pull up.
+	 *      2. find out which side of this join needs to dispatch, and only decide
+	 *      whether to pull up by the distributionType of another side subpath.
+	 *      3. pass target router map to another group maybe ? thus nothing need to
+	 *      pull up to CN.
+	 */
+	if (innerd && outerd && 
+		(outerd->distributionType == LOCATOR_TYPE_SHARD ||
+		(innerd->distributionType == LOCATOR_TYPE_SHARD)) &&
+		!bms_equal(outerd->nodes, innerd->nodes))
+	{
+		goto pull_up;
+	}
+	
+	/*
+	 * the join of cold-hot tables must be pulled up to CN until we find a way 
+	 * to determine whether this join occurs in a specific group.
+	 */
+#ifdef __COLD_HOT__
     if (has_cold_hot_table)
     {
         if (list_length(groupOids) > 1)
@@ -1691,9 +1718,10 @@ set_joinpath_distribution(PlannerInfo *root, JoinPath *pathnode)
         else if (list_length(groupOids) < 1)
         {
             has_cold_hot_table = false;
-            elog(ERROR, "hot cold table joins without groups");
+			elog(ERROR, "cold-hot table joins without groups");
         }
     }
+#endif
 #endif
     /*
      * If both subpaths are distributed by replication, the resulting
@@ -2435,8 +2463,21 @@ not_allowed_join:
                     nodes = bms_add_member(nodes, i);
 
 #ifdef __TBASE__
+				/*
+				 * We end up here that we don't have replication table and whether
+				 * 1. we have no shard table at both sides OR
+				 * 2. we have shard table but spread in same node set
+				 * so check distribution type and decide what's next.
+				 */
+				if (innerd->distributionType == LOCATOR_TYPE_SHARD ||
+					outerd->distributionType == LOCATOR_TYPE_SHARD)
+				{
+					/* must be same node set, just copy */
+					Assert(bms_equal(innerd->nodes, innerd->nodes));
+					nodes = bms_copy(outerd->nodes);
+				}
 				/* check if we can distribute by shard */
-				if (OidIsValid(group))
+				else if (OidIsValid(group))
 				{
 					int      node_index;
 					int32	 dn_num;
@@ -3100,12 +3141,6 @@ create_redistribute_grouping_path(PlannerInfo *root, Query *parse, Path *path)
 
         te = (TargetEntry *)list_nth(parse->targetList,
                                      groupColIdx[colIdx]-1);
-
-        if (list_length(groupOids) > 1 && !enable_group_across_query)
-        {
-            groupOids = NULL;
-            elog(ERROR, "Tables from different groups should not be invloved in one Query.");
-        }
 
         if (groupOids)
         {

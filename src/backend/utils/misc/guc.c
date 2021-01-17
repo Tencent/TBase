@@ -2197,16 +2197,6 @@ static struct config_bool ConfigureNamesBool[] =
     },
 
     {
-        {"enable_group_across_query", PGC_USERSET, CUSTOM_OPTIONS,
-            gettext_noop("enable group-across queries."),
-            NULL
-        },
-        &enable_group_across_query,
-        false,
-        NULL, NULL, NULL
-    },
-
-	{
 		{"enable_distributed_unique_plan", PGC_USERSET, CUSTOM_OPTIONS,
 			gettext_noop("enable distributed unique plan."),
 			NULL

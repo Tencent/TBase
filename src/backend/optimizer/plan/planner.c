@@ -288,7 +288,6 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
     groupOids = NULL;
 #endif
 #ifdef __COLD_HOT__
-    has_distribute_remote_plan = false;
     has_cold_hot_table = false;
 #endif
     /*
@@ -524,25 +523,6 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
     result->haspart_tobe_modify = root->haspart_tobe_modify;
     result->partrelindex = root->partrelindex;
     result->partpruning = bms_copy(root->partpruning);
-#endif
-
-
-#ifdef __TBASE__
-    /* 
-      * sanity check 
-      * tables from different groups can not be joined, and shard table join with other table type 
-      * also permitted.
-      */
-    {
-        if (list_length(groupOids) > 1 && !enable_group_across_query && !has_cold_hot_table)
-        {
-            groupOids = NULL;
-            elog(ERROR, "Shard tables from different groups should not be invloved in one Query,\n"
-                        "Shard tables should not be invloved in one Query with other tables, such as hash table.");
-        }
-
-        groupOids = NULL;
-    }
 #endif
 
     return result;
