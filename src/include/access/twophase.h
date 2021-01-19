@@ -92,6 +92,10 @@ extern int    max_prepared_xacts;
 
 extern int  transaction_threshold;
 
+#ifdef __TBASE__
+extern bool enable_2pc_recovery_info;
+#endif
+
 extern Size TwoPhaseShmemSize(void);
 extern void TwoPhaseShmemInit(void);
 

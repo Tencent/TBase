@@ -2552,6 +2552,15 @@ static struct config_bool ConfigureNamesBool[] =
         false,
         NULL, NULL, NULL
     },
+	{
+		{"enable_2pc_recovery_info", PGC_POSTMASTER, DEVELOPER_OPTIONS,
+			 gettext_noop("write extra file for 2pc crash recovery."),
+			 NULL
+		},
+		&enable_2pc_recovery_info,
+		true,
+		NULL, NULL, NULL
+	},
 #endif
 
 #ifdef __AUDIT__
