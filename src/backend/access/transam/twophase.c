@@ -143,6 +143,9 @@ int            max_prepared_xacts = 10000;  /* We require 2PC */
 #else
 int            max_prepared_xacts = 0;
 #endif
+#ifdef __TBASE__
+bool        enable_2pc_recovery_info = true;
+#endif
 
 
 static GlobalTransaction
@@ -3148,6 +3151,12 @@ void record_2pc_redo_remove_gid_xid(TransactionId xid)
     int i;
     GlobalTransaction gxact = NULL;
     bool found = false;
+
+	if(!enable_2pc_recovery_info)
+	{
+		return ;
+	}
+
     for (i = 0; i < TwoPhaseState->numPrepXacts; i++)
     {
         gxact = TwoPhaseState->prepXacts[i];
@@ -3185,6 +3194,11 @@ void record_2pc_involved_nodes_xid(const char * tid,
     XLogRecPtr xlogrec = 0;
 #endif
         
+    if (!enable_2pc_recovery_info)
+    {
+        return ;
+    }
+
     if (enable_distri_print)
     {
         elog(LOG, "record twophase txn gid: %s, startnode: %s, participants: %s", tid, startnode, nodestring);
@@ -3333,6 +3347,11 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
     GlobalTransaction gxact = NULL;
 #endif
     
+    if (!enable_2pc_recovery_info)
+    {
+    	return ;
+    }
+
     if (enable_distri_print)
     {
         elog(LOG, "record twophase txn gid: %s, commit_timestamp: %ld", tid, commit_timestamp);
@@ -3433,6 +3452,12 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 void remove_2pc_records(const char * tid, bool record_in_xlog)
 {
     char path[MAXPGPATH];    
+
+    if (!enable_2pc_recovery_info)
+    {
+    	return ;
+    }
+
     snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", tid);
 
     /* no need to check file exists. since when it do not exists , unlink won't success */
@@ -3454,6 +3479,11 @@ void record_2pc_readonly(const char *gid)
     int ret = 0;
     char path[MAXPGPATH];
     char content[10] = "readonly";
+        
+    if(!enable_2pc_recovery_info)
+    {
+    	return ;
+    }
         
     if (enable_distri_print)
     {
