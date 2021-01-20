@@ -3811,6 +3811,16 @@ create_bitmap_subplan(PlannerInfo *root, Path *bitmapqual,
         List       *subindexquals = NIL;
         List       *subindexECs = NIL;
         ListCell   *l;
+		double      nodes = 1;
+
+#ifdef __TBASE__
+		if (apath->path.distribution && IsA(apath->path.distribution, Distribution) &&
+		    apath->path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
+		    apath->path.distribution->distributionType != LOCATOR_TYPE_NONE)
+		{
+			nodes = bms_num_members(apath->path.distribution->nodes);
+		}
+#endif
 
         /*
          * There may well be redundant quals among the subplans, since a
@@ -3839,7 +3849,7 @@ create_bitmap_subplan(PlannerInfo *root, Path *bitmapqual,
         plan->startup_cost = apath->path.startup_cost;
         plan->total_cost = apath->path.total_cost;
         plan->plan_rows =
-            clamp_row_est(apath->bitmapselectivity * apath->path.parent->tuples);
+			clamp_row_est(apath->bitmapselectivity * apath->path.parent->tuples / nodes);
         plan->plan_width = 0;    /* meaningless */
         plan->parallel_aware = false;
         plan->parallel_safe = apath->path.parallel_safe;
@@ -3899,11 +3909,21 @@ create_bitmap_subplan(PlannerInfo *root, Path *bitmapqual,
         }
         else
         {
+			double  nodes = 1;
+#ifdef __TBASE__
+			if (opath->path.distribution && IsA(opath->path.distribution, Distribution) &&
+			    opath->path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
+			    opath->path.distribution->distributionType != LOCATOR_TYPE_NONE)
+			{
+				nodes = bms_num_members(opath->path.distribution->nodes);
+			}
+#endif
+			
             plan = (Plan *) make_bitmap_or(subplans);
             plan->startup_cost = opath->path.startup_cost;
             plan->total_cost = opath->path.total_cost;
             plan->plan_rows =
-                clamp_row_est(opath->bitmapselectivity * opath->path.parent->tuples);
+				clamp_row_est(opath->bitmapselectivity * opath->path.parent->tuples / nodes);
             plan->plan_width = 0;    /* meaningless */
             plan->parallel_aware = false;
             plan->parallel_safe = opath->path.parallel_safe;
@@ -3934,6 +3954,16 @@ create_bitmap_subplan(PlannerInfo *root, Path *bitmapqual,
         IndexScan  *iscan;
         List       *subindexECs;
         ListCell   *l;
+		double      nodes = 1;
+		
+#ifdef __TBASE__
+		if (ipath->path.distribution && IsA(ipath->path.distribution, Distribution) &&
+		    ipath->path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
+		    ipath->path.distribution->distributionType != LOCATOR_TYPE_NONE)
+		{
+			nodes = bms_num_members(ipath->path.distribution->nodes);
+		}
+#endif
 
         /* Use the regular indexscan plan build machinery... */
         iscan = castNode(IndexScan,
@@ -3948,7 +3978,7 @@ create_bitmap_subplan(PlannerInfo *root, Path *bitmapqual,
         plan->startup_cost = 0.0;
         plan->total_cost = ipath->indextotalcost;
         plan->plan_rows =
-            clamp_row_est(ipath->indexselectivity * ipath->path.parent->tuples);
+			clamp_row_est(ipath->indexselectivity * ipath->path.parent->tuples / nodes);
         plan->plan_width = 0;    /* meaningless */
         plan->parallel_aware = false;
         plan->parallel_safe = ipath->path.parallel_safe;

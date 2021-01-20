@@ -179,6 +179,111 @@ static double relation_byte_size(double tuples, int width);
 static double page_size(double tuples, int width);
 static double get_parallel_divisor(Path *path);
 
+#ifdef __TBASE__
+/*
+ * In PostgreSQL, the row count estimate of a base rel scan, like a Seq Scan
+ * or an Index Scan, can be directly copied from RelOptInfo->rows/tuples. In
+ * TBase, it's not that straightforward as a Scan runs in parallel in the
+ * DNs, and the number of rows scanned by each Scan is RelOptInfo->rows /
+ * number of DN.
+ *
+ * That's pretty straightforward, too, but it means that we'd have to modify
+ * all the cost_seqscan, cost_index, etc. functions to take that into
+ * account. That's prone to bugs, because it is easy to miss references to
+ * rel->rows/tuples/pages. Even if we fix them all now, more can be
+ * introduced in merges with PostgreSQL, and it's not easy to notice because
+ * the only consequence is a bad cost estimate.
+ *
+ * To make that more robust with PostgreSQL merges, we do a little switcheroo
+ * with the RelOptInfo. The RelOptInfoDataNode struct is a "proxy" of
+ * RelOptInfo, containing the same fields, except that the rows/pages/tuple
+ * have already been divided by the number of data nodes. The costing functions
+ * have been modified so that on entry, they construct a RelOptInfoDataNode and
+ * use it in place of the RelOptInfo. That way, the formulas in the costing
+ * functions can still refer to "rel->pages", "rel->tuples" and so forth in
+ * the source code, keeping them unchanged from upstream, but will actually
+ * use the adjusted values.
+ *
+ * The RelOptInfoDataNode struct doesn't contain all the fields from RelOptInfo,
+ * only the ones commonly used in the cost_*() functions. If a reference to a
+ * new field is added in uptream, and it's not handled either by adding it to
+ * the RelOptInfoDataNode, or by modifying the reference to explictly point to
+ * the original RelOptInfo, you'll get a compiler error. That's good: it forces
+ * you to think whether the value needs to be divided by nDNs or not.
+ */
+typedef struct
+{
+	/* Values copied from RelOptInfo as is, for convenience */
+	Index		relid;
+	RTEKind		rtekind;		/* RELATION, SUBQUERY, or FUNCTION */
+	Oid			reltablespace;	/* containing tablespace */
+	double		allvisfrac;
+	
+	/* Values adjusted from RelOptInfo, by dividing by number of DNs */
+	double		rows;
+	BlockNumber pages;
+	double		tuples;
+	
+	/* the original RelOptInfo */
+	RelOptInfo *orig;
+} RelOptInfoDataNode;
+
+/* ParamPathInfoDataNode is a similar proxy for ParamPathInfo. */
+typedef struct
+{
+	double		ppi_rows;		/* estimated number of result tuples */
+	List	   *ppi_clauses;	/* join clauses available from outer rels */
+	
+	ParamPathInfo *orig;
+} ParamPathInfoDataNode;
+
+static ParamPathInfoDataNode *
+adjust_reloptinfo(Path *path, RelOptInfoDataNode *basescan, RelOptInfo *baserel_orig,
+                  ParamPathInfoDataNode *param_info, ParamPathInfo *param_info_orig)
+{
+	double		nodes;
+	
+	if (path->distribution && IsA(path->distribution, Distribution) &&
+		path->distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
+		path->distribution->distributionType != LOCATOR_TYPE_NONE)
+		nodes = bms_num_members(path->distribution->nodes);
+	else
+		nodes = 1;
+	
+	basescan->relid = baserel_orig->relid;
+	basescan->rtekind = baserel_orig->rtekind;
+	basescan->reltablespace = baserel_orig->reltablespace;
+	basescan->allvisfrac = baserel_orig->allvisfrac;
+	
+	basescan->rows = clamp_row_est(baserel_orig->rows / nodes);
+	basescan->tuples = clamp_row_est(baserel_orig->tuples / nodes);
+	basescan->pages = ceil((double) baserel_orig->pages / nodes);
+	
+	basescan->orig = baserel_orig;
+	
+	if (param_info_orig)
+	{
+		param_info->ppi_rows = clamp_row_est(param_info_orig->ppi_rows / nodes);
+		param_info->ppi_clauses = param_info_orig->ppi_clauses;
+		param_info->orig = param_info_orig;
+		return param_info;
+	}
+	else
+		return NULL;
+}
+
+/*
+ * ADJUST_BASESCAN initializes the proxy structs for RelOptInfo and ParamPathInfo,
+ * adjusting them by # of data nodes as needed.
+ */
+#define ADJUST_BASESCAN(path, baserel_orig, baserel, param_info_orig, param_info) \
+	RelOptInfoDataNode baserel_adjusted; \
+	ParamPathInfoDataNode param_info_adjusted; \
+	RelOptInfoDataNode *baserel = &baserel_adjusted; \
+	ParamPathInfoDataNode *param_info = adjust_reloptinfo(path, &baserel_adjusted, baserel_orig, \
+															&param_info_adjusted, param_info_orig)
+#endif
+
 
 /*
  * clamp_row_est
@@ -210,8 +315,14 @@ clamp_row_est(double nrows)
  */
 void
 cost_seqscan(Path *path, PlannerInfo *root,
+#ifdef __TBASE__
+			 RelOptInfo *baserel_orig, ParamPathInfo *param_info_orig)
+{
+	ADJUST_BASESCAN(path, baserel_orig, baserel, param_info_orig, param_info);
+#else
              RelOptInfo *baserel, ParamPathInfo *param_info)
 {
+#endif
     Cost        startup_cost = 0;
     Cost        cpu_run_cost;
     Cost        disk_run_cost;
@@ -243,7 +354,11 @@ cost_seqscan(Path *path, PlannerInfo *root,
     disk_run_cost = spc_seq_page_cost * baserel->pages;
 
     /* CPU costs */
+#ifdef __TBASE__
+	get_restriction_qual_cost(root, baserel_orig, param_info_orig, &qpqual_cost);
+#else
     get_restriction_qual_cost(root, baserel, param_info, &qpqual_cost);
+#endif
 
     startup_cost += qpqual_cost.startup;
     cpu_per_tuple = cpu_tuple_cost + qpqual_cost.per_tuple;
@@ -287,8 +402,14 @@ cost_seqscan(Path *path, PlannerInfo *root,
  */
 void
 cost_samplescan(Path *path, PlannerInfo *root,
+#ifdef __TBASE__
+				RelOptInfo *baserel_orig, ParamPathInfo *param_info_orig)
+{
+	ADJUST_BASESCAN(path, baserel_orig, baserel, param_info_orig, param_info);
+#else
                 RelOptInfo *baserel, ParamPathInfo *param_info)
 {
+#endif
     Cost        startup_cost = 0;
     Cost        run_cost = 0;
     RangeTblEntry *rte;
@@ -337,7 +458,11 @@ cost_samplescan(Path *path, PlannerInfo *root,
      * simple constants anyway.  We also don't charge anything for the
      * calculations the sampling method might do internally.
      */
+#ifdef __TBASE__
+	get_restriction_qual_cost(root, baserel_orig, param_info_orig, &qpqual_cost);
+#else
     get_restriction_qual_cost(root, baserel, param_info, &qpqual_cost);
+#endif
 
     startup_cost += qpqual_cost.startup;
     cpu_per_tuple = cpu_tuple_cost + qpqual_cost.per_tuple;
@@ -362,9 +487,14 @@ cost_samplescan(Path *path, PlannerInfo *root,
  */
 void
 cost_gather(GatherPath *path, PlannerInfo *root,
+#ifdef __TBASE__
+			RelOptInfo *rel_orig, ParamPathInfo *param_info_orig,
+#else
             RelOptInfo *rel, ParamPathInfo *param_info,
+#endif
             double *rows)
 {
+	ADJUST_BASESCAN(&path->path, rel_orig, rel, param_info_orig, param_info);
     Cost        startup_cost = 0;
     Cost        run_cost = 0;
 
@@ -478,7 +608,12 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
            bool partial_path)
 {// #lizard forgives
     IndexOptInfo *index = path->indexinfo;
+#ifdef __TBASE__
+	RelOptInfo *baserel_orig = index->rel;
+	ADJUST_BASESCAN(&path->path, baserel_orig, baserel, path->path.param_info, param_info);
+#else
     RelOptInfo *baserel = index->rel;
+#endif
     bool        indexonly = (path->path.pathtype == T_IndexOnlyScan);
     amcostestimate_function amcostestimate;
     List       *qpquals;
@@ -500,10 +635,23 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
     double        pages_fetched;
     double        rand_heap_pages;
     double        index_pages;
+	double		nodes = 1;
 
+#ifdef __TBASE__
+	if (path->path.distribution && IsA(path->path.distribution, Distribution) &&
+	    path->path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
+	    path->path.distribution->distributionType != LOCATOR_TYPE_NONE)
+	{
+		nodes = bms_num_members(path->path.distribution->nodes);
+	}
+	/* Should only be applied to base relations */
+	Assert(IsA(baserel_orig, RelOptInfo) &&
+	       IsA(index, IndexOptInfo));
+#else
     /* Should only be applied to base relations */
     Assert(IsA(baserel, RelOptInfo) &&
            IsA(index, IndexOptInfo));
+#endif
     Assert(baserel->relid > 0);
     Assert(baserel->rtekind == RTE_RELATION);
 
@@ -514,6 +662,18 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
      * baserestrictinfo as the list of relevant restriction clauses for the
      * rel.
      */
+#ifdef __TBASE__
+	if (param_info)
+	{
+		path->path.rows = param_info->ppi_rows;
+		/* qpquals come from the rel's restriction clauses and ppi_clauses */
+		qpquals = list_concat(
+							  extract_nonindex_conditions(path->indexinfo->indrestrictinfo,
+														  path->indexquals),
+							  extract_nonindex_conditions(param_info->ppi_clauses,
+														  path->indexquals));
+	}
+#else
     if (path->path.param_info)
     {
         path->path.rows = path->path.param_info->ppi_rows;
@@ -524,6 +684,7 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
                               extract_nonindex_conditions(path->path.param_info->ppi_clauses,
                                                           path->indexquals));
     }
+#endif
     else
     {
         path->path.rows = baserel->rows;
@@ -548,6 +709,9 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
                    &indexStartupCost, &indexTotalCost,
                    &indexSelectivity, &indexCorrelation,
                    &index_pages);
+
+	/* The index pages should be divided among all the data nodes like baserel dose. */
+	index_pages = ceil(index_pages / nodes);
 
     /*
      * Save amcostestimate's results for possible use in bitmap scan planning.
@@ -608,7 +772,11 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
          */
         pages_fetched = index_pages_fetched(tuples_fetched * loop_count,
                                             baserel->pages,
+#ifdef __TBASE__
+											index_pages,
+#else
                                             (double) index->pages,
+#endif
                                             root);
 
         if (indexonly)
@@ -632,7 +800,11 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 
         pages_fetched = index_pages_fetched(pages_fetched * loop_count,
                                             baserel->pages,
+#ifdef __TBASE__
+											index_pages,
+#else
                                             (double) index->pages,
+#endif
                                             root);
 
         if (indexonly)
@@ -648,7 +820,11 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
          */
         pages_fetched = index_pages_fetched(tuples_fetched,
                                             baserel->pages,
+#ifdef __TBASE__
+											index_pages,
+#else
                                             (double) index->pages,
+#endif
                                             root);
 
         if (indexonly)
@@ -1014,6 +1190,21 @@ cost_bitmap_heap_scan(Path *path, PlannerInfo *root, RelOptInfo *baserel,
     cpu_per_tuple = cpu_tuple_cost + qpqual_cost.per_tuple;
     cpu_run_cost = cpu_per_tuple * tuples_fetched;
 
+#ifdef __TBASE__
+	/* Adjust costing for parallelism between data nodes, if used. */
+	if (path->distribution && IsA(path->distribution, Distribution) &&
+	    path->distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
+	    path->distribution->distributionType != LOCATOR_TYPE_NONE)
+	{
+		double nodes = bms_num_members(path->distribution->nodes);
+
+		/* The CPU cost is divided among all the data nodes. */
+		cpu_run_cost /= nodes;
+
+		path->rows = clamp_row_est(path->rows / nodes);
+	}
+#endif
+	
     /* Adjust costing for parallelism, if used. */
     if (path->parallel_workers > 0)
     {
@@ -1177,8 +1368,14 @@ cost_bitmap_or_node(BitmapOrPath *path, PlannerInfo *root)
  */
 void
 cost_tidscan(Path *path, PlannerInfo *root,
+#ifdef __TBASE__
+			 RelOptInfo *baserel_orig, List *tidquals, ParamPathInfo *param_info_orig)
+{
+	ADJUST_BASESCAN(path, baserel_orig, baserel, param_info_orig, param_info);
+#else
              RelOptInfo *baserel, List *tidquals, ParamPathInfo *param_info)
 {
+#endif
     Cost        startup_cost = 0;
     Cost        run_cost = 0;
     bool        isCurrentOf = false;
@@ -1234,7 +1431,11 @@ cost_tidscan(Path *path, PlannerInfo *root,
      */
     if (isCurrentOf)
     {
+#ifdef __TBASE__
+		Assert(baserel->orig->baserestrictcost.startup >= disable_cost);
+#else
         Assert(baserel->baserestrictcost.startup >= disable_cost);
+#endif
         startup_cost -= disable_cost;
     }
     else if (!enable_tidscan)
@@ -1255,7 +1456,11 @@ cost_tidscan(Path *path, PlannerInfo *root,
     run_cost += spc_random_page_cost * ntuples;
 
     /* Add scanning CPU costs */
+#ifdef __TBASE__
+	get_restriction_qual_cost(root, baserel_orig, param_info_orig, &qpqual_cost);
+#else
     get_restriction_qual_cost(root, baserel, param_info, &qpqual_cost);
+#endif
 
     /* XXX currently we assume TID quals are a subset of qpquals */
     startup_cost += qpqual_cost.startup + tid_qual_cost.per_tuple;
@@ -1280,8 +1485,14 @@ cost_tidscan(Path *path, PlannerInfo *root,
  */
 void
 cost_subqueryscan(SubqueryScanPath *path, PlannerInfo *root,
+#ifdef __TBASE__
+				  RelOptInfo *baserel_orig, ParamPathInfo *param_info_orig)
+{
+	ADJUST_BASESCAN(&path->path, baserel_orig, baserel, param_info_orig, param_info);
+#else
                   RelOptInfo *baserel, ParamPathInfo *param_info)
 {
+#endif
     Cost        startup_cost;
     Cost        run_cost;
     QualCost    qpqual_cost;
@@ -1306,7 +1517,11 @@ cost_subqueryscan(SubqueryScanPath *path, PlannerInfo *root,
     path->path.startup_cost = path->subpath->startup_cost;
     path->path.total_cost = path->subpath->total_cost;
 
+#ifdef __TBASE__
+	get_restriction_qual_cost(root, baserel_orig, param_info_orig, &qpqual_cost);
+#else
     get_restriction_qual_cost(root, baserel, param_info, &qpqual_cost);
+#endif
 
     startup_cost = qpqual_cost.startup;
     cpu_per_tuple = cpu_tuple_cost + qpqual_cost.per_tuple;
@@ -1329,8 +1544,14 @@ cost_subqueryscan(SubqueryScanPath *path, PlannerInfo *root,
  */
 void
 cost_functionscan(Path *path, PlannerInfo *root,
+#ifdef __TBASE__
+				  RelOptInfo *baserel_orig, ParamPathInfo *param_info_orig)
+{
+	ADJUST_BASESCAN(path, baserel_orig, baserel, param_info_orig, param_info);
+#else
                   RelOptInfo *baserel, ParamPathInfo *param_info)
 {
+#endif
     Cost        startup_cost = 0;
     Cost        run_cost = 0;
     QualCost    qpqual_cost;
@@ -1367,7 +1588,11 @@ cost_functionscan(Path *path, PlannerInfo *root,
     startup_cost += exprcost.startup + exprcost.per_tuple;
 
     /* Add scanning CPU costs */
+#ifdef __TBASE__
+	get_restriction_qual_cost(root, baserel_orig, param_info_orig, &qpqual_cost);
+#else
     get_restriction_qual_cost(root, baserel, param_info, &qpqual_cost);
+#endif
 
     startup_cost += qpqual_cost.startup;
     cpu_per_tuple = cpu_tuple_cost + qpqual_cost.per_tuple;
@@ -1390,8 +1615,14 @@ cost_functionscan(Path *path, PlannerInfo *root,
  */
 void
 cost_tablefuncscan(Path *path, PlannerInfo *root,
+#ifdef __TBASE__
+				   RelOptInfo *baserel_orig, ParamPathInfo *param_info_orig)
+{
+	ADJUST_BASESCAN(path, baserel_orig, baserel, param_info_orig, param_info);
+#else
                    RelOptInfo *baserel, ParamPathInfo *param_info)
 {
+#endif
     Cost        startup_cost = 0;
     Cost        run_cost = 0;
     QualCost    qpqual_cost;
@@ -1423,7 +1654,11 @@ cost_tablefuncscan(Path *path, PlannerInfo *root,
     startup_cost += exprcost.startup + exprcost.per_tuple;
 
     /* Add scanning CPU costs */
+#ifdef __TBASE__
+	get_restriction_qual_cost(root, baserel_orig, param_info_orig, &qpqual_cost);
+#else
     get_restriction_qual_cost(root, baserel, param_info, &qpqual_cost);
+#endif
 
     startup_cost += qpqual_cost.startup;
     cpu_per_tuple = cpu_tuple_cost + qpqual_cost.per_tuple;
@@ -1446,8 +1681,14 @@ cost_tablefuncscan(Path *path, PlannerInfo *root,
  */
 void
 cost_valuesscan(Path *path, PlannerInfo *root,
+#ifdef __TBASE__
+				RelOptInfo *baserel_orig, ParamPathInfo *param_info_orig)
+{
+	ADJUST_BASESCAN(path, baserel_orig, baserel, param_info_orig, param_info);
+#else
                 RelOptInfo *baserel, ParamPathInfo *param_info)
 {
+#endif
     Cost        startup_cost = 0;
     Cost        run_cost = 0;
     QualCost    qpqual_cost;
@@ -1470,7 +1711,11 @@ cost_valuesscan(Path *path, PlannerInfo *root,
     cpu_per_tuple = cpu_operator_cost;
 
     /* Add scanning CPU costs */
+#ifdef __TBASE__
+	get_restriction_qual_cost(root, baserel_orig, param_info_orig, &qpqual_cost);
+#else
     get_restriction_qual_cost(root, baserel, param_info, &qpqual_cost);
+#endif
 
     startup_cost += qpqual_cost.startup;
     cpu_per_tuple += cpu_tuple_cost + qpqual_cost.per_tuple;
@@ -1496,8 +1741,14 @@ cost_valuesscan(Path *path, PlannerInfo *root,
  */
 void
 cost_ctescan(Path *path, PlannerInfo *root,
+#ifdef __TBASE__
+			 RelOptInfo *baserel_orig, ParamPathInfo *param_info_orig)
+{
+	ADJUST_BASESCAN(path, baserel_orig, baserel, param_info_orig, param_info);
+#else
              RelOptInfo *baserel, ParamPathInfo *param_info)
 {
+#endif
     Cost        startup_cost = 0;
     Cost        run_cost = 0;
     QualCost    qpqual_cost;
@@ -1517,7 +1768,11 @@ cost_ctescan(Path *path, PlannerInfo *root,
     cpu_per_tuple = cpu_tuple_cost;
 
     /* Add scanning CPU costs */
+#ifdef __TBASE__
+	get_restriction_qual_cost(root, baserel_orig, param_info_orig, &qpqual_cost);
+#else
     get_restriction_qual_cost(root, baserel, param_info, &qpqual_cost);
+#endif
 
     startup_cost += qpqual_cost.startup;
     cpu_per_tuple += cpu_tuple_cost + qpqual_cost.per_tuple;
@@ -1537,8 +1792,14 @@ cost_ctescan(Path *path, PlannerInfo *root,
  */
 void
 cost_namedtuplestorescan(Path *path, PlannerInfo *root,
+#ifdef __TBASE__
+						 RelOptInfo *baserel_orig, ParamPathInfo *param_info_orig)
+{
+	ADJUST_BASESCAN(path, baserel_orig, baserel, param_info_orig, param_info);
+#else
                          RelOptInfo *baserel, ParamPathInfo *param_info)
 {
+#endif
     Cost        startup_cost = 0;
     Cost        run_cost = 0;
     QualCost    qpqual_cost;
@@ -1558,7 +1819,11 @@ cost_namedtuplestorescan(Path *path, PlannerInfo *root,
     cpu_per_tuple = cpu_tuple_cost;
 
     /* Add scanning CPU costs */
+#ifdef __TBASE__
+	get_restriction_qual_cost(root, baserel_orig, param_info_orig, &qpqual_cost);
+#else
     get_restriction_qual_cost(root, baserel, param_info, &qpqual_cost);
+#endif
 
     startup_cost += qpqual_cost.startup;
     cpu_per_tuple += cpu_tuple_cost + qpqual_cost.per_tuple;
@@ -2208,6 +2473,17 @@ final_cost_nestloop(PlannerInfo *root, NestPath *path,
 	else
 		path->path.rows = path->path.parent->rows;
 
+#ifdef __TBASE__
+	if (path->path.distribution && IsA(path->path.distribution, Distribution) &&
+	    path->path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
+	    path->path.distribution->distributionType != LOCATOR_TYPE_NONE)
+	{
+		double nodes = bms_num_members(path->path.distribution->nodes);
+		
+		path->path.rows = clamp_row_est(path->path.rows / nodes);
+	}
+#endif
+	
 	/* For partial paths, scale row estimate. */
 	if (path->path.parallel_workers > 0)
 	{
@@ -2697,6 +2973,17 @@ final_cost_mergejoin(PlannerInfo *root, MergePath *path,
 	else
 		path->jpath.path.rows = path->jpath.path.parent->rows;
 
+#ifdef __TBASE__
+	if (path->jpath.path.distribution && IsA(path->jpath.path.distribution, Distribution) &&
+	    path->jpath.path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
+	    path->jpath.path.distribution->distributionType != LOCATOR_TYPE_NONE)
+	{
+		double nodes = bms_num_members(path->jpath.path.distribution->nodes);
+		
+		path->jpath.path.rows = clamp_row_est(path->jpath.path.rows / nodes);
+	}
+#endif
+	
 	/* For partial paths, scale row estimate. */
 	if (path->jpath.path.parallel_workers > 0)
 	{
@@ -3140,6 +3427,17 @@ final_cost_hashjoin(PlannerInfo *root, HashPath *path,
 	else
 		path->jpath.path.rows = path->jpath.path.parent->rows;
 
+#ifdef __TBASE__
+	if (path->jpath.path.distribution && IsA(path->jpath.path.distribution, Distribution) &&
+	    path->jpath.path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
+	    path->jpath.path.distribution->distributionType != LOCATOR_TYPE_NONE)
+	{
+		double nodes = bms_num_members(path->jpath.path.distribution->nodes);
+		
+		path->jpath.path.rows = clamp_row_est(path->jpath.path.rows / nodes);
+	}
+#endif
+	
 	/* For partial paths, scale row estimate. */
 	if (path->jpath.path.parallel_workers > 0)
 	{
@@ -4728,6 +5026,17 @@ set_subquery_size_estimates(PlannerInfo *root, RelOptInfo *rel)
      */
     sub_final_rel = fetch_upper_rel(subroot, UPPERREL_FINAL, NULL);
     rel->tuples = sub_final_rel->cheapest_total_path->rows;
+#ifdef __TBASE__
+	if (sub_final_rel->cheapest_total_path->distribution && IsA(sub_final_rel->cheapest_total_path->distribution, Distribution) &&
+		sub_final_rel->cheapest_total_path->distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
+		sub_final_rel->cheapest_total_path->distribution->distributionType != LOCATOR_TYPE_NONE)
+	{
+		double nodes = bms_num_members(sub_final_rel->cheapest_total_path->distribution->nodes);
+		
+		/* count tuples in all data nodes */
+		rel->tuples *= nodes;
+	}
+#endif
 
     /*
      * Compute per-output-column width estimates by examining the subquery's
