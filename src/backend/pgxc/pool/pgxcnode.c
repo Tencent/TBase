@@ -4813,10 +4813,14 @@ DoInvalidateRemoteHandles(void)
 {
     bool            result = false;
 
+	HOLD_INTERRUPTS();
+
 	InitMultinodeExecutor(true);
 
 	HandlesInvalidatePending = false;
 	HandlesRefreshPending = false;
+
+	RESUME_INTERRUPTS();
 
 	return result;
 }
@@ -4831,6 +4835,8 @@ DoRefreshRemoteHandles(void)
     Oid                *coOids, *dnOids, *sdnOids;
     int                numCoords, numDNodes, numSlaveDNodes, total_nodes;
     bool            res = true;
+
+	HOLD_INTERRUPTS();
 
     HandlesRefreshPending = false;
 
@@ -4981,6 +4987,8 @@ DoRefreshRemoteHandles(void)
     list_free(altered);
     list_free(added);
     list_free(deleted);
+
+	RESUME_INTERRUPTS();
 
     return res;
 }
