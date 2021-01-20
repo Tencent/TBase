@@ -541,6 +541,17 @@ IsTransactionState(void)
 }
 
 /*
+ *	IsTransactionCommit
+ *
+ *	This returns true if transaction state is TRANS_COMMIT
+ */
+bool
+IsTransactionCommit(void)
+{
+	return (CurrentTransactionState->state == TRANS_COMMIT);
+}
+
+/*
  *    IsAbortedTransactionBlockState
  *
  *    This returns true if we are within an aborted transaction block.
