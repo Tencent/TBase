@@ -56,6 +56,10 @@ int      NewGtmPort = -1;
 bool  g_GTM_skip_catalog = false;
 char *gtm_unix_socket_directory = DEFAULT_PGSOCKET_DIR;
 #endif
+
+int reconnect_gtm_retry_times = 3;
+int reconnect_gtm_retry_interval = 500;
+
 char *GtmHost = NULL;
 int GtmPort = 0;
 static int GtmConnectTimeout = 60;
@@ -82,6 +86,7 @@ List *g_DropSeqList   = NULL;
 List *g_AlterSeqList  = NULL;
 #define GTM_SEQ_POSTFIX "_$TBASE$_"
 static void CheckConnection(void);
+static void ResetGTMConnection(void);
 static int GetGTMStoreStatus(GTMStorageStatus *header);
 static int GetGTMStoreSequence(GTM_StoredSeqInfo **store_seq);
 static int GetGTMStoreTransaction(GTM_StoredTransactionInfo **store_txn);
@@ -1107,6 +1112,10 @@ GetMasterGtmInfo(void)
 	/* If NewGtmHost and NewGtmPort, just use it. */
 	if (NewGtmHost && NewGtmPort != 0)
 	{
+		elog(LOG,
+			"GetMasterGtmInfo: set master gtm info with NewGtmHost:%s NewGtmPort:%d",
+			NewGtmHost, NewGtmPort);
+
 		GtmHost = strdup(NewGtmHost);
 		GtmPort = NewGtmPort;
 
@@ -1114,9 +1123,6 @@ GetMasterGtmInfo(void)
 		NewGtmHost = NULL;
 		NewGtmPort = 0;
 
-		elog(LOG,
-			"GetMasterGtmInfo: set master gtm info with NewGtmHost:%s NewGtmPort:%d",
-			NewGtmHost, NewGtmPort);
 		return;
 	}
 
@@ -1182,6 +1188,53 @@ CheckConnection(void)
 		CloseGTM();
 		InitGTM();
 	}
+}
+
+static void
+ResetGTMConnection(void)
+{
+	Relation rel;
+	HeapScanDesc scan;
+	HeapTuple gtmtup;
+	Form_pgxc_node nodeForm;
+	bool found = false;
+
+	CloseGTM();
+	ResetGtmInfo();
+
+	/*
+	 * We must be sure there is no error report, because we may be
+	 * in AbortTransaction now.
+	 * 1.If we are not in a inprogress or commit transaction, we should not open relation.
+	 * 2.If we do not get lock, it is ok to try it next time.
+	 */
+	if ( (IsTransactionState() || IsTransactionCommit()) &&
+		ConditionalLockRelationOid(PgxcNodeRelationId, AccessShareLock))
+	{
+		rel = relation_open(PgxcNodeRelationId, NoLock);
+		scan = heap_beginscan_catalog(rel, 0, NULL);
+		/* Only one record will match */
+		while (HeapTupleIsValid(gtmtup = heap_getnext(scan, ForwardScanDirection)))
+		{
+			nodeForm = (Form_pgxc_node) GETSTRUCT(gtmtup);
+			if (PGXC_NODE_GTM == nodeForm->node_type && nodeForm->nodeis_primary)
+			{
+				GtmHost = strdup(NameStr(nodeForm->node_host));
+				GtmPort = nodeForm->node_port;
+				found = true;
+				break;
+			}
+		}
+		heap_endscan(scan);
+		relation_close(rel, AccessShareLock);
+
+		if (!found)
+		{
+			elog(LOG, "can not get master gtm info from pgxc_node");
+		}
+	}
+
+	InitGTM();
 }
 
 void
@@ -1382,6 +1435,7 @@ GetGlobalTimestampGTM(void)
     GTM_Timestamp  latest_gts = InvalidGlobalTimestamp;
     struct rusage start_r;
     struct timeval start_t;
+	int  retry_cnt = 0;
 
     if (log_gtm_stats)
         ResetUsageCommon(&start_r, &start_t);
@@ -1400,21 +1454,38 @@ GetGlobalTimestampGTM(void)
     /* If something went wrong (timeout), try and reset GTM connection
      * and retry. This is safe at the beginning of a transaction.
      */
-    if (!GlobalTimestampIsValid(gts_result.gts))
+	while (!GlobalTimestampIsValid(gts_result.gts) &&
+		retry_cnt < reconnect_gtm_retry_times)
     {
         if(GTMDebugPrint)
         {
             elog(LOG, "get global timestamp reconnect");
         }
-        CloseGTM();
-        InitGTM();
+
+		ResetGTMConnection();
+		retry_cnt++;
+
+		elog(DEBUG5, "reset gtm connection %d times", retry_cnt);
+
         if (conn)
         {
             gts_result = get_global_timestamp(conn);
+			if (GlobalTimestampIsValid(gts_result.gts))
+			{
+				elog(DEBUG5, "retry get global timestamp gts " INT64_FORMAT,
+					gts_result.gts);
+				break;
+			}
         }
         else if(GTMDebugPrint)
         {
-            elog(LOG, "get global timestamp conn is null after retry");
+			elog(LOG, "get global timestamp conn is null after retry %d times",
+				retry_cnt);
+		}
+
+		if (retry_cnt < reconnect_gtm_retry_times)
+		{
+			pg_usleep(reconnect_gtm_retry_interval * 1000);
         }
     }
     elog(DEBUG7, "get global timestamp gts " INT64_FORMAT, gts_result.gts);

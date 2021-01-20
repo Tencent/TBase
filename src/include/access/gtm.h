@@ -107,6 +107,9 @@ extern char *NewGtmHost;
 extern int     NewGtmPort;
 #endif
 
+extern int reconnect_gtm_retry_times;
+extern int reconnect_gtm_retry_interval;
+
 extern bool IsGTMConnected(void);
 extern void InitGTM(void);
 extern void CloseGTM(void);

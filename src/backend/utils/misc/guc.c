@@ -4757,6 +4757,27 @@ static struct config_int ConfigureNamesInt[] =
     },
 #endif
 
+	{
+		{"reconnect_gtm_retry_times", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("reconnect gtm retry times"),
+			NULL
+		},
+		&reconnect_gtm_retry_times,
+		3, 0, 100,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"reconnect_gtm_retry_interval", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("reconnect gtm retry interval"),
+			NULL,
+			GUC_UNIT_MS
+		},
+		&reconnect_gtm_retry_interval,
+		500, 0, 60000,
+		NULL, NULL, NULL
+	},
+
     /* End-of-list marker */
     {
         {NULL, 0, 0, NULL, NULL}, NULL, 0, 0, 0, NULL, NULL, NULL

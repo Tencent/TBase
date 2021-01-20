@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * xact.h
- *      postgres transaction system definitions
+ *	  postgres transaction system definitions
  *
  *
  * Portions Copyright (c) 2012-2014, TransLattice, Inc.
@@ -33,12 +33,12 @@
 /*
  * Xact isolation levels
  */
-#define XACT_READ_UNCOMMITTED    0
-#define XACT_READ_COMMITTED        1
-#define XACT_REPEATABLE_READ    2
-#define XACT_SERIALIZABLE        3
+#define XACT_READ_UNCOMMITTED	0
+#define XACT_READ_COMMITTED		1
+#define XACT_REPEATABLE_READ	2
+#define XACT_SERIALIZABLE		3
 
-extern int    DefaultXactIsoLevel;
+extern int	DefaultXactIsoLevel;
 extern PGDLLIMPORT int XactIsoLevel;
 
 /*
@@ -68,19 +68,19 @@ extern bool XactDeferrable;
 
 typedef enum
 {
-    SYNCHRONOUS_COMMIT_OFF,        /* asynchronous commit */
-    SYNCHRONOUS_COMMIT_LOCAL_FLUSH, /* wait for local flush only */
-    SYNCHRONOUS_COMMIT_REMOTE_WRITE,    /* wait for local flush and remote
-                                         * write */
-    SYNCHRONOUS_COMMIT_REMOTE_FLUSH,    /* wait for local and remote flush */
-    SYNCHRONOUS_COMMIT_REMOTE_APPLY /* wait for local flush and remote apply */
-}            SyncCommitLevel;
+	SYNCHRONOUS_COMMIT_OFF,		/* asynchronous commit */
+	SYNCHRONOUS_COMMIT_LOCAL_FLUSH, /* wait for local flush only */
+	SYNCHRONOUS_COMMIT_REMOTE_WRITE,	/* wait for local flush and remote
+										 * write */
+	SYNCHRONOUS_COMMIT_REMOTE_FLUSH,	/* wait for local and remote flush */
+	SYNCHRONOUS_COMMIT_REMOTE_APPLY /* wait for local flush and remote apply */
+}			SyncCommitLevel;
 
 /* Define the default setting for synchronous_commit */
-#define SYNCHRONOUS_COMMIT_ON    SYNCHRONOUS_COMMIT_REMOTE_FLUSH
+#define SYNCHRONOUS_COMMIT_ON	SYNCHRONOUS_COMMIT_REMOTE_FLUSH
 
 /* Synchronous commit level */
-extern int    synchronous_commit;
+extern int	synchronous_commit;
 
 /*
  * Miscellaneous flag bits to record events which occur on the top level
@@ -89,48 +89,48 @@ extern int    synchronous_commit;
  * globally accessible, so can be set from anywhere in the code which requires
  * recording flags.
  */
-extern int    MyXactFlags;
+extern int	MyXactFlags;
 
 /*
  * XACT_FLAGS_ACCESSEDTEMPREL - set when a temporary relation is accessed. We
  * don't allow PREPARE TRANSACTION in that case.
  */
-#define XACT_FLAGS_ACCESSEDTEMPREL                (1U << 0)
+#define XACT_FLAGS_ACCESSEDTEMPREL				(1U << 0)
 
 /*
  * XACT_FLAGS_ACQUIREDACCESSEXCLUSIVELOCK - records whether the top level xact
  * logged any Access Exclusive Locks.
  */
-#define XACT_FLAGS_ACQUIREDACCESSEXCLUSIVELOCK    (1U << 1)
+#define XACT_FLAGS_ACQUIREDACCESSEXCLUSIVELOCK	(1U << 1)
 
 
 /*
- *    start- and end-of-transaction callbacks for dynamically loaded modules
+ *	start- and end-of-transaction callbacks for dynamically loaded modules
  */
 typedef enum
 {
-    XACT_EVENT_COMMIT,
-    XACT_EVENT_PARALLEL_COMMIT,
-    XACT_EVENT_ABORT,
-    XACT_EVENT_PARALLEL_ABORT,
-    XACT_EVENT_PREPARE,
-    XACT_EVENT_PRE_COMMIT,
-    XACT_EVENT_PARALLEL_PRE_COMMIT,
-    XACT_EVENT_PRE_PREPARE
+	XACT_EVENT_COMMIT,
+	XACT_EVENT_PARALLEL_COMMIT,
+	XACT_EVENT_ABORT,
+	XACT_EVENT_PARALLEL_ABORT,
+	XACT_EVENT_PREPARE,
+	XACT_EVENT_PRE_COMMIT,
+	XACT_EVENT_PARALLEL_PRE_COMMIT,
+	XACT_EVENT_PRE_PREPARE
 } XactEvent;
 
 typedef void (*XactCallback) (XactEvent event, void *arg);
 
 typedef enum
 {
-    SUBXACT_EVENT_START_SUB,
-    SUBXACT_EVENT_COMMIT_SUB,
-    SUBXACT_EVENT_ABORT_SUB,
-    SUBXACT_EVENT_PRE_COMMIT_SUB
+	SUBXACT_EVENT_START_SUB,
+	SUBXACT_EVENT_COMMIT_SUB,
+	SUBXACT_EVENT_ABORT_SUB,
+	SUBXACT_EVENT_PRE_COMMIT_SUB
 } SubXactEvent;
 
 typedef void (*SubXactCallback) (SubXactEvent event, SubTransactionId mySubid,
-                                 SubTransactionId parentSubid, void *arg);
+								 SubTransactionId parentSubid, void *arg);
 
 #ifdef PGXC
 /*
@@ -138,16 +138,16 @@ typedef void (*SubXactCallback) (SubXactEvent event, SubTransactionId mySubid,
  */
 typedef enum
 {
-    GTM_EVENT_COMMIT,
-    GTM_EVENT_ABORT,
-    GTM_EVENT_PREPARE
+	GTM_EVENT_COMMIT,
+	GTM_EVENT_ABORT,
+	GTM_EVENT_PREPARE
 } GTMEvent;
 
 typedef void (*GTMCallback) (GTMEvent event, void *arg);
 #endif
 
 /* ----------------
- *        transaction-related XLOG entries
+ *		transaction-related XLOG entries
  * ----------------
  */
 
@@ -155,24 +155,24 @@ typedef void (*GTMCallback) (GTMEvent event, void *arg);
  * XLOG allows to store some information in high 4 bits of log record xl_info
  * field. We use 3 for the opcode, and one about an optional flag variable.
  */
-#define XLOG_XACT_COMMIT            0x00
-#define XLOG_XACT_PREPARE            0x10
-#define XLOG_XACT_ABORT                0x20
-#define XLOG_XACT_COMMIT_PREPARED    0x30
-#define XLOG_XACT_ABORT_PREPARED    0x40
-#define XLOG_XACT_ASSIGNMENT        0x50
+#define XLOG_XACT_COMMIT			0x00
+#define XLOG_XACT_PREPARE			0x10
+#define XLOG_XACT_ABORT				0x20
+#define XLOG_XACT_COMMIT_PREPARED	0x30
+#define XLOG_XACT_ABORT_PREPARED	0x40
+#define XLOG_XACT_ASSIGNMENT		0x50
 #ifdef __TBASE__
 /* free opcode 0x60 */
-#define XLOG_XACT_ACQUIRE_GTS        0x60
+#define XLOG_XACT_ACQUIRE_GTS		0x60
 #endif
 
 /* free opcode 0x70 */
 
 /* mask for filtering opcodes out of xl_info */
-#define XLOG_XACT_OPMASK            0x70
+#define XLOG_XACT_OPMASK			0x70
 
 /* does this record have a 'xinfo' field or not */
-#define XLOG_XACT_HAS_INFO            0x80
+#define XLOG_XACT_HAS_INFO			0x80
 
 /* record 2plc file for readonly explicit transaction */
 #define XLOG_XACT_RECORD_READONLY 0x90
@@ -180,13 +180,13 @@ typedef void (*GTMCallback) (GTMEvent event, void *arg);
  * The following flags, stored in xinfo, determine which information is
  * contained in commit/abort records.
  */
-#define XACT_XINFO_HAS_DBINFO            (1U << 0)
-#define XACT_XINFO_HAS_SUBXACTS            (1U << 1)
-#define XACT_XINFO_HAS_RELFILENODES        (1U << 2)
-#define XACT_XINFO_HAS_INVALS            (1U << 3)
-#define XACT_XINFO_HAS_TWOPHASE            (1U << 4)
-#define XACT_XINFO_HAS_ORIGIN            (1U << 5)
-#define XACT_XINFO_HAS_AE_LOCKS            (1U << 6)
+#define XACT_XINFO_HAS_DBINFO			(1U << 0)
+#define XACT_XINFO_HAS_SUBXACTS			(1U << 1)
+#define XACT_XINFO_HAS_RELFILENODES		(1U << 2)
+#define XACT_XINFO_HAS_INVALS			(1U << 3)
+#define XACT_XINFO_HAS_TWOPHASE			(1U << 4)
+#define XACT_XINFO_HAS_ORIGIN			(1U << 5)
+#define XACT_XINFO_HAS_AE_LOCKS			(1U << 6)
 
 /*
  * Also stored in xinfo, these indicating a variety of additional actions that
@@ -196,24 +196,24 @@ typedef void (*GTMCallback) (GTMEvent event, void *arg);
  * EOXact... routines which run at the end of the original transaction
  * completion.
  */
-#define XACT_COMPLETION_APPLY_FEEDBACK            (1U << 29)
-#define XACT_COMPLETION_UPDATE_RELCACHE_FILE    (1U << 30)
-#define XACT_COMPLETION_FORCE_SYNC_COMMIT        (1U << 31)
+#define XACT_COMPLETION_APPLY_FEEDBACK			(1U << 29)
+#define XACT_COMPLETION_UPDATE_RELCACHE_FILE	(1U << 30)
+#define XACT_COMPLETION_FORCE_SYNC_COMMIT		(1U << 31)
 
 /* Access macros for above flags */
 #define XactCompletionApplyFeedback(xinfo) \
-    ((xinfo & XACT_COMPLETION_APPLY_FEEDBACK) != 0)
+	((xinfo & XACT_COMPLETION_APPLY_FEEDBACK) != 0)
 #define XactCompletionRelcacheInitFileInval(xinfo) \
-    ((xinfo & XACT_COMPLETION_UPDATE_RELCACHE_FILE) != 0)
+	((xinfo & XACT_COMPLETION_UPDATE_RELCACHE_FILE) != 0)
 #define XactCompletionForceSyncCommit(xinfo) \
-    ((xinfo & XACT_COMPLETION_FORCE_SYNC_COMMIT) != 0)
+	((xinfo & XACT_COMPLETION_FORCE_SYNC_COMMIT) != 0)
 
 
 typedef struct xl_xact_assignment
 {
-    TransactionId xtop;            /* assigned XID's top-level XID */
-    int            nsubxacts;        /* number of subtransaction XIDs */
-    TransactionId xsub[FLEXIBLE_ARRAY_MEMBER];    /* assigned subxids */
+	TransactionId xtop;			/* assigned XID's top-level XID */
+	int			nsubxacts;		/* number of subtransaction XIDs */
+	TransactionId xsub[FLEXIBLE_ARRAY_MEMBER];	/* assigned subxids */
 } xl_xact_assignment;
 
 #define MinSizeOfXactAssignment offsetof(xl_xact_assignment, xsub)
@@ -237,78 +237,78 @@ typedef struct xl_xact_assignment
 
 typedef struct xl_xact_xinfo
 {
-    /*
-     * Even though we right now only require 1 byte of space in xinfo we use
-     * four so following records don't have to care about alignment. Commit
-     * records can be large, so copying large portions isn't attractive.
-     */
-    uint32        xinfo;
+	/*
+	 * Even though we right now only require 1 byte of space in xinfo we use
+	 * four so following records don't have to care about alignment. Commit
+	 * records can be large, so copying large portions isn't attractive.
+	 */
+	uint32		xinfo;
 } xl_xact_xinfo;
 
 typedef struct xl_xact_dbinfo
 {
-    Oid            dbId;            /* MyDatabaseId */
-    Oid            tsId;            /* MyDatabaseTableSpace */
+	Oid			dbId;			/* MyDatabaseId */
+	Oid			tsId;			/* MyDatabaseTableSpace */
 } xl_xact_dbinfo;
 
 typedef struct xl_xact_subxacts
 {
-    int            nsubxacts;        /* number of subtransaction XIDs */
-    TransactionId subxacts[FLEXIBLE_ARRAY_MEMBER];
+	int			nsubxacts;		/* number of subtransaction XIDs */
+	TransactionId subxacts[FLEXIBLE_ARRAY_MEMBER];
 } xl_xact_subxacts;
 #define MinSizeOfXactSubxacts offsetof(xl_xact_subxacts, subxacts)
 
 typedef struct xl_xact_relfilenodes
 {
-    int            nrels;            /* number of subtransaction XIDs */
-    RelFileNode xnodes[FLEXIBLE_ARRAY_MEMBER];
+	int			nrels;			/* number of subtransaction XIDs */
+	RelFileNode xnodes[FLEXIBLE_ARRAY_MEMBER];
 } xl_xact_relfilenodes;
 #define MinSizeOfXactRelfilenodes offsetof(xl_xact_relfilenodes, xnodes)
 
 typedef struct xl_xact_invals
 {
-    int            nmsgs;            /* number of shared inval msgs */
-    SharedInvalidationMessage msgs[FLEXIBLE_ARRAY_MEMBER];
+	int			nmsgs;			/* number of shared inval msgs */
+	SharedInvalidationMessage msgs[FLEXIBLE_ARRAY_MEMBER];
 } xl_xact_invals;
 #define MinSizeOfXactInvals offsetof(xl_xact_invals, msgs)
 
 typedef struct xl_xact_twophase
 {
-    TransactionId xid;
+	TransactionId xid;
 } xl_xact_twophase;
 
 typedef struct xl_xact_origin
 {
-    XLogRecPtr    origin_lsn;
-    TimestampTz origin_timestamp;
+	XLogRecPtr	origin_lsn;
+	TimestampTz origin_timestamp;
 } xl_xact_origin;
 
 typedef struct xl_xact_commit
 {
-    TimestampTz global_timestamp;   /* logical global timestamp */
-    TimestampTz xact_time;        /* time of commit */
+	TimestampTz global_timestamp;   /* logical global timestamp */
+	TimestampTz xact_time;		/* time of commit */
 
-    /* xl_xact_xinfo follows if XLOG_XACT_HAS_INFO */
-    /* xl_xact_dbinfo follows if XINFO_HAS_DBINFO */
-    /* xl_xact_subxacts follows if XINFO_HAS_SUBXACT */
-    /* xl_xact_relfilenodes follows if XINFO_HAS_RELFILENODES */
-    /* xl_xact_invals follows if XINFO_HAS_INVALS */
-    /* xl_xact_twophase follows if XINFO_HAS_TWOPHASE */
-    /* xl_xact_origin follows if XINFO_HAS_ORIGIN, stored unaligned! */
+	/* xl_xact_xinfo follows if XLOG_XACT_HAS_INFO */
+	/* xl_xact_dbinfo follows if XINFO_HAS_DBINFO */
+	/* xl_xact_subxacts follows if XINFO_HAS_SUBXACT */
+	/* xl_xact_relfilenodes follows if XINFO_HAS_RELFILENODES */
+	/* xl_xact_invals follows if XINFO_HAS_INVALS */
+	/* xl_xact_twophase follows if XINFO_HAS_TWOPHASE */
+	/* xl_xact_origin follows if XINFO_HAS_ORIGIN, stored unaligned! */
 } xl_xact_commit;
 #define MinSizeOfXactCommit (offsetof(xl_xact_commit, xact_time) + sizeof(TimestampTz))
 
 typedef struct xl_xact_abort
 {
-    TimestampTz global_timestamp;   /* logical global timestamp */
-    TimestampTz xact_time;        /* time of abort */
+	TimestampTz global_timestamp;   /* logical global timestamp */
+	TimestampTz xact_time;		/* time of abort */
 
-    /* xl_xact_xinfo follows if XLOG_XACT_HAS_INFO */
-    /* No db_info required */
-    /* xl_xact_subxacts follows if HAS_SUBXACT */
-    /* xl_xact_relfilenodes follows if HAS_RELFILENODES */
-    /* No invalidation messages needed. */
-    /* xl_xact_twophase follows if XINFO_HAS_TWOPHASE */
+	/* xl_xact_xinfo follows if XLOG_XACT_HAS_INFO */
+	/* No db_info required */
+	/* xl_xact_subxacts follows if HAS_SUBXACT */
+	/* xl_xact_relfilenodes follows if HAS_RELFILENODES */
+	/* No invalidation messages needed. */
+	/* xl_xact_twophase follows if XINFO_HAS_TWOPHASE */
 } xl_xact_abort;
 #define MinSizeOfXactAbort sizeof(xl_xact_abort)
 
@@ -319,48 +319,48 @@ typedef struct xl_xact_abort
  */
 typedef struct xl_xact_parsed_commit
 {
-    TimestampTz global_timestamp;   /* logical global timestamp */
-    TimestampTz xact_time;
+	TimestampTz global_timestamp;   /* logical global timestamp */
+	TimestampTz xact_time;
 
-    uint32        xinfo;
+	uint32		xinfo;
 
-    Oid            dbId;            /* MyDatabaseId */
-    Oid            tsId;            /* MyDatabaseTableSpace */
+	Oid			dbId;			/* MyDatabaseId */
+	Oid			tsId;			/* MyDatabaseTableSpace */
 
-    int            nsubxacts;
-    TransactionId *subxacts;
+	int			nsubxacts;
+	TransactionId *subxacts;
 
-    int            nrels;
-    RelFileNode *xnodes;
+	int			nrels;
+	RelFileNode *xnodes;
 
-    int            nmsgs;
-    SharedInvalidationMessage *msgs;
+	int			nmsgs;
+	SharedInvalidationMessage *msgs;
 
-    TransactionId twophase_xid; /* only for 2PC */
+	TransactionId twophase_xid; /* only for 2PC */
 
-    XLogRecPtr    origin_lsn;
-    TimestampTz origin_timestamp;
+	XLogRecPtr	origin_lsn;
+	TimestampTz origin_timestamp;
 } xl_xact_parsed_commit;
 
 typedef struct xl_xact_parsed_abort
 {
-    TimestampTz global_timestamp;   /* logical global timestamp */
-    TimestampTz xact_time;
-    uint32        xinfo;
+	TimestampTz global_timestamp;   /* logical global timestamp */
+	TimestampTz xact_time;
+	uint32		xinfo;
 
-    int            nsubxacts;
-    TransactionId *subxacts;
+	int			nsubxacts;
+	TransactionId *subxacts;
 
-    int            nrels;
-    RelFileNode *xnodes;
+	int			nrels;
+	RelFileNode *xnodes;
 
-    TransactionId twophase_xid; /* only for 2PC */
+	TransactionId twophase_xid; /* only for 2PC */
 } xl_xact_parsed_abort;
 
 #ifdef __TBASE__
 typedef struct xl_xact_acquire_gts
 {
-    TimestampTz global_timestamp;   /* logical global timestamp */
+	TimestampTz global_timestamp;   /* logical global timestamp */
 }xl_xact_acquire_gts;
 #endif
 
@@ -483,12 +483,12 @@ typedef enum
     REMOTE_ABORT                /* from pgxc_node_remote_abort */
 }CurrentOperation;              /* record twophase trans operation before receive responses */
 
-typedef struct ConnTransState    /* record twophase trasaction state of each connection*/
+typedef struct ConnTransState	/* record twophase trasaction state of each connection*/
 {
     bool                is_participant;
     ConnState           conn_state;     /* record state of each connection in twophase trans */
-    TwoPhaseTransState    state;            /* state of twophase trans in each connection */
-    int                    handle_idx;     /* index of dn_handles or cn_handles */
+	TwoPhaseTransState	state;	        /* state of twophase trans in each connection */
+	int			        handle_idx;     /* index of dn_handles or cn_handles */
 }ConnTransState;
 
 typedef struct AllConnNodeInfo
@@ -503,14 +503,14 @@ typedef struct LocalTwoPhaseState
     bool                is_start_node;
     bool                is_readonly;   /* since explicit transaction can be readonly, need to record readonly in 2pc file */
     bool                is_after_prepare; /* record whether the transaction pass the whole prepare phase */
-    char                 *gid;            /* gid of twophase transaction*/
-    TwoPhaseTransState    state;                /* global twophase state */        
-    ConnTransState         *coord_state;       /* each coord participants state */
+	char 		        *gid;	        /* gid of twophase transaction*/
+	TwoPhaseTransState	state;			    /* global twophase state */		
+	ConnTransState 	    *coord_state;       /* each coord participants state */
     int                 coord_index;          /* index of coord_state */
-    ConnTransState         *datanode_state;
+	ConnTransState 	    *datanode_state;
     int                 datanode_index;       /* index of datanode_state */
     bool                isprinted;          /* is printed in AbortTransaction */
-    char                start_node_name[NAMEDATALEN];   /* twophase trans startnode */
+	char		        start_node_name[NAMEDATALEN];   /* twophase trans startnode */
     TransactionId       start_xid;
     char                *participants;
     PGXCNodeAllHandles  *handles;   /* handles in each phase in twophase trans */
@@ -522,10 +522,11 @@ extern LocalTwoPhaseState g_twophase_state;
 #endif
 
 /* ----------------
- *        extern definitions
+ *		extern definitions
  * ----------------
  */
 extern bool IsTransactionState(void);
+extern bool IsTransactionCommit(void);
 extern bool IsAbortedTransactionBlockState(void);
 extern TransactionId GetTopTransactionId(void);
 extern TransactionId GetTopTransactionIdIfAny(void);
@@ -606,7 +607,7 @@ extern void SetCurrentStatementStartTimestamp(void);
 extern TimestampTz GetCurrentGTMStartTimestamp(void);
 extern void SetCurrentGTMDeltaTimestamp(TimestampTz timestamp);
 #endif
-extern int    GetCurrentTransactionNestLevel(void);
+extern int	GetCurrentTransactionNestLevel(void);
 extern bool TransactionIdIsCurrentTransactionId(TransactionId xid);
 extern void CommandCounterIncrement(void);
 extern void ForceSyncCommit(void);
@@ -671,22 +672,22 @@ extern bool IsPGXCNodeXactDatanodeDirect(void);
 extern void TransactionRecordXidWait(TransactionId xid);
 #endif
 
-extern int    xactGetCommittedChildren(TransactionId **ptr);
+extern int	xactGetCommittedChildren(TransactionId **ptr);
 
 extern XLogRecPtr XactLogCommitRecord(TimestampTz global_timestamp,
-                    TimestampTz     commit_time,
-                    int nsubxacts, TransactionId *subxacts,
-                    int nrels, RelFileNode *rels,
-                    int nmsgs, SharedInvalidationMessage *msgs,
-                    bool relcacheInval, bool forceSync,
-                    int xactflags,
-                    TransactionId twophase_xid);
+					TimestampTz	 commit_time,
+					int nsubxacts, TransactionId *subxacts,
+					int nrels, RelFileNode *rels,
+					int nmsgs, SharedInvalidationMessage *msgs,
+					bool relcacheInval, bool forceSync,
+					int xactflags,
+					TransactionId twophase_xid);
 
 extern XLogRecPtr XactLogAbortRecord(TimestampTz global_timestamp,
-                    TimestampTz abort_time,
-                   int nsubxacts, TransactionId *subxacts,
-                   int nrels, RelFileNode *rels,
-                   int xactflags, TransactionId twophase_xid);
+					TimestampTz abort_time,
+				   int nsubxacts, TransactionId *subxacts,
+				   int nrels, RelFileNode *rels,
+				   int xactflags, TransactionId twophase_xid);
 extern void xact_redo(XLogReaderState *record);
 
 /* xactdesc.c */
@@ -701,4 +702,4 @@ extern void EnterParallelMode(void);
 extern void ExitParallelMode(void);
 extern bool IsInParallelMode(void);
 
-#endif                            /* XACT_H */
+#endif							/* XACT_H */
