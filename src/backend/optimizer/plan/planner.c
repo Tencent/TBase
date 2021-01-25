@@ -4281,6 +4281,8 @@ create_grouping_paths(PlannerInfo *root,
                 bool try_redistribute_grouping = false;
                 PathTarget * local_grouping_target = make_partial_grouping_target(root, target);
 
+				grouped_rel->reltarget = local_grouping_target;
+
                 /* Estimate number of partial groups. */
                 double dNumLocalGroups = get_number_of_groups(root,
                                                          cheapest_path->rows,
@@ -5326,6 +5328,9 @@ create_grouping_paths(PlannerInfo *root,
     {
         partial_grouping_target = make_partial_grouping_target(root, target);
 
+#ifdef __TBASE__
+		grouped_rel->reltarget = partial_grouping_target;
+#endif
         /* Estimate number of partial groups. */
         dNumPartialGroups = get_number_of_groups(root,
                                                  cheapest_path->rows,
