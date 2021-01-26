@@ -518,6 +518,18 @@ cost_gather(GatherPath *path, PlannerInfo *root,
     path->path.total_cost = (startup_cost + run_cost);
 }
 
+#ifdef __TBASE__
+/* 
+ * gather node has been optimized, it only needs to do some initiating work
+ * so set total_cost to startup_cost which means run_cost = 0.
+ */
+void
+reset_cost_gather(GatherPath *path)
+{
+	path->path.total_cost = path->subpath->total_cost + path->path.startup_cost;
+}
+#endif
+
 /*
  * cost_gather_merge
  *      Determines and returns the cost of gather merge path.
