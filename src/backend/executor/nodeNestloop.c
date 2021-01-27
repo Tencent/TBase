@@ -116,6 +116,10 @@ ExecNestLoop(PlanState *pstate)
 #ifdef __TBASE__
                 if (!node->nl_InnerInited && IS_PGXC_DATANODE)
                 {
+				    /*
+				     * Perform disconnection to make the redistribution on other nodes end normally,
+				     * otherwise need to wait for a timeout
+				     */
                     ExecDisconnectNode(innerPlan);
                 }
 #endif

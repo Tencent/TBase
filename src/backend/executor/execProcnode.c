@@ -927,6 +927,73 @@ ExecDisconnectNode(PlanState *node)
     ExecDisconnectNode(ps->righttree);
 }
 
+
+bool
+HasDisconnectNode(PlanState *node)
+{
+    PlanState *ps = node;
+    RemoteSubplanState *remotesubplan = NULL;
+
+    if (!node)
+        return false;
+
+    if (IsA(node, SubqueryScanState))
+    {
+        SubqueryScanState *substate = (SubqueryScanState *)node;
+        ps = substate->subplan;
+    }
+
+    switch (nodeTag(ps))
+    {
+        case T_RemoteSubplanState:
+        {
+            remotesubplan = (RemoteSubplanState *) ps;
+            if (remotesubplan->eflags & EXEC_FLAG_DISCONN)
+            {
+                return true;
+            }
+            return false;
+        }
+
+        case T_AppendState:
+        {
+            AppendState    *append = (AppendState *) ps;
+            int 			i;
+
+            for (i = 0; i < append->as_nplans; i++)
+            {
+                if (HasDisconnectNode(append->appendplans[i]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        case T_MergeAppendState:
+        {
+            MergeAppendState *mstate = (MergeAppendState *) ps;
+            int			i;
+
+            for (i = 0; i < mstate->ms_nplans; i++)
+            {
+                if (HasDisconnectNode(mstate->mergeplans[i]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        default:
+            break;
+    }
+
+    return HasDisconnectNode(ps->lefttree) || HasDisconnectNode(ps->righttree);
+}
+
 void
 ExecFinishNode(PlanState *node)
 {// #lizard forgives

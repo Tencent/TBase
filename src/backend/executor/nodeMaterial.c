@@ -327,6 +327,19 @@ ExecReScanMaterial(MaterialState *node)
 
     if (node->eflags != 0)
     {
+#ifdef __TBASE__
+	    /*
+	     * If we haven't materialized yet, but some nodes have done disconnect,
+	     * maybe this node needs to be executed when the material is executed,
+	     * so re-scan here
+	     */
+	    if ((NULL == node->tuplestorestate) && HasDisconnectNode(outerPlan))
+        {
+            ExecReScan(outerPlan);
+            node->eof_underlying = false;
+            return;
+        }
+#endif
         /*
          * If we haven't materialized yet, just return. If outerplan's
          * chgParam is not NULL then it will be re-scanned by ExecProcNode,

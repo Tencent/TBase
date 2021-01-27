@@ -11030,6 +11030,9 @@ ExecReScanRemoteSubplan(RemoteSubplanState *node)
      * Force query is re-bound with new parameters
      */
     node->bound = false;
+#ifdef __TBASE__
+    node->eflags &= ~(EXEC_FLAG_DISCONN);
+#endif
 }
 
 #ifdef __TBASE__
@@ -11168,6 +11171,7 @@ ExecDisconnectRemoteSubplan(RemoteSubplanState *node)
         }
 
         node->bound = true;
+        node->eflags |= EXEC_FLAG_DISCONN;
 
         connections = (PGXCNodeHandle **)palloc(combiner->conn_count * sizeof(PGXCNodeHandle *));
 

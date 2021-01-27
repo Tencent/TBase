@@ -67,6 +67,7 @@
 #ifdef XCP
 /* distributed executor may never execute the plan on this node  */
 #define EXEC_FLAG_SUBPLAN        0x0100
+#define EXEC_FLAG_DISCONN   	0x1000
 #endif
 
 #ifdef __TBASE__
@@ -526,6 +527,8 @@ extern Relation ExecOpenScanRelation(EState *estate, Index scanrelid, int eflags
 
 #ifdef __TBASE__
 extern Relation ExecOpenScanRelationPartition(EState *estate, Index scanrelid, int eflags, int partidx);
+
+extern bool HasDisconnectNode(PlanState *node);
 #endif
 extern void ExecCloseScanRelation(Relation scanrel);
 
