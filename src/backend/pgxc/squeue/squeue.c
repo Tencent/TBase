@@ -839,7 +839,9 @@ tryagain:
         int        qsize;   /* Size of one queue */
         int        i;
         char   *heapPtr;
-
+#ifdef __TBASE__
+        SQueueSync *sqsync = NULL;
+#endif
         elog(DEBUG1, "Create a new SQueue %s and format it for %d consumers", sqname, ncons);
 
         /* Initialize the shared queue */
@@ -899,6 +901,13 @@ tryagain:
         heapPtr = (char *) sq;
         /* Skip header */
         heapPtr += SQUEUE_HDR_SIZE(sq->sq_nconsumers);
+
+#ifdef __TBASE__
+		/* Init latch */
+		sqsync = sq->sq_sync;
+        InitSharedLatch(&sqsync->sqs_producer_latch);
+#endif
+
         /* Set up consumer queues */
         for (i = 0; i < sq->sq_nconsumers; i++)
         {
@@ -915,6 +924,7 @@ tryagain:
 #ifdef __TBASE__
             cstate->send_fd = false;
             cstate->cs_done = false;
+            InitSharedLatch(&sqsync->sqs_consumer_sync[i].cs_latch);
 #endif
             heapPtr += qsize;
         }
