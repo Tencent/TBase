@@ -1916,6 +1916,12 @@ pgxc_is_query_shippable(Query *query, int query_level)
 	pgxc_shippability_walker((Node *)query, &sc_context);
 
 	exec_nodes = sc_context.sc_exec_nodes;
+
+	/* For single datanode and select command, we ship it directly. */
+	if (NumDataNodes == 1 && query->commandType == CMD_SELECT &&
+		!bms_is_member(SS_NEEDS_COORD, sc_context.sc_shippability))
+		return exec_nodes;
+		
 	/*
 	 * The shippability context contains two ExecNodes, one for the subLinks
 	 * involved in the Query and other for the relation involved in FromClause.

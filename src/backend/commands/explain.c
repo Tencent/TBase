@@ -147,6 +147,7 @@ static void ExplainDummyGroup(const char *objtype, const char *labelname,
 static void ExplainExecNodes(ExecNodes *en, ExplainState *es);
 static void ExplainRemoteQuery(RemoteQuery *plan, PlanState *planstate,
                                 List *ancestors, ExplainState *es);
+static char **StrSplit(const char *str, const char *delimiter, int *n);
 #endif
 static void ExplainXMLTag(const char *tagname, int flags, ExplainState *es);
 static void ExplainJSONLineEnding(ExplainState *es);
@@ -3493,6 +3494,74 @@ ExplainPropertyListNested(const char *qlabel, List *data, ExplainState *es)
     }
 }
 
+/* split a string based on a delimiter */
+static char **
+StrSplit(const char *str, const char *delimiter, int *n)
+{
+	char *tmp = NULL;
+	char **rtn = NULL;
+	char *token = NULL;
+
+	*n = 0;
+	if (!str)
+		return NULL;
+
+	/* copy str to tmp as strtok will mangle the string */
+	tmp = pstrdup(str);
+
+	if (!strlen(tmp) || !delimiter || !strlen(delimiter))
+	{
+		*n = 1;
+		rtn = (char **) palloc(*n * sizeof(char *));
+		rtn[0] = pstrdup(tmp);
+		pfree(tmp);
+		return rtn;
+	}
+
+	token = strtok(tmp, delimiter);
+	while (token != NULL)
+	{
+		if (*n < 1)
+		{
+			rtn = (char **) palloc(sizeof(char *));
+		}
+		else
+		{
+			rtn = (char **) repalloc(rtn, (*n + 1) * sizeof(char *));
+		}
+
+		rtn[*n] = NULL;
+		rtn[*n] = pstrdup(token);
+		*n = *n + 1;
+
+		token = strtok(NULL, delimiter);
+	}
+
+	pfree(tmp);
+	return rtn;
+}
+
+static void
+DealRemoteJson(StringInfo explainResult, const char *value, int spaceLen)
+{
+	int i = 0;
+	int num = 0;
+	char **result = NULL;
+	result = StrSplit(value, "\n", &num);
+	for (i = 0; i < num; i++)
+	{
+		if (i > 0)
+		{
+			appendStringInfo(explainResult, "\n");
+			appendStringInfoSpaces(explainResult, spaceLen);
+		}
+		appendStringInfo(explainResult, "%s", result[i]);			
+		pfree(result[i]);
+	}
+	if (result)
+		pfree(result);
+}
+
 /*
  * Explain a simple property.
  *
@@ -4007,9 +4076,18 @@ ExplainRemoteQuery(RemoteQuery *plan, PlanState *planstate, List *ancestors, Exp
             value = slot_getattr(result, 1, &isnull);
             if (!isnull)
             {
+				if (es->format == EXPLAIN_FORMAT_JSON)
+				{
+					if (!firstline)
+						appendStringInfo(&explainResult, "\n");
+					DealRemoteJson(&explainResult, TextDatumGetCString(value), 2 * es->indent);
+				}
+				else
+				{
                 if (!firstline)
                     appendStringInfoSpaces(&explainResult, 2 * es->indent);
                 appendStringInfo(&explainResult, "%s\n", TextDatumGetCString(value));
+				}
                 firstline = false;
             }
 
@@ -4020,9 +4098,17 @@ ExplainRemoteQuery(RemoteQuery *plan, PlanState *planstate, List *ancestors, Exp
 
         if (es->format == EXPLAIN_FORMAT_TEXT)
             appendStringInfo(es->str, "%s", explainResult.data);
+		else if (es->format == EXPLAIN_FORMAT_JSON)
+		{
+			appendStringInfoChar(es->str, '\n');
+			appendStringInfoSpaces(es->str, es->indent * 2);
+			appendStringInfo(es->str, "%s: %s", "\"Remote plan\"", explainResult.data);
+		}
         else
+		{
             ExplainPropertyText("Remote plan", explainResult.data, es);
     }
+}
 }
 #endif
 
