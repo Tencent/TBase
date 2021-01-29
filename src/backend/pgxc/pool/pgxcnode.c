@@ -3855,6 +3855,30 @@ get_handles(List *datanodelist, List *coordlist, bool is_coord_only_query, bool 
                         is_global_session ? 'T' : 'F');
 #endif
 
+				if (IS_PGXC_COORDINATOR)
+				{
+					char nodetype = PGXC_NODE_DATANODE;
+					int nodeidx = PGXCNodeGetNodeId(node_handle->nodeoid, &nodetype);
+					if (PGXC_NODE_DATANODE != nodetype)
+					{
+						elog(ERROR, "Unexpected node type %c, name %s, index %d, "
+								"oid %d, max nodes %d", nodetype,
+								node_handle->nodename, nodeidx,
+								node_handle->nodeoid, NumDataNodes);
+					}
+					if (nodeidx < 0  || nodeidx >= NumDataNodes)
+					{
+						elog(ERROR, "Invalid datanode index %d, name %s, oid %d, "
+								"type %c, max nodes %d", nodeidx,
+								node_handle->nodename, node_handle->nodeoid,
+								nodetype, NumDataNodes);
+					}
+
+					InactivateDatanodeStatementOnNode(nodeidx);
+					elog(DEBUG5, "Inactivate statement on datanode %s, nodeidx %d, "
+							"oid %d, type %c, max nodes %d", node_handle->nodename,
+							nodeidx, node_handle->nodeoid, nodetype, NumDataNodes);
+				}
             }
         }
         /* Initialisation for Coordinators */

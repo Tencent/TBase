@@ -1089,7 +1089,7 @@ HaveActiveDatanodeStatements(void)
  * prepared on the node
  */
 bool
-ActivateDatanodeStatementOnNode(const char *stmt_name, int noid)
+ActivateDatanodeStatementOnNode(const char *stmt_name, int nodeidx)
 {
     DatanodeStatement *entry;
     int i;
@@ -1099,13 +1099,55 @@ ActivateDatanodeStatementOnNode(const char *stmt_name, int noid)
 
     /* see if statement already active on the node */
     for (i = 0; i < entry->number_of_nodes; i++)
-        if (entry->dns_node_indices[i] == noid)
+		if (entry->dns_node_indices[i] == nodeidx)
             return true;
 
     /* statement is not active on the specified node append item to the list */
-    entry->dns_node_indices[entry->number_of_nodes++] = noid;
+	entry->dns_node_indices[entry->number_of_nodes++] = nodeidx;
     return false;
 }
+
+
+/*
+ * Mark datanode statement as inactive on specified node
+ */
+void
+InactivateDatanodeStatementOnNode(int nodeidx)
+{
+	HASH_SEQ_STATUS seq;
+	DatanodeStatement *entry;
+	int i;
+
+	/* nothing cached */
+	if (!datanode_queries)
+		return;
+
+	/* walk over cache */
+	hash_seq_init(&seq, datanode_queries);
+	while ((entry = hash_seq_search(&seq)) != NULL)
+	{
+		/* see if statement already active on the node */
+		for (i = 0; i < entry->number_of_nodes; i++)
+		{
+			if (entry->dns_node_indices[i] == nodeidx)
+			{
+				elog(DEBUG5, "InactivateDatanodeStatementOnNode: node index %d, "
+						"number_of_nodes %d, statement name %s", nodeidx,
+						entry->number_of_nodes, entry->stmt_name);
+
+				/* remove nodeidx from list */
+				entry->number_of_nodes--;
+				if (i < entry->number_of_nodes)
+				{
+					entry->dns_node_indices[i] =
+						entry->dns_node_indices[entry->number_of_nodes];
+				}
+				break;
+			}
+		}
+	}
+}
+
 #endif
 #ifdef __TBASE__
 /* prepare remoteDML statement on coordinator */
