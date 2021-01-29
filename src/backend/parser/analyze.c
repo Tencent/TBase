@@ -714,7 +714,10 @@ transformInsertStmt(ParseState *pstate, InsertStmt *stmt)
             {
 				foreach(lc, selectStmt->fromClause)
                 {
-					Relation rel = heap_openrv((RangeVar *) lfirst(lc), AccessShareLock);
+					Node   *node = lfirst(lc);
+					if (IsA(node, RangeVar))
+					{
+						Relation rel = heap_openrv((RangeVar *) node, AccessShareLock);
 					
 					from_rel_loc_info = rel->rd_locator_info;
 					if (from_rel_loc_info == NULL || /* from system table */
@@ -730,6 +733,7 @@ transformInsertStmt(ParseState *pstate, InsertStmt *stmt)
                 }
             }
         }
+		}
 #endif
 
         /*
