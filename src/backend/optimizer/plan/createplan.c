@@ -6416,6 +6416,7 @@ make_remotesubplan(PlannerInfo *root,
     Plan *gather_left = lefttree;
     Plan *gather_parent = NULL;
     bool need_sort = true;
+	double nodes = 1;
 #endif
 
     /* Sanity checks */
@@ -6423,6 +6424,16 @@ make_remotesubplan(PlannerInfo *root,
     Assert(!IsA(lefttree, RemoteSubplan));
 
 #ifdef __TBASE__
+	if (execDistribution &&
+	    (execDistribution->distributionType == LOCATOR_TYPE_HASH ||
+	     execDistribution->distributionType == LOCATOR_TYPE_SHARD))
+	{
+		nodes = bms_num_members(execDistribution->nodes);
+		if (nodes <= 0)
+			/* should not happen, but for safety */
+			nodes = 1;
+	}
+	
     if((IsA(lefttree, HashJoin) || IsA(lefttree, SeqScan) 
         || IsA(lefttree, Agg) || IsA(lefttree, Group) ||
         IsA(lefttree, Sort) || IsA(lefttree, Limit) || IsA(lefttree, Gather)) && 
@@ -6432,18 +6443,17 @@ make_remotesubplan(PlannerInfo *root,
          distributionType == LOCATOR_TYPE_NONE ||
          distributionType == LOCATOR_TYPE_SHARD))
     {
-        int    parallel_threshold_rows = 50000;
-        
         if (IsA(lefttree, Gather))
         {
             Gather *gather = (Gather *)lefttree;
             int nWorkers = gather->num_workers;
             Plan *leftplan = lefttree->lefttree;
-            double rows = GetPlanRows(leftplan);
+			/* rows estimate is cut down to per data nodes, set it to all nodes for parallel estimate. */
+			double rows = GetPlanRows(leftplan) * nodes;
             int    heap_parallel_threshold = 0;
             int    heap_parallel_workers = 1;
 
-            heap_parallel_threshold = Max(parallel_threshold_rows, 1);
+			heap_parallel_threshold = Max(min_parallel_rows_size, 1);
             while (rows >= (heap_parallel_threshold * 3))
             {
                 heap_parallel_workers++;
@@ -6481,7 +6491,7 @@ make_remotesubplan(PlannerInfo *root,
                 switch(nodeTag(lefttree))
                 {
                     case T_SeqScan:
-                        if (rows >= parallel_threshold_rows * 3)
+						if (rows >= min_parallel_rows_size * 3)
                         {
                             lefttree->parallel_aware = true;
                         }
@@ -6667,7 +6677,9 @@ make_remotesubplan(PlannerInfo *root,
                 }
             }
 
-            if (rows < parallel_threshold_rows * 3)
+			/* rows estimate is cut down to per data nodes, set it to all nodes for parallel estimate. */
+			rows *= nodes;
+			if (rows < min_parallel_rows_size * 3)
                 need_parallel = false;
 
             if (need_parallel)
@@ -6677,7 +6689,7 @@ make_remotesubplan(PlannerInfo *root,
                 Gather       *gather_plan           = NULL;
                 Plan       *subplan               = NULL;
 
-                heap_parallel_threshold = Max(parallel_threshold_rows, 1);
+				heap_parallel_threshold = Max(min_parallel_rows_size, 1);
                 while (rows >= (heap_parallel_threshold * 3))
                 {
                     heap_parallel_workers++;

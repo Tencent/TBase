@@ -1667,6 +1667,8 @@ bitmap_and_cost_est(PlannerInfo *root, RelOptInfo *rel, List *paths)
                                                       required_outer);
     bpath.path.pathkeys = NIL;
     bpath.bitmapqual = (Path *) &apath;
+	/* TODO: get real distribution information */
+	bpath.path.distribution = NULL;
 
     /*
      * Check the cost of temporary path without considering parallelism.

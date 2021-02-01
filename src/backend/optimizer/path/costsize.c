@@ -494,7 +494,9 @@ cost_gather(GatherPath *path, PlannerInfo *root,
 #endif
             double *rows)
 {
+#ifdef __TBASE__
 	ADJUST_BASESCAN(&path->path, rel_orig, rel, param_info_orig, param_info);
+#endif
     Cost        startup_cost = 0;
     Cost        run_cost = 0;
 
@@ -542,10 +544,17 @@ reset_cost_gather(GatherPath *path)
  */
 void
 cost_gather_merge(GatherMergePath *path, PlannerInfo *root,
+#ifdef __TBASE__
+				  RelOptInfo *rel_orig, ParamPathInfo *param_info_orig,
+#else
                   RelOptInfo *rel, ParamPathInfo *param_info,
+#endif
                   Cost input_startup_cost, Cost input_total_cost,
                   double *rows)
 {
+#ifdef __TBASE__
+	ADJUST_BASESCAN(&path->path, rel_orig, rel, param_info_orig, param_info);
+#endif
     Cost        startup_cost = 0;
     Cost        run_cost = 0;
     Cost        comparison_cost;
@@ -879,8 +888,13 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
          * sequential as for parallel scans the pages are accessed in random
          * order.
          */
+#ifdef __TBASE__
+		path->path.parallel_workers = compute_parallel_worker(baserel_orig,
+		                                                      rand_heap_pages, index_pages);
+#else
         path->path.parallel_workers = compute_parallel_worker(baserel,
                                                               rand_heap_pages, index_pages);
+#endif
 
         /*
          * Fall out if workers can't be assigned for parallel scan, because in

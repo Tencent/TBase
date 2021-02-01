@@ -4133,7 +4133,17 @@ static struct config_int ConfigureNamesInt[] =
         (512 * 1024) / BLCKSZ, 0, INT_MAX / 3,
         NULL, NULL, NULL
     },
-
+#ifdef __TBASE__
+	{
+		{"min_parallel_rows_size", PGC_USERSET, QUERY_TUNING_COST,
+			gettext_noop("Sets the minimum amount of rows for a parallel aggregate or scan."),
+			gettext_noop("If the planner estimates that it will read rows too small to reach this limit, a parallel plan will not be considered.")
+		},
+		&min_parallel_rows_size,
+		50000, 0, INT_MAX / 3,
+		NULL, NULL, NULL
+	},
+#endif
     {
         /* Can't be set in postgresql.conf */
         {"server_version_num", PGC_INTERNAL, PRESET_OPTIONS,

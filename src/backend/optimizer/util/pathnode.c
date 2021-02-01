@@ -1415,8 +1415,8 @@ create_remotesubplan_path_internal(PlannerInfo *root, Path *subpath,
 {
 	RemoteSubPath   *pathnode;
 	
-	if (IsA(subpath, GatherPath))
-		reset_cost_gather((GatherPath *) subpath);
+	//if (IsA(subpath, GatherPath))
+		//reset_cost_gather((GatherPath *) subpath);
 	
 	pathnode = makeNode(RemoteSubPath);
 	pathnode->path.pathtype = T_RemoteSubplan;
