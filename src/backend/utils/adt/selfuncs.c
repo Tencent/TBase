@@ -3541,6 +3541,20 @@ estimate_num_groups(PlannerInfo *root, List *groupExprs, double input_rows,
              */
             double        clamp = rel->tuples;
 
+#ifdef __TBASE__
+			double      nodes = 1;
+			if (list_length(rel->pathlist) > 0)
+			{
+				Path *path = linitial(rel->pathlist);
+				if (path->distribution &&
+				    (path->distribution->distributionType == LOCATOR_TYPE_HASH ||
+				     path->distribution->distributionType == LOCATOR_TYPE_SHARD))
+					nodes = bms_num_members(path->distribution->nodes);
+				/* for sanity */
+				if (nodes < 1)
+					nodes = 1;
+			}
+#endif
             if (relvarcount > 1)
             {
                 clamp *= 0.1;
@@ -3600,7 +3614,11 @@ estimate_num_groups(PlannerInfo *root, List *groupExprs, double input_rows,
                     (1 - pow((rel->tuples - rel->rows) / rel->tuples,
                              rel->tuples / reldistinct));
             }
+#ifdef __TBASE__
+			reldistinct = clamp_row_est(reldistinct / nodes);
+#else
             reldistinct = clamp_row_est(reldistinct);
+#endif
 
             /*
              * Update estimate of total distinct groups.
