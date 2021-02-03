@@ -1434,7 +1434,7 @@ create_remotesubplan_path_internal(PlannerInfo *root, Path *subpath,
 
 	cost_remote_subplan((Path *) pathnode, subpath->startup_cost + additional_startup_cost,
 	                    subpath->total_cost + additional_total_cost, subpath->rows,
-	                    rel->reltarget->width, replication);
+	                    rel->reltarget->width, replication, subpath->parallel_workers);
 	
 	return (Path *) pathnode;
 }

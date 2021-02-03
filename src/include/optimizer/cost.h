@@ -177,7 +177,8 @@ extern void cost_qual_eval_node(QualCost *cost, Node *qual, PlannerInfo *root);
 #ifdef XCP
 extern void cost_remote_subplan(Path *path,
 			  Cost input_startup_cost, Cost input_total_cost,
-			  double tuples, int width, int replication);
+			  double tuples, int width, int replication,
+			  int nworkers);
 #endif
 extern void compute_semi_anti_join_factors(PlannerInfo *root,
 							   RelOptInfo *outerrel,
