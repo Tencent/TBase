@@ -3127,6 +3127,14 @@ ProcessUtilitySlow(ParseState *pstate,
                     stmts = transformCreateStmt((CreateStmt *) parsetree,
                             queryString, !is_local && !sentToRemote);
 
+#ifdef __TBASE__
+					if (NULL == stmts)
+                    {
+                        commandCollected = true;
+                        break;
+                    }
+#endif
+
                     if (IS_PGXC_LOCAL_COORDINATOR)
                     {
                         /*
@@ -4401,18 +4409,43 @@ ExecDropStmt(DropStmt *stmt, bool isTopLevel)
 #ifdef PGXC
             {
                 bool        is_temp = false;
+#ifdef __TBASE__
+				int         drop_cnt = 0;
+                char        *new_query_string = pstrdup(queryString);
+#endif
                 RemoteQueryExecType exec_type = EXEC_ON_ALL_NODES;
 
                 /* Check restrictions on objects dropped */
                 DropStmtPreTreatment((DropStmt *) stmt, queryString, sentToRemote,
                         &is_temp, &exec_type);
 #endif
+
+#ifdef __TBASE__
+                drop_cnt = RemoveRelations(stmt, new_query_string);
+#else
                 RemoveRelations(stmt);
+#endif
+
 #ifdef PGXC
+#ifdef __TBASE__
+                /* if drop nothing, skip */
+                if (drop_cnt == 0)
+                {
+                    pfree(new_query_string);
+                    break;
+                }
+
+				/* DROP is done depending on the object type and its temporary type */
+				if (IS_PGXC_LOCAL_COORDINATOR)
+					ExecUtilityStmtOnNodes(NULL, new_query_string, NULL, sentToRemote, false,
+							exec_type, is_temp, false);
+                pfree(new_query_string);
+#else
                 /* DROP is done depending on the object type and its temporary type */
                 if (IS_PGXC_LOCAL_COORDINATOR)
                     ExecUtilityStmtOnNodes(NULL, queryString, NULL, sentToRemote, false,
                             exec_type, is_temp, false);
+#endif				
             }
 #endif
             break;

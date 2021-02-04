@@ -6247,6 +6247,8 @@ AbortSubTransaction(void)
         {
             CheckGTMConnection();
         }
+
+		FinishSeqOp(false);
     }
 #endif
 

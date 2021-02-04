@@ -132,6 +132,11 @@
 #include "pgxc/shardmap.h"
 #include "pgxc/groupmgr.h"
 #endif
+
+#ifdef __TBASE__
+#include "parser/scansup.h"
+#endif
+
 /*
  * ON COMMIT action list
  */
@@ -1220,19 +1225,170 @@ DropErrorMsgWrongType(const char *relname, char wrongkind, char rightkind)
              (wentry->kind != '\0') ? errhint("%s", _(wentry->drophint_msg)) : 0));
 }
 
+#ifdef __TBASE__
+
+/*
+ * replace all invisible characters with ' ',
+ * leave no spaces next to ',' or '.'
+ */
+static void
+OmitqueryStringSpace(char *queryString)
+{
+    char *front = queryString;
+    char *last = queryString;
+    bool skip = false;
+
+    if (queryString == NULL)
+    {
+        return;
+    }
+
+    /* omit space */
+    while (scanner_isspace(*front))
+    {
+        ++front;
+    }
+
+    while ((*front) != '\0')
+    {
+        if(scanner_isspace(*front) && skip == false)
+        {
+            while(scanner_isspace(*front))
+            {
+                ++front;
+            }
+
+            if ((*front) == ',' || (*front) == '.')
+            {
+                /* no need space */
+            }
+            else if (last != queryString && (*(last - 1) == ',' || *(last - 1) == '.'))
+            {
+                /* no need space */
+            }
+            else
+            {
+                /* replace all invisible characters with ' ' */
+                *last = ' ';
+                ++last;
+                continue;
+            }
+        }
+
+        if ((*front) == '\"')
+        {
+            skip = (skip == true) ? false : true;
+            *last = *front;
+            ++front;
+        }
+        else
+        {
+            *last = *front;
+            ++front;
+        }
+        ++last;
+    }
+    *last = '\0';
+}
+
+/*
+ * remove relname in query string (replace with ' ')
+ */
+static void
+RemoveRelnameInQueryString(char *queryString, RangeVar *rel)
+{
+    char *ptr = NULL;
+    char *tmp = NULL;
+    char *tmpStr = NULL;
+    char *start_ptr = queryString;
+    char *end_ptr = queryString + strlen(queryString) - 1;
+    int  len = 0;
+    char full_name[MAXFULLNAMEDATALEN];
+
+    /* get remove obj full name */
+    snprintf(full_name, MAXFULLNAMEDATALEN, "%s%s%s%s%s", (rel->catalogname) ? (rel->catalogname) : "",
+                                                            (rel->catalogname) ? "." : "",
+                                                            (rel->schemaname) ? (rel->schemaname) : "",
+                                                             (rel->schemaname) ? "." : "",
+                                                             rel->relname);
+    tmpStr = queryString;
+    len = strlen(full_name);
+    while ((ptr = strstr(tmpStr, full_name)) != NULL)
+    {
+        /* is not independent string, skip */
+        if (((ptr - 1) >= start_ptr && *(ptr - 1) != ' ' && (*(ptr - 1) != ',')) ||
+                    ((ptr + len) <= end_ptr && *(ptr + len) != ' ' && *(ptr + len) != ',' && *(ptr + len) != ';'))
+        {
+            if (((ptr - 1) >= start_ptr && *(ptr - 1) == '\"' && (ptr + len) <= end_ptr && *(ptr + len) == '\"') &&
+                        ((ptr - 2) < start_ptr || *(ptr - 2) != '.'))
+            {
+                *(ptr - 1) = ' ';
+                *(ptr + len) = ' ';
+            }
+            else
+            {
+                tmpStr = ptr + len;
+                continue;
+            }
+        }
+
+        /* replace obj name with ' ' */
+        MemSet(ptr, ' ', len);
+
+        /* find the previous ',' */
+        tmp = ptr - 1;
+        while (tmp >= start_ptr && *tmp == ' ')
+        {
+            tmp--;
+        }
+
+        if (tmp >= start_ptr && *tmp == ',')
+        {
+            *tmp = ' ';
+        }
+        else
+        {
+            /* find the following ',' */
+            tmp = ptr + len;
+            while (tmp <= end_ptr && *tmp == ' ')
+            {
+                tmp++;
+            }
+
+            if (tmp <= end_ptr && *tmp == ',')
+            {
+                *tmp = ' ';
+            }
+        }
+
+        tmpStr = ptr + len;
+    }
+}
+
+#endif
+
 /*
  * RemoveRelations
  *        Implements DROP TABLE, DROP INDEX, DROP SEQUENCE, DROP VIEW,
  *        DROP MATERIALIZED VIEW, DROP FOREIGN TABLE
  */
+#ifdef __TBASE__
+int
+RemoveRelations(DropStmt *drop, char* queryString)
+#else
 void
 RemoveRelations(DropStmt *drop)
-{// #lizard forgives
+#endif
+{
     ObjectAddresses *objects;
     char        relkind;
     ListCell   *cell;
     int            flags = 0;
     LOCKMODE    lockmode = AccessExclusiveLock;
+#ifdef __TBASE__
+    bool        querystring_omit = false;
+    int         drop_cnt = 0;
+#endif
 
     /* DROP CONCURRENTLY uses a weaker lock, and has some restrictions */
     if (drop->concurrent)
@@ -1328,6 +1484,15 @@ RemoveRelations(DropStmt *drop)
         if (!OidIsValid(relOid))
         {
             DropErrorMsgNonExistent(rel, relkind, drop->missing_ok);
+#ifdef __TBASE__
+			if (!querystring_omit)
+            {
+                OmitqueryStringSpace(queryString);
+                querystring_omit = true;
+            }
+
+            RemoveRelnameInQueryString(queryString, rel);
+#endif
             continue;
         }
 
@@ -1374,11 +1539,18 @@ RemoveRelations(DropStmt *drop)
         obj.objectSubId = 0;
 
         add_exact_object_address(&obj, objects);
+#ifdef __TBASE__
+        drop_cnt++;
+#endif
     }
 
     performMultipleDeletions(objects, drop->behavior, flags);
 
     free_object_addresses(objects);
+
+#ifdef __TBASE__
+    return drop_cnt;
+#endif
 }
 
 /*

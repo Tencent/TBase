@@ -82,6 +82,9 @@
  */
 #define NAMEDATALEN 64
 
+
+#define MAXFULLNAMEDATALEN (NAMEDATALEN * 3 + 2)
+
 /*
  * Maximum number of arguments to a function.
  *

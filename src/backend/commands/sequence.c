@@ -375,7 +375,7 @@ DefineSequence(ParseState *pstate, CreateSeqStmt *seq)
         {
             ereport(ERROR,
                     (errcode(ERRCODE_CONNECTION_FAILURE),
-                     errmsg("GTM error, could not create sequence")));
+					 errmsg("GTM error, could not create sequence %s", seqname)));
         }
 
 #ifdef __TBASE__
