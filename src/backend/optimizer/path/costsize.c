@@ -241,14 +241,7 @@ static ParamPathInfoDataNode *
 adjust_reloptinfo(Path *path, RelOptInfoDataNode *basescan, RelOptInfo *baserel_orig,
                   ParamPathInfoDataNode *param_info, ParamPathInfo *param_info_orig)
 {
-	double		nodes;
-	
-	if (path->distribution && IsA(path->distribution, Distribution) &&
-		path->distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
-		path->distribution->distributionType != LOCATOR_TYPE_NONE)
-		nodes = bms_num_members(path->distribution->nodes);
-	else
-		nodes = 1;
+	double  nodes = path_count_datanodes(path);
 	
 	basescan->relid = baserel_orig->relid;
 	basescan->rtekind = baserel_orig->rtekind;
@@ -659,12 +652,7 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 	double		nodes = 1;
 
 #ifdef __TBASE__
-	if (path->path.distribution && IsA(path->path.distribution, Distribution) &&
-	    path->path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
-	    path->path.distribution->distributionType != LOCATOR_TYPE_NONE)
-	{
-		nodes = bms_num_members(path->path.distribution->nodes);
-	}
+	nodes = path_count_datanodes(&path->path);
 	/* Should only be applied to base relations */
 	Assert(IsA(baserel_orig, RelOptInfo) &&
 	       IsA(index, IndexOptInfo));
@@ -1217,12 +1205,9 @@ cost_bitmap_heap_scan(Path *path, PlannerInfo *root, RelOptInfo *baserel,
     cpu_run_cost = cpu_per_tuple * tuples_fetched;
 
 #ifdef __TBASE__
-	/* Adjust costing for parallelism between data nodes, if used. */
-	if (path->distribution && IsA(path->distribution, Distribution) &&
-	    path->distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
-	    path->distribution->distributionType != LOCATOR_TYPE_NONE)
 	{
-		double nodes = bms_num_members(path->distribution->nodes);
+		/* Adjust costing for parallelism between data nodes, if used. */
+		double nodes = path_count_datanodes(path);
 
 		/* The CPU cost is divided among all the data nodes. */
 		cpu_run_cost /= nodes;
@@ -2500,14 +2485,7 @@ final_cost_nestloop(PlannerInfo *root, NestPath *path,
 		path->path.rows = path->path.parent->rows;
 
 #ifdef __TBASE__
-	if (path->path.distribution && IsA(path->path.distribution, Distribution) &&
-	    path->path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
-	    path->path.distribution->distributionType != LOCATOR_TYPE_NONE)
-	{
-		double nodes = bms_num_members(path->path.distribution->nodes);
-		
-		path->path.rows = clamp_row_est(path->path.rows / nodes);
-	}
+	path->path.rows = clamp_row_est(path->path.rows / path_count_datanodes(&path->path));
 #endif
 	
 	/* For partial paths, scale row estimate. */
@@ -3000,14 +2978,7 @@ final_cost_mergejoin(PlannerInfo *root, MergePath *path,
 		path->jpath.path.rows = path->jpath.path.parent->rows;
 
 #ifdef __TBASE__
-	if (path->jpath.path.distribution && IsA(path->jpath.path.distribution, Distribution) &&
-	    path->jpath.path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
-	    path->jpath.path.distribution->distributionType != LOCATOR_TYPE_NONE)
-	{
-		double nodes = bms_num_members(path->jpath.path.distribution->nodes);
-		
-		path->jpath.path.rows = clamp_row_est(path->jpath.path.rows / nodes);
-	}
+	path->jpath.path.rows = clamp_row_est(path->jpath.path.rows / path_count_datanodes(&path->jpath.path));
 #endif
 	
 	/* For partial paths, scale row estimate. */
@@ -3454,14 +3425,7 @@ final_cost_hashjoin(PlannerInfo *root, HashPath *path,
 		path->jpath.path.rows = path->jpath.path.parent->rows;
 
 #ifdef __TBASE__
-	if (path->jpath.path.distribution && IsA(path->jpath.path.distribution, Distribution) &&
-	    path->jpath.path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
-	    path->jpath.path.distribution->distributionType != LOCATOR_TYPE_NONE)
-	{
-		double nodes = bms_num_members(path->jpath.path.distribution->nodes);
-		
-		path->jpath.path.rows = clamp_row_est(path->jpath.path.rows / nodes);
-	}
+	path->jpath.path.rows = clamp_row_est(path->jpath.path.rows / path_count_datanodes(&path->jpath.path));
 #endif
 	
 	/* For partial paths, scale row estimate. */
@@ -5053,15 +5017,8 @@ set_subquery_size_estimates(PlannerInfo *root, RelOptInfo *rel)
     sub_final_rel = fetch_upper_rel(subroot, UPPERREL_FINAL, NULL);
     rel->tuples = sub_final_rel->cheapest_total_path->rows;
 #ifdef __TBASE__
-	if (sub_final_rel->cheapest_total_path->distribution && IsA(sub_final_rel->cheapest_total_path->distribution, Distribution) &&
-		sub_final_rel->cheapest_total_path->distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
-		sub_final_rel->cheapest_total_path->distribution->distributionType != LOCATOR_TYPE_NONE)
-	{
-		double nodes = bms_num_members(sub_final_rel->cheapest_total_path->distribution->nodes);
-		
 		/* count tuples in all data nodes */
-		rel->tuples *= nodes;
-	}
+	rel->tuples *= path_count_datanodes(sub_final_rel->cheapest_total_path);
 #endif
 
     /*

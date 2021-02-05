@@ -1405,6 +1405,10 @@ retry_pools:
 }
 
 #ifdef __TBASE__
+/*
+ * implementation for create_remotesubplan_path, besides regular creation of remote subplan,
+ * we need it when redistributing join rel.
+ */
 static Path *
 create_remotesubplan_path_internal(PlannerInfo *root, Path *subpath,
                                    Distribution *distribution, RelOptInfo *rel,
@@ -6994,3 +6998,26 @@ reparameterize_path(PlannerInfo *root, Path *path,
     }
     return NULL;
 }
+
+#ifdef __TBASE__
+/*
+ * count datanode number for given path, consider replication table as 1
+ * because we use this function to figure out how many parts that data
+ * had been separated into, when we estimating costs of a plan. Therefore
+ * to get more accurate estimating result as in a distributed system.
+ */
+double
+path_count_datanodes(Path *path)
+{
+	if (path->distribution && IsA(path->distribution, Distribution) &&
+	    (path->distribution->distributionType == LOCATOR_TYPE_SHARD ||
+	     path->distribution->distributionType == LOCATOR_TYPE_HASH))
+	{
+		double nodes = bms_num_members(path->distribution->nodes);
+		if (nodes > 0)
+			return nodes;
+	}
+	
+	return 1;
+}
+#endif

@@ -3814,12 +3814,7 @@ create_bitmap_subplan(PlannerInfo *root, Path *bitmapqual,
 		double      nodes = 1;
 
 #ifdef __TBASE__
-		if (apath->path.distribution && IsA(apath->path.distribution, Distribution) &&
-		    apath->path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
-		    apath->path.distribution->distributionType != LOCATOR_TYPE_NONE)
-		{
-			nodes = bms_num_members(apath->path.distribution->nodes);
-		}
+		nodes = path_count_datanodes(&apath->path);
 #endif
 
         /*
@@ -3911,14 +3906,8 @@ create_bitmap_subplan(PlannerInfo *root, Path *bitmapqual,
         {
 			double  nodes = 1;
 #ifdef __TBASE__
-			if (opath->path.distribution && IsA(opath->path.distribution, Distribution) &&
-			    opath->path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
-			    opath->path.distribution->distributionType != LOCATOR_TYPE_NONE)
-			{
-				nodes = bms_num_members(opath->path.distribution->nodes);
-			}
+			nodes = path_count_datanodes(&opath->path);
 #endif
-			
             plan = (Plan *) make_bitmap_or(subplans);
             plan->startup_cost = opath->path.startup_cost;
             plan->total_cost = opath->path.total_cost;
@@ -3955,16 +3944,9 @@ create_bitmap_subplan(PlannerInfo *root, Path *bitmapqual,
         List       *subindexECs;
         ListCell   *l;
 		double      nodes = 1;
-		
 #ifdef __TBASE__
-		if (ipath->path.distribution && IsA(ipath->path.distribution, Distribution) &&
-		    ipath->path.distribution->distributionType != LOCATOR_TYPE_REPLICATED &&
-		    ipath->path.distribution->distributionType != LOCATOR_TYPE_NONE)
-		{
-			nodes = bms_num_members(ipath->path.distribution->nodes);
-		}
+		nodes = path_count_datanodes(&ipath->path);
 #endif
-
         /* Use the regular indexscan plan build machinery... */
         iscan = castNode(IndexScan,
                          create_indexscan_plan(root, ipath,
@@ -6424,6 +6406,7 @@ make_remotesubplan(PlannerInfo *root,
     Assert(!IsA(lefttree, RemoteSubplan));
 
 #ifdef __TBASE__
+	/* do things like path_count_datanodes, but we have only distribution here */
 	if (execDistribution &&
 	    (execDistribution->distributionType == LOCATOR_TYPE_HASH ||
 	     execDistribution->distributionType == LOCATOR_TYPE_SHARD))

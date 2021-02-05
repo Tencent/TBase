@@ -228,5 +228,7 @@ extern bool has_useful_pathkeys(PlannerInfo *root, RelOptInfo *rel);
 extern PathKey *make_canonical_pathkey(PlannerInfo *root,
 					   EquivalenceClass *eclass, Oid opfamily,
 					   int strategy, bool nulls_first);
-
+#ifdef __TBASE__
+extern double path_count_datanodes(Path *path);
+#endif
 #endif							/* PATHS_H */

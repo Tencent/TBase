@@ -3545,14 +3545,7 @@ estimate_num_groups(PlannerInfo *root, List *groupExprs, double input_rows,
 			double      nodes = 1;
 			if (list_length(rel->pathlist) > 0)
 			{
-				Path *path = linitial(rel->pathlist);
-				if (path->distribution &&
-				    (path->distribution->distributionType == LOCATOR_TYPE_HASH ||
-				     path->distribution->distributionType == LOCATOR_TYPE_SHARD))
-					nodes = bms_num_members(path->distribution->nodes);
-				/* for sanity */
-				if (nodes < 1)
-					nodes = 1;
+				nodes = path_count_datanodes(linitial(rel->pathlist));
 			}
 #endif
             if (relvarcount > 1)
