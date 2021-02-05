@@ -6434,7 +6434,7 @@ make_remotesubplan(PlannerInfo *root,
 			nodes = 1;
 	}
 	
-    if((IsA(lefttree, HashJoin) || IsA(lefttree, SeqScan) 
+	if((IsA(lefttree, HashJoin) || IsA(lefttree, NestLoop) || IsA(lefttree, SeqScan) 
         || IsA(lefttree, Agg) || IsA(lefttree, Group) ||
         IsA(lefttree, Sort) || IsA(lefttree, Limit) || IsA(lefttree, Gather)) && 
         max_parallel_workers_per_gather && root->glob->parallelModeOK &&
