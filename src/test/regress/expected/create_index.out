@@ -2489,16 +2489,14 @@ SET maintenance_work_mem = '1MB';
 CREATE INDEX hash_tuplesort_idx ON tenk1 USING hash (stringu1 name_ops) WITH (fillfactor = 10);
 EXPLAIN (COSTS OFF)
 SELECT count(*) FROM tenk1 WHERE stringu1 = 'TVAAAA';
-                            QUERY PLAN                             
--------------------------------------------------------------------
+                           QUERY PLAN                           
+----------------------------------------------------------------
  Finalize Aggregate
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Partial Aggregate
-               ->  Bitmap Heap Scan on tenk1
-                     Recheck Cond: (stringu1 = 'TVAAAA'::name)
-                     ->  Bitmap Index Scan on hash_tuplesort_idx
-                           Index Cond: (stringu1 = 'TVAAAA'::name)
-(7 rows)
+               ->  Index Scan using hash_tuplesort_idx on tenk1
+                     Index Cond: (stringu1 = 'TVAAAA'::name)
+(5 rows)
 
 SELECT count(*) FROM tenk1 WHERE stringu1 = 'TVAAAA';
  count 
@@ -2985,16 +2983,12 @@ explain (costs off)
 SELECT unique1 FROM tenk1
 WHERE unique1 IN (1,42,7)
 ORDER BY unique1;
-                               QUERY PLAN                                
--------------------------------------------------------------------------
+                         QUERY PLAN                          
+-------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Sort
-         Sort Key: unique1
-         ->  Bitmap Heap Scan on tenk1
-               Recheck Cond: (unique1 = ANY ('{1,42,7}'::integer[]))
-               ->  Bitmap Index Scan on tenk1_unique1
-                     Index Cond: (unique1 = ANY ('{1,42,7}'::integer[]))
-(7 rows)
+   ->  Index Only Scan using tenk1_unique1 on tenk1
+         Index Cond: (unique1 = ANY ('{1,42,7}'::integer[]))
+(3 rows)
 
 SELECT unique1 FROM tenk1
 WHERE unique1 IN (1,42,7)
