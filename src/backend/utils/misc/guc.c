@@ -2763,6 +2763,19 @@ static struct config_bool ConfigureNamesBool[] =
 		false,
 		NULL, NULL, NULL
 	},
+    {
+		{"enable_memory_optimization", PGC_POSTMASTER, RESOURCES,
+			gettext_noop("enable session cache memory control"),
+			NULL
+		},
+		&enable_memory_optimization,
+#ifdef _PG_REGRESS_
+		true,
+#else
+		false,
+#endif
+		NULL, NULL, NULL
+	},
 
 #endif
 
@@ -3791,6 +3804,28 @@ static struct config_int ConfigureNamesInt[] =
         0, 0, 31536000,
         NULL, NULL, NULL
     },
+	{
+		{"max_relcache_relations", PGC_POSTMASTER, RESOURCES,
+			gettext_noop("max relcache relations per session."),
+			NULL
+		},
+		&max_relcache_relations,
+#ifdef _PG_REGRESS_
+		500, 500, INT_MAX,
+#else
+		2000, 500, INT_MAX,
+#endif
+		NULL, NULL, NULL
+	},
+	{
+		{"number_replaced_relations", PGC_POSTMASTER, RESOURCES,
+			gettext_noop("max relcache relations while replacing."),
+			NULL
+		},
+		&number_replaced_relations,
+		10, 1, 500,
+		NULL, NULL, NULL
+	},
 #endif
     {
         {"log_rotation_age", PGC_SIGHUP, LOGGING_WHERE,
@@ -4344,10 +4379,10 @@ static struct config_int ConfigureNamesInt[] =
         {"pool_session_memory_limit", PGC_SIGHUP, DATA_NODES,
             gettext_noop("Datanode session max memory context size."),
             gettext_noop("Exceed limit will be closed."),
-            GUC_UNIT_S
+			GUC_UNIT_MB
         },
         &PoolMaxMemoryLimit,
-        10, 1, 10000,
+		10, -1, 10000,
         NULL, NULL, NULL
     },    
     {
@@ -4402,7 +4437,8 @@ static struct config_int ConfigureNamesInt[] =
     {
         {"session_memory_size", PGC_USERSET, RESOURCES_MEM,
             gettext_noop("Used to get the total memory size of the session, in M Bytes."),
-            gettext_noop("Used to get the total memory size of the session, in M Bytes.")
+			gettext_noop("Used to get the total memory size of the session, in M Bytes."),
+			GUC_UNIT_MB
         },
         &g_TotalMemorySize,
         0, 0, INT_MAX,
@@ -5968,7 +6004,7 @@ static struct config_enum ConfigureNamesEnum[] =
 
 #ifdef PGXC
     {
-        {"remotetype", PGC_BACKEND, CONN_AUTH,
+		{"remotetype", PGC_USERSET, CONN_AUTH,
             gettext_noop("Sets the type of Postgres-XL remote connection"),
             NULL
         },
@@ -13447,7 +13483,7 @@ show_total_memorysize(void)
     int32   size;
     static char buf[64];
     size = get_total_memory_size();
-    snprintf(buf, sizeof(buf), "%d", size);
+	snprintf(buf, sizeof(buf), "%dM", size);
     return buf;
 }
 #endif

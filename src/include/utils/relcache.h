@@ -15,6 +15,7 @@
 #define RELCACHE_H
 
 #include "access/tupdesc.h"
+#include "lib/ilist.h"
 #include "nodes/bitmapset.h"
 
 
@@ -53,6 +54,13 @@ typedef enum IndexAttrBitmapKind
 	INDEX_ATTR_BITMAP_PRIMARY_KEY,
 	INDEX_ATTR_BITMAP_IDENTITY_KEY
 } IndexAttrBitmapKind;
+
+typedef struct relcacheheader
+{
+	int			rh_ntup;		/* # of tuples in relation cache */
+	int			rh_maxtup;		/* max number of LRU relations */
+	dlist_head 	rh_lrulist;		/* LRU list, most recent first */
+} RelCacheHeader;
 
 extern Bitmapset *RelationGetIndexAttrBitmap(Relation relation,
 						   IndexAttrBitmapKind keyAttrs);
@@ -130,6 +138,9 @@ extern void RelationCacheInitFilePostInvalidate(void);
 extern void RelationCacheInitFileRemove(void);
 
 extern bool RelationHasGTS(Relation rel);
+
+extern void RelationLRUInsert(Relation rel);
+extern void RelationLRUDelete(Relation rel);
 
 /* should be used only by relcache.c and catcache.c */
 extern bool criticalRelcachesBuilt;

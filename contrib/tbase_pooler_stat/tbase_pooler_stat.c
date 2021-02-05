@@ -182,7 +182,7 @@ tbase_reset_pooler_cmd_statistics(PG_FUNCTION_ARGS)
 Datum
 tbase_get_pooler_conn_statistics(PG_FUNCTION_ARGS)
 {
-#define  LIST_POOLER_CONN_STATISTICS_COLUMNS 12
+#define  LIST_POOLER_CONN_STATISTICS_COLUMNS 11
     FuncCallContext 	 *funcctx = NULL;
     int32                ret = 0;
     Pooler_ConnState     *status = NULL;
@@ -222,9 +222,7 @@ tbase_get_pooler_conn_statistics(PG_FUNCTION_ARGS)
                            INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) 10, "exceed_keepalive_cnt",
                            INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber) 11, "exceed_deadtime_cnt",
-                           INT4OID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber) 12, "exceed_maxlifetime_cnt",
+        TupleDescInitEntry(tupdesc, (AttrNumber) 11, "exceed_maxlifetime_cnt",
                            INT4OID, -1, 0);
 
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
@@ -279,7 +277,6 @@ tbase_get_pooler_conn_statistics(PG_FUNCTION_ARGS)
             nulls[8] = true;
             nulls[9] = true;
             nulls[10] = true;
-            nulls[11] = true;
         }
         else
         {
@@ -292,7 +289,6 @@ tbase_get_pooler_conn_statistics(PG_FUNCTION_ARGS)
             values[8] = UInt32GetDatum(pq_getmsgint(status->buf, sizeof(uint32)));
             values[9] = UInt32GetDatum(pq_getmsgint(status->buf, sizeof(uint32)));
             values[10] = UInt32GetDatum(pq_getmsgint(status->buf, sizeof(uint32)));
-            values[11] = UInt32GetDatum(pq_getmsgint(status->buf, sizeof(uint32)));
             status->node_cursor--;
         }
 

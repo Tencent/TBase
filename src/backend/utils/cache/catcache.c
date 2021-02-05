@@ -91,7 +91,6 @@ static CatCTup *CatalogCacheCreateEntry(CatCache *cache, HeapTuple ntp,
                         bool negative);
 static HeapTuple build_dummy_tuple(CatCache *cache, int nkeys, ScanKey skeys);
 
-
 /*
  *                    internal support functions
  */

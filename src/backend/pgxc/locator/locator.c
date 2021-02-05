@@ -915,6 +915,14 @@ FreeRelationLocInfo(RelationLocInfo *relationLocInfo)
     {
         if (relationLocInfo->partAttrName)
             pfree(relationLocInfo->partAttrName);
+
+#ifdef __COLD_HOT__
+		if (relationLocInfo->secAttrName)
+			pfree(relationLocInfo->secAttrName);
+#endif
+
+		list_free(relationLocInfo->rl_nodeList);
+
         pfree(relationLocInfo);
     }
 }

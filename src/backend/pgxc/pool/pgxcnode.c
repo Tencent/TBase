@@ -5532,9 +5532,11 @@ PGXCNodeSendShowQuery(NODE_CONNECTION *conn, const char *sql_command)
     resStatus = PQresultStatus(result);
     if (resStatus == PGRES_TUPLES_OK || resStatus == PGRES_COMMAND_OK)
     {           
-        snprintf(number, 128, "%s", PQgetvalue(result, 0, 0));            
+		/* ignore unit */
+		snprintf(number, result->tuples[0][0].len, "%s", PQgetvalue(result, 0, 0));
     }    
     PQclear(result);    
+
     return number;
 }
 

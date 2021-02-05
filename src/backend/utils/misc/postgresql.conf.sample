@@ -502,6 +502,11 @@
 				# 2: check the correctness of the GTS of tuples by referring to
 				#    tlog, and reset it if it is wrong while doing vacuum.
 
+# - Memory Optimization -
+#enable_memory_optimization = false
+#max_relcache_relations = 2000
+#number_replaced_relations = 10
+
 #------------------------------------------------------------------------------
 # RUNTIME STATISTICS
 #------------------------------------------------------------------------------

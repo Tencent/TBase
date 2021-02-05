@@ -274,6 +274,10 @@ extern bool enable_clog_mprotect;
 extern bool enable_tlog_mprotect;
 extern bool enable_xlog_mprotect;
 extern int query_delay;
+
+extern bool enable_memory_optimization;
+extern int max_relcache_relations;
+extern int number_replaced_relations;
 #endif
 extern int    log_min_error_statement;
 extern int    log_min_messages;

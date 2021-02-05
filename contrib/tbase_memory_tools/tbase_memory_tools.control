@@ -1,0 +1,5 @@
+# tbase_memory_tools extension
+comment = 'memory wrapper for TBase'
+default_version = '1.0'
+module_pathname = '$libdir/tbase_memory_tools'
+relocatable = true

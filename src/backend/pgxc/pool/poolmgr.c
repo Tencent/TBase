@@ -83,7 +83,6 @@ int            PoolMaintenanceTimeout = 30;
 int            PoolSizeCheckGap       = 120;  /* max check memory size gap, in seconds */
 int            PoolConnMaxLifetime    = 600;  /* max lifetime of a pooled connection, in seconds */
 int            PoolWarmConnMaxLifetime = 7200;  /* max lifetime of a warm-needed pooled connection, in seconds */
-int            PoolConnDeadtime       = 1800; /* a pooled connection must be closed when lifetime exceed this, in seconds */
 int            PoolMaxMemoryLimit     = 10;
 int            PoolConnectTimeOut     = 10;
 int            PoolScaleFactor        = 2;
@@ -4755,8 +4754,7 @@ release_connection(DatabasePool *dbPool, PGXCNodePoolSlot *slot,
             }
         }    
         else if (((nodePool->freeSize > 0) && (nodePool->nwarming + nodePool->nquery) > MinFreeSize) ||                                         
-            (difftime(now, slot->created) >= PoolConnMaxLifetime) ||
-             ((difftime(now, slot->created) >= PoolConnDeadtime) && (PoolConnDeadtime > PoolConnMaxLifetime)))
+			(difftime(now, slot->created) >= PoolConnMaxLifetime))
         {
             force_destroy = true;
             if (PoolConnectDebugPrint)
@@ -4777,7 +4775,6 @@ release_connection(DatabasePool *dbPool, PGXCNodePoolSlot *slot,
             pooler_async_warm_connection(dbPool, slot, nodePool, node);
             grow_pool(dbPool, nodeidx, node, bCoord);
         }
-
         else
         {        
             if ((difftime(now, slot->checked) >=  PoolSizeCheckGap) && !IS_ASYNC_PIPE_FULL())
@@ -5318,8 +5315,8 @@ pooler_handle_subthread_log(bool is_pooler_exit)
  */
 static void
 PoolerLoop(void)
-{// #lizard forgives
-    bool           warme_initd = false;
+{
+	bool           warm_inited = false;
     StringInfoData input_message;
     int            maxfd       = MaxConnections + 1024;
     struct pollfd *pool_fd;
@@ -5589,10 +5586,10 @@ PoolerLoop(void)
         }
 
         /* create preload database pooler */
-        if (!warme_initd)
+		if (!warm_inited)
         {
             connect_pools();
-            warme_initd = true;
+			warm_inited = true;
         }
         pooler_pools_warm();
         
@@ -5828,7 +5825,6 @@ shrink_pool(DatabasePool *pool)
             {
                 /* no need to shrik warmed slot, only discard them when they use too much memroy */
                 if (!slot->bwarmed && ((difftime(now, slot->released) > PoolConnKeepAlive) || 
-                                      (difftime(now, slot->created) > PoolConnDeadtime)   ||
                                       (difftime(now, slot->created) >= PoolConnMaxLifetime)))
                 {                    
                     if (PoolConnectDebugPrint)
@@ -8266,13 +8262,18 @@ void *pooler_async_utility_thread(void *arg)
                 case COMMAND_CONNECTION_WARM:
                 {
                     CommandId commandID = InvalidCommandId;
-                    ret = PGXCNodeSendSetQuery((NODE_CONNECTION *)pWarmInfo->slot->conn, "set warm_shared_buffer to true;", NULL, 0, &pWarmInfo->set_query_status, &commandID);
+
+					ret = PGXCNodeSendSetQuery(
+						(NODE_CONNECTION *) pWarmInfo->slot->conn,
+						"set warm_shared_buffer to true;",
+						NULL,
+						0,
+						&pWarmInfo->set_query_status, &commandID);
                     /* only set warm flag when warm succeed */
                     if (0 == ret)
                     {
                         pWarmInfo->slot->bwarmed = true;                    
                     }
-                    
                 }
                 break;
                 
@@ -8280,14 +8281,44 @@ void *pooler_async_utility_thread(void *arg)
                 {
                     int   mbytes = 0;
                     char *size = NULL;
-                    size = PGXCNodeSendShowQuery((NODE_CONNECTION *)pWarmInfo->slot->conn, "show session_memory_size;");
+					CommandId commandID = InvalidCommandId;
+
+					(void) PGXCNodeSendSetQuery(
+						(NODE_CONNECTION *) pWarmInfo->slot->conn,
+						"set remotetype to application;",
+						NULL,
+						0,
+						&pWarmInfo->set_query_status, &commandID);
+
+					size = PGXCNodeSendShowQuery(
+						(NODE_CONNECTION *) pWarmInfo->slot->conn,
+						"show session_memory_size;");
                     pWarmInfo->cmd = COMMAND_JUDGE_CONNECTION_MEMSIZE;
                     mbytes = atoi(size);
-                    if (mbytes >= PoolMaxMemoryLimit)
+					if (PoolMaxMemoryLimit > 0 && mbytes >= PoolMaxMemoryLimit)
                     {
                         pWarmInfo->cmd = COMMAND_CONNECTION_NEED_CLOSE;
                     }
                     pWarmInfo->size = mbytes;
+
+					if (IS_PGXC_COORDINATOR)
+					{
+						(void) PGXCNodeSendSetQuery(
+							(NODE_CONNECTION *) pWarmInfo->slot->conn,
+							"set remotetype to coordinator;",
+							NULL,
+							0,
+							&pWarmInfo->set_query_status, &commandID);
+					}
+					else
+					{
+						(void) PGXCNodeSendSetQuery(
+							(NODE_CONNECTION *) pWarmInfo->slot->conn,
+							"set remotetype to datanode;",
+							NULL,
+							0,
+							&pWarmInfo->set_query_status, &commandID);
+					}
                 }
                 break;
 
@@ -11318,7 +11349,6 @@ handle_get_conn_statistics(PoolAgent *agent)
     uint32           total_node_cnt_offset = 0;
 
     uint32           exceed_keepalive_cnt = 0;
-    uint32           exceed_deadtime_cnt = 0;
     uint32           exceed_maxlifetime_cnt = 0;
     int              i = 0;
     PGXCNodePoolSlot *slot = NULL;
@@ -11357,7 +11387,6 @@ handle_get_conn_statistics(PoolAgent *agent)
 
             /* reset statistics count */
             exceed_keepalive_cnt = 0;
-            exceed_deadtime_cnt = 0;
             exceed_maxlifetime_cnt = 0;
             /* statistical connection life cycle */
             if (node_pool->slot)
@@ -11370,11 +11399,6 @@ handle_get_conn_statistics(PoolAgent *agent)
                         exceed_keepalive_cnt++;
                     }
 
-                    if (difftime(now, slot->created) > PoolConnDeadtime)
-                    {
-                        exceed_deadtime_cnt++;
-                    }
-
                     if (difftime(now, slot->created) >= PoolConnMaxLifetime)
                     {
                         exceed_maxlifetime_cnt++;
@@ -11383,7 +11407,6 @@ handle_get_conn_statistics(PoolAgent *agent)
             }
 
             pq_sendint(&buf, exceed_keepalive_cnt, sizeof(uint32));
-            pq_sendint(&buf, exceed_deadtime_cnt, sizeof(uint32));
             pq_sendint(&buf, exceed_maxlifetime_cnt, sizeof(uint32));
         }
 
