@@ -1522,8 +1522,8 @@ vacuum analyze patest2;
 analyze int4_tbl;
 explain (costs off, num_nodes off, nodes off)
 select * from patest0 join (select f1 from int4_tbl where f1 = 0 limit 1) ss on id = f1;
-                           QUERY PLAN                           
-----------------------------------------------------------------
+                          QUERY PLAN                          
+--------------------------------------------------------------
  Nested Loop
    ->  Limit
          ->  Remote Subquery Scan on all
@@ -1533,15 +1533,13 @@ select * from patest0 join (select f1 from int4_tbl where f1 = 0 limit 1) ss on 
    ->  Materialize
          ->  Remote Subquery Scan on all
                ->  Append
-                     ->  Bitmap Heap Scan on patest0
-                           Recheck Cond: (id = int4_tbl.f1)
-                           ->  Bitmap Index Scan on patest0i
-                                 Index Cond: (id = int4_tbl.f1)
+                     ->  Index Scan using patest0i on patest0
+                           Index Cond: (id = int4_tbl.f1)
                      ->  Index Scan using patest1i on patest1
                            Index Cond: (id = int4_tbl.f1)
                      ->  Index Scan using patest2i on patest2
                            Index Cond: (id = int4_tbl.f1)
-(17 rows)
+(15 rows)
 
 select * from patest0 join (select f1 from int4_tbl where f1 = 0 limit 1) ss on id = f1;
  id | x | f1 
@@ -1554,8 +1552,8 @@ select * from patest0 join (select f1 from int4_tbl where f1 = 0 limit 1) ss on 
 drop index patest2i;
 explain (costs off, num_nodes off, nodes off)
 select * from patest0 join (select f1 from int4_tbl where f1 = 0 limit 1) ss on id = f1;
-                           QUERY PLAN                           
-----------------------------------------------------------------
+                          QUERY PLAN                          
+--------------------------------------------------------------
  Nested Loop
    ->  Limit
          ->  Remote Subquery Scan on all
@@ -1565,15 +1563,13 @@ select * from patest0 join (select f1 from int4_tbl where f1 = 0 limit 1) ss on 
    ->  Materialize
          ->  Remote Subquery Scan on all
                ->  Append
-                     ->  Bitmap Heap Scan on patest0
-                           Recheck Cond: (id = int4_tbl.f1)
-                           ->  Bitmap Index Scan on patest0i
-                                 Index Cond: (id = int4_tbl.f1)
+                     ->  Index Scan using patest0i on patest0
+                           Index Cond: (id = int4_tbl.f1)
                      ->  Index Scan using patest1i on patest1
                            Index Cond: (id = int4_tbl.f1)
                      ->  Seq Scan on patest2
                            Filter: (int4_tbl.f1 = id)
-(17 rows)
+(15 rows)
 
 select * from patest0 join (select f1 from int4_tbl where f1 = 0 limit 1) ss on id = f1;
  id | x | f1 
@@ -1788,15 +1784,13 @@ SELECT thousand, thousand FROM tenk1
 ORDER BY thousand, tenthous;
                                   QUERY PLAN                                   
 -------------------------------------------------------------------------------
- Merge Append
-   Sort Key: tenk1.thousand, tenk1.tenthous
-   ->  Remote Subquery Scan on all
-         ->  Index Only Scan using tenk1_thous_tenthous on tenk1
-   ->  Remote Subquery Scan on all
-         ->  Sort
-               Sort Key: tenk1_1.thousand, tenk1_1.thousand
+ Remote Subquery Scan on all
+   ->  Sort
+         Sort Key: tenk1.thousand, tenk1.tenthous
+         ->  Append
+               ->  Index Only Scan using tenk1_thous_tenthous on tenk1
                ->  Index Only Scan using tenk1_thous_tenthous on tenk1 tenk1_1
-(8 rows)
+(6 rows)
 
 explain (costs off, num_nodes off, nodes off)
 SELECT thousand, tenthous, thousand+tenthous AS x FROM tenk1
@@ -1805,15 +1799,13 @@ SELECT 42, 42, hundred FROM tenk1
 ORDER BY thousand, tenthous;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
- Merge Append
-   Sort Key: tenk1.thousand, tenk1.tenthous
-   ->  Remote Subquery Scan on all
-         ->  Index Only Scan using tenk1_thous_tenthous on tenk1
-   ->  Remote Subquery Scan on all
-         ->  Sort
-               Sort Key: 42, 42
+ Remote Subquery Scan on all
+   ->  Sort
+         Sort Key: tenk1.thousand, tenk1.tenthous
+         ->  Append
+               ->  Index Only Scan using tenk1_thous_tenthous on tenk1
                ->  Index Only Scan using tenk1_hundred on tenk1 tenk1_1
-(8 rows)
+(6 rows)
 
 explain (costs off, num_nodes off, nodes off)
 SELECT thousand, tenthous FROM tenk1
@@ -1822,15 +1814,14 @@ SELECT thousand, random()::integer FROM tenk1
 ORDER BY thousand, tenthous;
                                   QUERY PLAN                                   
 -------------------------------------------------------------------------------
- Merge Append
+ Sort
    Sort Key: tenk1.thousand, tenk1.tenthous
-   ->  Remote Subquery Scan on all
-         ->  Index Only Scan using tenk1_thous_tenthous on tenk1
-   ->  Remote Subquery Scan on all
-         ->  Sort
-               Sort Key: tenk1_1.thousand, ((random())::integer)
+   ->  Append
+         ->  Remote Subquery Scan on all
+               ->  Index Only Scan using tenk1_thous_tenthous on tenk1
+         ->  Remote Subquery Scan on all
                ->  Index Only Scan using tenk1_thous_tenthous on tenk1 tenk1_1
-(8 rows)
+(7 rows)
 
 -- Check min/max aggregate optimization
 explain (costs off, num_nodes off, nodes off)
@@ -1880,17 +1871,15 @@ SELECT x, y FROM
    UNION ALL
    SELECT unique2 AS x, unique2 AS y FROM tenk1 b) s
 ORDER BY x, y;
-                            QUERY PLAN                             
--------------------------------------------------------------------
- Merge Append
-   Sort Key: a.thousand, a.tenthous
-   ->  Remote Subquery Scan on all
-         ->  Index Only Scan using tenk1_thous_tenthous on tenk1 a
-   ->  Remote Subquery Scan on all
-         ->  Sort
-               Sort Key: b.unique2, b.unique2
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Remote Subquery Scan on all
+   ->  Sort
+         Sort Key: a.thousand, a.tenthous
+         ->  Append
+               ->  Index Only Scan using tenk1_thous_tenthous on tenk1 a
                ->  Index Only Scan using tenk1_unique2 on tenk1 b
-(8 rows)
+(6 rows)
 
 -- exercise rescan code path via a repeatedly-evaluated subquery
 explain (costs off)

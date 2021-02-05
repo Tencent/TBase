@@ -211,10 +211,12 @@ EXPLAIN (COSTS OFF) SELECT * FROM atest12v x, atest12v y WHERE x.a = y.b;
                Distribute results by H: b
                ->  Seq Scan on atest12 atest12_1
                      Filter: (b <<< 5)
-         ->  Index Scan using atest12_a_idx on atest12
-               Index Cond: (a = atest12_1.b)
+         ->  Bitmap Heap Scan on atest12
+               Recheck Cond: (a = atest12_1.b)
                Filter: (b <<< 5)
-(9 rows)
+               ->  Bitmap Index Scan on atest12_a_idx
+                     Index Cond: (a = atest12_1.b)
+(11 rows)
 
 -- And this one.
 EXPLAIN (COSTS OFF) SELECT * FROM atest12 x, atest12 y
@@ -247,16 +249,15 @@ EXPLAIN (COSTS OFF) SELECT * FROM atest12v x, atest12v y WHERE x.a = y.b;
                            QUERY PLAN                            
 -----------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Hash Join
-         Hash Cond: (atest12_1.b = atest12.a)
+   ->  Nested Loop
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                Distribute results by H: b
                ->  Seq Scan on atest12 atest12_1
                      Filter: (b <<< 5)
-         ->  Hash
-               ->  Seq Scan on atest12
-                     Filter: (b <<< 5)
-(10 rows)
+         ->  Index Scan using atest12_a_idx on atest12
+               Index Cond: (a = atest12_1.b)
+               Filter: (b <<< 5)
+(9 rows)
 
 RESET random_page_cost;
 -- Now regress_user1 grants sufficient access to regress_user2.
@@ -273,10 +274,12 @@ EXPLAIN (COSTS OFF) SELECT * FROM atest12v x, atest12v y WHERE x.a = y.b;
                Distribute results by H: b
                ->  Seq Scan on atest12 atest12_1
                      Filter: (b <<< 5)
-         ->  Index Scan using atest12_a_idx on atest12
-               Index Cond: (a = atest12_1.b)
+         ->  Bitmap Heap Scan on atest12
+               Recheck Cond: (a = atest12_1.b)
                Filter: (b <<< 5)
-(9 rows)
+               ->  Bitmap Index Scan on atest12_a_idx
+                     Index Cond: (a = atest12_1.b)
+(11 rows)
 
 -- But not for this, due to lack of table-wide permissions needed
 -- to make use of the expression index's statistics.

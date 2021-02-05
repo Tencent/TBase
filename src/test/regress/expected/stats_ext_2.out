@@ -181,12 +181,10 @@ EXPLAIN (COSTS off)
          Group Key: a, b
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                Distribute results by H: a
-               ->  Partial GroupAggregate
+               ->  Partial HashAggregate
                      Group Key: a, b
-                     ->  Sort
-                           Sort Key: a, b
-                           ->  Seq Scan on ndistinct
-(10 rows)
+                     ->  Seq Scan on ndistinct
+(8 rows)
 
 EXPLAIN (COSTS off)
  SELECT COUNT(*) FROM ndistinct GROUP BY b, c;
@@ -197,12 +195,10 @@ EXPLAIN (COSTS off)
          Group Key: b, c
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                Distribute results by H: b
-               ->  Partial GroupAggregate
+               ->  Partial HashAggregate
                      Group Key: b, c
-                     ->  Sort
-                           Sort Key: b, c
-                           ->  Seq Scan on ndistinct
-(10 rows)
+                     ->  Seq Scan on ndistinct
+(8 rows)
 
 EXPLAIN (COSTS off)
  SELECT COUNT(*) FROM ndistinct GROUP BY a, b, c;
@@ -213,12 +209,10 @@ EXPLAIN (COSTS off)
          Group Key: a, b, c
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                Distribute results by H: a
-               ->  Partial GroupAggregate
+               ->  Partial HashAggregate
                      Group Key: a, b, c
-                     ->  Sort
-                           Sort Key: a, b, c
-                           ->  Seq Scan on ndistinct
-(10 rows)
+                     ->  Seq Scan on ndistinct
+(8 rows)
 
 EXPLAIN (COSTS off)
  SELECT COUNT(*) FROM ndistinct GROUP BY a, b, c, d;
@@ -229,12 +223,10 @@ EXPLAIN (COSTS off)
          Group Key: a, b, c, d
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                Distribute results by H: a
-               ->  Partial GroupAggregate
+               ->  Partial HashAggregate
                      Group Key: a, b, c, d
-                     ->  Sort
-                           Sort Key: a, b, c, d
-                           ->  Seq Scan on ndistinct
-(10 rows)
+                     ->  Seq Scan on ndistinct
+(8 rows)
 
 EXPLAIN (COSTS off)
  SELECT COUNT(*) FROM ndistinct GROUP BY b, c, d;
@@ -245,12 +237,10 @@ EXPLAIN (COSTS off)
          Group Key: b, c, d
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                Distribute results by H: b
-               ->  Partial GroupAggregate
+               ->  Partial HashAggregate
                      Group Key: b, c, d
-                     ->  Sort
-                           Sort Key: b, c, d
-                           ->  Seq Scan on ndistinct
-(10 rows)
+                     ->  Seq Scan on ndistinct
+(8 rows)
 
 -- correct command
 CREATE STATISTICS s10 ON a, b, c FROM ndistinct;
@@ -316,12 +306,10 @@ EXPLAIN (COSTS off)
          Group Key: a, b, c, d
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                Distribute results by H: a
-               ->  Partial GroupAggregate
+               ->  Partial HashAggregate
                      Group Key: a, b, c, d
-                     ->  Sort
-                           Sort Key: a, b, c, d
-                           ->  Seq Scan on ndistinct
-(10 rows)
+                     ->  Seq Scan on ndistinct
+(8 rows)
 
 EXPLAIN (COSTS off)
  SELECT COUNT(*) FROM ndistinct GROUP BY b, c, d;
@@ -332,12 +320,10 @@ EXPLAIN (COSTS off)
          Group Key: b, c, d
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                Distribute results by H: b
-               ->  Partial GroupAggregate
+               ->  Partial HashAggregate
                      Group Key: b, c, d
-                     ->  Sort
-                           Sort Key: b, c, d
-                           ->  Seq Scan on ndistinct
-(10 rows)
+                     ->  Seq Scan on ndistinct
+(8 rows)
 
 TRUNCATE TABLE ndistinct;
 -- under-estimates when using only per-column statistics
@@ -363,12 +349,10 @@ EXPLAIN (COSTS off)
          Group Key: a, b
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                Distribute results by H: b
-               ->  Partial GroupAggregate
+               ->  Partial HashAggregate
                      Group Key: a, b
-                     ->  Sort
-                           Sort Key: a, b
-                           ->  Seq Scan on ndistinct
-(10 rows)
+                     ->  Seq Scan on ndistinct
+(8 rows)
 
 EXPLAIN (COSTS off)
  SELECT COUNT(*) FROM ndistinct GROUP BY a, b, c;
@@ -675,10 +659,10 @@ EXPLAIN
  SELECT count(*) FROM subset WHERE b = 'prefix_1' and c = 1;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- Finalize Aggregate  (cost=255.01..255.02 rows=1 width=8)
-   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=255.00..255.01 rows=1 width=0)
-         ->  Partial Aggregate  (cost=155.00..155.01 rows=1 width=8)
-               ->  Seq Scan on subset  (cost=0.00..155.00 rows=2 width=0)
+ Finalize Aggregate  (cost=177.51..177.52 rows=1 width=8)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=177.50..177.51 rows=1 width=8)
+         ->  Partial Aggregate  (cost=77.50..77.51 rows=1 width=8)
+               ->  Seq Scan on subset  (cost=0.00..77.50 rows=1 width=0)
                      Filter: ((b = 'prefix_1'::text) AND (c = 1))
 (5 rows)
 
@@ -696,10 +680,10 @@ EXPLAIN
  SELECT count(*) FROM subset WHERE b = 'prefix_1' and c = 1;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- Finalize Aggregate  (cost=255.01..255.02 rows=1 width=8)
-   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=255.00..255.01 rows=1 width=0)
-         ->  Partial Aggregate  (cost=155.00..155.01 rows=1 width=8)
-               ->  Seq Scan on subset  (cost=0.00..155.00 rows=100 width=0)
+ Finalize Aggregate  (cost=177.51..177.52 rows=1 width=8)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=177.50..177.51 rows=1 width=8)
+         ->  Partial Aggregate  (cost=77.50..77.51 rows=1 width=8)
+               ->  Seq Scan on subset  (cost=0.00..77.50 rows=50 width=0)
                      Filter: ((b = 'prefix_1'::text) AND (c = 1))
 (5 rows)
 
@@ -714,10 +698,10 @@ EXPLAIN
  SELECT count(*) FROM subset WHERE b like '%_1' and c = 1;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- Finalize Aggregate  (cost=255.01..255.02 rows=1 width=8)
-   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=255.00..255.01 rows=1 width=0)
-         ->  Partial Aggregate  (cost=155.00..155.01 rows=1 width=8)
-               ->  Seq Scan on subset  (cost=0.00..155.00 rows=10 width=0)
+ Finalize Aggregate  (cost=177.51..177.52 rows=1 width=8)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=177.50..177.51 rows=1 width=8)
+         ->  Partial Aggregate  (cost=77.50..77.51 rows=1 width=8)
+               ->  Seq Scan on subset  (cost=0.00..77.50 rows=5 width=0)
                      Filter: ((b ~~ '%_1'::text) AND (c = 1))
 (5 rows)
 
@@ -738,10 +722,10 @@ EXPLAIN
  SELECT count(*) FROM subset WHERE b like '%_1' and c = 1;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- Finalize Aggregate  (cost=255.01..255.02 rows=1 width=8)
-   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=255.00..255.01 rows=1 width=0)
-         ->  Partial Aggregate  (cost=155.00..155.01 rows=1 width=8)
-               ->  Seq Scan on subset  (cost=0.00..155.00 rows=100 width=0)
+ Finalize Aggregate  (cost=177.51..177.52 rows=1 width=8)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=177.50..177.51 rows=1 width=8)
+         ->  Partial Aggregate  (cost=77.50..77.51 rows=1 width=8)
+               ->  Seq Scan on subset  (cost=0.00..77.50 rows=50 width=0)
                      Filter: ((b ~~ '%_1'::text) AND (c = 1))
 (5 rows)
 

@@ -51,8 +51,8 @@ explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on con
 
 explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on conflict (key, fruit) do update set fruit = excluded.fruit
   where exists (select 1 from insertconflicttest ii where ii.key = excluded.key);
-                                       QUERY PLAN                                       
-----------------------------------------------------------------------------------------
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_2)
    ->  Insert on insertconflicttest
          Conflict Resolution: UPDATE
@@ -61,8 +61,8 @@ explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on con
          ->  Result
          SubPlan 1
            ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                 ->  Index Only Scan using both_index_expr_key on insertconflicttest ii
-                       Index Cond: (key = excluded.key)
+                 ->  Seq Scan on insertconflicttest ii
+                       Filter: (key = excluded.key)
 (10 rows)
 
 -- Neither collation nor operator class specifications are required --

@@ -1449,18 +1449,17 @@ EXPLAIN (COSTS OFF) SELECT * FROM my_credit_card_usage_normal
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Nested Loop
          Join Filter: (l.cid = r.cid)
+         ->  Subquery Scan on l
+               Filter: f_leak(l.cnum)
+               ->  Hash Join
+                     Hash Cond: (r_1.cid = l_1.cid)
+                     ->  Seq Scan on credit_card r_1
+                     ->  Hash
+                           ->  Seq Scan on customer l_1
+                                 Filter: (name = (CURRENT_USER)::text)
          ->  Seq Scan on credit_usage r
                Filter: ((ymd >= '10-01-2011'::date) AND (ymd < '11-01-2011'::date))
-         ->  Materialize
-               ->  Subquery Scan on l
-                     Filter: f_leak(l.cnum)
-                     ->  Hash Join
-                           Hash Cond: (r_1.cid = l_1.cid)
-                           ->  Seq Scan on credit_card r_1
-                           ->  Hash
-                                 ->  Seq Scan on customer l_1
-                                       Filter: (name = (CURRENT_USER)::text)
-(14 rows)
+(13 rows)
 
 SELECT * FROM my_credit_card_usage_secure
        WHERE f_leak(cnum) AND ymd >= '2011-10-01' AND ymd < '2011-11-01';

@@ -1577,13 +1577,12 @@ WHERE t2.a = 3 and t3.a = 2 AND f_leak(t2.b) AND f_leak(t3.b);
  Remote Subquery Scan on all (datanode_2)
    ->  Update on t2
          ->  Nested Loop
-               ->  Seq Scan on t2
-                     Filter: ((a = 3) AND ((a % 2) = 1) AND f_leak(b))
-               ->  Materialize
                      ->  Remote Subquery Scan on all (datanode_1)
                            ->  Seq Scan on t3
                                  Filter: ((a = 2) AND f_leak(b))
-(9 rows)
+               ->  Seq Scan on t2
+                     Filter: ((a = 3) AND ((a % 2) = 1) AND f_leak(b))
+(8 rows)
 
 UPDATE t2 SET b=t2.b FROM t3
 WHERE t2.a = 3 and t3.a = 2 AND f_leak(t2.b) AND f_leak(t3.b);
@@ -2062,16 +2061,16 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test2;
 PREPARE plancache_test3 AS WITH q AS MATERIALIZED (SELECT * FROM z2) SELECT * FROM q,z1 WHERE f_leak(z1.b);
 EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
                            QUERY PLAN                            
------------------------------------------------------------------
+-------------------------------------------------------------
  Nested Loop
    CTE q
      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
            ->  Seq Scan on z2
-   ->  CTE Scan on q
-   ->  Materialize
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                ->  Seq Scan on z1
                      Filter: (((a % 2) = 0) AND f_leak(b))
+   ->  Materialize
+         ->  CTE Scan on q
 (9 rows)
 
 SET ROLE regress_rls_group1;
@@ -2114,16 +2113,16 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test2;
 
 EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
                            QUERY PLAN                            
------------------------------------------------------------------
+-------------------------------------------------------------
  Nested Loop
    CTE q
      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
            ->  Seq Scan on z2
-   ->  CTE Scan on q
-   ->  Materialize
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                ->  Seq Scan on z1
                      Filter: (((a % 2) = 0) AND f_leak(b))
+   ->  Materialize
+         ->  CTE Scan on q
 (9 rows)
 
 SET SESSION AUTHORIZATION regress_rls_carol;
@@ -2166,16 +2165,16 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test2;
 
 EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
                            QUERY PLAN                            
------------------------------------------------------------------
+-------------------------------------------------------------
  Nested Loop
    CTE q
      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
            ->  Seq Scan on z2
-   ->  CTE Scan on q
-   ->  Materialize
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                ->  Seq Scan on z1
                      Filter: (((a % 2) = 1) AND f_leak(b))
+   ->  Materialize
+         ->  CTE Scan on q
 (9 rows)
 
 SET ROLE regress_rls_group2;
@@ -2218,16 +2217,16 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test2;
 
 EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
                            QUERY PLAN                            
------------------------------------------------------------------
+-------------------------------------------------------------
  Nested Loop
    CTE q
      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
            ->  Seq Scan on z2
-   ->  CTE Scan on q
-   ->  Materialize
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                ->  Seq Scan on z1
                      Filter: (((a % 2) = 1) AND f_leak(b))
+   ->  Materialize
+         ->  CTE Scan on q
 (9 rows)
 
 --

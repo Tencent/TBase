@@ -1456,13 +1456,12 @@ explain (costs off)
    Hash Key: ten
    Hash Key: hundred
    Hash Key: thousand
+   Hash Key: twothousand
    Group Key: unique1
-   Sort Key: twothousand
-     Group Key: twothousand
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Sort
                Sort Key: unique1
                ->  Seq Scan on tenk1
-(13 rows)
+(12 rows)
 
 -- end

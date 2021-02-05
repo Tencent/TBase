@@ -1174,15 +1174,15 @@ set enable_hashjoin to false;
 set enable_mergejoin to false;
 explain select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
                                            QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=15636.19..15637.88 rows=675 width=8)
-   ->  Sort  (cost=15636.19..15637.88 rows=675 width=8)
+-----------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=3923.54..3924.39 rows=338 width=8)
+   ->  Sort  (cost=3923.54..3924.39 rows=338 width=8)
          Sort Key: a.a, b.a
-         ->  Nested Loop Left Scalar Join  (cost=0.00..15604.47 rows=675 width=8)
+         ->  Nested Loop Left Scalar Join  (cost=0.00..3909.35 rows=338 width=8)
                Join Filter: (b.a = a.a)
-               ->  Seq Scan on tbl_a a  (cost=0.00..23.50 rows=1350 width=4)
-               ->  Materialize  (cost=0.00..30.25 rows=1350 width=4)
-                     ->  Seq Scan on tbl_b b  (cost=0.00..23.50 rows=1350 width=4)
+               ->  Seq Scan on tbl_a a  (cost=0.00..11.75 rows=675 width=4)
+               ->  Materialize  (cost=0.00..15.12 rows=675 width=4)
+                     ->  Seq Scan on tbl_b b  (cost=0.00..11.75 rows=675 width=4)
 (8 rows)
 
 select a.a,(select b.a from tbl_b b where b.a = a.a) q from tbl_a a order by 1,2;
@@ -1711,16 +1711,16 @@ select a.a,(select b.a from tbl_b b where b.a = a.a limit 1) q from tbl_a a orde
 -- support pullup lateral ANY_SUBLINK
 explain select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);
                                                 QUERY PLAN                                                
-----------------------------------------------------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=140.38..193.10 rows=225 width=8)
-   ->  Hash Semi Join  (cost=140.38..193.10 rows=225 width=8)
+---------------------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=120.19..136.36 rows=112 width=8)
+   ->  Hash Semi Join  (cost=120.19..136.36 rows=112 width=8)
          Hash Cond: (a.b = b.a)
          Join Filter: (b.b > a.b)
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..141.05 rows=1350 width=8)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..111.75 rows=675 width=8)
                Distribute results by H: b
-               ->  Seq Scan on tbl_a a  (cost=0.00..23.50 rows=1350 width=8)
-         ->  Hash  (cost=23.50..23.50 rows=1350 width=8)
-               ->  Seq Scan on tbl_b b  (cost=0.00..23.50 rows=1350 width=8)
+               ->  Seq Scan on tbl_a a  (cost=0.00..11.75 rows=675 width=8)
+         ->  Hash  (cost=11.75..11.75 rows=675 width=8)
+               ->  Seq Scan on tbl_b b  (cost=0.00..11.75 rows=675 width=8)
 (9 rows)
 
 select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);
@@ -1750,9 +1750,12 @@ where t2.a = (
 		t1.a = t2.a
 );
                                              QUERY PLAN                                              
------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------
  Hash Join
-   Hash Cond: ("EXPR_subquery".min = t2.a)
+   Hash Cond: (t2.a = "EXPR_subquery".min)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+         ->  Seq Scan on sub_t2 t2
+   ->  Hash
    ->  Hash Left Join
          Hash Cond: (t1.a = "EXPR_subquery".a)
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
@@ -1771,9 +1774,6 @@ where t2.a = (
                                  ->  Materialize
                                        ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                              ->  Seq Scan on sub_interfere2
-   ->  Hash
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               ->  Seq Scan on sub_t2 t2
 (23 rows)
 
 DROP TABLE sub_t1;
