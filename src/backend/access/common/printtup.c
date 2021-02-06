@@ -29,9 +29,12 @@
 
 #include "miscadmin.h"
 #ifdef __TBASE__
+#include "access/htup_details.h"
+#include "catalog/pg_type.h"
 #include "postmaster/postmaster.h"
 #include "pgxc/squeue.h"
 #include "executor/executor.h"
+#include "utils/typcache.h"
 extern bool IsAbortedTransactionBlockState(void);
 #endif
 static void printtup_startup(DestReceiver *self, int operation,
@@ -444,6 +447,41 @@ printtup(TupleTableSlot *slot, DestReceiver *self)
         }
         else
         {
+#ifdef __TBASE__
+	            if (slot->tts_tupleDescriptor->attrs[i]->atttypid == RECORDOID && self->mydest == DestRemoteExecute)
+	            {
+		            Oid			    tupType;
+		            int32           tupTypmod;
+		            TupleDesc       tupdesc;
+		            uint32          n32;
+		            StringInfoData  tupdesc_data;
+		            HeapTupleHeader rec;
+		            /* RECORD must be varlena */
+		            Datum   attr_detoast = PointerGetDatum(PG_DETOAST_DATUM(slot->tts_values[i]));
+		
+		            rec = DatumGetHeapTupleHeader(attr_detoast);
+		            
+		            initStringInfo(&tupdesc_data);
+		            
+		            /* Extract type info from the tuple itself */
+		            tupType = HeapTupleHeaderGetTypeId(rec);
+		            tupTypmod = HeapTupleHeaderGetTypMod(rec);
+		            tupdesc = lookup_rowtype_tupdesc(tupType, tupTypmod);
+		
+		            /* -2 to indicate this is composite type */
+		            n32 = htonl(-2);
+		            appendBinaryStringInfo(&buf, (char *) &n32, 4);
+		
+		            FormRowDescriptionMessage(tupdesc, NULL, NULL, &tupdesc_data);
+		            ReleaseTupleDesc(tupdesc);
+		            n32 = htonl(tupdesc_data.len);
+		            /* write rowDesctiption */
+		            appendBinaryStringInfo(&buf, (char *) &n32, 4);
+		            appendBinaryStringInfo(&buf, tupdesc_data.data, tupdesc_data.len);
+		
+		            pfree(tupdesc_data.data);
+	            }
+#endif
                 int len = strlen(outputstr);
                 pq_sendint(&buf, len, 4);
                 appendBinaryStringInfo(&buf, outputstr, len);

@@ -2667,19 +2667,16 @@ select * from id_ordered order by id;
 (6 rows)
 
 update id_ordered set name = 'update 2' where id = 2;
-ERROR:  input of anonymous composite types is not implemented
 update id_ordered set name = 'update 4' where id = 4;
-ERROR:  input of anonymous composite types is not implemented
 update id_ordered set name = 'update 5' where id = 5;
-ERROR:  input of anonymous composite types is not implemented
 select * from id_ordered order by id;
- id |  name  
-----+--------
+ id |   name   
+----+----------
   1 | Test 1
-  2 | Test 2
+  2 | update 2
   3 | Test 3
-  4 | Test 4
-  5 | Test 5
+  4 | update 4
+  5 | update 5
   6 | Test 6
 (6 rows)
 
