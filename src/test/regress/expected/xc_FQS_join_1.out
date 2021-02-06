@@ -390,19 +390,19 @@ explain (verbose on, nodes off, costs off) select * from tab1_mod natural join t
 ----------------------------------------------------------------------------------
  Hash Join
    Output: tab1_mod.val, tab1_mod.val2
-   Hash Cond: ((tab4_rep.val = tab1_mod.val) AND (tab4_rep.val2 = tab1_mod.val2))
-         ->  Remote Subquery Scan on all
-               Output: tab4_rep.val, tab4_rep.val2
-               ->  Seq Scan on public.tab4_rep
-                     Output: tab4_rep.val, tab4_rep.val2
-                     Filter: (tab4_rep.val < 4)
-   ->  Hash
-         Output: tab1_mod.val, tab1_mod.val2
+   Hash Cond: ((tab1_mod.val = tab4_rep.val) AND (tab1_mod.val2 = tab4_rep.val2))
          ->  Remote Subquery Scan on all
                Output: tab1_mod.val, tab1_mod.val2
                ->  Seq Scan on public.tab1_mod
                      Output: tab1_mod.val, tab1_mod.val2
                      Filter: (tab1_mod.val > 2)
+   ->  Hash
+         Output: tab4_rep.val, tab4_rep.val2
+         ->  Remote Subquery Scan on all
+               Output: tab4_rep.val, tab4_rep.val2
+               ->  Seq Scan on public.tab4_rep
+                     Output: tab4_rep.val, tab4_rep.val2
+                     Filter: (tab4_rep.val < 4)
 (15 rows)
 
 -- Join involving two distributed tables, never shipped
@@ -425,18 +425,18 @@ explain (verbose on, nodes off, costs off) select * from tab1_mod natural join t
    Output: tab1_mod.val, tab1_mod.val2
    ->  Hash Join
          Output: tab1_mod.val, tab1_mod.val2
-         Hash Cond: ((tab2_mod.val = tab1_mod.val) AND (tab2_mod.val2 = tab1_mod.val2))
-                     ->  Seq Scan on public.tab2_mod
-                           Output: tab2_mod.val, tab2_mod.val2
-                           Filter: (tab2_mod.val < 4)
-         ->  Hash
-               Output: tab1_mod.val, tab1_mod.val2
-               ->  Remote Subquery Scan on all
-                     Output: tab1_mod.val, tab1_mod.val2
-                     Distribute results by M: val
+         Hash Cond: ((tab1_mod.val = tab2_mod.val) AND (tab1_mod.val2 = tab2_mod.val2))
                      ->  Seq Scan on public.tab1_mod
                            Output: tab1_mod.val, tab1_mod.val2
                            Filter: (tab1_mod.val > 2)
+         ->  Hash
+               Output: tab2_mod.val, tab2_mod.val2
+               ->  Remote Subquery Scan on all
+                     Output: tab2_mod.val, tab2_mod.val2
+                     Distribute results by M: val
+                     ->  Seq Scan on public.tab2_mod
+                           Output: tab2_mod.val, tab2_mod.val2
+                           Filter: (tab2_mod.val < 4)
 (16 rows)
 
 -- Join involving a distributed table and two replicated tables, such that the
@@ -590,17 +590,17 @@ explain (verbose on, nodes off, costs off, num_nodes on) select * from tab1_mod 
          Output: tab1_mod.val, tab1_mod.val2, tab1_mod.val2
          Join Filter: (tab1_mod.val2 = tab4_rep.val2)
          ->  Remote Subquery Scan on all
-                     Output: tab4_rep.val, tab4_rep.val2
-                     ->  Seq Scan on public.tab4_rep
-                           Output: tab4_rep.val, tab4_rep.val2
-                           Filter: (tab4_rep.val = 1)
-         ->  Materialize
-               Output: tab1_mod.val, tab1_mod.val2
-               ->  Remote Subquery Scan on all
                      Output: tab1_mod.val, tab1_mod.val2
                      ->  Seq Scan on public.tab1_mod
                            Output: tab1_mod.val, tab1_mod.val2
                            Filter: (tab1_mod.val = 1)
+         ->  Materialize
+               Output: tab4_rep.val, tab4_rep.val2
+               ->  Remote Subquery Scan on all
+                     Output: tab4_rep.val, tab4_rep.val2
+                     ->  Seq Scan on public.tab4_rep
+                           Output: tab4_rep.val, tab4_rep.val2
+                           Filter: (tab4_rep.val = 1)
 (18 rows)
 
 -- following join between distributed tables should get FQSed because both of
@@ -625,16 +625,16 @@ explain (verbose on, nodes off, costs off, num_nodes on) select * from tab1_mod 
    ->  Nested Loop
          Output: tab1_mod.val2, tab1_mod.val, tab2_mod.val, tab1_mod.val
          Join Filter: (tab1_mod.val2 = tab2_mod.val2)
-         ->  Seq Scan on public.tab2_mod
-               Output: tab2_mod.val, tab2_mod.val2
-               Filter: (tab2_mod.val = 2)
-         ->  Materialize
-               Output: tab1_mod.val2, tab1_mod.val
          ->  Remote Subquery Scan on all
                Output: tab1_mod.val2, tab1_mod.val
                ->  Seq Scan on public.tab1_mod
                      Output: tab1_mod.val2, tab1_mod.val
                      Filter: (tab1_mod.val = 1)
+         ->  Materialize
+               Output: tab2_mod.val, tab2_mod.val2
+               ->  Seq Scan on public.tab2_mod
+                     Output: tab2_mod.val, tab2_mod.val2
+                     Filter: (tab2_mod.val = 2)
 (15 rows)
 
 -- JOIN involving the distributed table with equi-JOIN on the distributed column

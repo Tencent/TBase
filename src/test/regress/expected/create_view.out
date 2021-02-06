@@ -38,6 +38,55 @@ SELECT * FROM viewtest ORDER BY a;
 
 CREATE OR REPLACE VIEW viewtest AS
 	SELECT a, b FROM viewtest_tbl WHERE a > 5 ORDER BY b DESC;
+EXPLAIN SELECT * FROM viewtest;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=22.23..22.79 rows=225 width=8)
+   ->  Sort  (cost=22.23..22.79 rows=225 width=8)
+         Sort Key: viewtest_tbl.b DESC
+         ->  Seq Scan on viewtest_tbl  (cost=0.00..13.44 rows=225 width=8)
+               Filter: (a > 5)
+(5 rows)
+
+SELECT * FROM viewtest;
+ a  | b  
+----+----
+ 20 | 25
+ 15 | 20
+ 10 | 15
+(3 rows)
+
+EXPLAIN SELECT a FROM viewtest;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Subquery Scan on viewtest  (cost=22.23..25.04 rows=225 width=4)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=22.23..22.79 rows=225 width=8)
+         ->  Sort  (cost=22.23..22.79 rows=225 width=8)
+               Sort Key: viewtest_tbl.b DESC
+               ->  Seq Scan on viewtest_tbl  (cost=0.00..13.44 rows=225 width=8)
+                     Filter: (a > 5)
+(6 rows)
+
+SELECT a FROM viewtest;
+ a  
+----
+ 20
+ 15
+ 10
+(3 rows)
+
+EXPLAIN SELECT * FROM viewtest ORDER BY a;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=33.83..34.39 rows=225 width=8)
+   ->  Sort  (cost=33.83..34.39 rows=225 width=8)
+         Sort Key: viewtest_tbl.a
+         ->  Sort  (cost=22.23..22.79 rows=225 width=8)
+               Sort Key: viewtest_tbl.b DESC
+               ->  Seq Scan on viewtest_tbl  (cost=0.00..13.44 rows=225 width=8)
+                     Filter: (a > 5)
+(7 rows)
+
 SELECT * FROM viewtest ORDER BY a;
  a  | b  
 ----+----
