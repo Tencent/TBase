@@ -2050,7 +2050,7 @@ PoolManagerCheckConnectionInfo(void)
 		ConnectPoolManager();
     }
     
-    PgxcNodeListAndCount();
+	PgxcNodeListAndCountWrapTransaction();
     pool_putmessage(&poolHandle->port, 'q', NULL, 0);
     pool_flush(&poolHandle->port);
 
@@ -2070,7 +2070,7 @@ void
 PoolManagerReloadConnectionInfo(void)
 {
     Assert(poolHandle);
-    PgxcNodeListAndCount();
+	PgxcNodeListAndCountWrapTransaction();
     pool_putmessage(&poolHandle->port, 'p', NULL, 0);
     pool_flush(&poolHandle->port);
 }
@@ -10640,7 +10640,7 @@ PoolManagerRefreshConnectionInfo(void)
     HOLD_POOLER_RELOAD();
 
     Assert(poolHandle);
-    PgxcNodeListAndCount();
+	PgxcNodeListAndCountWrapTransaction();
     pool_putmessage(&poolHandle->port, 'R', NULL, 0);
     pool_flush(&poolHandle->port);
 

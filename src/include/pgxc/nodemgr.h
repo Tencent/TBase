@@ -47,7 +47,7 @@ extern Size NodeHashTableShmemSize(void);
 #endif
 extern Size NodeTablesShmemSize(void);
 
-extern void PgxcNodeListAndCount(void);
+extern void PgxcNodeListAndCountWrapTransaction(void);
 extern void
 PgxcNodeGetOidsExtend(Oid **coOids, Oid **dnOids, Oid **sdnOids,
                 int *num_coords, int *num_dns, int *num_sdns, bool update_preferred);

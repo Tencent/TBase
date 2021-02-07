@@ -577,7 +577,7 @@ count_coords_datanodes(Relation rel, int *num_coord, int *num_dns)
  *
  * Update node definitions in the shared memory tables from the catalog
  */
-void
+static void
 PgxcNodeListAndCount(void)
 {// #lizard forgives
     Relation rel;
@@ -800,6 +800,29 @@ PgxcNodeListAndCount(void)
     LWLockRelease(NodeTableLock);
 }
 
+/*
+ * PgxcNodeListAndCountWrapTransaction
+ *
+ * Update node definitions in the shared memory tables from the catalog wrap the transaction
+ */
+void
+PgxcNodeListAndCountWrapTransaction(void)
+{
+	bool need_abort = false;
+	
+	if (!IsTransactionOrTransactionBlock())
+	{
+		StartTransactionCommand();
+		need_abort = true;
+	}
+
+	PgxcNodeListAndCount();
+	
+	if (need_abort)
+	{
+		AbortCurrentTransaction();
+	}
+}
 
 /*
  * PgxcNodeGetIds

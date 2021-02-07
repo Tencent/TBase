@@ -240,7 +240,7 @@ InitMultinodeExecutor(bool is_force)
         return;
 
     /* Update node table in the shared memory */
-    PgxcNodeListAndCount();
+	PgxcNodeListAndCountWrapTransaction();
 
     /* Get classified list of node Oids */
     PgxcNodeGetOidsExtend(&coOids, &dnOids, &sdnOids, &NumCoords, &NumDataNodes, &NumSlaveDataNodes, true);
