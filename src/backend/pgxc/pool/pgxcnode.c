@@ -2064,7 +2064,7 @@ pgxc_node_send_parse(PGXCNodeHandle * handle, const char* statement,
 int
 pgxc_node_send_plan(PGXCNodeHandle * handle, const char *statement,
                     const char *query, const char *planstr,
-                    short num_params, Oid *param_types)
+					short num_params, Oid *param_types, int instrument_options)
 {
     int            stmtLen;
     int            queryLen;
@@ -2093,8 +2093,8 @@ pgxc_node_send_plan(PGXCNodeHandle * handle, const char *statement,
         paramTypes[i] = format_type_be(param_types[i]);
         paramTypeLen += strlen(paramTypes[i]) + 1;
     }
-    /* size + pnameLen + queryLen + parameters */
-    msgLen = 4 + queryLen + stmtLen + planLen + paramTypeLen;
+	/* size + pnameLen + queryLen + parameters + instrument_options */
+	msgLen = 4 + queryLen + stmtLen + planLen + paramTypeLen + 4;
 
     /* msgType + msgLen */
     if (ensure_out_buffer_capacity(handle->outEnd + 1 + msgLen, handle) != 0)
@@ -2134,6 +2134,10 @@ pgxc_node_send_plan(PGXCNodeHandle * handle, const char *statement,
         pfree(paramTypes[i]);
     }
     pfree(paramTypes);
+	/* instrument_options */
+	instrument_options = htonl(instrument_options);
+	memcpy(handle->outBuffer + handle->outEnd, &instrument_options, 4);
+	handle->outEnd += 4;
 
     handle->last_command = 'a';
 

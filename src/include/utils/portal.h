@@ -266,6 +266,7 @@ typedef struct PortalData
 	
 	/* information about EvalPlanQual, pass it to queryDesc */
 	RemoteEPQContext *epqContext;
+	int			up_instrument;	/* explain analyze option from cn */
 #endif
 }            PortalData;
 

@@ -866,6 +866,9 @@ ExecShutdownNode(PlanState *node)
         case T_GatherMergeState:
             ExecShutdownGatherMerge((GatherMergeState *) node);
             break;
+		case T_RemoteSubplanState:
+			ExecShutdownRemoteSubplan((RemoteSubplanState *) node);
+			break;
         default:
             break;
     }

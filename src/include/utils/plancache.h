@@ -181,6 +181,7 @@ typedef struct CachedPlanSource
 #endif
 #ifdef __TBASE__
     bool       insert_into;
+	int        instrument_options
 #endif
 } CachedPlanSource;
 

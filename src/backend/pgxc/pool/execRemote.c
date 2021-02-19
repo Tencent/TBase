@@ -59,6 +59,7 @@
 #include "pgxc/xc_maintenance_mode.h"
 #include "catalog/pgxc_class.h"
 #ifdef __TBASE__
+#include "commands/explain_dist.h"
 #include "pgxc/squeue.h"
 #include "executor/execParallel.h"
 #include "postmaster/postmaster.h"
@@ -297,6 +298,15 @@ InitResponseCombiner(ResponseCombiner *combiner, int node_count,
     combiner->recv_datarows  = 0;
     combiner->prerowBuffers  = NULL;
     combiner->is_abort = false;
+	combiner->printed_nodes = NULL;
+	{
+		HASHCTL		ctl;
+		
+		ctl.keysize = sizeof(int);
+		ctl.entrysize = sizeof(RemoteInstr);
+		
+		combiner->recv_instr_htbl = hash_create("Remote Instrument", 16, &ctl, HASH_ELEM);
+	}
 #endif
 }
 
@@ -1098,6 +1108,18 @@ CloseCombiner(ResponseCombiner *combiner)
         pfree(combiner->tapemarks);
         combiner->tapemarks = NULL;
     }
+#ifdef __TBASE__
+	if (combiner->recv_instr_htbl)
+	{
+		hash_destroy(combiner->recv_instr_htbl);
+		combiner->recv_instr_htbl = NULL;
+	}
+	if (combiner->printed_nodes)
+	{
+		bms_free(combiner->printed_nodes);
+		combiner->printed_nodes = NULL;
+	}
+#endif
 }
 
 /*
@@ -2671,6 +2693,10 @@ READ_ROWBUFFER:
         {
             /* Do nothing. It must have been handled in handle_response() */
         }
+		else if (res == RESPONSE_INSTR)
+		{
+			/* Do nothing. It must have been handled in handle_response() */
+		}
         else
         {
             // Can not get here?
@@ -3306,6 +3332,12 @@ handle_response(PGXCNodeHandle *conn, ResponseCombiner *combiner)
                 #endif
                 return RESPONSE_ASSIGN_GXID;
                 
+#ifdef __TBASE__
+			case 'i': /* Remote Instrument */
+				if (msg_len > 0)
+					HandleRemoteInstr(msg, msg_len, conn->nodeoid, combiner);
+				return RESPONSE_INSTR;
+#endif
             default:
                 /* sync lost? */
                 elog(WARNING, "Received unsupported message type: %c", msg_type);
@@ -10487,7 +10519,7 @@ ExecFinishInitRemoteSubplan(RemoteSubplanState *node)
                      errmsg("Failed to send command ID to data nodes")));
         }
         pgxc_node_send_plan(connection, cursor, "Remote Subplan",
-                            node->subplanstr, node->nParamRemote, paramtypes);
+							node->subplanstr, node->nParamRemote, paramtypes, estate->es_instrument);
 
 		if (enable_statistic)
 		{
@@ -11100,6 +11132,29 @@ ExecReScanRemoteSubplan(RemoteSubplanState *node)
 }
 
 #ifdef __TBASE__
+/*
+ * ExecShutdownRemoteSubplan
+ * 
+ * for instrumentation only, init full planstate tree,
+ * then attach recieved remote instrumenation.
+ */
+void
+ExecShutdownRemoteSubplan(RemoteSubplanState *node)
+{
+	ResponseCombiner    *combiner = &node->combiner;
+	PlanState           *ps = &combiner->ss.ps;
+	Plan                *plan = ps->plan;
+	EState              *estate = ps->state;
+	
+	if (estate->es_instrument)
+	{
+		if (!ps->lefttree)
+			ps->lefttree = ExecInitNode(plan->lefttree, estate, EXEC_FLAG_EXPLAIN_ONLY);
+
+		AttachRemoteInstr(ps->lefttree, combiner);
+	}
+}
+
 void
 ExecFinishRemoteSubplan(RemoteSubplanState *node)
 {// #lizard forgives

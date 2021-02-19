@@ -244,6 +244,19 @@ ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateContext *e)
     /* Count this node. */
     e->nnodes++;
 
+	/*
+	 * if we are running with instrument option, must init
+	 * full plantree here, to ensure e->nnodes correct.
+	 */
+	if (planstate->instrument &&
+	    IsA(planstate, RemoteSubplanState) &&
+	    NULL == planstate->lefttree)
+	{
+		planstate->lefttree = ExecInitNode(planstate->plan->lefttree,
+		                                   planstate->state,
+		                                   EXEC_FLAG_EXPLAIN_ONLY);
+	}
+
     /* Call estimators for parallel-aware nodes. */
     if (planstate->plan->parallel_aware)
     {

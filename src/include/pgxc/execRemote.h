@@ -52,6 +52,7 @@
 #endif
 
 #ifdef __TBASE__
+#define RESPONSE_INSTR 13
 #define     UINT32_BITS_NUM              32
 #define     WORD_NUMBER_FOR_NODES      (MAX_NODES_NUMBER / UINT32_BITS_NUM)
 
@@ -174,6 +175,10 @@ typedef struct ResponseCombiner
     PGXCNodeHandle **conns;        
     int                 ccount;    
     uint64     recv_datarows;
+	
+	/* for remote instrument */
+	Bitmapset       *printed_nodes;     /* ids of plan nodes we've handled */
+	HTAB            *recv_instr_htbl;        /* received str hash table for each plan_node_id */
 #endif
 }    ResponseCombiner;
 
@@ -422,6 +427,7 @@ extern void SetCurrentHandlesReadonly(void);
 extern TupleDesc create_tuple_desc(char *msg_body, size_t len);
 
 extern void ExecFinishRemoteSubplan(RemoteSubplanState *node);
+extern void ExecShutdownRemoteSubplan(RemoteSubplanState *node);
 #endif
 
 #ifdef __SUBSCRIPTION__

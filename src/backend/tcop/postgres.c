@@ -106,6 +106,7 @@
 #include "executor/execParallel.h"
 #include "pgxc/poolutils.h"
 #include "commands/vacuum.h"
+#include "commands/explain_dist.h"
 #endif
 #endif
 
@@ -1995,8 +1996,9 @@ exec_plan_message(const char *query_string,    /* source of the query */
                   const char *stmt_name,        /* name for prepared stmt */
                   const char *plan_string,        /* encoded plan to execute */
                   char **paramTypeNames,    /* parameter type names */
-                  int numParams)        /* number of parameters */
-{// #lizard forgives
+				  int numParams,		/* number of parameters */
+				  int instrument_options)		/* explain analyze option */
+{
     MemoryContext oldcontext;
     bool        save_log_statement_stats = log_statement_stats;
     char        msec_str[32];
@@ -2094,6 +2096,8 @@ exec_plan_message(const char *query_string,    /* source of the query */
     StorePreparedStatement(stmt_name, psrc, false, true);
 
     SetRemoteSubplan(psrc, plan_string);
+	/* set instrument_options, default 0 */
+	psrc->instrument_options = instrument_options;
 
     MemoryContextSwitchTo(oldcontext);
 
@@ -2691,26 +2695,26 @@ exec_bind_message(StringInfo input_message)
 	/* Get epq context, only datanodes need them */
 	if (IS_PGXC_DATANODE && (IsConnFromCoord() || IsConnFromDatanode()))
 	{
-	num_epq_tuple = pq_getmsgint(input_message, 2);
-	if (num_epq_tuple > 0)
-	{
-		int			i;
-		
-		portal->epqContext = palloc(sizeof(RemoteEPQContext));
-		portal->epqContext->ntuples = num_epq_tuple;
-		portal->epqContext->tid = palloc(num_epq_tuple * sizeof(ItemPointerData));
-		portal->epqContext->rtidx = palloc(num_epq_tuple * sizeof(int));
-		portal->epqContext->nodeid = palloc(num_epq_tuple * sizeof(uint32));
-		
-		for (i = 0; i < num_epq_tuple; i++)
-		{
-			portal->epqContext->rtidx[i] = pq_getmsgint(input_message, 2);
-			portal->epqContext->tid[i].ip_blkid.bi_hi = pq_getmsgint(input_message, 2);
-			portal->epqContext->tid[i].ip_blkid.bi_lo = pq_getmsgint(input_message, 2);
-			portal->epqContext->tid[i].ip_posid = pq_getmsgint(input_message, 2);
-			portal->epqContext->nodeid[i] = pq_getmsgint(input_message, 4);
-		}
-	}
+        num_epq_tuple = pq_getmsgint(input_message, 2);
+        if (num_epq_tuple > 0)
+        {
+            int			i;
+            
+            portal->epqContext = palloc(sizeof(RemoteEPQContext));
+            portal->epqContext->ntuples = num_epq_tuple;
+            portal->epqContext->tid = palloc(num_epq_tuple * sizeof(ItemPointerData));
+            portal->epqContext->rtidx = palloc(num_epq_tuple * sizeof(int));
+            portal->epqContext->nodeid = palloc(num_epq_tuple * sizeof(uint32));
+            
+            for (i = 0; i < num_epq_tuple; i++)
+            {
+                portal->epqContext->rtidx[i] = pq_getmsgint(input_message, 2);
+                portal->epqContext->tid[i].ip_blkid.bi_hi = pq_getmsgint(input_message, 2);
+                portal->epqContext->tid[i].ip_blkid.bi_lo = pq_getmsgint(input_message, 2);
+                portal->epqContext->tid[i].ip_posid = pq_getmsgint(input_message, 2);
+                portal->epqContext->nodeid[i] = pq_getmsgint(input_message, 4);
+            }
+        }
 	}
 	
     pq_getmsgend(input_message);
@@ -2760,6 +2764,9 @@ exec_bind_message(StringInfo input_message)
                       cplan->stmt_list,
                       cplan);
 
+	/* set instrument before PortalStart, default 0 */
+	portal->up_instrument = psrc->instrument_options;
+	
     /* Done with the snapshot used for parameter I/O and parsing/planning */
     if (snapshot_set)
         PopActiveSnapshot();
@@ -3025,6 +3032,15 @@ exec_execute_message(const char *portal_name, long max_rows)
             CommandCounterIncrement();
         }
 
+		
+#ifdef __TBASE__
+		if (portal->up_instrument &&
+		    portal->queryDesc &&
+		    portal->queryDesc->myindex == -1)
+		{
+			SendLocalInstr(portal->queryDesc->planstate);
+		}
+#endif
         /* Send appropriate CommandComplete to client */
         EndCommand(completionTag, dest);
 
@@ -5486,6 +5502,7 @@ PostgresMain(int argc, char *argv[],
                     const char *plan_string;
                     int            numParams;
                     char       **paramTypes = NULL;
+					int         instrument_options = 0;
 
                     /* Set statement_timestamp() */
                     SetCurrentStatementStartTimestamp();
@@ -5502,10 +5519,14 @@ PostgresMain(int argc, char *argv[],
                             paramTypes[i] = (char *)
                                     pq_getmsgstring(&input_message);
                     }
+					
+					instrument_options = pq_getmsgint(&input_message, 4);
+					
                     pq_getmsgend(&input_message);
 
                     exec_plan_message(query_string, stmt_name, plan_string,
-                                      paramTypes, numParams);
+									  paramTypes, numParams,
+									  instrument_options);
                 }
                 break;
 #endif

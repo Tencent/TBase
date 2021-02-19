@@ -681,8 +681,11 @@ PortalStart(Portal portal, ParamListInfo params,
                                             None_Receiver,
                                             params,
                                             NULL,
+#ifdef __TBASE__
+                                            portal->up_instrument);
+#else
                                             0);
-
+#endif
 				/*
 				 * set information about EvalPlanQual if any, they will be fill in
 				 * estate later after it been created.
@@ -1006,7 +1009,7 @@ PortalStart(Portal portal, ParamListInfo params,
                                                 None_Receiver,
                                                 params,
                                                 portal->queryEnv,
-                                                0);
+                                                portal->up_instrument);
                 }
                 else
 #endif
@@ -1017,8 +1020,11 @@ PortalStart(Portal portal, ParamListInfo params,
                                             None_Receiver,
                                             params,
                                             portal->queryEnv,
+#ifdef __TBASE__
+                                            portal->up_instrument);
+#else
                                             0);
-
+#endif
                 /*
 				 * set information about EvalPlanQual if any, they will be fill in
 				 * estate later after it been created.

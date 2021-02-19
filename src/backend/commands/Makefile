@@ -15,7 +15,7 @@ include $(top_builddir)/src/Makefile.global
 OBJS = amcmds.o aggregatecmds.o alter.o analyze.o async.o cluster.o comment.o \
 	collationcmds.o constraint.o conversioncmds.o copy.o createas.o \
 	dbcommands.o define.o discard.o dropcmds.o \
-	event_trigger.o explain.o extension.o foreigncmds.o functioncmds.o \
+	event_trigger.o explain.o explain_dist.o extension.o foreigncmds.o functioncmds.o \
 	indexcmds.o lockcmds.o matview.o operatorcmds.o opclasscmds.o \
 	policy.o portalcmds.o prepare.o proclang.o publicationcmds.o \
 	schemacmds.o seclabel.o sequence.o statscmds.o subscriptioncmds.o \

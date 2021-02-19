@@ -222,7 +222,7 @@ extern int	pgxc_node_send_query_extended(PGXCNodeHandle *handle, const char *que
 							  bool send_describe, int fetch_size);
 extern int  pgxc_node_send_plan(PGXCNodeHandle * handle, const char *statement,
 					const char *query, const char *planstr,
-					short num_params, Oid *param_types);
+					short num_params, Oid *param_types, int instrument_options);
 extern int pgxc_node_send_gid(PGXCNodeHandle *handle, char* gid);
 #ifdef __TWO_PHASE_TRANS__
 extern int pgxc_node_send_starter(PGXCNodeHandle *handle, char* startnode);
