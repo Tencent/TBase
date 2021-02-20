@@ -1911,9 +1911,25 @@ FinishPreparedTransaction(const char *gid, bool isCommit)
      * to disk if for some reason they have lived for a long time.
      */
     if (gxact->ondisk)
+	{
         buf = ReadTwoPhaseFile(xid, true);
+		if (NULL == buf)
+		{
+			ereport(PANIC,
+					(errcode_for_file_access(),
+					errmsg("read two-phase file failed, gid: %s", gid)));
+		}
+	}
     else
+	{
         XlogReadTwoPhaseData(gxact->prepare_start_lsn, &buf, NULL);
+		if (NULL == buf)
+		{
+			ereport(PANIC,
+					(errcode_for_file_access(),
+					errmsg("read two-phase data from xlog failed, gid: %s", gid)));
+		}
+	}
 
 
     /*
