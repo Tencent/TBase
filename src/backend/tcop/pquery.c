@@ -1409,6 +1409,11 @@ PortalRun(Portal portal, long count, bool isTopLevel, bool run_once,
                     int             myindex = queryDesc->myindex;
                     TupleTableSlot *slot;
 
+                    if (squeue == NULL)
+                    {
+                        elog(ERROR, "squeue: %s is null, myindex: %d, atStart: %d, atEnd: %d", portal->name, myindex, portal->atStart, portal->atEnd);
+                    }
+
                     /*
                      * We are the consumer.
                      * We have skipped plan initialization, hence we do not have
