@@ -64,6 +64,7 @@
 #include "postmaster/postmaster.h"
 #include "executor/nodeModifyTable.h"
 #include "utils/syscache.h"
+#include "nodes/print.h"
 #endif
 /*
  * We do not want it too long, when query is terminating abnormally we just
@@ -9503,7 +9504,8 @@ RemoteSubplanMakeUnique(Node *plan, int unique)
      */
     if (IsA(plan, RemoteSubplan))
     {
-        ((RemoteSubplan *)plan)->unique = unique;
+	    int old = ((RemoteSubplan *)plan)->unique;
+		((RemoteSubplan *)plan)->unique = old * MAX_NODES_NUMBER + unique;
     }
     /* Otherwise it is a Plan descendant */
     RemoteSubplanMakeUnique((Node *) ((Plan *) plan)->lefttree, unique);
@@ -10055,6 +10057,8 @@ ExecInitRemoteSubplan(RemoteSubplan *node, EState *estate, int eflags)
              * unique.
              */
             RemoteSubplanMakeUnique((Node *) outerPlan(node), PGXCNodeId);
+            elog(DEBUG3, "RemoteSubplanMakeUnique for LOCATOR_TYPE_NONE unique: %d, cursor: %s",
+                 PGXCNodeId, node->cursor);
         }
         rstmt.planTree = outerPlan(node);
         /*
@@ -10255,6 +10259,7 @@ ExecInitRemoteSubplan(RemoteSubplan *node, EState *estate, int eflags)
 #ifdef __AUDIT__
             rstmt.queryString = NULL;
             rstmt.parseTree = NULL;
+			elog_node_display(DEBUG5, "SendPlanMessage", &rstmt, Debug_pretty_print);
 #endif
         }
         PG_CATCH();

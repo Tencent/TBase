@@ -296,7 +296,7 @@ OwnLatch(volatile Latch *latch)
 #endif
 
     if (latch->owner_pid != 0)
-        elog(ERROR, "latch already owned");
+		elog(ERROR, "latch already owned by %d", latch->owner_pid);
 
     latch->owner_pid = MyProcPid;
 }
