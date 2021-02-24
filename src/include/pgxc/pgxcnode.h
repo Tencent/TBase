@@ -143,6 +143,8 @@ typedef struct
 	PGXCNodeHandle	  **coord_handles;	/* an array of Coordinator handles */
 } PGXCNodeAllHandles;
 
+extern volatile bool HandlesInvalidatePending;
+
 extern void InitMultinodeExecutor(bool is_force);
 extern Oid get_nodeoid_from_nodeid(int nodeid, char node_type);
 
@@ -295,6 +297,7 @@ inline bool  is_ddl_leader_cn(char *leader_cn);
 extern int pgxc_node_send_sessionid(PGXCNodeHandle * handle);
 extern void SerializeSessionId(Size maxsize, char *start_address);
 extern void StartParallelWorkerSessionId(char *address);
+void CheckInvalidateRemoteHandles(void);
 #endif
 
 #ifdef __AUDIT__

@@ -5264,9 +5264,7 @@ PostgresMain(int argc, char *argv[],
 #endif
 
 #ifdef __TBASE__
-        RESUME_POOLER_RELOAD();
-        CHECK_FOR_POOLER_RELOAD();
-        HOLD_POOLER_RELOAD();
+		CheckInvalidateRemoteHandles();
 #endif
 
         initStringInfo(&input_message);

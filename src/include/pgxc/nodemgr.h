@@ -67,6 +67,7 @@ extern void PgxcNodeRemove(DropNodeStmt *stmt);
 extern void PgxcNodeDnListHealth(List *nodeList, bool *dnhealth);
 extern bool PgxcNodeUpdateHealth(Oid node, bool status);
 
+extern bool PrimaryNodeNumberChanged(void);
 /* GUC parameter */
 extern bool enable_multi_cluster;
 extern bool enable_multi_cluster_print;

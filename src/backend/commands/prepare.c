@@ -479,6 +479,54 @@ InitQueryHashTable(void)
 #endif
 }
 
+/*
+ * Rebuild query hash table.
+ */
+void
+RebuildDatanodeQueryHashTable(void)
+{
+	HASHCTL		hash_ctl;
+	HASH_SEQ_STATUS seq;
+	DatanodeStatement *entry;
+	DatanodeStatement *entry_tmp;
+	Size               original_entry_size;
+	HTAB        *datanode_queries_tmp = NULL;
+
+	if (!IS_PGXC_COORDINATOR || !datanode_queries)
+	{
+		return;
+	}
+
+	MemSet(&hash_ctl, 0, sizeof(hash_ctl));
+	hash_ctl.keysize = NAMEDATALEN;
+	hash_ctl.entrysize = sizeof(DatanodeStatement) + NumDataNodes * sizeof(int);
+
+	original_entry_size = hash_get_entry_size(datanode_queries);
+
+	/* node number not changed, no need to rebuild */
+	if (original_entry_size == hash_ctl.entrysize)
+	{
+		return ;
+	}
+
+	datanode_queries_tmp = hash_create("Datanode Queries",
+	                               64,
+	                               &hash_ctl,
+	                               HASH_ELEM);
+	/* walk over cache */
+	hash_seq_init(&seq, datanode_queries);
+	while ((entry = hash_seq_search(&seq)) != NULL)
+	{
+		/* Now we can copy the hash table entry */
+		entry_tmp = (DatanodeStatement  *) hash_search(datanode_queries_tmp, entry->stmt_name,
+		                                               HASH_ENTER, NULL);
+		memcpy(entry_tmp, entry, original_entry_size);
+	}
+
+	hash_destroy(datanode_queries);
+	datanode_queries = datanode_queries_tmp;
+}
+
 #ifdef PGXC
 /*
  * Assign the statement name for all the RemoteQueries in the plan tree, so
