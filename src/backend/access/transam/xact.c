@@ -8168,9 +8168,6 @@ IsTransactionIdle(void)
         }
     }
     
-    elog(WARNING,"reload is be processing in transaction. trans state: %d", CurrentTransactionState->state);
-    elog(WARNING,"reload is be processing in transaction. trans block state: %d", CurrentTransactionState->blockState);
-    
     return false;
 }
 

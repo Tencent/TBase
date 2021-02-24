@@ -146,6 +146,7 @@ extern void PrepareRemoteDMLStatement(bool upsert, char *stmt,
                                     char *select_stmt, char *update_stmt);
 
 extern void DropRemoteDMLStatement(char *stmt, char *update_stmt);
+extern void RebuildDatanodeQueryHashTable(void);
 #endif
 
 #endif                            /* PREPARE_H */

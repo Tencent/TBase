@@ -457,6 +457,7 @@ extern void ClearLocalTwoPhaseState(void);
 extern char *GetTransStateString(TwoPhaseTransState state);
 extern char *GetConnStateString(ConnState state);
 extern void get_partnodes(PGXCNodeAllHandles * handles, StringInfo participants);
+extern void clean_stat_transaction(void);
 #endif
 
 #endif

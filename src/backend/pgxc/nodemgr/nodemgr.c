@@ -574,6 +574,15 @@ count_coords_datanodes(Relation rel, int *num_coord, int *num_dns)
 }
 
 /*
+ * Whether node changes happened
+ */
+bool
+PrimaryNodeNumberChanged(void)
+{
+	return (*shmemNumCoords + *shmemNumDataNodes != NumCoords + NumDataNodes);
+}
+
+/*
  * PgxcNodeListAndCount
  *
  * Update node definitions in the shared memory tables from the catalog

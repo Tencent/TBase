@@ -190,6 +190,21 @@ stat_statement()
 }
 
 /*
+ * clean memory related to stat transaction
+ */
+void
+clean_stat_transaction(void)
+{
+	if(!nodes_per_transaction)
+	{
+		return ;
+	}
+
+	free(nodes_per_transaction);
+	nodes_per_transaction = NULL;
+}
+
+/*
  * To collect statistics: count a transaction
  */
 static void

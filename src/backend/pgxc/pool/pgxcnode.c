@@ -229,7 +229,6 @@ InitMultinodeExecutor(bool is_force)
     PGXCNodeHandlesLookupEnt *node_handle_ent = NULL;
 #endif
 
-
     /* Free all the existing information first */
     if (is_force)
         pgxc_node_all_free();
@@ -244,6 +243,10 @@ InitMultinodeExecutor(bool is_force)
 
     /* Get classified list of node Oids */
     PgxcNodeGetOidsExtend(&coOids, &dnOids, &sdnOids, &NumCoords, &NumDataNodes, &NumSlaveDataNodes, true);
+
+	/* Process node number related memory */
+	RebuildDatanodeQueryHashTable();
+	clean_stat_transaction();
 
 #ifdef XCP
     /*
@@ -3629,12 +3632,6 @@ get_any_handle(List *datanodelist)
                  errmsg("Invalid NULL node list")));
     }
 
-    if (HandlesInvalidatePending)
-        if (DoInvalidateRemoteHandles())
-            ereport(ERROR,
-                    (errcode(ERRCODE_QUERY_CANCELED),
-                     errmsg("canceling transaction due to cluster configuration reset by administrator command")));
-
     if (HandlesRefreshPending)
         if (DoRefreshRemoteHandles())
             ereport(ERROR,
@@ -3771,12 +3768,6 @@ get_handles(List *datanodelist, List *coordlist, bool is_coord_only_query, bool 
 
     /* index of the result array */
     int            i = 0;
-
-    if (HandlesInvalidatePending)
-        if (DoInvalidateRemoteHandles())
-            ereport(ERROR,
-                    (errcode(ERRCODE_QUERY_CANCELED),
-                     errmsg("canceling transaction due to cluster configuration reset by administrator command")));
 
     if (HandlesRefreshPending)
         if (DoRefreshRemoteHandles())
@@ -5012,6 +5003,21 @@ PoolerMessagesPending(void)
 }
 
 /*
+ * Check HandleInvalidatePending flag
+ */
+void
+CheckInvalidateRemoteHandles(void)
+{
+	if (!HandlesInvalidatePending)
+		return ;
+
+	if (DoInvalidateRemoteHandles())
+		ereport(ERROR,
+		        (errcode(ERRCODE_QUERY_CANCELED),
+				        errmsg("canceling transaction due to cluster configuration reset by administrator command")));
+}
+
+/*
  * For all handles, mark as they are not in use and discard pending input/output
  */
 static bool
@@ -5019,9 +5025,30 @@ DoInvalidateRemoteHandles(void)
 {
     bool            result = false;
 
+	/*
+	 * Not reload until transaction is complete.
+	 * That contain two condition.
+	 * 1. transaction status is idle.
+	 * 2. GlobalCommitTimestamp has to be invalid
+	 *    which makes sure we are not in 2pc commit phase.
+	 */
+	if (InterruptHoldoffCount || !IsTransactionIdle() || GetGlobalCommitTimestamp() != InvalidGlobalTimestamp)
+	{
+		return result;
+	}
+
 	HOLD_INTERRUPTS();
 
+	/*
+   	 * Reinitialize session, it updates the shared memory table.
+     * Initialize XL executor. This must be done inside a transaction block.
+     */
+	StartTransactionCommand();
 	InitMultinodeExecutor(true);
+	CommitTransactionCommand();
+
+	/* Disconnect from the pooler to get new connection infos next time */
+	PoolManagerDisconnect();
 
 	HandlesInvalidatePending = false;
 	HandlesRefreshPending = false;

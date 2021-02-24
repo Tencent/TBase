@@ -1348,6 +1348,15 @@ hash_get_num_entries(HTAB *hashp)
 }
 
 /*
+ * hash_get_entry_size -- get the entry size of a hashtable
+ */
+Size
+hash_get_entry_size(HTAB *hashp)
+{
+	return hashp->hctl->entrysize;
+}
+
+/*
  * hash_seq_init/_search/_term
  *            Sequentially search through hash table and return
  *            all the elements one by one, return NULL when no more.

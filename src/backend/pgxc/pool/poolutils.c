@@ -26,6 +26,7 @@
 #include "pgxc/nodemgr.h"
 #include "pgxc/poolutils.h"
 #include "pgxc/pgxcnode.h"
+#include "pgxc/execRemote.h"
 #include "access/gtm.h"
 #include "access/xact.h"
 #include "catalog/pgxc_node.h"
@@ -415,45 +416,8 @@ HandlePoolerReload(void)
     if (proc_exit_inprogress)
         return;
 
-	if (InterruptHoldoffCount != 0)
-		return;
-
-#ifdef __TBASE__
-    if (PoolerReloadHoldoffCount)
-    {
-        PoolerReloadPending = true;
-        return;
-    }
-    
-    if (false == IsTransactionIdle())
-    {
-        return;
-    }
-
-    PoolerReloadPending = false;
-#endif
-
-	HOLD_INTERRUPTS();
-
-	/*
-	 * Reinitialize session, it updates the shared memory table.
-	 * Initialize XL executor. This must be done inside a transaction block.
-	 */
-	StartTransactionCommand();
-	InitMultinodeExecutor(true);
-	CommitTransactionCommand();
-
-    /* Request query cancel, when convenient */
-    InterruptPending = true;
-    QueryCancelPending = true;
-
-    /* Disconnect from the pooler to get new connection infos next time */
-    PoolManagerDisconnect();
-
     /* Prevent using of cached connections to remote nodes */
     RequestInvalidateRemoteHandles();
-
-	RESUME_INTERRUPTS();
 }
 
 /*

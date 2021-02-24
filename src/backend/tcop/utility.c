@@ -1845,7 +1845,17 @@ standard_ProcessUtility(PlannedStmt *pstmt,
     {
         /* Is the statement a prohibited one? */
         if (!IsStmtAllowedInLockedMode(parsetree, queryString))
+		{
+			/* node number changes with ddl is not allowed */
+			if (HandlesInvalidatePending && PrimaryNodeNumberChanged())
+			{
+				ereport(ERROR,
+				        (errcode(ERRCODE_QUERY_CANCELED),
+						        errmsg("canceling transaction due to cluster configuration reset by administrator command")));
+			}
             pgxc_lock_for_utility_stmt(parsetree);
+
+		}
     }
 
     check_xact_readonly(parsetree);
