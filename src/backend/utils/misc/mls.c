@@ -142,7 +142,7 @@ bool g_enable_data_mask         = false;
 bool g_enable_transparent_crypt = false;
 bool g_enable_crypt_debug       = false;
 #endif
-
+int g_rel_crypt_hash_size = 2048;
 
 
 #define MLS_QUERY_STRING_PRUNE_DELIMETER '('
@@ -1619,7 +1619,9 @@ void MlsShmemInit(void)
     MlsInitFileAccess();
     
     crypt_key_info_load_mapfile();
+    elog(LOG, "start rel crypt load mapfile");
     rel_crypt_load_mapfile();
+	elog(LOG, "end rel crypt load mapfile");
 
     /* after vfd access, rollback all init actions */
     MlsCleanFileAccess();

@@ -70,6 +70,7 @@ typedef int16 AlgoId;
 extern bool g_enable_cls;
 extern bool g_enable_transparent_crypt;
 extern bool g_enable_crypt_debug;
+extern int g_rel_crypt_hash_size;
 
 extern int g_checkpoint_crypt_worker;
 extern int g_checkpoint_crypt_queue_length;

@@ -4488,6 +4488,15 @@ static struct config_int ConfigureNamesInt[] =
         32, 4, 64,
         NULL, NULL, NULL
     },
+	{
+		{"rel_crypt_hash_size", PGC_POSTMASTER, CUSTOM_OPTIONS,
+			gettext_noop("Number of rel crypt hash table size, it will influence node start time."),
+			NULL
+		},
+		&g_rel_crypt_hash_size,
+		2048, 2048, INT_MAX,
+		NULL, NULL, NULL
+	},
 #endif
     {
         {"pooler_port", PGC_POSTMASTER, DATA_NODES,
