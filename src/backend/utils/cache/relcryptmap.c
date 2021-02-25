@@ -131,8 +131,8 @@
 
 #define REL_CRYPT_MAP_FILENAME                  "pg_rel_crypt.map"
 #define REL_CRYPT_MAP_FILEMAGIC                 0x952702    /* version ID value */
-#define REL_CRYPT_HASHTABLE_MAX_SIZE            (1 << 20)
-#define REL_CRYPT_HASHTABLE_INIT_SIZE           (1 << 11)
+#define REL_CRYPT_HASHTABLE_MAX_SIZE            ((g_rel_crypt_hash_size > (1 << 20))? g_rel_crypt_hash_size : (1 << 20))
+#define REL_CRYPT_HASHTABLE_INIT_SIZE           g_rel_crypt_hash_size
 #define REL_CRYPT_HASHTABLE_NUM_PARTITIONS      128
 
 
@@ -1267,9 +1267,9 @@ static int rel_crypt_hash_key_cmp (const void *key1, const void *key2, Size keys
 {
     const RelFileNode *tagPtr1 = key1, *tagPtr2 = key2;
 
-    if (tagPtr1->spcNode == tagPtr2->spcNode 
+	if (tagPtr1->relNode == tagPtr2->relNode
         && tagPtr1->dbNode == tagPtr2->dbNode 
-        && tagPtr1->relNode == tagPtr2->relNode )
+        && tagPtr1->spcNode == tagPtr2->spcNode )
         return 0;
 
     return 1;
@@ -1294,6 +1294,7 @@ void rel_crypt_hash_insert(RelFileNode * rnode, AlgoId algo_id, bool write_wal, 
                                                     hashcode,
                                                     HASH_ENTER,
                                                     &found);
+
     if (false == found)
     {
         relcrypt->algo_id        = algo_id;
