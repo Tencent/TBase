@@ -46,6 +46,17 @@ static int range_sockaddr_AF_INET6(const struct sockaddr_in6 * addr,
                         const struct sockaddr_in6 * netmask);
 #endif
 
+#ifdef	HAVE_UNIX_SOCKETS
+static int getaddrinfo_unix(const char *path,
+				 const struct addrinfo *hintsp,
+				 struct addrinfo **result);
+
+static int getnameinfo_unix(const struct sockaddr_un *sa, int salen,
+				 char *node, int nodelen,
+				 char *service, int servicelen,
+				 int flags);
+#endif
+
 
 /*
  *    pg_getaddrinfo_all - get address info for Unix, IPv4 and IPv6 sockets
@@ -58,6 +69,11 @@ pg_getaddrinfo_all(const char *hostname, const char *servname,
 
     /* not all versions of getaddrinfo() zero *result on failure */
     *result = NULL;
+
+#ifdef HAVE_UNIX_SOCKETS
+    if (hintp->ai_family == AF_UNIX)
+		return getaddrinfo_unix(servname, hintp, result);
+#endif
 
     /* NULL has special meaning to getaddrinfo(). */
     rc = getaddrinfo((!hostname || hostname[0] == '\0') ? NULL : hostname,
@@ -103,6 +119,14 @@ pg_getnameinfo_all(const struct sockaddr_storage * addr, int salen,
 {
     int            rc;
 
+#ifdef HAVE_UNIX_SOCKETS
+    if (addr && addr->ss_family == AF_UNIX)
+		rc = getnameinfo_unix((const struct sockaddr_un *) addr, salen,
+							  node, nodelen,
+							  service, servicelen,
+							  flags);
+	else
+#endif
     rc = getnameinfo((const struct sockaddr *) addr, salen,
                      node, nodelen,
                      service, servicelen,
@@ -322,3 +346,111 @@ pg_promote_v4_to_v6_mask(struct sockaddr_storage * addr)
 }
 
 #endif   /* HAVE_IPV6 */
+
+
+#ifdef HAVE_UNIX_SOCKETS
+
+/* -------
+ *	getaddrinfo_unix - get unix socket info using IPv6-compatible API
+ *
+ *	Bugs: only one addrinfo is set even though hintsp is NULL or
+ *		  ai_socktype is 0
+ *		  AI_CANONNAME is not supported.
+ * -------
+ */
+static int
+getaddrinfo_unix(const char *path, const struct addrinfo *hintsp,
+				 struct addrinfo **result)
+{
+	struct addrinfo hints;
+	struct addrinfo *aip;
+	struct sockaddr_un *unp;
+
+	*result = NULL;
+
+	MemSet(&hints, 0, sizeof(hints));
+
+	if (strlen(path) >= sizeof(unp->sun_path))
+		return EAI_FAIL;
+
+	if (hintsp == NULL)
+	{
+		hints.ai_family = AF_UNIX;
+		hints.ai_socktype = SOCK_STREAM;
+	}
+	else
+		memcpy(&hints, hintsp, sizeof(hints));
+
+	if (hints.ai_socktype == 0)
+		hints.ai_socktype = SOCK_STREAM;
+
+	if (hints.ai_family != AF_UNIX)
+	{
+		/* shouldn't have been called */
+		return EAI_FAIL;
+	}
+
+	aip = calloc(1, sizeof(struct addrinfo));
+	if (aip == NULL)
+		return EAI_MEMORY;
+
+	unp = calloc(1, sizeof(struct sockaddr_un));
+	if (unp == NULL)
+	{
+		free(aip);
+		return EAI_MEMORY;
+	}
+
+	aip->ai_family = AF_UNIX;
+	aip->ai_socktype = hints.ai_socktype;
+	aip->ai_protocol = hints.ai_protocol;
+	aip->ai_next = NULL;
+	aip->ai_canonname = NULL;
+	*result = aip;
+
+	unp->sun_family = AF_UNIX;
+	aip->ai_addr = (struct sockaddr *) unp;
+	aip->ai_addrlen = sizeof(struct sockaddr_un);
+
+	strcpy(unp->sun_path, path);
+
+#ifdef HAVE_STRUCT_SOCKADDR_STORAGE_SS_LEN
+	unp->sun_len = sizeof(struct sockaddr_un);
+#endif
+
+	return 0;
+}
+
+/*
+ * Convert an address to a hostname.
+ */
+static int
+getnameinfo_unix(const struct sockaddr_un *sa, int salen,
+				 char *node, int nodelen,
+				 char *service, int servicelen,
+				 int flags)
+{
+	int			ret = -1;
+
+	/* Invalid arguments. */
+	if (sa == NULL || sa->sun_family != AF_UNIX ||
+		(node == NULL && service == NULL))
+		return EAI_FAIL;
+
+	if (node)
+	{
+		ret = snprintf(node, nodelen, "%s", "[local]");
+		if (ret == -1 || ret > nodelen)
+			return EAI_MEMORY;
+	}
+
+	if (service)
+	{
+		ret = snprintf(service, servicelen, "%s", sa->sun_path);
+		if (ret == -1 || ret > servicelen)
+			return EAI_MEMORY;
+	}
+
+	return 0;
+}
+#endif							/* HAVE_UNIX_SOCKETS */
