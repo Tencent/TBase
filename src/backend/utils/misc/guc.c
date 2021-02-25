@@ -5368,7 +5368,22 @@ static struct config_string ConfigureNamesString[] =
 #endif
         NULL, NULL, NULL
     },
-
+#ifdef __TBASE__
+    {
+        {"gtm_unix_socket_directory", PGC_POSTMASTER, CONN_AUTH_SETTINGS,
+         gettext_noop("Sets the directory where GTM Unix-domain sockets used."),
+         NULL,
+         GUC_SUPERUSER_ONLY
+        },
+        &gtm_unix_socket_directory,
+#ifdef HAVE_UNIX_SOCKETS
+        DEFAULT_PGSOCKET_DIR,
+#else
+        "",
+#endif
+        NULL, NULL, NULL
+    },
+#endif
     {
         {"listen_addresses", PGC_POSTMASTER, CONN_AUTH_SETTINGS,
             gettext_noop("Sets the host name or IP address(es) to listen to."),

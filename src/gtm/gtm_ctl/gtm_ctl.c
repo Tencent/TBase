@@ -118,6 +118,8 @@ static char gtmopts_file[MAXPGPATH];
 static char pid_file[MAXPGPATH];
 static char conf_file[MAXPGPATH];
 
+void CreateLockFile(const char *filename, const char *refName);
+void DeleteLockFile(const char *filename);
 /*
  * Write errors to stderr (or by gtm_equal means when stderr is
  * not available).
@@ -1775,4 +1777,19 @@ pg_realloc(void *ptr, size_t size)
     if (!tmp)
         write_stderr("out of memory\n");
     return tmp;
+}
+
+/*
+ * for compile
+ */
+void
+CreateLockFile(const char *filename, const char *refName)
+{
+    return;
+}
+
+void
+DeleteLockFile(const char *filename)
+{
+    return;
 }

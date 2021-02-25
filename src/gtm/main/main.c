@@ -116,6 +116,7 @@ bool        GTMClusterReadOnly;
 char        *GTMStartupGTSSet;
 int         GTMGTSFreezeLimit;
 int         GTMStartupGTSDelta;
+char	    *unix_socket_directory = NULL;
 
 #endif
 GTM_MutexLock   control_lock;
@@ -229,11 +230,12 @@ static void GTM_RegisterPGXCNode(Port *myport, char *PGXCNodeName);
 
 static bool CreateOptsFile(int argc, char *argv[]);
 static void CreateDataDirLockFile(void);
-static void CreateLockFile(const char *filename, const char *refName);
+void CreateLockFile(const char *filename, const char *refName);
 static void SetDataDir(void);
 static void ChangeToDataDir(void);
 static void checkDataDir(void);
-static void DeleteLockFile(const char *filename);
+void DeleteLockFile(const char *filename);
+extern void RemoveSocketFile(void);
 static void PromoteToActive(void);
 #ifndef __XLOG__
 static void ProcessSyncStandbyCommand(Port *myport, GTM_MessageType mtype, StringInfo message);
@@ -614,7 +616,7 @@ main(int argc, char *argv[])
 #endif
     bool        force_xid = false;
 
-    int            process_thread_num;
+	int			process_thread_num = 0;
     bool        do_basebackup = false;
     /*
      * Local variable to hold command line options.
@@ -938,10 +940,12 @@ main(int argc, char *argv[])
         if (strcmp(ListenAddresses, "*") == 0)
             status = StreamServerPort(AF_UNSPEC, NULL,
                                       (unsigned short) GTMPortNumber,
+                                      NULL,
                                       ListenSocket, MAXLISTEN);
         else
             status = StreamServerPort(AF_UNSPEC, ListenAddresses,
                                       (unsigned short) GTMPortNumber,
+                                      NULL,
                                       ListenSocket, MAXLISTEN);
 
         if (status != STATUS_OK)
@@ -949,6 +953,25 @@ main(int argc, char *argv[])
                     (errmsg("could not create listen socket for \"%s\"",
                             ListenAddresses)));
     }
+
+#ifdef __TBASE__
+#ifdef HAVE_UNIX_SOCKETS
+    if (unix_socket_directory)
+	{
+        status = StreamServerPort(AF_UNIX, NULL,
+                                  (unsigned short) GTMPortNumber,
+                                  unix_socket_directory,
+                                  ListenSocket, MAXLISTEN);
+
+        if (status != STATUS_OK)
+        {
+            ereport(FATAL,
+                    (errmsg("could not create Unix-domain socket in directory \"%s\"",
+                            unix_socket_directory)));
+        }
+	}
+#endif
+#endif
 
     /*
      * check that we have some socket to listen on
@@ -1658,6 +1681,12 @@ ServerLoop(void)
 #ifdef __XLOG__
             /* Delete pid file */
             DeleteLockFile(GTM_PID_FILE);
+#endif
+
+#ifdef __TBASE__
+#ifdef HAVE_UNIX_SOCKETS
+            RemoveSocketFile();
+#endif
 #endif
             elog(LOG, "GTM exits");
             exit(1);
@@ -4599,7 +4628,7 @@ CreateDataDirLockFile()
  * amPostmaster is used to determine how to encode the output PID.
  * isDDLock and refName are used to determine what error message to produce.
  */
-static void
+void
 CreateLockFile(const char *filename, const char *refName)
 {// #lizard forgives
     int            fd;
@@ -4806,7 +4835,7 @@ CreateOptsFile(int argc, char *argv[])
 }
 
 /* delete pid file */
-static void
+void
 DeleteLockFile(const char *filename)
 {
     if (unlink(filename) < 0)

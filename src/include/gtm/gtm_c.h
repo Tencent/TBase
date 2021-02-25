@@ -393,7 +393,7 @@ typedef enum
 #define GTM_SYNC_CYCLE                     (5   * GTM_GTS_ONE_SECOND)
 #define GTM_SYNC_TIME_LIMIT              (60  * GTM_GTS_ONE_SECOND)
 #define GTM_LOG_COLLECT_CYCLE		     (5   * GTM_GTS_ONE_SECOND)
-
+#define MAXGTMPATH	                     256
 #pragma pack()
 
 #endif

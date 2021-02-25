@@ -54,6 +54,7 @@
 char *NewGtmHost = NULL;
 int      NewGtmPort = -1;
 bool  g_GTM_skip_catalog = false;
+char *gtm_unix_socket_directory = DEFAULT_PGSOCKET_DIR;
 #endif
 char *GtmHost = NULL;
 int GtmPort = 0;
@@ -1191,6 +1192,7 @@ InitGTM(void)
 #ifdef __TBASE__
 	int  try_cnt = 0;
 	const int max_try_cnt = 1;
+    bool  same_host = false;
 
 	/*
 	 * Only re-set gtm info in two cases:
@@ -1209,6 +1211,13 @@ InitGTM(void)
 				 errmsg("GtmHost and GtmPort are not set")));
 		return;
 	}
+
+#ifdef HAVE_UNIX_SOCKETS
+    if (GtmHost && (strcmp(PGXCNodeHost, GtmHost) == 0) && gtm_unix_socket_file_exists())
+    {
+        same_host = true;
+    }
+#endif
 #endif
 
 try_connect_gtm:
@@ -1222,11 +1231,24 @@ try_connect_gtm:
 		else if (IS_PGXC_DATANODE)
 			remote_type = GTM_NODE_DATANODE;
 
+#ifdef __TBASE__
+        if (same_host)
+        {
+            /* Use 60s as connection timeout */
+            snprintf(conn_str, CONNECT_STR_LEN, "host=%s port=%d node_name=%s remote_type=%d postmaster=1 connect_timeout=%d",
+                     gtm_unix_socket_directory, GtmPort, PGXCNodeName, remote_type,
+                     tcp_keepalives_idle > 0 ?
+                     tcp_keepalives_idle : GtmConnectTimeout);
+        }
+        else
+#endif
+        {
 		/* Use 60s as connection timeout */
 		snprintf(conn_str, CONNECT_STR_LEN, "host=%s port=%d node_name=%s remote_type=%d postmaster=1 connect_timeout=%d",
 								GtmHost, GtmPort, PGXCNodeName, remote_type,
 								tcp_keepalives_idle > 0 ?
 								tcp_keepalives_idle : GtmConnectTimeout);
+        }
 
 		/* Log activity of GTM connections */
 		if(GTMDebugPrint)
@@ -1234,11 +1256,24 @@ try_connect_gtm:
 	}
 	else
 	{
+#ifdef __TBASE__
+        if (same_host)
+        {
+            /* Use 60s as connection timeout */
+            snprintf(conn_str, CONNECT_STR_LEN, "host=%s port=%d node_name=%s connect_timeout=%d",
+                     gtm_unix_socket_directory, GtmPort, PGXCNodeName,
+                     tcp_keepalives_idle > 0 ?
+                     tcp_keepalives_idle : GtmConnectTimeout);
+        }
+        else
+#endif
+        {
 		/* Use 60s as connection timeout */
 		snprintf(conn_str, CONNECT_STR_LEN, "host=%s port=%d node_name=%s connect_timeout=%d",
 				GtmHost, GtmPort, PGXCNodeName,
 				tcp_keepalives_idle > 0 ?
 				tcp_keepalives_idle : GtmConnectTimeout);
+        }
 
 		/* Log activity of GTM connections */
 		if (IsAutoVacuumWorkerProcess() && GTMDebugPrint)
@@ -1268,6 +1303,12 @@ try_connect_gtm:
 			}
 			CloseGTM();
 			try_cnt++;
+
+			/* if connect with unix domain socket failed */
+			if (same_host)
+            {
+                same_host = false;
+            }
 			goto try_connect_gtm;
 		}
 		else

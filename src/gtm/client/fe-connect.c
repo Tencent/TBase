@@ -260,7 +260,7 @@ static int
 connectGTMStart(GTM_Conn *conn)
 {// #lizard forgives
     int            portnum = 0;
-    char        portstr[128];
+	char		portstr[MAXGTMPATH];
     struct addrinfo *addrs = NULL;
     struct addrinfo hint;
     const char *node;
@@ -299,10 +299,27 @@ connectGTMStart(GTM_Conn *conn)
         /* Using pghost, so we have to look-up the hostname */
         node = conn->pghost;
         hint.ai_family = AF_UNSPEC;
+#ifdef __TBASE__
+#ifdef HAVE_UNIX_SOCKETS
+        if (is_absolute_path(conn->pghost))
+        {
+            node = NULL;
+            hint.ai_family = AF_UNIX;
+            UNIXSOCK_PATH(portstr, portnum, conn->pghost);
+            if (strlen(portstr) >= UNIXSOCK_PATH_BUFLEN)
+            {
+                appendGTMPQExpBuffer(&conn->errorMessage,
+                                     libpq_gettext("Unix-domain socket path \"%s\" is too long (maximum %d bytes)\n"),
+                                     portstr,
+                                     (int) (UNIXSOCK_PATH_BUFLEN - 1));
+                goto connect_errReturn;
+            }
+        }
+#endif
+#endif
     }
     else
     {
-        /* Without Unix sockets, default to localhost instead */
         node = "localhost";
         hint.ai_family = AF_UNSPEC;
     }

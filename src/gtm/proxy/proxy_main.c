@@ -232,11 +232,11 @@ static void GTMProxy_CommandPending(GTMProxy_ConnectionInfo *conninfo,
 
 static bool CreateOptsFile(int argc, char *argv[]);
 static void CreateDataDirLockFile(void);
-static void CreateLockFile(const char *filename, const char *refName);
+void CreateLockFile(const char *filename, const char *refName);
 static void SetDataDir(void);
 static void ChangeToDataDir(void);
 static void checkDataDir(void);
-static void DeleteLockFile(const char *filename);
+void DeleteLockFile(const char *filename);
 static void RegisterProxy(bool is_reconnect);
 static void UnregisterProxy(void);
 static GTM_Conn *ConnectGTM(void);
@@ -877,10 +877,12 @@ main(int argc, char *argv[])
         if (strcmp(ListenAddresses, "*") == 0)
             status = StreamServerPort(AF_UNSPEC, NULL,
                                       (unsigned short) GTMProxyPortNumber,
+									  NULL,
                                       ListenSocket, MAXLISTEN);
         else
             status = StreamServerPort(AF_UNSPEC, ListenAddresses,
                                       (unsigned short) GTMProxyPortNumber,
+                                      NULL,
                                       ListenSocket, MAXLISTEN);
 
         if (status == STATUS_OK)
@@ -2800,7 +2802,7 @@ CreateDataDirLockFile()
  * amPostmaster is used to determine how to encode the output PID.
  * isDDLock and refName are used to determine what error message to produce.
  */
-static void
+void
 CreateLockFile(const char *filename, const char *refName)
 {// #lizard forgives
     int            fd;
@@ -2999,7 +3001,7 @@ CreateOptsFile(int argc, char *argv[])
 }
 
 /* delete pid file */
-static void
+void
 DeleteLockFile(const char *filename)
 {
     if (unlink(filename) < 0)
