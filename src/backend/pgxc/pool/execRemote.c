@@ -299,14 +299,7 @@ InitResponseCombiner(ResponseCombiner *combiner, int node_count,
     combiner->prerowBuffers  = NULL;
     combiner->is_abort = false;
 	combiner->printed_nodes = NULL;
-	{
-		HASHCTL		ctl;
-		
-		ctl.keysize = sizeof(int);
-		ctl.entrysize = sizeof(RemoteInstr);
-		
-		combiner->recv_instr_htbl = hash_create("Remote Instrument", 16, &ctl, HASH_ELEM);
-	}
+	combiner->recv_instr_htbl = NULL;
 #endif
 }
 
@@ -9915,6 +9908,16 @@ ExecInitRemoteSubplan(RemoteSubplan *node, EState *estate, int eflags)
     combiner->ss.ps.state = estate;
     combiner->ss.ps.ExecProcNode = ExecRemoteSubplan;
 
+	if (estate->es_instrument)
+	{
+		HASHCTL		ctl;
+		
+		ctl.keysize = sizeof(int);
+		ctl.entrysize = sizeof(RemoteInstr);
+		
+		combiner->recv_instr_htbl = hash_create("Remote Instrument", 16, &ctl, HASH_ELEM);
+	}
+	
     combiner->ss.ps.qual = NULL;
 
     combiner->request_type = REQUEST_TYPE_QUERY;
