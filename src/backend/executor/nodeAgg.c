@@ -550,6 +550,20 @@ typedef struct AggStatePerHashData
     Agg           *aggnode;        /* original Agg node, for numGroups etc. */
 }            AggStatePerHashData;
 
+#ifdef __TBASE__
+/*
+ * used in ReDistributeInitializeDSM and ReDistributeInitializeWorker
+ * to distinguish keys between shared memory for parallel and
+ * shared memory for redistributed optimization, for parallel it's
+ * plan_node_id the same as PG, for redistributed optimization, we
+ * use plan_node_id + this macro
+ *
+ * Node: refer to execParallel.c, only the first 4 bits been occupied
+ * for specific use, now we have to use an extra bit, but it's fine
+ * since plan_node_id is only a 32bit integer.
+ */
+#define PARALLEL_REDISTRIBUTE_OFFSET UINT64CONST(0xE800000000000000)
+#endif
 
 static void select_current_set(AggState *aggstate, int setno, bool is_hash);
 static void initialize_phase(AggState *aggstate, int newphase);
@@ -5430,7 +5444,7 @@ ReDistributeInitializeDSM(PlanState *node, ParallelContext *pcxt)
         state->buf[i]->dataType      = DT_None;
     }
     
-    shm_toc_insert(pcxt->toc, node->plan->plan_node_id, state);
+	shm_toc_insert(pcxt->toc, node->plan->plan_node_id + PARALLEL_REDISTRIBUTE_OFFSET, state);
     *state_ptr = state;
 }
 
@@ -5444,7 +5458,7 @@ ReDistributeInitializeWorker(PlanState *node, ParallelWorkerContext *pwcxt)
     ReDistributeState *rd_state = NULL;
     volatile ParallelWorkerStatus *numParallelWorkers = NULL;
 
-    state = shm_toc_lookup(toc, node->plan->plan_node_id, false);
+	state = shm_toc_lookup(toc, node->plan->plan_node_id + PARALLEL_REDISTRIBUTE_OFFSET, false);
     numParallelWorkers = GetParallelWorkerStatusInfo(toc);
 
     rd_state = (ReDistributeState *)palloc0(sizeof(ReDistributeState));
