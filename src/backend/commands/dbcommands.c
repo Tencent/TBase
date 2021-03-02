@@ -815,6 +815,131 @@ createdb_failure_callback(int code, Datum arg)
     remove_dbtablespaces(fparms->dest_dboid);
 }
 
+/*
+ * DROP DATABASE PREPARE
+ * 
+ * Lock the database and check the constraint in advance.
+ */
+void
+dropdb_prepare(const char *dbname, bool missing_ok)
+{
+	Oid			db_id;
+	bool		db_istemplate;
+	Relation	pgdbrel;
+	int			notherbackends;
+	int			npreparedxacts;
+	int			nslots,
+			nslots_active;
+	int			nsubscriptions;
+
+	/*
+	 * Look up the target database's OID, and get exclusive lock on it. We
+	 * need this to ensure that no new backend starts up in the target
+	 * database while we are deleting it (see postinit.c), and that no one is
+	 * using it as a CREATE DATABASE template or trying to delete it for
+	 * themselves.
+	 */
+	pgdbrel = heap_open(DatabaseRelationId, RowExclusiveLock);
+
+	if (!get_db_info(dbname, AccessExclusiveLock, &db_id, NULL, NULL,
+	                 &db_istemplate, NULL, NULL, NULL, NULL, NULL, NULL, NULL))
+	{
+		if (!missing_ok)
+		{
+			ereport(ERROR,
+			        (errcode(ERRCODE_UNDEFINED_DATABASE),
+					        errmsg("database \"%s\" does not exist", dbname)));
+		}
+		else
+		{
+			/* Close pg_database, release the lock, since we changed nothing */
+			heap_close(pgdbrel, RowExclusiveLock);
+			ereport(NOTICE,
+			        (errmsg("database \"%s\" does not exist, skipping",
+			                dbname)));
+			return;
+		}
+	}
+
+	/*
+	 * Permission checks
+	 */
+	if (!pg_database_ownercheck(db_id, GetUserId()))
+		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE,
+		               dbname);
+
+	/* DROP hook for the database being removed */
+	InvokeObjectDropHook(DatabaseRelationId, db_id, 0);
+
+	/*
+	 * Disallow dropping a DB that is marked istemplate.  This is just to
+	 * prevent people from accidentally dropping template0 or template1; they
+	 * can do so if they're really determined ...
+	 */
+	if (db_istemplate)
+		ereport(ERROR,
+		        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				        errmsg("cannot drop a template database")));
+
+	/* Obviously can't drop my own database */
+	if (db_id == MyDatabaseId)
+		ereport(ERROR,
+		        (errcode(ERRCODE_OBJECT_IN_USE),
+				        errmsg("cannot drop the currently open database")));
+
+	/*
+	 * Check whether there are active logical slots that refer to the
+	 * to-be-dropped database. The database lock we are holding prevents the
+	 * creation of new slots using the database or existing slots becoming
+	 * active.
+	 */
+	(void) ReplicationSlotsCountDBSlots(db_id, &nslots, &nslots_active);
+	if (nslots_active)
+	{
+		ereport(ERROR,
+		        (errcode(ERRCODE_OBJECT_IN_USE),
+				        errmsg("database \"%s\" is used by an active logical replication slot",
+				               dbname),
+				        errdetail_plural("There is %d active slot",
+				                         "There are %d active slots",
+				                         nslots_active, nslots_active)));
+	}
+
+	/*
+	 * Check for other backends in the target database.  (Because we hold the
+	 * database lock, no new ones can start after this.)
+	 *
+	 * As in CREATE DATABASE, check this after other error conditions.
+	 */
+	if (CountOtherDBBackends(db_id, &notherbackends, &npreparedxacts))
+	{
+#ifndef _PG_REGRESS_
+		ereport(ERROR,
+		        (errcode(ERRCODE_OBJECT_IN_USE),
+				        errmsg("database \"%s\" is being accessed by other users",
+				               dbname),
+				        errdetail_busy_db(notherbackends, npreparedxacts)));
+#else
+		elog(ERROR, "database \"%s\" is being accessed by other users", dbname);
+#endif
+	}
+
+	/*
+	 * Check if there are subscriptions defined in the target database.
+	 *
+	 * We can't drop them automatically because they might be holding
+	 * resources in other databases/instances.
+	 */
+	if ((nsubscriptions = CountDBSubscriptions(db_id)) > 0)
+		ereport(ERROR,
+		        (errcode(ERRCODE_OBJECT_IN_USE),
+				        errmsg("database \"%s\" is being used by logical replication subscription",
+				               dbname),
+				        errdetail_plural("There is %d subscription.",
+				                         "There are %d subscriptions.",
+				                         nsubscriptions, nsubscriptions)));
+	heap_close(pgdbrel, RowExclusiveLock);
+}
 
 /*
  * DROP DATABASE

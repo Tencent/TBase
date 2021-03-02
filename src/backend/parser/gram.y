@@ -10632,6 +10632,7 @@ DropdbStmt: DROP DATABASE database_name
 					DropdbStmt *n = makeNode(DropdbStmt);
 					n->dbname = $3;
 					n->missing_ok = FALSE;
+					n->prepare = FALSE;
 					$$ = (Node *)n;
 				}
 			| DROP DATABASE IF_P EXISTS database_name
@@ -10639,6 +10640,23 @@ DropdbStmt: DROP DATABASE database_name
 					DropdbStmt *n = makeNode(DropdbStmt);
 					n->dbname = $5;
 					n->missing_ok = TRUE;
+					n->prepare = FALSE;
+					$$ = (Node *)n;
+				}
+			| DROP DATABASE PREPARE database_name
+        			{
+        				DropdbStmt *n = makeNode(DropdbStmt);
+        				n->dbname = $4;
+        				n->missing_ok = FALSE;
+        				n->prepare = TRUE;
+        				$$ = (Node *)n;
+        			}
+    			| DROP DATABASE PREPARE IF_P EXISTS database_name
+				{
+					DropdbStmt *n = makeNode(DropdbStmt);
+					n->dbname = $6;
+					n->missing_ok = TRUE;
+					n->prepare = TRUE;
 					$$ = (Node *)n;
 				}
 		;
