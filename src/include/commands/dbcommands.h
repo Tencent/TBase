@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * dbcommands.h
- *        Database management commands (create/drop database).
+ *		Database management commands (create/drop database).
  *
  *
  * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
@@ -19,14 +19,15 @@
 #include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
 
-extern Oid    createdb(ParseState *pstate, const CreatedbStmt *stmt);
+extern Oid	createdb(ParseState *pstate, const CreatedbStmt *stmt);
 extern void dropdb(const char *dbname, bool missing_ok);
+extern void dropdb_prepare(const char *dbname, bool missing_ok);
 extern ObjectAddress RenameDatabase(const char *oldname, const char *newname);
-extern Oid    AlterDatabase(ParseState *pstate, AlterDatabaseStmt *stmt, bool isTopLevel);
-extern Oid    AlterDatabaseSet(AlterDatabaseSetStmt *stmt);
+extern Oid	AlterDatabase(ParseState *pstate, AlterDatabaseStmt *stmt, bool isTopLevel);
+extern Oid	AlterDatabaseSet(AlterDatabaseSetStmt *stmt);
 extern ObjectAddress AlterDatabaseOwner(const char *dbname, Oid newOwnerId);
 
-extern Oid    get_database_oid(const char *dbname, bool missingok);
+extern Oid	get_database_oid(const char *dbname, bool missingok);
 extern char *get_database_name(Oid dbid);
 
 extern void check_encoding_locale_matches(int encoding, const char *collate, const char *ctype);
@@ -35,4 +36,4 @@ extern void check_encoding_locale_matches(int encoding, const char *collate, con
 extern bool IsSetTableSpace(AlterDatabaseStmt *stmt);
 #endif
 
-#endif                            /* DBCOMMANDS_H */
+#endif							/* DBCOMMANDS_H */

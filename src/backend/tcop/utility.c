@@ -643,18 +643,35 @@ ProcessUtilityPre(PlannedStmt *pstmt,
             break;
 
         case T_DropdbStmt:
-            /* Clean connections before dropping a database on local node */
             if (IS_PGXC_LOCAL_COORDINATOR)
             {
                 DropdbStmt *stmt = (DropdbStmt *) parsetree;
-                char query[256];
+				char query[STRINGLENGTH];
 
+				/* Clean connections before dropping a database on local node */
                 DropDBCleanConnection(stmt->dbname);
                 /* Clean also remote Coordinators */
-                sprintf(query, "CLEAN CONNECTION TO ALL FOR DATABASE %s;",
+				snprintf(query, STRINGLENGTH, "CLEAN CONNECTION TO ALL FOR DATABASE %s;",
                         quote_identifier(stmt->dbname));
                 ExecUtilityStmtOnNodes(parsetree, query, NULL, sentToRemote, true,
                         EXEC_ON_ALL_NODES, false, false);
+
+				if (!stmt->prepare)
+				{
+					/* Lock database and check the constraints before we actually dropping */
+					if (stmt->missing_ok)
+					{
+						snprintf(query, STRINGLENGTH, "DROP DATABASE PREPARE IF EXISTS %s;",
+						        quote_identifier(stmt->dbname));
+					}
+					else
+					{
+						snprintf(query, STRINGLENGTH, "DROP DATABASE PREPARE %s;",
+						        quote_identifier(stmt->dbname));
+					}
+					ExecUtilityStmtOnNodes(parsetree, query, NULL, sentToRemote, false,
+					                       EXEC_ON_ALL_NODES, false, false);
+				}
             }
             break;
 
@@ -2107,12 +2124,20 @@ standard_ProcessUtility(PlannedStmt *pstmt,
             {
                 DropdbStmt *stmt = (DropdbStmt *) parsetree;
 
+				if (!stmt->prepare)
+				{
                 /* no event triggers for global objects */
                 if (IS_PGXC_LOCAL_COORDINATOR)
+					{
                     PreventTransactionChain(isTopLevel, "DROP DATABASE");
-
+					}
                 dropdb(stmt->dbname, stmt->missing_ok);
             }
+				else
+				{
+					dropdb_prepare(stmt->dbname, stmt->missing_ok);
+				}
+			}
             break;
 
             /* Query-level asynchronous notification */
@@ -5290,7 +5315,14 @@ CreateCommandTag(Node *parsetree)
             break;
 
         case T_DropdbStmt:
+			if (((DropdbStmt *) parsetree)->prepare)
+			{
+				tag = "DROP DATABASE PREPARE";
+			}
+			else
+			{
             tag = "DROP DATABASE";
+			}
             break;
 
         case T_NotifyStmt:
