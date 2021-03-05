@@ -602,6 +602,18 @@ ProcessUtilityPre(PlannedStmt *pstmt,
                         }
                         break;
 
+					case TRANS_STMT_COMMIT_PREPARED_CHECK:
+						PreventTransactionChain(isTopLevel, "COMMIT PREPARED CHECK");
+						PreventCommandDuringRecovery("COMMIT PREPARED CHECK");
+						elog(LOG, "COMMIT PREPARED %s FOR CHECK ONLY", stmt->gid);
+						break;
+
+					case TRANS_STMT_ROLLBACK_PREPARED_CHECK:
+						PreventTransactionChain(isTopLevel, "ROLLBACK PREPARED CHECK");
+						PreventCommandDuringRecovery("ROLLBACK PREPARED CHECK");
+						elog(LOG, "ROLLBACK PREPARED %s FOR CHECK ONLY", stmt->gid);
+						break;
+
                     case TRANS_STMT_ROLLBACK:
                         break;
 
@@ -1973,6 +1985,18 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                         PreventCommandDuringRecovery("ROLLBACK PREPARED");
                         FinishPreparedTransaction(stmt->gid, false);
                         break;
+
+					case TRANS_STMT_COMMIT_PREPARED_CHECK:
+						PreventTransactionChain(isTopLevel, "COMMIT PREPARED CHECK");
+						PreventCommandDuringRecovery("COMMIT PREPARED CHECK");
+						CheckPreparedTransactionLock(stmt->gid);
+						break;
+
+					case TRANS_STMT_ROLLBACK_PREPARED_CHECK:
+						PreventTransactionChain(isTopLevel, "ROLLBACK PREPARED CHECK");
+						PreventCommandDuringRecovery("ROLLBACK PREPARED CHECK");
+						CheckPreparedTransactionLock(stmt->gid);
+						break;
 
                     case TRANS_STMT_ROLLBACK:
                         UserAbortTransactionBlock();
@@ -4945,6 +4969,14 @@ CreateCommandTag(Node *parsetree)
                     case TRANS_STMT_ROLLBACK_PREPARED:
                         tag = "ROLLBACK PREPARED";
                         break;
+
+					case TRANS_STMT_COMMIT_PREPARED_CHECK:
+						tag = "COMMIT PREPARED CHECK";
+						break;
+
+					case TRANS_STMT_ROLLBACK_PREPARED_CHECK:
+						tag = "ROLLBACK PREPARED CHECK";
+						break;
 
                     default:
                         tag = "???";

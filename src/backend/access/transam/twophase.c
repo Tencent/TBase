@@ -149,7 +149,7 @@ static GlobalTransaction
 LookupGXact(const char *gid, Oid user);
 
 static GlobalTransaction
-LockGXact(const char *gid, Oid user);
+LockGXact(const char *gid, Oid user, bool is_check);
 
 
 
@@ -763,7 +763,7 @@ LookupGXact(const char *gid, Oid user)
  *        Locate the prepared transaction and mark it busy for COMMIT or PREPARE.
  */
 static GlobalTransaction
-LockGXact(const char *gid, Oid user)
+LockGXact(const char *gid, Oid user, bool is_check)
 {// #lizard forgives
     int            i;
 
@@ -812,9 +812,12 @@ LockGXact(const char *gid, Oid user)
                      errmsg("prepared transaction belongs to another database"),
                      errhint("Connect to the database where the transaction was prepared to finish it.")));
 
+		if (!is_check)
+		{
         /* OK for me to lock it */
         gxact->locking_backend = MyBackendId;
         MyLockedGxact = gxact;
+		}
 
         LWLockRelease(TwoPhaseStateLock);
 
@@ -1711,6 +1714,27 @@ StandbyTransactionIdIsPrepared(TransactionId xid)
 }
 
 /*
+ * CheckPreparedTransactionLock: Check whether the prepared transaction
+ * can be rollbacked
+ */
+void
+CheckPreparedTransactionLock(const char *gid)
+{
+	GlobalTransaction gxact = LockGXact(gid, GetUserId(), true);
+	if (enable_distri_print)
+	{
+		if (gxact == NULL)
+		{
+			elog(LOG, "prepared gid %s gxact is NULL.", gid);
+		}
+		else
+		{
+			elog(LOG, "prepared gid %s gxact xid %d.", gid, gxact->xid);
+		}
+	}
+}
+
+/*
  * FinishPreparedTransaction: execute COMMIT PREPARED or ROLLBACK PREPARED
  */
 void
@@ -1821,7 +1845,7 @@ FinishPreparedTransaction(const char *gid, bool isCommit)
      * Validate the GID, and lock the GXACT to ensure that two backends do not
      * try to commit the same GID at once.
      */
-    gxact = LockGXact(gid, GetUserId());
+	gxact = LockGXact(gid, GetUserId(), false);
 #ifdef PGXC
     /*
      * LockGXact returns NULL if this node does not contain given two-phase

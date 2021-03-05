@@ -21,7 +21,7 @@ PostgreSQL documentation
 
  <refsynopsisdiv>
 <synopsis>
-COMMIT PREPARED <replaceable class="PARAMETER">transaction_id</replaceable>
+COMMIT PREPARED <replaceable class="PARAMETER">transaction_id</replaceable> [ FOR CHECK ONLY ]
 </synopsis>
  </refsynopsisdiv>
 
@@ -44,6 +44,15 @@ COMMIT PREPARED <replaceable class="PARAMETER">transaction_id</replaceable>
      <para>
       The transaction identifier of the transaction that is to be
       committed.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
+    <term><literal>FOR CHECK ONLY</literal></term>
+    <listitem>
+     <para>
+      Check whether a prepared transaction can be committed.
      </para>
     </listitem>
    </varlistentry>
