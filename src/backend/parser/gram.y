@@ -10370,6 +10370,20 @@ TransactionStmt:
 					n->gid = $3;
 					$$ = (Node *)n;
 				}
+			| COMMIT PREPARED Sconst FOR CHECK ONLY
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_COMMIT_PREPARED_CHECK;
+					n->gid = $3;
+					$$ = (Node *)n;
+				}
+			| ROLLBACK PREPARED Sconst FOR CHECK ONLY
+				{
+					TransactionStmt *n = makeNode(TransactionStmt);
+					n->kind = TRANS_STMT_ROLLBACK_PREPARED_CHECK;
+					n->gid = $3;
+					$$ = (Node *)n;
+				}
 		;
 
 opt_transaction:	WORK							{}

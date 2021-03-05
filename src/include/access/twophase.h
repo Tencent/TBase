@@ -122,6 +122,8 @@ extern void CheckPointTwoPhase(XLogRecPtr redo_horizon);
 
 extern void FinishPreparedTransaction(const char *gid, bool isCommit);
 
+extern void CheckPreparedTransactionLock(const char *gid);
+
 extern void PrepareRedoAdd(char *buf, XLogRecPtr start_lsn,
                XLogRecPtr end_lsn);
 extern void PrepareRedoRemove(TransactionId xid, bool giveWarning);

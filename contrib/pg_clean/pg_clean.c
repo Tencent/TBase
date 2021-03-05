@@ -84,6 +84,8 @@ PG_MODULE_MAGIC;
 #define GIDSIZE (200 + 24)
 #define MAX_TWOPC_TXN 1000
 
+#define MAX_CMD_LENGTH 120
+
 #define XIDFOUND 1
 #define XIDNOTFOUND -1
 #define XIDEXECFAIL -2
@@ -314,7 +316,7 @@ bool check_node_participate(txn_info * txn, int node_idx);
 void recover2PC(txn_info * txn);
 TXN_STATUS 
 	 check_txn_global_status(txn_info *txn);
-bool clean_2PC_iscommit(txn_info *txn, bool iscommit);
+bool clean_2PC_iscommit(txn_info *txn, bool is_commit, bool is_check);
 bool clean_2PC_files(txn_info *txn);
 void Init_print_txn_info(print_txn_info *print_txn);
 void Init_print_stats_all(print_status *pstatus);
@@ -2228,7 +2230,7 @@ Datum pgxc_commit_on_node(PG_FUNCTION_ARGS)
     Oid  nodeoid;
     char *gid;
     txn_info *txn;
-	char command[100];
+	char command[MAX_CMD_LENGTH];
 	PGXCNodeHandle **connections = NULL;
 	int					conn_count = 0;
 	ResponseCombiner	combiner;
@@ -2268,7 +2270,7 @@ Datum pgxc_commit_on_node(PG_FUNCTION_ARGS)
 
 	strncpy(txn->gid, gid, strlen(gid)+1);
     getTxnInfoOnOtherNodes(txn);
-	snprintf(command, 100, "commit prepared '%s'", txn->gid);
+	snprintf(command, MAX_CMD_LENGTH, "commit prepared '%s'", txn->gid);
 
 
     if (InvalidGlobalTimestamp == txn->global_commit_timestamp)
@@ -2334,7 +2336,7 @@ Datum pgxc_abort_on_node(PG_FUNCTION_ARGS)
     Oid  nodeoid;
     char *gid;
     txn_info *txn;
-	char command[100];
+	char command[MAX_CMD_LENGTH];
 	PGXCNodeHandle **connections = NULL;
 	int					conn_count = 0;
 	ResponseCombiner	combiner;
@@ -2375,7 +2377,7 @@ Datum pgxc_abort_on_node(PG_FUNCTION_ARGS)
 	strncpy(txn->gid, gid, strlen(gid)+1);
 	connections = (PGXCNodeHandle**)palloc(sizeof(PGXCNodeHandle*));
     getTxnInfoOnOtherNodes(txn);
-	snprintf(command, 100, "rollback prepared '%s'", txn->gid);
+	snprintf(command, MAX_CMD_LENGTH, "rollback prepared '%s'", txn->gid);
 #if 0    
 	if (!setMaintenanceMode(true))
 	{
@@ -2617,7 +2619,15 @@ void recover2PC(txn_info * txn)
             else
             {
     			txn->op = COMMIT;
-    			if (!clean_2PC_iscommit(txn, true))
+    			/* check whether all nodes can commit prepared */
+    			if (!clean_2PC_iscommit(txn, true, true))
+    			{
+    				txn->op_issuccess = false;
+    				elog(LOG, "check commit 2PC transaction %s failed", txn->gid);
+    				return;
+    			}
+    			/* send commit prepared to all nodes */
+    			if (!clean_2PC_iscommit(txn, true, false))
     			{
     				txn->op_issuccess = false;
     				elog(LOG, "commit 2PC transaction %s failed", txn->gid);
@@ -2630,7 +2640,15 @@ void recover2PC(txn_info * txn)
 		
 		case TXN_STATUS_ABORTED:
 			txn->op = ABORT;
-			if (!clean_2PC_iscommit(txn, false))
+			/* check whether all nodes can rollback prepared */
+			if (!clean_2PC_iscommit(txn, false, true))
+			{
+				txn->op_issuccess = false;
+				elog(LOG, "check rollback 2PC transaction %s failed", txn->gid);
+				return;
+			}
+			/* send rollback prepared to all nodes */
+			if (!clean_2PC_iscommit(txn, false, false))
 			{
 				txn->op_issuccess = false;
 				elog(LOG, "rollback 2PC transaction %s failed", txn->gid);
@@ -2791,11 +2809,12 @@ TXN_STATUS check_txn_global_status(txn_info *txn)
 	return TXN_STATUS_ABORTED;
 }
 
-bool clean_2PC_iscommit(txn_info *txn, bool iscommit)
+bool clean_2PC_iscommit(txn_info *txn, bool is_commit, bool is_check)
 {
 	int ii;
 	static const char *STMT_FORM = "%s prepared '%s';";
-	char command[100];
+	static const char *STMT_FORM_CHECK = "%s prepared '%s' for check only;";
+	char command[MAX_CMD_LENGTH];
 	int node_idx;
     Oid node_oid;
 	PGXCNodeHandle **connections = NULL;
@@ -2803,11 +2822,29 @@ bool clean_2PC_iscommit(txn_info *txn, bool iscommit)
 	ResponseCombiner	combiner;
 	PGXCNodeAllHandles *pgxc_handles = NULL;
 
-	if (iscommit)
-		snprintf(command, 100, STMT_FORM, "commit", txn->gid);
+	if (is_commit)
+	{
+		if (is_check)
+		{
+			snprintf(command, MAX_CMD_LENGTH, STMT_FORM_CHECK, "commit", txn->gid);
+		}
 	else
-		snprintf(command, 100, STMT_FORM, "rollback", txn->gid);
-	if (iscommit && InvalidGlobalTimestamp == txn->global_commit_timestamp)	
+		{
+			snprintf(command, MAX_CMD_LENGTH, STMT_FORM, "commit", txn->gid);
+		}
+	}
+	else
+	{
+		if (is_check)
+		{
+			snprintf(command, MAX_CMD_LENGTH, STMT_FORM_CHECK, "rollback", txn->gid);
+		}
+		else
+		{
+			snprintf(command, MAX_CMD_LENGTH, STMT_FORM, "rollback", txn->gid);
+		}
+	}
+	if (is_commit && InvalidGlobalTimestamp == txn->global_commit_timestamp)	
 	{
 		elog(ERROR, "twophase transaction '%s' has InvalidGlobalCommitTimestamp", txn->gid);
 	}
@@ -2986,9 +3023,9 @@ bool clean_2PC_files(txn_info * txn)
 	TupleTableSlots result;
 	bool issuccess = true;
 	static const char *STMT_FORM = "select pgxc_remove_2pc_records('%s')::text";
-	char query[100];
+	char query[MAX_CMD_LENGTH];
 	
-	snprintf(query, 100, STMT_FORM, txn->gid);
+	snprintf(query, MAX_CMD_LENGTH, STMT_FORM, txn->gid);
 
 	for (ii = 0; ii < dn_nodes_num; ii++)
 	{
