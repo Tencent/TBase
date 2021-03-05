@@ -177,8 +177,8 @@ typedef struct ResponseCombiner
     uint64     recv_datarows;
 	
 	/* for remote instrument */
-	Bitmapset       *printed_nodes;     /* ids of plan nodes we've handled */
 	HTAB            *recv_instr_htbl;        /* received str hash table for each plan_node_id */
+	bool    remote_parallel_estimated;  /* hint for remote instrument in parallel mode */
 #endif
 }    ResponseCombiner;
 

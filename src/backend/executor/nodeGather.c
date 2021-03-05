@@ -543,9 +543,10 @@ ExecReScanGather(GatherState *node)
      * to propagate any error or other information to master backend before
      * dying.  Parallel context will be reused for rescan.
      */
+#if 0 /* pg latest code disable for now */
 	Gather	   *gather = (Gather *) node->ps.plan;
 	PlanState  *outerPlan = outerPlanState(node);
-
+#endif
 	/* Make sure any existing workers are gracefully shut down */
     ExecShutdownGatherWorkers(node);
 

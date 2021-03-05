@@ -47,6 +47,7 @@
 #include "pgxc/execRemote.h"
 #endif
 #ifdef __TBASE__
+#include "commands/explain_dist.h"
 #include "commands/vacuum.h"
 #endif
 
@@ -1492,6 +1493,10 @@ ExplainNode(PlanState *planstate, List *ancestors,
 			ExplainPropertyFloat("Actual Loops", nloops, 0, es);
 		}
 	}
+	else if (es->analyze && planstate->dn_instrument)
+	{
+		ExplainCommonRemoteInstr(planstate, es);
+	}
 	else if (es->analyze)
 	{
 		if (es->format == EXPLAIN_FORMAT_TEXT)
@@ -2608,6 +2613,32 @@ show_sort_info(SortState *sortstate, ExplainState *es)
 		if (opened_group)
 			ExplainCloseGroup("Workers", "Workers", false, es);
 	}
+#ifdef __TBASE__
+	else if (sortstate->instrument.spaceType != -1)
+	{
+		/* try our cached distributed instrument */
+		/* same logic above */
+		const char *sortMethod = tuplesort_method_name(sortstate->instrument.sortMethod);
+		const char *spaceType = tuplesort_space_type_name(sortstate->instrument.spaceType);
+		long        spaceUsed = sortstate->instrument.spaceUsed;
+		
+		/* -1 means invalid value, indicate that this node executed by ourself */
+		Assert(sortstate->instrument.sortMethod != -1);
+		
+		if (es->format == EXPLAIN_FORMAT_TEXT)
+		{
+			appendStringInfoSpaces(es->str, es->indent * 2);
+			appendStringInfo(es->str, "Sort Method: %s  %s: %ldkB\n",
+			                 sortMethod, spaceType, spaceUsed);
+		}
+		else
+		{
+			ExplainPropertyText("Sort Method", sortMethod, es);
+			ExplainPropertyLong("Sort Space Used", spaceUsed, es);
+			ExplainPropertyText("Sort Space Type", spaceType, es);
+		}
+	}
+#endif
 }
 
 /*

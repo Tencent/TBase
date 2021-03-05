@@ -184,6 +184,9 @@ ExecInitHash(Hash *node, EState *estate, int eflags)
     hashstate->ps.ExecProcNode = ExecHash;
     hashstate->hashtable = NULL;
     hashstate->hashkeys = NIL;    /* will be set by parent HashJoin */
+#ifdef __TBASE__
+	hashstate->shared_info = NULL;
+#endif
 
     /*
      * Miscellaneous initialization
@@ -1830,6 +1833,10 @@ ExecHashEstimate(HashState *node, ParallelContext *pcxt)
 {
 	size_t		size;
 
+	/* don't need this if not instrumenting or no workers */
+	if (!node->ps.instrument || pcxt->nworkers == 0)
+		return;
+	
 	size = mul_size(pcxt->nworkers, sizeof(HashInstrumentation));
 	size = add_size(size, offsetof(SharedHashInfo, hinstrument));
 	shm_toc_estimate_chunk(&pcxt->estimator, size);
@@ -1845,6 +1852,10 @@ ExecHashInitializeDSM(HashState *node, ParallelContext *pcxt)
 {
 	size_t		size;
 
+	/* don't need this if not instrumenting or no workers */
+	if (!node->ps.instrument || pcxt->nworkers == 0)
+		return;
+	
 	size = offsetof(SharedHashInfo, hinstrument) +
 		pcxt->nworkers * sizeof(HashInstrumentation);
 	node->shared_info = (SharedHashInfo *) shm_toc_allocate(pcxt->toc, size);
@@ -1876,9 +1887,17 @@ ExecHashInitializeWorker(HashState *node, ParallelWorkerContext *pwcxt)
 {
 	SharedHashInfo *shared_info;
 
+	/* don't need this if not instrumenting */
+	if (!node->ps.instrument)
+		return;
+	
 	shared_info = (SharedHashInfo *)
 		shm_toc_lookup(pwcxt->toc, node->ps.plan->plan_node_id, true);
 	node->hinstrument = &shared_info->hinstrument[ParallelWorkerNumber];
+#ifdef __TBASE__
+	/* set node->shared_info for distributed instrument */
+	node->shared_info = shared_info;
+#endif
 }
 
 /*
@@ -1890,6 +1909,7 @@ ExecHashInitializeWorker(HashState *node, ParallelWorkerContext *pwcxt)
 void
 ExecShutdownHash(HashState *node)
 {
+	/* Now accumulate data for the current (final) hash table */
 	if (node->hinstrument && node->hashtable)
 		ExecHashGetInstrumentation(node->hinstrument, node->hashtable);
 }
@@ -1904,6 +1924,9 @@ ExecHashRetrieveInstrumentation(HashState *node)
 	SharedHashInfo *shared_info = node->shared_info;
 	size_t		size;
 
+	if (shared_info == NULL)
+		return;
+	
 	/* Replace node->shared_info with a copy in backend-local memory. */
 	size = offsetof(SharedHashInfo, hinstrument) +
 		shared_info->num_workers * sizeof(HashInstrumentation);

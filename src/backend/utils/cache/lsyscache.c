@@ -2640,6 +2640,31 @@ is_pgxc_nodeprimary(Oid nodeid)
     return result;
 }
 
+#ifdef __TBASE__
+/*
+ * get_pgxc_nodename
+ *		Get node name for given identifier
+ */
+char *
+get_pgxc_nodename_from_identifier(int id)
+{
+	HeapTuple		tuple;
+	Form_pgxc_node	nodeForm;
+	char           *result;
+	
+	tuple = SearchSysCache1(PGXCNODEIDENTIFIER, Int32GetDatum(id));
+	
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for identifier %d", id);
+	
+	nodeForm = (Form_pgxc_node) GETSTRUCT(tuple);
+	result = pstrdup(NameStr(nodeForm->node_name));
+	ReleaseSysCache(tuple);
+	
+	return result;
+}
+#endif
+
 /*
  * get_pgxc_groupoid
  *        Obtain PGXC Group Oid for given group name

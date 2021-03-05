@@ -298,7 +298,6 @@ InitResponseCombiner(ResponseCombiner *combiner, int node_count,
     combiner->recv_datarows  = 0;
     combiner->prerowBuffers  = NULL;
     combiner->is_abort = false;
-	combiner->printed_nodes = NULL;
 	combiner->recv_instr_htbl = NULL;
 #endif
 }
@@ -1107,11 +1106,6 @@ CloseCombiner(ResponseCombiner *combiner)
 		hash_destroy(combiner->recv_instr_htbl);
 		combiner->recv_instr_htbl = NULL;
 	}
-	if (combiner->printed_nodes)
-	{
-		bms_free(combiner->printed_nodes);
-		combiner->printed_nodes = NULL;
-	}
 #endif
 }
 
@@ -1900,7 +1894,15 @@ FetchTuple(ResponseCombiner *combiner)
      * Case if we run local subplan.
      * We do not have remote connections, so just get local tuple and return it
      */
-    if (outerPlanState(combiner))
+	if (outerPlanState(combiner)
+#ifdef __TBASE__
+	    /* 
+		 * if dn_instrument is not null, means this node is initialized for recv
+		 * instrument from remote, not execute it locally too.
+		 */
+	    && ((outerPlanState(combiner))->dn_instrument == NULL)
+#endif
+		)
     {
         RemoteSubplanState *planstate = (RemoteSubplanState *) combiner;
         RemoteSubplan *plan = (RemoteSubplan *) combiner->ss.ps.plan;
@@ -2686,10 +2688,6 @@ READ_ROWBUFFER:
         {
             /* Do nothing. It must have been handled in handle_response() */
         }
-		else if (res == RESPONSE_INSTR)
-		{
-			/* Do nothing. It must have been handled in handle_response() */
-		}
         else
         {
             // Can not get here?
@@ -3328,8 +3326,9 @@ handle_response(PGXCNodeHandle *conn, ResponseCombiner *combiner)
 #ifdef __TBASE__
 			case 'i': /* Remote Instrument */
 				if (msg_len > 0)
-					HandleRemoteInstr(msg, msg_len, conn->nodeoid, combiner);
-				return RESPONSE_INSTR;
+					HandleRemoteInstr(msg, msg_len, conn->nodeid, combiner);
+				/* just break to return EOF. */
+				break;
 #endif
             default:
                 /* sync lost? */
@@ -9907,17 +9906,19 @@ ExecInitRemoteSubplan(RemoteSubplan *node, EState *estate, int eflags)
     combiner->ss.ps.plan = (Plan *) node;
     combiner->ss.ps.state = estate;
     combiner->ss.ps.ExecProcNode = ExecRemoteSubplan;
-
+#ifdef __TBASE__
 	if (estate->es_instrument)
 	{
 		HASHCTL		ctl;
 		
-		ctl.keysize = sizeof(int);
+		ctl.keysize = sizeof(RemoteInstrKey);
 		ctl.entrysize = sizeof(RemoteInstr);
 		
-		combiner->recv_instr_htbl = hash_create("Remote Instrument", 16, &ctl, HASH_ELEM);
+		combiner->recv_instr_htbl = hash_create("Remote Instrument", 8 * NumDataNodes,
+		                                        &ctl, HASH_ELEM | HASH_BLOBS);
 	}
-	
+	combiner->remote_parallel_estimated = false;
+#endif
     combiner->ss.ps.qual = NULL;
 
     combiner->request_type = REQUEST_TYPE_QUERY;
@@ -10718,6 +10719,9 @@ ExecRemoteSubplan(PlanState *pstate)
     int count = 0;
 #endif
 #ifdef __TBASE__
+	if ((node->eflags & EXEC_FLAG_EXPLAIN_ONLY) != 0)
+		return NULL;
+	
     if (!node->local_exec && (!node->finish_init) && (!(node->eflags & EXEC_FLAG_SUBPLAN)))
     {
         if(node->execNodes)
@@ -11149,12 +11153,25 @@ ExecShutdownRemoteSubplan(RemoteSubplanState *node)
 	Plan                *plan = ps->plan;
 	EState              *estate = ps->state;
 	
+	if ((node->eflags & EXEC_FLAG_EXPLAIN_ONLY) != 0)
+		return;
+	
+	elog(DEBUG1, "shutdown remote subplan worker %d, plan_node_id %d", ParallelWorkerNumber, plan->plan_node_id);
+	
 	if (estate->es_instrument)
 	{
+		MemoryContext oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
+		AttachRemoteInstrContext ctx;
+		
 		if (!ps->lefttree)
 			ps->lefttree = ExecInitNode(plan->lefttree, estate, EXEC_FLAG_EXPLAIN_ONLY);
 
-		AttachRemoteInstr(ps->lefttree, combiner);
+		ctx.htab = combiner->recv_instr_htbl;
+		ctx.node_idx_List = ((RemoteSubplan *) plan)->nodeList;
+		ctx.printed_nodes = NULL;
+		AttachRemoteInstr(ps->lefttree, &ctx);
+		
+		MemoryContextSwitchTo(oldcontext);
 	}
 }
 
@@ -11168,6 +11185,9 @@ ExecFinishRemoteSubplan(RemoteSubplanState *node)
     int *dn_list = NULL;
     char cursor[NAMEDATALEN];
 
+	if ((node->eflags & EXEC_FLAG_EXPLAIN_ONLY) != 0)
+		return;
+	
     if (!node->bound)
     {
         if (g_DataPumpDebug)

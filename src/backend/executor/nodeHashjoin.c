@@ -287,6 +287,8 @@ ExecHashJoin(PlanState *pstate)
                                                             node->hj_HashOperators,
                                                             HJ_FILL_INNER(node));
                         node->hj_HashTable = hashtable;
+						/* copy into hashNode too, for instrumentation */
+						hashNode->hashtable = hashtable;
                         parallelState->statusParallelWorker[ParallelWorkerNumber] = ParallelHashJoin_MergeShmHashTableDone;
                     }
                     else
@@ -1651,6 +1653,7 @@ ExecMergeShmHashTable(HashJoinState * hjstate, volatile ParallelHashJoinState *p
                     }
 
                     ht->totalTuples = ht->totalTuples + mergeHashtable->totalTuples;
+					ht->spacePeak = Max(ht->spacePeak, mergeHashtable->spacePeak);
                     
                     /* merge hashtable */
                     for(indexbucket = 0; indexbucket < ht->nbuckets; indexbucket++)
@@ -1803,6 +1806,12 @@ ExecMergeShmHashTable(HashJoinState * hjstate, volatile ParallelHashJoinState *p
         hashtable->totalTuples = ht->totalTuples;
         hashtable->skewEnabled = false;
         hashtable->growEnabled = false;
+		/* copy instrumentation too */
+		hashtable->nbuckets = ht->nbuckets;
+		hashtable->nbuckets_original = ht->nbuckets_original;
+		hashtable->nbatch = ht->nbatch;
+		hashtable->nbatch_original = ht->nbatch_original;
+		hashtable->spacePeak = ht->spacePeak;
     }
 
 #if 0

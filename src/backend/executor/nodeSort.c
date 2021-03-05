@@ -299,6 +299,9 @@ ExecInitSort(Sort *node, EState *estate, int eflags)
     sortstate->state     = NULL;
     sortstate->file      = NULL;
     sortstate->dataslot  = NULL;
+	sortstate->instrument.sortMethod = -1;
+	sortstate->instrument.spaceType = -1;
+	sortstate->instrument.spaceUsed = 0;
 #endif
 
     /*

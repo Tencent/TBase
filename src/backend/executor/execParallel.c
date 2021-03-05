@@ -82,6 +82,7 @@
 
 #define PARALLEL_KEY_EXEC_ERROR        UINT64CONST(0xE0000000000000B1)
 #define PARALLEL_KEY_EXEC_DONE         UINT64CONST(0xE0000000000000B2)
+#define PARALLEL_REMOTEINSTR_OFFSET    UINT64CONST(0xEC00000000000000)
 #endif
 
 #define PARALLEL_TUPLE_QUEUE_SIZE        65536
@@ -137,6 +138,15 @@ typedef struct ExecParallelInitializeDSMContext
     int            nnodes;
 } ExecParallelInitializeDSMContext;
 
+#ifdef __TBASE__
+/* Context object for ExecParallelInitializeRemoteInstr. */
+typedef struct ExecParallelRemoteInstrContext
+{
+	ParallelContext *pcxt;
+	int			ndatanode;
+} ExecParallelRemoteInstrContext;
+#endif
+
 /* Helper functions that run in the parallel leader. */
 static char *ExecSerializePlan(Plan *plan, EState *estate);
 static bool ExecParallelEstimate(PlanState *node,
@@ -149,7 +159,13 @@ static bool ExecParallelReInitializeDSM(PlanState *planstate,
 							ParallelContext *pcxt);
 static bool ExecParallelRetrieveInstrumentation(PlanState *planstate,
                                     SharedExecutorInstrumentation *instrumentation);
-
+#ifdef __TBASE__
+static bool ExecParallelEstimateRemoteInstr(PlanState *planstate,
+                                            ExecParallelRemoteInstrContext *ri);
+static bool ExecParallelInitRemoteInstrDSM(PlanState *planstate,
+                                           ExecParallelRemoteInstrContext *ri);
+static bool ExecInitializeWorkerRemoteInstr(PlanState *planstate, ParallelWorkerContext *pcxt);
+#endif
 /* Helper function that runs in the parallel worker. */
 static DestReceiver *ExecParallelGetReceiver(dsm_segment *seg, shm_toc *toc);
 
@@ -241,25 +257,15 @@ ExecSerializePlan(Plan *plan, EState *estate)
  */
 static bool
 ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateContext *e)
-{// #lizard forgives
+{
+#ifdef __TBASE__
+	int previous_nworkers;
+#endif
     if (planstate == NULL)
         return false;
 
     /* Count this node. */
     e->nnodes++;
-
-	/*
-	 * if we are running with instrument option, must init
-	 * full plantree here, to ensure e->nnodes correct.
-	 */
-	if (planstate->instrument &&
-	    IsA(planstate, RemoteSubplanState) &&
-	    NULL == planstate->lefttree)
-	{
-		planstate->lefttree = ExecInitNode(planstate->plan->lefttree,
-		                                   planstate->state,
-		                                   EXEC_FLAG_EXPLAIN_ONLY);
-	}
 
         switch (nodeTag(planstate))
         {
@@ -306,7 +312,27 @@ ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateContext *e)
 			break;
             /* For remote query and remote subplan, there is no need for shared storage. */
             case T_RemoteQueryState:                
+			break;
             case T_RemoteSubplanState:
+			/*
+             * If we are running with instrument option, must init full plantree here,
+             * to ensure e->nnodes correct. Further, we estimate per node instrument
+             * for remote instrumentation.
+             */
+			if (planstate->instrument && NULL == planstate->lefttree)
+			{
+				ExecParallelRemoteInstrContext ri;
+				RemoteSubplanState *node = (RemoteSubplanState *) planstate;
+				
+				ri.ndatanode = list_length(((RemoteSubplan *)planstate->plan)->nodeList);
+				ri.pcxt = e->pcxt;
+				
+				planstate->lefttree = ExecInitNode(planstate->plan->lefttree,
+				                                   planstate->state,
+				                                   EXEC_FLAG_EXPLAIN_ONLY);
+				planstate_tree_walker(planstate, ExecParallelEstimateRemoteInstr, &ri);
+				node->combiner.remote_parallel_estimated = true;
+			}
                 break;
             case T_HashJoinState:
 			if (planstate->plan->parallel_aware)
@@ -322,12 +348,24 @@ ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateContext *e)
                         ReDistributeEstimate(planstate, e->pcxt);
                 }
                 break;
+		case T_GatherState:
+			previous_nworkers = e->pcxt->nworkers;
+			e->pcxt->nworkers = ((Gather *) planstate->plan)->num_workers;
 #endif
             default:
                 break;
         }
 
+#ifdef __TBASE__
+	planstate_tree_walker(planstate, ExecParallelEstimate, e);
+	
+	if (IsA(planstate, GatherState))
+		e->pcxt->nworkers = previous_nworkers;
+	
+	return false;
+#else
     return planstate_tree_walker(planstate, ExecParallelEstimate, e);
+#endif
 }
 
 /*
@@ -337,7 +375,10 @@ ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateContext *e)
 static bool
 ExecParallelInitializeDSM(PlanState *planstate,
                           ExecParallelInitializeDSMContext *d)
-{// #lizard forgives
+{
+#ifdef __TBASE__
+	int previous_nworkers;
+#endif
     if (planstate == NULL)
         return false;
 
@@ -407,9 +448,21 @@ ExecParallelInitializeDSM(PlanState *planstate,
                                                   d->pcxt);
                 break;
             case T_RemoteSubplanState:
+			{
+				RemoteSubplanState *node = (RemoteSubplanState *) planstate;
+				if (node->combiner.remote_parallel_estimated)
+				{
+					ExecParallelRemoteInstrContext ri;
+					
+					ri.ndatanode = list_length(((RemoteSubplan *)planstate->plan)->nodeList);
+					ri.pcxt = d->pcxt;
+					
+					planstate_tree_walker(planstate, ExecParallelInitRemoteInstrDSM, &ri);
+				}
 			if (planstate->plan->parallel_aware)
                 ExecRemoteSubPlanInitializeDSM((RemoteSubplanState *)planstate,
                                                   d->pcxt);
+			}
                 break;                
             case T_HashJoinState:
 			if (planstate->plan->parallel_aware)
@@ -425,12 +478,24 @@ ExecParallelInitializeDSM(PlanState *planstate,
                         ReDistributeInitializeDSM(planstate, d->pcxt);
                 }
                 break;
+		case T_GatherState:
+			previous_nworkers = d->pcxt->nworkers;
+			d->pcxt->nworkers = ((Gather *) planstate->plan)->num_workers;
 #endif
             default:
                 break;
         }
 
+#ifdef __TBASE__
+	planstate_tree_walker(planstate, ExecParallelInitializeDSM, d);
+	
+	if (IsA(planstate, GatherState))
+		d->pcxt->nworkers = previous_nworkers;
+	
+	return false;
+#else
     return planstate_tree_walker(planstate, ExecParallelInitializeDSM, d);
+#endif
 }
 
 /*
@@ -1002,7 +1067,9 @@ ExecParallelRetrieveInstrumentation(PlanState *planstate,
     ibytes = mul_size(instrumentation->num_workers, sizeof(Instrumentation));
     planstate->worker_instrument =
         palloc(ibytes + offsetof(WorkerInstrumentation, instrument));
+#ifndef __TBASE__
     MemoryContextSwitchTo(oldcontext);
+#endif
 
     planstate->worker_instrument->num_workers = instrumentation->num_workers;
     memcpy(&planstate->worker_instrument->instrument, instrument, ibytes);
@@ -1019,6 +1086,26 @@ ExecParallelRetrieveInstrumentation(PlanState *planstate,
 		default:
 			break;
 	}
+#ifdef __TBASE__
+	/* also retrieve instrumentation from remote */
+	if (planstate->dn_instrument != NULL)
+	{
+		DatanodeInstrumentation *tmp_instrument = planstate->dn_instrument;
+		int     nnode = planstate->dn_instrument->nnode;
+		Size    size = offsetof(DatanodeInstrumentation, instrument) +
+		               mul_size(nnode, sizeof(RemoteInstrumentation));
+		
+		elog(DEBUG1, "retrieve downstream instrumentation, plan_node_id %d nnode %d", plan_node_id, nnode);
+		
+		planstate->dn_instrument = palloc0(size);
+		memcpy(planstate->dn_instrument, tmp_instrument, size);
+	}
+	/*
+	 * TBase switch memory context later to keep retrieved instrumentation live until 
+	 * sending them back to upstream.
+	 */
+	MemoryContextSwitchTo(oldcontext);
+#endif
 
     return planstate_tree_walker(planstate, ExecParallelRetrieveInstrumentation,
                                  instrumentation);
@@ -1228,6 +1315,15 @@ ExecParallelInitializeWorker(PlanState *planstate, ParallelWorkerContext *pwcxt)
 				ExecRemoteQueryInitializeDSMWorker((RemoteQueryState *)planstate, pwcxt);
                 break;
             case T_RemoteSubplanState: 
+			if (planstate->instrument && NULL == planstate->lefttree)
+			{
+				/* if instrument needed, init full plantree in worker */
+				planstate->lefttree = ExecInitNode(planstate->plan->lefttree,
+				                                   planstate->state,
+				                                   EXEC_FLAG_EXPLAIN_ONLY);
+				/* attach share memory for it's child */
+				planstate_tree_walker(planstate, ExecInitializeWorkerRemoteInstr, pwcxt);
+			}
             if (planstate->plan->parallel_aware)        
 				ExecRemoteSubPlanInitializeDSMWorker((RemoteSubplanState *)planstate, pwcxt);
 			break;
@@ -1252,6 +1348,105 @@ ExecParallelInitializeWorker(PlanState *planstate, ParallelWorkerContext *pwcxt)
 	return planstate_tree_walker(planstate, ExecParallelInitializeWorker,
 								 pwcxt);
 }
+
+#ifdef __TBASE__
+/*
+ * Estimate share memory space for plan nodes executed by remote, they contain instruments
+ * from all datanodes involved, and only leader worker receive these instruments.
+ */
+static bool
+ExecParallelEstimateRemoteInstr(PlanState *node, ExecParallelRemoteInstrContext *ri)
+{
+	ParallelContext *pcxt = ri->pcxt;
+	Size size = mul_size(ri->ndatanode, sizeof(RemoteInstrumentation));
+	size = add_size(size, offsetof(DatanodeInstrumentation, instrument));
+	
+	if (node == NULL)
+		return false;
+	
+	/*
+	 * only remote plan node could be here, we need disable parallel for these nodes
+	 * to prevent them from initializing other share memory for execution, they don't
+	 * need that, only init share memory for instrument collecting.
+	 */
+	node->plan->parallel_aware = false;
+	
+	shm_toc_estimate_chunk(&pcxt->estimator, size);
+	shm_toc_estimate_keys(&pcxt->estimator, 1);
+	
+	/* for sub-plan */
+	if (IsA(node, RemoteSubplanState) && node->lefttree == NULL)
+	{
+		node->lefttree = ExecInitNode(node->plan->lefttree,
+		                              node->state,
+		                              EXEC_FLAG_EXPLAIN_ONLY);
+	}
+	
+	elog(DEBUG1, "parallel estimate shm remote instrument for plan node %d", node->plan->plan_node_id);
+	
+	return planstate_tree_walker(node, ExecParallelEstimateRemoteInstr,
+	                             ri);
+}
+
+/*
+ * Allocate share memory space for plan nodes executed by remote, they contain instruments
+ * from all datanodes involved, and only leader worker receive these instruments. use
+ * plan_node_id + offset as a unique key.
+ */
+static bool
+ExecParallelInitRemoteInstrDSM(PlanState *node, ExecParallelRemoteInstrContext *ri)
+{
+	ParallelContext *pcxt = ri->pcxt;
+	Size size = mul_size(ri->ndatanode, sizeof(RemoteInstrumentation));
+	size = add_size(size, offsetof(DatanodeInstrumentation, instrument));
+	
+	if (node == NULL)
+		return false;
+	
+	node->dn_instrument = shm_toc_allocate(pcxt->toc, size);
+	memset(node->dn_instrument, 0, size);
+	node->dn_instrument->nnode = ri->ndatanode;
+	shm_toc_insert(pcxt->toc, node->plan->plan_node_id + PARALLEL_REMOTEINSTR_OFFSET,
+	               node->dn_instrument);
+	
+	elog(DEBUG1, "parallel allocate shm remote instrument for plan node %d", node->plan->plan_node_id);
+	
+	return planstate_tree_walker(node, ExecParallelInitRemoteInstrDSM,
+	                             ri);
+}
+
+/*
+ * Fetch the share memory for plan nodes executed by remote, they will be fulfilled
+ * with instruments during RemoteSubplan node's execution. use plan_node_id + offset
+ * as the unique key.
+ */
+static bool
+ExecInitializeWorkerRemoteInstr(PlanState *planstate, ParallelWorkerContext *pwcxt)
+{
+	/*
+	 * only remote plan node could be here, we need disable parallel for these nodes
+	 * to prevent them from initializing other share memory for execution, they don't
+	 * need that, only init share memory for instrument collecting.
+	 */
+	planstate->plan->parallel_aware = false;
+	planstate->dn_instrument = shm_toc_lookup(pwcxt->toc,
+	                                          planstate->plan->plan_node_id + PARALLEL_REMOTEINSTR_OFFSET,
+	                                          false);
+	
+	/* for sub-plan */
+	if (IsA(planstate, RemoteSubplanState) && planstate->lefttree == NULL)
+	{
+		planstate->lefttree = ExecInitNode(planstate->plan->lefttree,
+		                                   planstate->state,
+		                                   EXEC_FLAG_EXPLAIN_ONLY);
+	}
+	
+	elog(DEBUG1, "parallel init worker remote instrument for plan node %d", planstate->plan->plan_node_id);
+	
+	return planstate_tree_walker(planstate, ExecInitializeWorkerRemoteInstr,
+	                             pwcxt);
+}
+#endif
 
 /*
  * Main entrypoint for parallel query worker processes.

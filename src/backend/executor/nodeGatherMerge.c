@@ -405,8 +405,10 @@ ExecReScanGatherMerge(GatherMergeState *node)
      * to propagate any error or other information to master backend before
      * dying.  Parallel context will be reused for rescan.
      */
+#if 0 /* postgresql latest code */
 	GatherMerge *gm = (GatherMerge *) node->ps.plan;
 	PlanState  *outerPlan = outerPlanState(node);
+#endif
 
 	/* Make sure any existing workers are gracefully shut down */
     ExecShutdownGatherMergeWorkers(node);
@@ -418,7 +420,7 @@ ExecReScanGatherMerge(GatherMergeState *node)
 		ExecParallelReinitialize(&node->ps, node->pei);
 
     ExecReScan(node->ps.lefttree);
-#if 0
+#if 0 /* postgresql latest code */
 =======
 	/*
 	 * Set child node's chgParam to tell it that the next scan might deliver a

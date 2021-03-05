@@ -161,3 +161,9 @@ test: xc_notrans_block
 
 # This runs XL specific tests
 test: xl_primary_key xl_foreign_key xl_distribution_column_types xl_alter_table xl_distribution_column_types_modulo xl_plan_pushdown xl_functions xl_limitations xl_user_defined_functions xl_join xl_distributed_xact xl_create_table
+
+# This runs TBase specific tests
+test: tbase_explain
+
+test: redistribute_custom_types
+test: nestloop_by_shard

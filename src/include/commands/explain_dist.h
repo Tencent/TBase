@@ -16,21 +16,42 @@
 #include "commands/explain.h"
 #include "pgxc/execRemote.h"
 
-/* Hash table entry */
-typedef struct
+/* Key of hash table entry */
+typedef struct RemoteInstrKey
 {
-	int id;                 /* unique id of current plan node */
+	int plan_node_id;   /* unique id of current plan node */
+	int node_id;        /* node id */
+} RemoteInstrKey;
+
+/* Hash table entry */
+typedef struct RemoteInstr
+{
+	RemoteInstrKey key;
+	
 	int nodeTag;            /* type of current plan node */
 	Instrumentation instr;  /* instrument of current plan node */
 	
-	/* for Gather */
-	int nworkers_launched;  /* worker num of gather */
+	/* for Gather and Sort */
+	int nworkers_launched;  /* worker num of gather or sort */
 	
-	/* for Hash: */
+	/* for Sort */
+	TuplesortInstrumentation sort_stat;      /* instrument if no parallel */
+	TuplesortInstrumentation *w_sort_stats;  /* instrument of parallel workers */
+	
+	/* for Hash */
+	HashInstrumentation hash_stat;
 } RemoteInstr;
 
+typedef struct AttachRemoteInstrContext
+{
+	List        *node_idx_List;     /* list of node index in dn_handles */
+	HTAB        *htab;              /* htab from combiner, stored remote instr */
+	Bitmapset   *printed_nodes;     /* ids of plan nodes we've handled */
+} AttachRemoteInstrContext;
+
 extern void SendLocalInstr(PlanState *planstate);
-extern void HandleRemoteInstr(char *msg_body, size_t len, int nodeoid, ResponseCombiner *combiner);
-extern bool AttachRemoteInstr(PlanState *planstate, ResponseCombiner *combiner);
+extern void HandleRemoteInstr(char *msg_body, size_t len, int nodeid, ResponseCombiner *combiner);
+extern bool AttachRemoteInstr(PlanState *planstate, AttachRemoteInstrContext *ctx);
+extern void ExplainCommonRemoteInstr(PlanState *planstate, ExplainState *es);
 
 #endif  /* EXPLAINDIST_H  */

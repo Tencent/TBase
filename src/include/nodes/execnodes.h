@@ -928,6 +928,9 @@ typedef struct PlanState
                                          * wrapper */
 
     Instrumentation *instrument;    /* Optional runtime stats for this node */
+#ifdef __TBASE__
+	DatanodeInstrumentation *dn_instrument;     /* per-datanode instrumentation */
+#endif
     WorkerInstrumentation *worker_instrument;    /* per-worker instrumentation */
 
     /*
@@ -1992,6 +1995,7 @@ typedef struct SortState
 	bool		am_worker;		/* are we a worker? */
 	SharedSortInfo *shared_info;	/* one entry per worker */
 #ifdef __TBASE__
+	TuplesortInstrumentation instrument; /* cached instrument from distributed nodes */
     Size            stateLen;
     ReDistributeState *state;
     BufFile        **file;

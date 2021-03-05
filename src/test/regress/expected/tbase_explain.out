@@ -1,0 +1,362 @@
+--explain analyze
+create table a1(id int, num int, name text);
+create table a2(id int, num int, name text);
+insert into a1 values(1,generate_series(1,100),'a');
+insert into a1 values(2,generate_series(1,100),'b');
+insert into a1 values(3,generate_series(1,100),'c');
+insert into a2 select * from a1;
+--normal cases
+explain (costs off,timing off,summary off,analyze,verbose)
+select count(*) from a1;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Finalize Aggregate (actual rows=1 loops=1)
+   Output: count(*)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2) (actual rows=2 loops=1)
+         Output: PARTIAL count(*)
+         ->  Partial Aggregate
+               DN (actual rows=1..1 loops=1..1)
+               - datanode_1 (actual rows=1 loops=1)
+               - datanode_2 (actual rows=1 loops=1)
+               Output: PARTIAL count(*)
+               ->  Seq Scan on public.a1
+                     DN (actual rows=100..200 loops=1..1)
+                     - datanode_1 (actual rows=200 loops=1)
+                     - datanode_2 (actual rows=100 loops=1)
+                     Output: id, num, name
+(14 rows)
+
+explain (costs off,timing off,summary off,analyze,verbose)
+select num, count(*) cnt from a2 group by num order by cnt;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2) (actual rows=100 loops=1)
+   Output: num, count(*)
+   Sort Key: count(*)
+   ->  Sort
+         DN (actual rows=42..58 loops=1..1)
+         - datanode_1 (actual rows=42 loops=1)
+         - datanode_2 (actual rows=58 loops=1)
+         Output: num, (count(*))
+         Sort Key: (count(*))
+         Sort Method: quicksort  Memory: 28kB
+         ->  Finalize HashAggregate
+               DN (actual rows=42..58 loops=1..1)
+               - datanode_1 (actual rows=42 loops=1)
+               - datanode_2 (actual rows=58 loops=1)
+               Output: num, count(*)
+               Group Key: a2.num
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     DN (actual rows=84..116 loops=1..1)
+                     - datanode_1 (actual rows=84 loops=1)
+                     - datanode_2 (actual rows=116 loops=1)
+                     Output: num, PARTIAL count(*)
+                     Distribute results by H: num
+                     ->  Partial HashAggregate
+                           DN (actual rows=100..100 loops=1..1)
+                           - datanode_1 (actual rows=100 loops=1)
+                           - datanode_2 (actual rows=100 loops=1)
+                           Output: num, PARTIAL count(*)
+                           Group Key: a2.num
+                           ->  Seq Scan on public.a2
+                                 DN (actual rows=100..200 loops=1..1)
+                                 - datanode_1 (actual rows=200 loops=1)
+                                 - datanode_2 (actual rows=100 loops=1)
+                                 Output: id, num, name
+(33 rows)
+
+explain (costs off,timing off,summary off,analyze,verbose)
+select * from a1, a2 where a1.num = a2.num;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2) (actual rows=900 loops=1)
+   Output: a1.id, a1.num, a1.name, a2.id, a2.num, a2.name
+   ->  Hash Join
+         DN (actual rows=378..522 loops=1..1)
+         - datanode_1 (actual rows=378 loops=1)
+         - datanode_2 (actual rows=522 loops=1)
+         Output: a1.id, a1.num, a1.name, a2.id, a2.num, a2.name
+         Hash Cond: (a1.num = a2.num)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               DN (actual rows=126..174 loops=1..1)
+               - datanode_1 (actual rows=126 loops=1)
+               - datanode_2 (actual rows=174 loops=1)
+               Output: a1.id, a1.num, a1.name
+               Distribute results by H: num
+               ->  Seq Scan on public.a1
+                     DN (actual rows=100..200 loops=1..1)
+                     - datanode_1 (actual rows=200 loops=1)
+                     - datanode_2 (actual rows=100 loops=1)
+                     Output: a1.id, a1.num, a1.name
+         ->  Hash
+               DN (actual rows=126..174 loops=1..1)
+               - datanode_1 (actual rows=126 loops=1)
+               - datanode_2 (actual rows=174 loops=1)
+               Output: a2.id, a2.num, a2.name
+               Buckets: 1024  Batches: 1  Memory Usage: 16kB
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     DN (actual rows=126..174 loops=1..1)
+                     - datanode_1 (actual rows=126 loops=1)
+                     - datanode_2 (actual rows=174 loops=1)
+                     Output: a2.id, a2.num, a2.name
+                     Distribute results by H: num
+                     ->  Seq Scan on public.a2
+                           DN (actual rows=100..200 loops=1..1)
+                           - datanode_1 (actual rows=200 loops=1)
+                           - datanode_2 (actual rows=100 loops=1)
+                           Output: a2.id, a2.num, a2.name
+(36 rows)
+
+--append
+explain (costs off,timing off,summary off,analyze,verbose)
+select max(num) from a1 union select min(num) from a1 order by 1;
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Unique (actual rows=2 loops=1)
+   Output: (max(a1.num))
+   ->  Sort (actual rows=2 loops=1)
+         Output: (max(a1.num))
+         Sort Key: (max(a1.num))
+         Sort Method: quicksort  Memory: 25kB
+         ->  Append (actual rows=2 loops=1)
+               ->  Finalize Aggregate (actual rows=1 loops=1)
+                     Output: max(a1.num)
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2) (actual rows=2 loops=1)
+                           Output: PARTIAL max(a1.num)
+                           ->  Partial Aggregate
+                                 DN (actual rows=1..1 loops=1..1)
+                                 - datanode_1 (actual rows=1 loops=1)
+                                 - datanode_2 (actual rows=1 loops=1)
+                                 Output: PARTIAL max(a1.num)
+                                 ->  Seq Scan on public.a1
+                                       DN (actual rows=100..200 loops=1..1)
+                                       - datanode_1 (actual rows=200 loops=1)
+                                       - datanode_2 (actual rows=100 loops=1)
+                                       Output: a1.id, a1.num, a1.name
+               ->  Finalize Aggregate (actual rows=1 loops=1)
+                     Output: min(a1_1.num)
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2) (actual rows=2 loops=1)
+                           Output: PARTIAL min(a1_1.num)
+                           ->  Partial Aggregate
+                                 DN (actual rows=1..1 loops=1..1)
+                                 - datanode_1 (actual rows=1 loops=1)
+                                 - datanode_2 (actual rows=1 loops=1)
+                                 Output: PARTIAL min(a1_1.num)
+                                 ->  Seq Scan on public.a1 a1_1
+                                       DN (actual rows=100..200 loops=1..1)
+                                       - datanode_1 (actual rows=200 loops=1)
+                                       - datanode_2 (actual rows=100 loops=1)
+                                       Output: a1_1.id, a1_1.num, a1_1.name
+(35 rows)
+
+--subplan
+explain (costs off,timing off,summary off,analyze,verbose)
+select * from a1 where id in (select count(*) from a2 where a1.num=a2.num);
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2) (actual rows=100 loops=1)
+   Output: a1.id, a1.num, a1.name
+   ->  Seq Scan on public.a1
+         DN (actual rows=0..100 loops=1..1)
+         - datanode_1 (actual rows=0 loops=1)
+         - datanode_2 (actual rows=100 loops=1)
+         Output: a1.id, a1.num, a1.name
+         Filter: (SubPlan 1)
+         SubPlan 1
+           ->  Finalize Aggregate
+                 DN (actual rows=1..1 loops=100..200)
+                 - datanode_1 (actual rows=1 loops=200)
+                 - datanode_2 (actual rows=1 loops=100)
+                 Output: count(*)
+                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                       DN (actual rows=2..2 loops=100..200)
+                       - datanode_1 (actual rows=2 loops=200)
+                       - datanode_2 (actual rows=2 loops=100)
+                       Output: PARTIAL count(*)
+                       ->  Partial Aggregate
+                             DN (actual rows=1..1 loops=1..1)
+                             - datanode_1 (actual rows=1 loops=1)
+                             - datanode_2 (actual rows=1 loops=1)
+                             Output: PARTIAL count(*)
+                             ->  Seq Scan on public.a2
+                                   DN (actual rows=1..2 loops=1..1)
+                                   - datanode_1 (actual rows=2 loops=1)
+                                   - datanode_2 (actual rows=1 loops=1)
+                                   Output: a2.id, a2.num, a2.name
+                                   Filter: (a1.num = a2.num)
+(30 rows)
+
+--initplan
+explain (costs off,timing off,summary off,analyze,verbose)
+select * from a1 where num >= (select count(*) from a2 where name='a');
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2) (actual rows=3 loops=1)
+   Output: a1.id, a1.num, a1.name
+   ->  Seq Scan on public.a1
+         DN (actual rows=1..2 loops=1..1)
+         - datanode_1 (actual rows=2 loops=1)
+         - datanode_2 (actual rows=1 loops=1)
+         Output: a1.id, a1.num, a1.name
+         Filter: (a1.num >= $0)
+         InitPlan 1 (returns $0)
+           ->  Finalize Aggregate
+                 DN (actual rows=1..1 loops=1..1)
+                 - datanode_1 (actual rows=1 loops=1)
+                 - datanode_2 (actual rows=1 loops=1)
+                 Output: count(*)
+                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                       DN (actual rows=2..2 loops=1..1)
+                       - datanode_1 (actual rows=2 loops=1)
+                       - datanode_2 (actual rows=2 loops=1)
+                       Output: PARTIAL count(*)
+                       ->  Partial Aggregate
+                             DN (actual rows=1..1 loops=1..1)
+                             - datanode_1 (actual rows=1 loops=1)
+                             - datanode_2 (actual rows=1 loops=1)
+                             Output: PARTIAL count(*)
+                             ->  Seq Scan on public.a2
+                                   DN (actual rows=0..100 loops=1..1)
+                                   - datanode_1 (actual rows=100 loops=1)
+                                   - datanode_2 (actual rows=0 loops=1)
+                                   Output: a2.id, a2.num, a2.name
+                                   Filter: (a2.name = 'a'::text)
+(30 rows)
+
+explain (costs off,timing off,summary off,analyze,verbose)
+select * from a1 where num >= (select count(*) from a2 where name='b') order by id;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2) (actual rows=3 loops=1)
+   Output: a1.id, a1.num, a1.name
+   Sort Key: a1.id
+   ->  Sort
+         DN (actual rows=1..2 loops=1..1)
+         - datanode_1 (actual rows=2 loops=1)
+         - datanode_2 (actual rows=1 loops=1)
+         Output: a1.id, a1.num, a1.name
+         Sort Key: a1.id
+         Sort Method: quicksort  Memory: 25kB
+         InitPlan 1 (returns $0)
+           ->  Finalize Aggregate
+                 DN (actual rows=1..1 loops=1..1)
+                 - datanode_1 (actual rows=1 loops=1)
+                 - datanode_2 (actual rows=1 loops=1)
+                 Output: count(*)
+                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                       DN (actual rows=2..2 loops=1..1)
+                       - datanode_1 (actual rows=2 loops=1)
+                       - datanode_2 (actual rows=2 loops=1)
+                       Output: PARTIAL count(*)
+                       ->  Partial Aggregate
+                             DN (actual rows=1..1 loops=1..1)
+                             - datanode_1 (actual rows=1 loops=1)
+                             - datanode_2 (actual rows=1 loops=1)
+                             Output: PARTIAL count(*)
+                             ->  Seq Scan on public.a2
+                                   DN (actual rows=0..100 loops=1..1)
+                                   - datanode_1 (actual rows=100 loops=1)
+                                   - datanode_2 (actual rows=0 loops=1)
+                                   Output: a2.id, a2.num, a2.name
+                                   Filter: (a2.name = 'b'::text)
+         ->  Seq Scan on public.a1
+               DN (actual rows=1..2 loops=1..1)
+               - datanode_1 (actual rows=2 loops=1)
+               - datanode_2 (actual rows=1 loops=1)
+               Output: a1.id, a1.num, a1.name
+               Filter: (a1.num >= $0)
+(38 rows)
+
+explain (costs off,timing off,summary off,analyze,verbose)
+select * from a1 where num >= (select count(*) from a2 where name='c') limit 1;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Limit (actual rows=1 loops=1)
+   Output: a1.id, a1.num, a1.name
+   InitPlan 1 (returns $0)
+     ->  Finalize Aggregate (actual rows=1 loops=1)
+           Output: count(*)
+           ->  Remote Subquery Scan on all (datanode_1,datanode_2) (actual rows=2 loops=1)
+                 Output: PARTIAL count(*)
+                 ->  Partial Aggregate
+                       DN (actual rows=1..1 loops=1..1)
+                       - datanode_1 (actual rows=1 loops=1)
+                       - datanode_2 (actual rows=1 loops=1)
+                       Output: PARTIAL count(*)
+                       ->  Seq Scan on public.a2
+                             DN (actual rows=0..100 loops=1..1)
+                             - datanode_1 (actual rows=0 loops=1)
+                             - datanode_2 (actual rows=100 loops=1)
+                             Output: a2.id, a2.num, a2.name
+                             Filter: (a2.name = 'c'::text)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2) (actual rows=1 loops=1)
+         Output: a1.id, a1.num, a1.name
+         ->  Limit
+               DN (actual rows=1..1 loops=1..1)
+               - datanode_1 (actual rows=1 loops=1)
+               - datanode_2 (actual rows=1 loops=1)
+               Output: a1.id, a1.num, a1.name
+               ->  Seq Scan on public.a1
+                     DN (actual rows=1..1 loops=1..1)
+                     - datanode_1 (actual rows=1 loops=1)
+                     - datanode_2 (actual rows=1 loops=1)
+                     Output: a1.id, a1.num, a1.name
+                     Filter: (a1.num >= $0)
+(31 rows)
+
+explain (costs off,timing off,summary off,analyze,verbose)
+select count(*) from a1 group by name having count(*) = (select count(*) from a2 where name='a');
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2) (actual rows=3 loops=1)
+   Output: count(*), a1.name
+   ->  Finalize HashAggregate
+         DN (actual rows=1..2 loops=1..1)
+         - datanode_1 (actual rows=2 loops=1)
+         - datanode_2 (actual rows=1 loops=1)
+         Output: count(*), a1.name
+         Group Key: a1.name
+         Filter: (count(*) = $0)
+         InitPlan 1 (returns $0)
+           ->  Finalize Aggregate
+                 DN (actual rows=1..1 loops=1..1)
+                 - datanode_1 (actual rows=1 loops=1)
+                 - datanode_2 (actual rows=1 loops=1)
+                 Output: count(*)
+                 ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                       DN (actual rows=2..2 loops=1..1)
+                       - datanode_1 (actual rows=2 loops=1)
+                       - datanode_2 (actual rows=2 loops=1)
+                       Output: PARTIAL count(*)
+                       ->  Partial Aggregate
+                             DN (actual rows=1..1 loops=1..1)
+                             - datanode_1 (actual rows=1 loops=1)
+                             - datanode_2 (actual rows=1 loops=1)
+                             Output: PARTIAL count(*)
+                             ->  Seq Scan on public.a2
+                                   DN (actual rows=0..100 loops=1..1)
+                                   - datanode_1 (actual rows=100 loops=1)
+                                   - datanode_2 (actual rows=0 loops=1)
+                                   Output: a2.id, a2.num, a2.name
+                                   Filter: (a2.name = 'a'::text)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               DN (actual rows=1..2 loops=1..1)
+               - datanode_1 (actual rows=2 loops=1)
+               - datanode_2 (actual rows=1 loops=1)
+               Output: a1.name, PARTIAL count(*)
+               Distribute results by H: name
+               ->  Partial HashAggregate
+                     DN (actual rows=1..2 loops=1..1)
+                     - datanode_1 (actual rows=2 loops=1)
+                     - datanode_2 (actual rows=1 loops=1)
+                     Output: a1.name, PARTIAL count(*)
+                     Group Key: a1.name
+                     ->  Seq Scan on public.a1
+                           DN (actual rows=100..200 loops=1..1)
+                           - datanode_1 (actual rows=200 loops=1)
+                           - datanode_2 (actual rows=100 loops=1)
+                           Output: a1.id, a1.num, a1.name
+(48 rows)
+
+--cleanup
+drop table a1, a2;
