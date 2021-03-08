@@ -181,6 +181,8 @@ bool        isGTM = true;
 
 GTM_ThreadID    TopMostThreadID;
 
+enum GTM_PromoteStatus promote_status = GTM_PRPMOTE_INIT;
+s_lock_t promote_status_lck;
 
 /* The socket(s) we're listening to. */
 #define MAXLISTEN    64
@@ -1000,6 +1002,38 @@ main(int argc, char *argv[])
         Recovery_StandbySetConnInfo(active_addr, active_port);
     }
 
+    SpinLockInit(&promote_status_lck);
+    promote_status = GTM_PRPMOTE_INIT;
+	
+    pqsignal(SIGHUP, GTM_SigleHandler);
+    pqsignal(SIGKILL, GTM_SigleHandler);
+    pqsignal(SIGQUIT, GTM_SigleHandler);
+    pqsignal(SIGTERM, GTM_SigleHandler);
+    pqsignal(SIGINT, GTM_SigleHandler);
+    pqsignal(SIGUSR1, GTM_SigleHandler);
+    pqsignal(SIGPIPE, SIG_IGN);
+
+    pqinitmask();
+
+    /*
+     * Establish a connection between the active and standby.
+     */
+    while (Recovery_IsStandby())
+    {
+        if (gtm_standby_start_startup())
+        {
+            elog(LOG, "Standby GTM Startup connection established with active-GTM.");
+            break;
+        }
+
+        elog(LOG, "Failed to establish a connection to active-GTM.");
+        usleep(GTM_GTS_ONE_SECOND);
+    }
+
+    SpinLockAcquire(&promote_status_lck);
+    promote_status = GTM_PRPMOTE_CONNED;
+    SpinLockRelease(&promote_status_lck);
+
 #ifdef __XLOG__
 
     if(access(RECOVERY_CONF_NAME,F_OK) == 0)
@@ -1052,20 +1086,6 @@ main(int argc, char *argv[])
     GTM_RWLockRelease(&ControlDataLock);
 
 #endif
-    
-    /*
-     * Establish a connection between the active and standby.
-     */
-    if (Recovery_IsStandby())
-    {
-
-        if (!gtm_standby_start_startup())
-        {
-            elog(ERROR, "Failed to establish a connection to active-GTM.");
-            exit(1);
-        }
-        elog(LOG, "Standby GTM Startup connection established with active-GTM.");
-    }
     
 #ifdef __TBASE__
     elog(LOG, "Starting GTM server at (%s:%d) with syn storage", ListenAddresses, GTMPortNumber);
@@ -1279,15 +1299,21 @@ main(int argc, char *argv[])
     if (!CreateOptsFile(argc, argv))
         exit(1);
 
-    pqsignal(SIGHUP, GTM_SigleHandler);
-    pqsignal(SIGKILL, GTM_SigleHandler);
-    pqsignal(SIGQUIT, GTM_SigleHandler);
-    pqsignal(SIGTERM, GTM_SigleHandler);
-    pqsignal(SIGINT, GTM_SigleHandler);
-    pqsignal(SIGUSR1, GTM_SigleHandler);
-    pqsignal(SIGPIPE, SIG_IGN);
+    SpinLockAcquire(&promote_status_lck);
+    /*
+     * GTM_PRPMOTE_IN_STARTUP is setting in PromoteToActive,
+     * do CurrentTimeLineID++ here.
+     */
+    if (promote_status == GTM_PRPMOTE_IN_STARTUP)
+    {
+        SetCurrentTimeLineID(GetCurrentTimeLineID() + 1);
+    }
 
-    pqinitmask();
+    /*
+     * set promote_status to GTM_PRPMOTE_NORMAL finally
+     */
+    promote_status = GTM_PRPMOTE_NORMAL;
+    SpinLockRelease(&promote_status_lck);
 
     /*
      * Now, activating a standby GTM...
@@ -2942,7 +2968,10 @@ reconnect:
 
     sleep(1);
 
-    gtm_standby_start_startup();
+	if (!gtm_standby_start_startup())
+    {
+        elog(ERROR, "Failed to establish a connection to active-GTM.");
+    }
 
     if (GTM_ActiveConn == NULL || GTMPQstatus(GTM_ActiveConn) != CONNECTION_OK ||
         gtm_standby_register_self(NULL,0,NULL)  == 0 ||
@@ -4868,10 +4897,29 @@ PromoteToActive(void)
      */
 //    GTM_SetInitialAndNextClientIdentifierAtPromote();
 
+    SpinLockAcquire(&promote_status_lck);
+    if (promote_status != GTM_PRPMOTE_INIT && promote_status != GTM_PRPMOTE_NORMAL)
+    {
+        elog(LOG, "Promote signal received. But not allow to promote, promote status %d", promote_status);
+        SpinLockRelease(&promote_status_lck);
+        return;
+    }
+	
     /*
      * Do promoting things here.
+     * if promote_status is GTM_PRPMOTE_INIT, should use the CurrentTimeLineID to Recovery or OpenXLogFile,
+     * keep it's value here
      */
+    if (promote_status == GTM_PRPMOTE_NORMAL)
+    {
     SetCurrentTimeLineID(GetCurrentTimeLineID() + 1);
+    }
+    else
+    {
+        promote_status = GTM_PRPMOTE_IN_STARTUP;
+    }
+    SpinLockRelease(&promote_status_lck);
+
     Recovery_StandbySetStandby(false);
     StartupThreadAfterPromote();
     CreateDataDirLockFile();
