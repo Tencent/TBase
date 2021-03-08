@@ -67,5 +67,12 @@ extern int gtm_standby_start_replication(const char *application_name);
 #define GTM_ACT_MODE 0
 #define GTM_STANDBY_MODE 1
 
+enum GTM_PromoteStatus
+{
+    GTM_PRPMOTE_INIT          = 0,
+    GTM_PRPMOTE_IN_STARTUP    = 1,
+    GTM_PRPMOTE_CONNED        = 2,
+    GTM_PRPMOTE_NORMAL        = 3,
+};
 
 #endif /* GTM_STANDBY_H */
