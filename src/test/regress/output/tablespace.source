@@ -132,34 +132,19 @@ Tablespace: "regress_tblspace"
 
 -- partitioned rels cannot specify the primary key.  These fail:
 CREATE TABLE testschema.dflt (a int PRIMARY KEY) PARTITION BY LIST (a) TABLESPACE pg_default;
-ERROR:  primary key constraints are not supported on partitioned tables
-LINE 1: CREATE TABLE testschema.dflt (a int PRIMARY KEY) PARTITION B...
-                                            ^
+ERROR:  cannot specify default tablespace for partitioned relations
 CREATE TABLE testschema.dflt (a int PRIMARY KEY USING INDEX TABLESPACE pg_default) PARTITION BY LIST (a);
-ERROR:  primary key constraints are not supported on partitioned tables
-LINE 1: CREATE TABLE testschema.dflt (a int PRIMARY KEY USING INDEX ...
-                                            ^
+ERROR:  cannot specify default tablespace for partitioned relation
 SET default_tablespace TO 'pg_default';
 CREATE TABLE testschema.dflt (a int PRIMARY KEY) PARTITION BY LIST (a) TABLESPACE regress_tblspace;
-ERROR:  primary key constraints are not supported on partitioned tables
-LINE 1: CREATE TABLE testschema.dflt (a int PRIMARY KEY) PARTITION B...
-                                            ^
+ERROR:  cannot specify default tablespace for partitioned relations
 CREATE TABLE testschema.dflt (a int PRIMARY KEY USING INDEX TABLESPACE regress_tblspace) PARTITION BY LIST (a);
-ERROR:  primary key constraints are not supported on partitioned tables
-LINE 1: CREATE TABLE testschema.dflt (a int PRIMARY KEY USING INDEX ...
-                                            ^
+ERROR:  cannot specify default tablespace for partitioned relations
 -- but these work:
 CREATE TABLE testschema.dflt (a int PRIMARY KEY USING INDEX TABLESPACE regress_tblspace) PARTITION BY LIST (a) TABLESPACE regress_tblspace;
-ERROR:  primary key constraints are not supported on partitioned tables
-LINE 1: CREATE TABLE testschema.dflt (a int PRIMARY KEY USING INDEX ...
-                                            ^
 SET default_tablespace TO '';
 CREATE TABLE testschema.dflt2 (a int PRIMARY KEY) PARTITION BY LIST (a);
-ERROR:  primary key constraints are not supported on partitioned tables
-LINE 1: CREATE TABLE testschema.dflt2 (a int PRIMARY KEY) PARTITION ...
-                                             ^
 DROP TABLE testschema.dflt, testschema.dflt2;
-ERROR:  table "dflt" does not exist
 -- check that default_tablespace doesn't affect ALTER TABLE index rebuilds
 CREATE TABLE testschema.test_default_tab(id bigint) TABLESPACE regress_tblspace;
 INSERT INTO testschema.test_default_tab VALUES (1);
@@ -277,13 +262,7 @@ INSERT INTO testschema.test_default_tab_p VALUES (1);
 CREATE INDEX test_index1 on testschema.test_default_tab_p (val);
 CREATE INDEX test_index2 on testschema.test_default_tab_p (val) TABLESPACE regress_tblspace;
 ALTER TABLE testschema.test_default_tab_p ADD CONSTRAINT test_index3 PRIMARY KEY (id);
-ERROR:  primary key constraints are not supported on partitioned tables
-LINE 1: ALTER TABLE testschema.test_default_tab_p ADD CONSTRAINT tes...
-                                                      ^
 ALTER TABLE testschema.test_default_tab_p ADD CONSTRAINT test_index4 UNIQUE (id) USING INDEX TABLESPACE regress_tblspace;
-ERROR:  unique constraints are not supported on partitioned tables
-LINE 1: ALTER TABLE testschema.test_default_tab_p ADD CONSTRAINT tes...
-                                                      ^
 \d testschema.test_index1
 Index "testschema.test_index1"
  Column |  Type  | Definition 

@@ -843,7 +843,7 @@ ERROR:  no partition of relation "parted_conflict_test" found for row
 DETAIL:  Partition key of the failing row contains (a) = (1).
 -- however, on conflict do update is not supported yet
 insert into parted_conflict_test values (1) on conflict (b) do update set a = excluded.a;
-ERROR:  Distributed column or partition column "a" can't be updated in current version
+ERROR:  ON CONFLICT DO UPDATE cannot be applied to partitioned table "parted_conflict_test"
 -- but it works OK if we target the partition directly
 insert into parted_conflict_test_1 values (1) on conflict (b) do
 update set a = excluded.a;
