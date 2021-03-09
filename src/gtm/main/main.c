@@ -1031,7 +1031,10 @@ main(int argc, char *argv[])
     }
 
     SpinLockAcquire(&promote_status_lck);
+    if (promote_status == GTM_PRPMOTE_INIT)
+    {
     promote_status = GTM_PRPMOTE_CONNED;
+    }
     SpinLockRelease(&promote_status_lck);
 
 #ifdef __XLOG__
