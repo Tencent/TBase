@@ -2255,7 +2255,6 @@ check_for_freed_segments(dsa_area *area)
         LWLockAcquire(DSA_AREA_LOCK(area), LW_EXCLUSIVE);
 		check_for_freed_segments_locked(area);
 		LWLockRelease(DSA_AREA_LOCK(area));
-		area->freed_segment_counter = freed_segment_counter;
 	}
 }
 
