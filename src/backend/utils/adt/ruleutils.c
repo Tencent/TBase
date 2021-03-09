@@ -6637,6 +6637,8 @@ get_update_query_targetlist_def(Query *query, List *targetList,
     {
         TargetEntry *tle = (TargetEntry *) lfirst(l);
         Node       *expr;
+		Node	   *aexpr = (Node*)tle->expr;
+		const char *attr_str;
 
         if (tle->resjunk)
             continue;            /* ignore junk entries */
@@ -6707,16 +6709,17 @@ get_update_query_targetlist_def(Query *query, List *targetList,
          * Put out name of target column; look in the catalogs, not at
          * tle->resname, since resname will fail to track RENAME.
          */
-        appendStringInfoString(buf,
-                               quote_identifier(get_relid_attribute_name(rte->relid,
-                                                                         tle->resno)));
+		attr_str = quote_identifier(
+							get_relid_attribute_name(rte->relid, tle->resno));
+		appendStringInfoString(buf, attr_str);
 
+		for (;;)
+		{
         /*
          * Print any indirection needed (subfields or subscripts), and strip
          * off the top-level nodes representing the indirection assignments.
          */
-        expr = processIndirection((Node *) tle->expr, context);
-
+			expr = processIndirection(aexpr, context);
         /*
          * If we're in a multiassignment, skip printing anything more, unless
          * this is the last column; in which case, what we print should be the
@@ -6725,7 +6728,7 @@ get_update_query_targetlist_def(Query *query, List *targetList,
         if (cur_ma_sublink != NULL)
         {
             if (--remaining_ma_columns > 0)
-                continue;        /* not the last column of multiassignment */
+					break;		/* not the last column of multiassignment */
             appendStringInfoChar(buf, ')');
             expr = (Node *) cur_ma_sublink;
             cur_ma_sublink = NULL;
@@ -6734,6 +6737,21 @@ get_update_query_targetlist_def(Query *query, List *targetList,
         appendStringInfoString(buf, " = ");
 
         get_rule_expr(expr, context, false);
+
+			/*
+			* expand multiple entries for the same target attribute if need.
+			* if this is the last one, we don't append sep and column msg.
+			*/
+			if (IsA(aexpr, ArrayRef) &&
+				IsA(((ArrayRef*)aexpr)->refexpr, ArrayRef))
+			{
+				appendStringInfoString(buf, sep);
+				appendStringInfoString(buf, attr_str);
+				aexpr = (Node*)((ArrayRef*)aexpr)->refexpr;
+			}
+			else
+				break;
+		}
     }
 }
 

@@ -452,16 +452,20 @@ DELETE FROM T WHERE pk BETWEEN 10 AND 20 RETURNING *;
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE)
 DELETE FROM T WHERE pk BETWEEN 10 AND 20 RETURNING *;
-                      QUERY PLAN                       
--------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)
-   Output: pk, c_bigint, c_text
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Remote Fast Query Execution
+   Output: t.xc_node_id, t.ctid, t.shardid, t.pk
+   Node/s: datanode_1, datanode_2
+   Remote query: DELETE FROM t WHERE ((pk >= 10) AND (pk <= 20)) RETURNING pk, c_bigint, c_text
    ->  Delete on fast_default.t
          Output: pk, c_bigint, c_text
-         ->  Seq Scan on fast_default.t
-               Output: xc_node_id, ctid, shardid, pk
-               Filter: ((t.pk >= 10) AND (t.pk <= 20))
-(7 rows)
+         ->  Bitmap Heap Scan on fast_default.t
+               Output: ctid, shardid
+               Recheck Cond: ((t.pk >= 10) AND (t.pk <= 20))
+               ->  Bitmap Index Scan on t_pkey
+                     Index Cond: ((t.pk >= 10) AND (t.pk <= 20))
+(11 rows)
 
 -- UPDATE
 UPDATE T SET c_text = '"' || c_text || '"'  WHERE pk < 10;

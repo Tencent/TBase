@@ -1648,8 +1648,9 @@ exec_parse_message(const char *query_string,    /* string to execute */
                    const char *stmt_name,    /* name for prepared stmt */
                    Oid *paramTypes, /* parameter types */
                    char **paramTypeNames,    /* parameter type names */
-                   int numParams)    /* number of parameters */
-{// #lizard forgives
+				   int numParams, /* number of parameters */
+				   const char need_rewrite) /* plancache need to be rewritted */
+{
     MemoryContext unnamed_stmt_context = NULL;
     MemoryContext oldcontext;
     List       *parsetree_list;
@@ -1929,11 +1930,11 @@ exec_parse_message(const char *query_string,    /* string to execute */
 #ifdef __TBASE__
         if (use_resowner)
         {
-            StorePreparedStatement(stmt_name, psrc, false, true);
+			StorePreparedStatement(stmt_name, psrc, false, true, need_rewrite);
         }
         else
 #endif
-        StorePreparedStatement(stmt_name, psrc, false, false);
+		StorePreparedStatement(stmt_name, psrc, false, false, need_rewrite);
     }
     else
     {
@@ -2093,7 +2094,7 @@ exec_plan_message(const char *query_string,    /* source of the query */
     /*
      * Store the query as a prepared statement.  See above comments.
      */
-    StorePreparedStatement(stmt_name, psrc, false, true);
+	StorePreparedStatement(stmt_name, psrc, false, true, 'N');
 
     SetRemoteSubplan(psrc, plan_string);
 	/* set instrument_options, default 0 */
@@ -5460,6 +5461,7 @@ PostgresMain(int argc, char *argv[],
                     int            numParams;
                     Oid           *paramTypes = NULL;
                     char       **paramTypeNames = NULL;
+					char		need_rewrite = 'N';
 
                     forbidden_in_wal_sender(firstchar);
 
@@ -5479,6 +5481,8 @@ PostgresMain(int argc, char *argv[],
                             paramTypeNames = (char **)palloc(numParams * sizeof(char *));
                             for (i = 0; i < numParams; i++)
                                 paramTypeNames[i] = (char *)pq_getmsgstring(&input_message);
+
+							need_rewrite = pq_getmsgbyte(&input_message);
                         }
                         else
 #endif /* PGXC */
@@ -5490,7 +5494,8 @@ PostgresMain(int argc, char *argv[],
                     pq_getmsgend(&input_message);
 
                     exec_parse_message(query_string, stmt_name,
-                                       paramTypes, paramTypeNames, numParams);
+									   paramTypes, paramTypeNames,
+									   numParams, need_rewrite);
                 }
                 break;
 

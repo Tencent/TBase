@@ -75,3 +75,132 @@ SELECT name, statement, parameter_types FROM pg_prepared_statements
 DEALLOCATE ALL;
 SELECT name, statement, parameter_types FROM pg_prepared_statements
     ORDER BY name;
+
+--
+-- search_path test 
+--
+CREATE DATABASE search_path_db;
+\c search_path_db
+
+CREATE TABLE tbl_test(
+    id int primary key,
+    name  varchar(30)
+);
+
+INSERT INTO tbl_test VALUES (1, 'public 01');
+INSERT INTO tbl_test VALUES (2, 'public 02');
+INSERT INTO tbl_test VALUES (3, 'public 03');
+
+select * from tbl_test order by id;
+
+-- create schema
+CREATE SCHEMA sch01;
+CREATE SCHEMA sch02;
+
+-- set schema to sch01
+SET search_path TO sch01;
+
+CREATE TABLE IF NOT EXISTS tbl_test(
+    id int primary key,
+    name  varchar(30)
+);
+
+BEGIN;
+INSERT INTO tbl_test VALUES (11, 'sch01 11');
+INSERT INTO tbl_test VALUES (12, 'sch01 12');
+INSERT INTO tbl_test VALUES (13, 'sch01 13');
+COMMIT;
+
+select * from tbl_test order by id;
+
+-- set schema to sch02
+SET search_path TO sch02;
+
+CREATE TABLE IF NOT EXISTS tbl_test(
+    id int primary key,
+    name  varchar(30)
+);
+
+BEGIN;
+INSERT INTO tbl_test VALUES (21, 'sch02 21');
+INSERT INTO tbl_test VALUES (22, 'sch02 22');
+INSERT INTO tbl_test VALUES (23, 'sch02 23');
+ROLLBACK;
+
+select * from tbl_test order by id;
+
+-- set schema to sch01
+SET search_path = sch01;
+SHOW search_path;
+
+PREPARE ps_test_insert (int, varchar) AS INSERT INTO tbl_test VALUES ($1, $2);;
+PREPARE ps_test_select (int) AS select * from tbl_test where id < $1 order by id;
+
+BEGIN;
+EXECUTE ps_test_insert(14, 'sch01 14');
+EXECUTE ps_test_select(50);
+ROLLBACK;
+EXECUTE ps_test_select(50);
+
+SHOW search_path;
+
+BEGIN;
+EXECUTE ps_test_insert(15, 'sch01 15');
+EXECUTE ps_test_select(50);
+COMMIT;
+EXECUTE ps_test_select(50);
+
+SHOW search_path;
+
+EXECUTE ps_test_insert(16, 'sch01 16');
+EXECUTE ps_test_select(50);
+
+SHOW search_path;
+
+DEALLOCATE PREPARE ps_test_insert;
+DEALLOCATE PREPARE ps_test_select;
+
+-- test insert fqs in prepare
+CREATE TABLE insert_fsq_test(id serial primary key, name  varchar(30));
+PREPARE ps_test_insert (varchar) AS INSERT INTO insert_fsq_test (name) VALUES ($1);
+EXECUTE ps_test_insert('1');
+EXECUTE ps_test_insert('2');
+EXECUTE ps_test_insert('3');
+EXECUTE ps_test_insert('4');
+EXECUTE ps_test_insert('5');
+SELECT * from insert_fsq_test order by id;
+DEALLOCATE PREPARE ps_test_insert;
+DROP TABLE insert_fsq_test cascade;
+
+--
+-- gb18030 test
+--
+CREATE DATABASE gb18030_db template template0 encoding = gb18030 LC_COLLATE = 'zh_CN.gb18030' LC_CTYPE = 'zh_CN.gb18030';
+\c gb18030_db;
+
+-- set client_encoding
+SET client_encoding = utf8;
+
+CREATE TABLE tbl_test(id int primary key, name varchar(3));
+
+INSERT INTO tbl_test VALUES (3, '张三');
+BEGIN;
+INSERT INTO tbl_test VALUES (4, '李四');
+INSERT INTO tbl_test VALUES (5, '王五');
+COMMIT;
+BEGIN;
+INSERT INTO tbl_test VALUES (6, '丁六');
+INSERT INTO tbl_test VALUES (7, '方七');
+ROLLBACK;
+SELECT * FROM tbl_test ORDER BY id;
+
+SHOW client_encoding;
+
+PREPARE ps_test (int) AS select * from tbl_test where id < $1 order by id;
+EXECUTE ps_test(20);
+SHOW client_encoding;
+EXECUTE ps_test(20);
+SHOW client_encoding;
+EXECUTE ps_test(20);
+SHOW client_encoding;
+DEALLOCATE PREPARE ps_test;

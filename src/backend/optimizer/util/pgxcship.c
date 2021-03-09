@@ -103,7 +103,10 @@ typedef enum
     SS_HAS_AGG_EXPR,            /* it has aggregate expressions */
     SS_UNSHIPPABLE_TYPE,        /* the type of expression is unshippable */
     SS_UNSHIPPABLE_TRIGGER,        /* the type of trigger is unshippable */
-    SS_UPDATES_DISTRIBUTION_COLUMN    /* query updates the distribution column */
+	SS_UPDATES_DISTRIBUTION_COLUMN,	/* query updates the distribution column */
+	SS_NEED_FUNC_REWRITE		/* exist func expression of distribution column,
+								 * we should rewrite the expr for FQS 
+								 */
 } ShippabilityStat;
 
 extern void PoolPingNodes(void);
@@ -1249,13 +1252,18 @@ pgxc_shippability_walker(Node *node, Shippability_context *sc_context)
              * can be shipped to the Datanode and what can not be.
              */
             if (!pgxc_is_func_shippable(funcexpr->funcid))
+			{
+				/* Ship insert if function doesn't return set */
+				if (sc_context->sc_query &&
+					sc_context->sc_query->commandType == CMD_INSERT &&
+					!(funcexpr->funcretset && sc_context->sc_for_expr))
+				{
+					pgxc_set_shippability_reason(sc_context, SS_NEED_FUNC_REWRITE);
+				}
+				else
                 pgxc_set_shippability_reason(sc_context, SS_UNSHIPPABLE_EXPR);
+			}
 
-            /*
-             * If this is a stand alone expression and the function returns a
-             * set of rows, we need to handle it along with the final result of
-             * other expressions. So, it can not be shippable.
-             */
             if (funcexpr->funcretset && sc_context->sc_for_expr)
                 pgxc_set_shippability_reason(sc_context, SS_UNSHIPPABLE_EXPR);
 
@@ -1317,10 +1325,6 @@ pgxc_shippability_walker(Node *node, Shippability_context *sc_context)
             bool   tree_examine_ret = false;
             Query *query = (Query *)node;
             ExecNodes *exec_nodes = NULL;
-
-            /* PGXCTODO : If the query has a returning list, it is not shippable as of now */
-            if (query->returningList)
-                pgxc_set_shippability_reason(sc_context, SS_UNSUPPORTED_EXPR);
 
             /* A stand-alone expression containing Query is not shippable */
             if (sc_context->sc_for_expr)
@@ -2017,6 +2021,20 @@ pgxc_is_query_shippable(Query *query, int query_level)
      * aggregates are entirely shippable, so don't worry about it.
      */
     shippability = bms_del_member(shippability, SS_HAS_AGG_EXPR);
+
+	/*
+	 * If an insert sql command whose distribute key's value is a
+	 * function, we allow it to be shipped to datanode. But we must
+	 * must know the function's result before real execute. So set
+	 * the flag to identify rewrite in ExecutePlan.
+	 */
+	if (bms_is_member(SS_NEED_FUNC_REWRITE, shippability))
+	{
+		exec_nodes->need_rewrite = true;
+		shippability = bms_del_member(shippability, SS_NEED_FUNC_REWRITE);
+	}
+	else
+		exec_nodes->need_rewrite = false;
 
     /* Can not ship the query for some reason */
     if (!bms_is_empty(shippability))

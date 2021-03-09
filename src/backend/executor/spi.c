@@ -2403,6 +2403,11 @@ _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, uint64 tcount)
     else
         eflags = EXEC_FLAG_SKIP_TRIGGERS;
 
+	if (queryDesc->plannedstmt->hasReturning)
+	{
+		eflags |= EXEC_FLAG_RETURNING;
+	}
+
     ExecutorStart(queryDesc, eflags);
 
     ExecutorRun(queryDesc, ForwardScanDirection, tcount, true);

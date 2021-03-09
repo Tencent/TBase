@@ -3988,7 +3988,7 @@ ExplainRemoteQuery(RemoteQuery *plan, PlanState *planstate, List *ancestors, Exp
         estate = planstate->state;
         oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
 
-        node = ExecInitRemoteQuery(step, estate, 0);
+		node = ExecInitRemoteQuery(step, estate, EXEC_FLAG_EXPLAIN_ONLY);
         MemoryContextSwitchTo(oldcontext);
         result = ExecRemoteQuery((PlanState *) node);
         while (result != NULL && !TupIsNull(result))

@@ -2282,6 +2282,23 @@ GetRelationNodes(RelationLocInfo *rel_loc_info, Datum valueForDistCol,
 }
 
 /*
+ * GetRelationNodesForExplain
+ * This is just for explain statement, just pick one datanode.
+ * The returned List is a copy, so it should be freed when finished.
+ */
+ExecNodes *
+GetRelationNodesForExplain(RelationLocInfo *rel_loc_info,
+				RelationAccessType accessType)
+{
+	ExecNodes	*exec_nodes;
+	exec_nodes = makeNode(ExecNodes);
+	exec_nodes->baselocatortype = rel_loc_info->locatorType;
+	exec_nodes->accesstype = accessType;
+	exec_nodes->nodeList = lappend_int(exec_nodes->nodeList, 1);
+	return exec_nodes;
+}
+
+/*
  * GetRelationNodesByQuals
  * A wrapper around GetRelationNodes to reduce the node list by looking at the
  * quals. varno is assumed to be the varno of reloid inside the quals. No check

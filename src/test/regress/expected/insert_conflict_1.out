@@ -219,37 +219,37 @@ explain (costs off) insert into insertconflicttest values(0, 'Crowberry') on con
 
 -- Does the same, but JSON format shows "Conflict Arbiter Index" as JSON array:
 explain (costs off, format json) insert into insertconflicttest values (0, 'Bilberry') on conflict (key) do update set fruit = excluded.fruit where insertconflicttest.fruit != 'Lime' returning *;
-                                 QUERY PLAN                                 
-----------------------------------------------------------------------------
- [                                                                         +
-   {                                                                       +
-     "Plan": {                                                             +
-       "Node Type": "Remote Subquery Scan",                                +
-       "Parallel Aware": false,                                            +
-       "Replicated": "no",                                                 +
-       "Node List": ["datanode_2"],                                        +
-       "Plans": [                                                          +
-         {                                                                 +
-           "Node Type": "ModifyTable",                                     +
-           "Operation": "Insert",                                          +
-           "Parent Relationship": "Outer",                                 +
-           "Parallel Aware": false,                                        +
-           "Relation Name": "insertconflicttest",                          +
-           "Alias": "insertconflicttest",                                  +
-           "Conflict Resolution": "UPDATE",                                +
-           "Conflict Arbiter Indexes": ["key_index"],                      +
-           "Conflict Filter": "(insertconflicttest.fruit <> 'Lime'::text)",+
-           "Plans": [                                                      +
-             {                                                             +
-               "Node Type": "Result",                                      +
-               "Parent Relationship": "Member",                            +
-               "Parallel Aware": false                                     +
-             }                                                             +
-           ]                                                               +
-         }                                                                 +
-       ]                                                                   +
-     }                                                                     +
-   }                                                                       +
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ [                                                                           +
+   {                                                                         +
+     "Plan": {                                                               +
+       "Node Type": "Remote Fast Query Execution",                           +
+       "Parallel Aware": false,                                              +
+       "Node expr": "0"                                                      +
+       "Remote plan": [                                                      +
+         {                                                                   +
+           "Plan": {                                                         +
+             "Node Type": "ModifyTable",                                     +
+             "Operation": "Insert",                                          +
+             "Parallel Aware": false,                                        +
+             "Relation Name": "insertconflicttest",                          +
+             "Alias": "insertconflicttest",                                  +
+             "Conflict Resolution": "UPDATE",                                +
+             "Conflict Arbiter Indexes": ["key_index"],                      +
+             "Conflict Filter": "(insertconflicttest.fruit <> 'Lime'::text)",+
+             "Plans": [                                                      +
+               {                                                             +
+                 "Node Type": "Result",                                      +
+                 "Parent Relationship": "Member",                            +
+                 "Parallel Aware": false                                     +
+               }                                                             +
+             ]                                                               +
+           }                                                                 +
+         }                                                                   +
+       ]                                                                     +
+     }                                                                       +
+   }                                                                         +
  ]
 (1 row)
 

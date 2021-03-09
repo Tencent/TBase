@@ -1315,6 +1315,7 @@ _copyRemoteQuery(const RemoteQuery *from)
     COPY_NODE_FIELD(query_var_tlist);
     COPY_SCALAR_FIELD(is_temp);
 #ifdef __TBASE__
+	COPY_NODE_FIELD(forDeparse);
     COPY_STRING_FIELD(sql_select);
     COPY_STRING_FIELD(sql_select_base);
     COPY_SCALAR_FIELD(forUpadte);
@@ -1361,6 +1362,7 @@ _copyExecNodes(const ExecNodes *from)
 #endif
     COPY_SCALAR_FIELD(en_relid);
     COPY_SCALAR_FIELD(accesstype);
+	COPY_SCALAR_FIELD(need_rewrite);
 
     return newnode;
 }

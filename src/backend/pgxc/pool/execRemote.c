@@ -6287,13 +6287,16 @@ get_exec_connections(RemoteQueryState *planstate,
             /* execution time determining of target Datanodes */
             bool isnull;
             ExecNodes *nodes;
+			Datum partvalue;
 #ifdef __COLD_HOT__
             bool secisnull;
             Datum secValue;
 #endif
             ExprState *estate = ExecInitExpr(exec_nodes->en_expr,
                                              (PlanState *) planstate);
-            Datum partvalue = ExecEvalExpr(estate,
+			/* For explain, no need to execute expr. */
+			if (planstate->eflags != EXEC_FLAG_EXPLAIN_ONLY)
+				partvalue = ExecEvalExpr(estate,
                                            planstate->combiner.ss.ps.ps_ExprContext,
                                            &isnull);
             RelationLocInfo *rel_loc_info = GetRelationLocInfo(exec_nodes->en_relid);
@@ -6303,6 +6306,8 @@ get_exec_connections(RemoteQueryState *planstate,
             {
                 estate = ExecInitExpr(exec_nodes->sec_en_expr,
                                              (PlanState *) planstate);
+				/* For explain, no need to execute expr. */
+				if (planstate->eflags != EXEC_FLAG_EXPLAIN_ONLY)
                 secValue = ExecEvalExpr(estate,
                                         planstate->combiner.ss.ps.ps_ExprContext,
                                         &secisnull);
@@ -6314,6 +6319,10 @@ get_exec_connections(RemoteQueryState *planstate,
             }
 #endif
 
+			if (planstate->eflags == EXEC_FLAG_EXPLAIN_ONLY)
+				nodes = GetRelationNodesForExplain(rel_loc_info,
+												   exec_nodes->accesstype);
+			else
             /* PGXCTODO what is the type of partvalue here */
             nodes = GetRelationNodes(rel_loc_info,
                                      partvalue,
@@ -6567,10 +6576,13 @@ pgxc_start_command_on_connection(PGXCNodeHandle *connection,
         int    fetch = 0;
         bool    prepared = false;
         char    nodetype = PGXC_NODE_DATANODE;
+		ExecNodes *exec_nodes = step->exec_nodes;
 
         /* if prepared statement is referenced see if it is already
          * exist */
-        if (step->statement)
+		if (exec_nodes && exec_nodes->need_rewrite == true)
+			prepared = false;
+		else if (step->statement)
             prepared =
                 ActivateDatanodeStatementOnNode(step->statement,
                         PGXCNodeGetNodeId(connection->nodeoid,
@@ -8799,6 +8811,7 @@ ExecInitRemoteQuery(RemoteQuery *node, EState *estate, int eflags)
     ResponseCombiner   *combiner;
 
     remotestate = makeNode(RemoteQueryState);
+	remotestate->eflags = eflags;
     combiner = (ResponseCombiner *) remotestate;
     InitResponseCombiner(combiner, 0, node->combine_type);
     combiner->ss.ps.plan = (Plan *) node;

@@ -119,6 +119,7 @@
 #include "utils/ruleutils.h"
 #endif
 
+#include "pgxc/execRemote.h"
 
 static void ShutdownExprContext(ExprContext *econtext, bool isCommit);
 
@@ -509,6 +510,7 @@ ExecAssignResultTypeFromTL(PlanState *planstate)
 {
     bool        hasoid;
     TupleDesc    tupDesc;
+	List		*targetList = NIL;
 
     if (ExecContextForcesOids(planstate, &hasoid))
     {
@@ -521,11 +523,26 @@ ExecAssignResultTypeFromTL(PlanState *planstate)
     }
 
     /*
+	 * If the command with returning syntax, the tupDesc's info should
+	 * be maked up of returningList
+	 */
+	if (IsA(planstate, RemoteQueryState) &&
+		(((((RemoteQueryState *)planstate)->eflags) & EXEC_FLAG_RETURNING) != 0))
+	{
+		if (planstate->state && planstate->state->es_plannedstmt &&
+			planstate->state->es_plannedstmt->parseTree &&
+			planstate->state->es_plannedstmt->parseTree->returningList)
+			targetList = planstate->state->es_plannedstmt->parseTree->returningList;
+	}
+	if (targetList == NIL)
+		targetList = planstate->plan->targetlist;
+
+	/*
      * ExecTypeFromTL needs the parse-time representation of the tlist, not a
      * list of ExprStates.  This is good because some plan nodes don't bother
      * to set up planstate->targetlist ...
      */
-    tupDesc = ExecTypeFromTL(planstate->plan->targetlist, hasoid);
+	tupDesc = ExecTypeFromTL(targetList, hasoid);
     ExecAssignResultType(planstate, tupDesc);
 }
 

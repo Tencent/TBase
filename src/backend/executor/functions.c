@@ -853,6 +853,10 @@ postquel_start(execution_state *es, SQLFunctionCachePtr fcache)
             eflags = EXEC_FLAG_SKIP_TRIGGERS;
         else
             eflags = 0;            /* default run-to-completion flags */
+
+		if (es->qd->plannedstmt->hasReturning)
+			eflags |= EXEC_FLAG_RETURNING;
+
         ExecutorStart(es->qd, eflags);
     }
 

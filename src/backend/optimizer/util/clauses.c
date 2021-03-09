@@ -5258,6 +5258,36 @@ bool find_sublink_walker(Node *node, List **list)
 }
 
 /*
+ * replace_distribkey_func:
+ * evaluate the result of a function that returns only
+ * one value and replace as certain value.
+ */
+Node*
+replace_distribkey_func(Node *node)
+{
+	if (node == NULL)
+		return NULL;
+
+	if (node->type == T_FuncExpr)
+	{
+		FuncExpr *func = (FuncExpr *) node;
+
+		if (!func->funcretset)
+		{
+			Node *evalNode = (Node *) evaluate_expr((Expr *) func,
+			                              func->funcresulttype,
+			                              exprTypmod(node),
+			                              func->funccollid);
+			return evalNode;
+		}
+	}
+
+	return expression_tree_mutator(node, 
+								   replace_distribkey_func, 
+								   NULL);
+}
+
+/*
  * replace_eval_sql_value_function:
  *  eval SQLValueFunction and replace as Const value.
  */

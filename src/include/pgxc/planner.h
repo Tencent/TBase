@@ -207,6 +207,7 @@ typedef struct
       * triggers. In order to make triggers work, we separate UPSERT into INSERT and
       * UPDATE.
          */
+	Query           *forDeparse;      /* function statement */
     char            *sql_select;      /* select statement */
     char            *sql_select_base;
     bool            forUpadte;

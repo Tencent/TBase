@@ -62,6 +62,7 @@
 #include "storage/lmgr.h"
 #include "tcop/utility.h"
 #include "utils/acl.h"
+#include "utils/builtins.h"
 #ifdef _MLS_
 #include "utils/mls.h"
 #endif
@@ -1899,6 +1900,95 @@ ExecEndPlan(PlanState *planstate, EState *estate)
     }
 }
 
+/*
+ *		RewriteForSql
+ * We must caculate the result of distribute key's function to know
+ * which datanode will execute the sql command. After we get the result,
+ * we should use the result to replace distribute key's function to
+ * generate a new sql that will be shipped to datanode.
+ * Note: for replication table, we should caculate all the results of
+ * functions before ship the sql. Otherwise the value may not be same
+ * in different datanodes.
+ */
+static void
+RewriteForSql(RemoteQuery *plan, Query *query,
+			  char *distribcol, bool isreplic)
+{
+	ListCell		*lc_deparse = NULL;
+	TargetEntry		*entry_deparse = NULL;
+	bool			find_target = false;
+	StringInfoData	buf;
+
+	foreach(lc_deparse, query->targetList)
+	{
+		entry_deparse = lfirst(lc_deparse);
+		if (isreplic)
+		{
+			entry_deparse->expr = (Expr *)replace_distribkey_func(
+									(Node *)entry_deparse->expr);
+			find_target = true;
+		}
+		else if (strcmp(entry_deparse->resname, distribcol) == 0)
+		{
+			entry_deparse->expr = (Expr *)replace_distribkey_func(
+									(Node *)entry_deparse->expr);
+			plan->exec_nodes->en_expr = entry_deparse->expr;
+			find_target = true;
+			break;
+		}
+	}
+
+	if (find_target)
+	{
+		initStringInfo(&buf);
+		/*
+		* We always finalise aggregates on datanodes for FQS.
+		* Use the expressions for ORDER BY or GROUP BY clauses.
+		*/
+		deparse_query(query, &buf, NIL, true, false);
+		plan->sql_statement = pstrdup(buf.data);
+		pfree(buf.data);
+	}
+}
+
+/*
+ *		RewriteFuncNode
+ * We ship the insert sql whose distribute key's value contains function. 
+ * So we must rewrite the func node by caculating result of the function.
+ */
+static void
+RewriteFuncNode(PlanState *planstate)
+{
+	RemoteQuery		*plan = (RemoteQuery *)planstate->plan;
+	ExecNodes		*exec_nodes = plan->exec_nodes;
+	Query			*query = copyObject(plan->forDeparse);
+	RelationLocInfo	*rel_loc_info = NULL;
+	char			*distribcol = NULL;
+
+	if ((!exec_nodes) || (!exec_nodes->need_rewrite))
+		return;
+
+	/* 
+	 * For replicated table, we need to execute func
+	 * and then ship to datanode 
+	 */
+	if (IsExecNodesReplicated(exec_nodes))
+	{
+		RewriteForSql(plan, query, NULL, true);
+		return;
+	}
+
+	if (exec_nodes->en_relid == InvalidOid || (!exec_nodes->en_expr))
+		return;
+
+	rel_loc_info = GetRelationLocInfo(exec_nodes->en_relid);
+	if (!rel_loc_info)
+		return;
+
+	distribcol = GetRelationDistribColumn(rel_loc_info);
+	RewriteForSql(plan, query, distribcol, false);
+}
+
 /* ----------------------------------------------------------------
  *        ExecutePlan
  *
@@ -1946,6 +2036,11 @@ ExecutePlan(EState *estate,
 
     if (use_parallel_mode)
         EnterParallelMode();
+
+	if (operation == CMD_INSERT && planstate->plan->type == T_RemoteQuery)
+	{
+		RewriteFuncNode(planstate);
+	}
 
     /*
      * Loop until we've processed the proper number of tuples from the plan.

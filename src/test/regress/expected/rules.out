@@ -3156,13 +3156,14 @@ SELECT tablename, rulename, definition FROM pg_rules
 explain (costs off) INSERT INTO hats VALUES ('h8', 'forbidden') RETURNING *;
                                               QUERY PLAN                                               
 -------------------------------------------------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1)
+ Remote Fast Query Execution
+   Node expr: 'h8'::bpchar
    ->  Insert on hat_data
          Conflict Resolution: UPDATE
          Conflict Arbiter Indexes: hat_data_unique_idx
          Conflict Filter: ((excluded.hat_color <> 'forbidden'::bpchar) AND (hat_data.* <> excluded.*))
          ->  Result
-(6 rows)
+(7 rows)
 
 -- ensure upserting into a rule, with a CTE (different offsets!) works
 WITH data(hat_name, hat_color) AS MATERIALIZED (

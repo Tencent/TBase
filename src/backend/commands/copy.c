@@ -1873,6 +1873,9 @@ BeginCopy(ParseState *pstate,
          *
          * ExecutorStart computes a result tupdesc for us
          */
+		if (query->returningList != NIL)
+			ExecutorStart(cstate->queryDesc, EXEC_FLAG_RETURNING);
+		else
         ExecutorStart(cstate->queryDesc, 0);
 
         tupDesc = cstate->queryDesc->tupDesc;

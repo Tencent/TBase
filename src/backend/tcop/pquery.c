@@ -1092,11 +1092,16 @@ PortalStart(Portal portal, ParamListInfo params,
                  */
                 {
                     PlannedStmt *pstmt;
+					List *list = NIL;
 
                     pstmt = PortalGetPrimaryStmt(portal);
+					if (portal->strategy == PORTAL_ONE_RETURNING &&
+						pstmt->parseTree && pstmt->parseTree->returningList)
+						list = pstmt->parseTree->returningList;
+					else
+						list = pstmt->planTree->targetlist;
                     portal->tupDesc =
-                        ExecCleanTypeFromTL(pstmt->planTree->targetlist,
-                                            false);
+						ExecCleanTypeFromTL(list, false);
                 }
 
                 /*

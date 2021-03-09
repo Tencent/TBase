@@ -91,6 +91,8 @@ extern Node *substitute_sublink_with_node(Node *expr, SubLink *sublink,
 										 Node *node);
 extern bool find_sublink_walker(Node *node, List **list);
 
+extern Node *replace_distribkey_func(Node *node);
+
 extern Node *replace_eval_sql_value_function(Node *node);
 
 #endif							/* CLAUSES_H */

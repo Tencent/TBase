@@ -201,7 +201,8 @@ PrepareQuery(PrepareStmt *stmt, const char *queryString,
     StorePreparedStatement(stmt->name,
                            plansource,
                            true,
-                           false);
+						   false,
+						   'N');
 }
 
 /*
@@ -584,7 +585,8 @@ void
 StorePreparedStatement(const char *stmt_name,
                        CachedPlanSource *plansource,
                        bool from_sql,
-                       bool use_resowner)
+					   bool use_resowner,
+					   const char need_rewrite)
 {
 	PreparedStatement *entry;
 	TimestampTz cur_ts = GetCurrentStatementStartTimestamp();
@@ -603,7 +605,13 @@ StorePreparedStatement(const char *stmt_name,
 	/* Shouldn't get a duplicate entry */
 	if (found)
 	{
-		if (!(plansource->commandTag == entry->plansource->commandTag &&
+		if (need_rewrite == 'Y' &&
+			plansource->commandTag == entry->plansource->commandTag &&
+			strcmp(plansource->query_string, entry->plansource->query_string) != 0)
+		{
+			entry->plansource->query_string = plansource->query_string;
+		}
+		else if (!(plansource->commandTag == entry->plansource->commandTag &&
 				strcmp(plansource->query_string, entry->plansource->query_string) == 0))
 		{
 			ereport(ERROR,

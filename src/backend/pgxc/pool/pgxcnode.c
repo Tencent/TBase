@@ -1991,6 +1991,10 @@ pgxc_node_send_parse(PGXCNodeHandle * handle, const char* statement,
     size_t        old_outEnd = handle->outEnd;
 #endif
 
+	ResponseCombiner	*combiner = handle->combiner;
+	bool				need_rewrite = false;
+	int					rewriteLen = 1;
+
     /* if there are parameters, param_types should exist */
     Assert(num_params <= 0 || param_types);
     /* 2 bytes for number of parameters, preceding the type names */
@@ -2010,8 +2014,8 @@ pgxc_node_send_parse(PGXCNodeHandle * handle, const char* statement,
         paramTypeLen += strlen(paramTypes[cnt_params]) + 1;
     }
 
-    /* size + stmtLen + strlen + paramTypeLen */
-    msgLen = 4 + stmtLen + strLen + paramTypeLen;
+	/* size + rewriteLen + stmtLen + strlen + paramTypeLen */
+	msgLen = 4 + rewriteLen + stmtLen + strLen + paramTypeLen;
 
     /* msgType + msgLen */
     if (ensure_out_buffer_capacity(handle->outEnd + 1 + msgLen, handle) != 0)
@@ -2025,6 +2029,7 @@ pgxc_node_send_parse(PGXCNodeHandle * handle, const char* statement,
     msgLen = htonl(msgLen);
     memcpy(handle->outBuffer + handle->outEnd, &msgLen, 4);
     handle->outEnd += 4;
+
     /* statement name */
     if (statement)
     {
@@ -2053,6 +2058,29 @@ pgxc_node_send_parse(PGXCNodeHandle * handle, const char* statement,
         pfree(paramTypes[cnt_params]);
     }
     pfree(paramTypes);
+
+	/*
+	 * If the extended query contains an insert sql command whose
+	 * distribute key's value is a function, we caculte the function
+	 * and rewrite the insert sql with the const result. So after send
+	 * the sql to datanode, it will be cached, However, the sql command
+	 * changes as the result of the function, so datanode should use
+	 * the new sql instead of cached sql. The we send a 'need_rewrite'
+	 * flag to tell the datanode to use new sql.
+	 */
+	if (IsA((combiner->ss.ps.plan), RemoteQuery))
+	{
+		RemoteQuery *plan = (RemoteQuery *)(combiner->ss.ps.plan);
+		ExecNodes *exec_nodes = plan->exec_nodes;
+		if (exec_nodes && exec_nodes->need_rewrite)
+		{
+			handle->outBuffer[handle->outEnd++] = 'Y';
+			need_rewrite = true;
+		}
+	}
+	if (!need_rewrite)
+		handle->outBuffer[handle->outEnd++] = 'N';
+
     Assert(old_outEnd + ntohl(msgLen) + 1 == handle->outEnd);
 
      return 0;

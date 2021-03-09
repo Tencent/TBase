@@ -348,6 +348,7 @@ pgxc_FQS_planner(Query *query, int cursorOptions, ParamListInfo boundParams)
     result->relationOids = glob->relationOids;
     result->invalItems = glob->invalItems;
     result->rowMarks = glob->finalrowmarks;
+	result->hasReturning = (query->returningList != NULL);
 
     return result;
 }
@@ -389,6 +390,13 @@ pgxc_FQS_create_remote_plan(Query *query, ExecNodes *exec_nodes, bool is_exec_di
         query_step->sql_statement = pstrdup(buf.data);
         pfree(buf.data);
     }
+
+	if (query_step->exec_nodes &&
+		query_step->exec_nodes->need_rewrite &&
+		query->commandType == CMD_INSERT)
+	{
+		query_step->forDeparse = copyObject(query);
+	}
 
     /* Optimize multi-node handling */
     query_step->read_only = (query->commandType == CMD_SELECT && !query->hasForUpdate);
