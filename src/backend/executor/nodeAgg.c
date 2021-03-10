@@ -6060,7 +6060,7 @@ READ_LENGTH:
         }
         else
         {
-            data = (char *)palloc0(nread);
+			data = (char *)palloc0(dataLen);
         }
     
 READ_DATA:
