@@ -447,6 +447,7 @@ printtup(TupleTableSlot *slot, DestReceiver *self)
         }
         else
         {
+	            int len = strlen(outputstr);
 #ifdef __TBASE__
 	            if (slot->tts_tupleDescriptor->attrs[i]->atttypid == RECORDOID && self->mydest == DestRemoteExecute)
 	            {
@@ -482,7 +483,6 @@ printtup(TupleTableSlot *slot, DestReceiver *self)
 		            pfree(tupdesc_data.data);
 	            }
 #endif
-                int len = strlen(outputstr);
                 pq_sendint(&buf, len, 4);
                 appendBinaryStringInfo(&buf, outputstr, len);
             }
