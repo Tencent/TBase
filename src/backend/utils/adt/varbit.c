@@ -16,6 +16,7 @@
 
 #include "postgres.h"
 
+#include "access/hash.h"
 #include "access/htup_details.h"
 #include "libpq/pqformat.h"
 #include "nodes/nodeFuncs.h"
@@ -1870,4 +1871,12 @@ bitgetbit(PG_FUNCTION_ARGS)
         PG_RETURN_INT32(1);
     else
         PG_RETURN_INT32(0);
+}
+
+Datum
+bithash(PG_FUNCTION_ARGS)
+{
+	VarBit	   *arg1 = PG_GETARG_VARBIT_P(0);
+	
+	return hash_any(VARBITS(arg1), VARBITBYTES(arg1));
 }

@@ -38,6 +38,7 @@
 #include "utils/relcache.h"
 #include "utils/tqual.h"
 #include "utils/syscache.h"
+#include "utils/varbit.h"
 #include "nodes/nodes.h"
 #include "optimizer/clauses.h"
 #include "parser/parse_coerce.h"
@@ -1020,6 +1021,9 @@ hash_func_ptr(Oid dataType)
             return hash_numeric;
         case UUIDOID:
             return uuid_hash;
+		case BITOID:
+		case VARBITOID:
+			return bithash;
         default:
             return NULL;
     }
