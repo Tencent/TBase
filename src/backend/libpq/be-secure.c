@@ -257,8 +257,10 @@ retry:
             /*
              * We'll retry the read. Most likely it will return immediately
              * because there's still no data available, and we'll wait for the
-             * socket to become ready again.
+			 * socket to become ready again. But we should check interrupts
+			 * before retry incase of conflict interrupt.
              */
+			CHECK_FOR_INTERRUPTS();
         }
         goto retry;
     }
