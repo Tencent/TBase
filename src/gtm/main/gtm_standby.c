@@ -76,6 +76,7 @@ gtm_standby_start_startup(void)
 		errno = save_errno;
 		if(GTM_ActiveConn)
 			GTMPQfinish(GTM_ActiveConn);
+		GTM_ActiveConn = NULL;
 		return 0;
 	}
 

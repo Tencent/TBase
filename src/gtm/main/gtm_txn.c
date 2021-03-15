@@ -1563,6 +1563,48 @@ ProcessCheckGTMCommand(Port *myport, StringInfo message)
     pq_endmessage(myport, &buf);
     pq_flush(myport);
 }
+
+
+/*
+ * Check gtm slave status by acquiring gts.
+ */
+void
+ProcessStandbyPreCheckGTMCommand(Port *myport, StringInfo message)
+{
+    StringInfoData buf;
+    int            is_master = 0;
+    GTM_Timestamp  master_timestamp  = InvalidGTS;
+    int            standby_count = 0;
+    XLogRecPtr     flush_ptr;
+
+    /* read timeout message */
+    pq_getmsgint(message,sizeof(int));
+    pq_getmsgend(message);
+
+    if (myport->remote_type != GTM_NODE_GTM_CTL)
+    {
+        /* standby node only handle GTS request from gtm_ctl*/
+        elog(ERROR, "check gtm command is supposed to be fired only by gtm or gtm_ctl!!");
+    }
+
+    /* get static gts from ControlData */
+    GTM_RWLockAcquire(&ControlDataLock,GTM_LOCKMODE_WRITE);
+    master_timestamp = ControlData->gts;
+    GTM_RWLockRelease(&ControlDataLock);
+
+    flush_ptr = GetCurrentXLogwrtResult().Flush;
+    is_master = Recovery_IsStandby();
+
+    pq_beginmessage(&buf, 'S');
+    pq_sendint(&buf, TXN_CHECK_GTM_STATUS_RESULT, 4);
+    pq_sendbytes(&buf, (char *) &is_master, sizeof(is_master));
+    pq_sendbytes(&buf, (char *) &master_timestamp, sizeof(GTM_Timestamp));
+    pq_sendint64(&buf, flush_ptr);
+    pq_sendint(&buf, standby_count, sizeof(int));
+
+    pq_endmessage(myport, &buf);
+    pq_flush(myport);
+}
 #endif 
 /*
  * Process MSG_TXN_BEGIN_GETGXID message

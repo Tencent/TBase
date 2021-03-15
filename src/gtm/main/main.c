@@ -140,6 +140,7 @@ GTM_ThreadInfo  *g_timer_thread = NULL;
 GTM_ThreadInfo  *g_logcollector_thread = NULL;
 void *GTM_ThreadLogCollector(void *argp);
 extern void GTM_ErrorLogCollector(ErrorData *edata, StringInfo buff);
+GTM_ThreadInfo  *g_standby_pre_server_thread = NULL;
 
 #ifdef __XLOG__
 GTM_ThreadInfo  *g_basebackup_thread   = NULL;
@@ -245,6 +246,8 @@ static void ProcessSyncStandbyCommand(Port *myport, GTM_MessageType mtype, Strin
 static void ProcessBarrierCommand(Port *myport, GTM_MessageType mtype, StringInfo message);
 static int 
 GTMInitConnection(GTM_ConnectionInfo *conninfo);
+static void SetNonBlockConnection(GTM_ConnectionInfo *conninfo);
+static void gtm_standby_pre_server_loop(const char *data_dir);
 
 #ifdef __XLOG__
 static void thread_replication_clean(GTM_StandbyReplication *replication);
@@ -604,6 +607,26 @@ static bool CheckClockSource(void)
 
 #endif
 
+static void GTM_XLogRecoveryIfNeed(const char *data_dir)
+{
+    Assert(ControlData != NULL);
+
+    switch(ControlData->state)
+    {
+        case DB_SHUTDOWNED_IN_RECOVERY:
+        case DB_SHUTDOWNING:
+        case DB_STARTUP:
+        case DB_IN_CRASH_RECOVERY:
+        case DB_IN_ARCHIVE_RECOVERY:
+        case DB_IN_PRODUCTION:
+            elog(LOG, "Detect GTM server crash.");
+            GTM_XLogRecovery(ControlData->checkPoint,data_dir);
+            break;
+        case DB_SHUTDOWNED:
+            break;
+    }
+}
+
 int
 main(int argc, char *argv[])
 {// #lizard forgives
@@ -659,6 +682,8 @@ main(int argc, char *argv[])
     int     util_thread_cnt = 0;
 
     isStartUp = true;
+    SpinLockInit(&promote_status_lck);
+    promote_status = GTM_PRPMOTE_INIT;
 
     /*
      * At first, initialize options.  Also moved something from BaseInit() here.
@@ -1002,41 +1027,6 @@ main(int argc, char *argv[])
         Recovery_StandbySetConnInfo(active_addr, active_port);
     }
 
-    SpinLockInit(&promote_status_lck);
-    promote_status = GTM_PRPMOTE_INIT;
-	
-    pqsignal(SIGHUP, GTM_SigleHandler);
-    pqsignal(SIGKILL, GTM_SigleHandler);
-    pqsignal(SIGQUIT, GTM_SigleHandler);
-    pqsignal(SIGTERM, GTM_SigleHandler);
-    pqsignal(SIGINT, GTM_SigleHandler);
-    pqsignal(SIGUSR1, GTM_SigleHandler);
-    pqsignal(SIGPIPE, SIG_IGN);
-
-    pqinitmask();
-
-    /*
-     * Establish a connection between the active and standby.
-     */
-    while (Recovery_IsStandby())
-    {
-        if (gtm_standby_start_startup())
-        {
-            elog(LOG, "Standby GTM Startup connection established with active-GTM.");
-            break;
-        }
-
-        elog(LOG, "Failed to establish a connection to active-GTM.");
-        usleep(GTM_GTS_ONE_SECOND);
-    }
-
-    SpinLockAcquire(&promote_status_lck);
-    if (promote_status == GTM_PRPMOTE_INIT)
-    {
-    promote_status = GTM_PRPMOTE_CONNED;
-    }
-    SpinLockRelease(&promote_status_lck);
-
 #ifdef __XLOG__
 
     if(access(RECOVERY_CONF_NAME,F_OK) == 0)
@@ -1061,24 +1051,61 @@ main(int argc, char *argv[])
 
     if(Recovery_IsStandby() == false)
     {
-        Assert(ControlData != NULL);
+        GTM_XLogRecoveryIfNeed(data_dir);
+	}
 
-        switch(ControlData->state)
+#endif
+
+#ifdef __TBASE__
+    elog(LOG, "Starting GTM server at (%s:%d) with syn storage", ListenAddresses, GTMPortNumber);
+#else
+    elog(LOG, "Starting GTM server at (%s:%d) -- control file %s", ListenAddresses, GTMPortNumber, GTMControlFile);
+#endif
+
+    g_max_lock_number = 6000;
+    pqsignal(SIGHUP, GTM_SigleHandler);
+    pqsignal(SIGKILL, GTM_SigleHandler);
+    pqsignal(SIGQUIT, GTM_SigleHandler);
+    pqsignal(SIGTERM, GTM_SigleHandler);
+    pqsignal(SIGINT, GTM_SigleHandler);
+    pqsignal(SIGUSR1, GTM_SigleHandler);
+    pqsignal(SIGPIPE, SIG_IGN);
+
+    pqinitmask();
+
+    /*
+     * Establish a connection between the active and standby.
+     */
+    if (Recovery_IsStandby())
+    {
+        if (!gtm_standby_start_startup())
         {
-            case DB_SHUTDOWNED_IN_RECOVERY:
-            case DB_SHUTDOWNING:
-            case DB_STARTUP:
-            case DB_IN_CRASH_RECOVERY:
-            case DB_IN_ARCHIVE_RECOVERY:
-            case DB_IN_PRODUCTION:
-                elog(LOG, "Detect GTM server crash.");
-                GTM_XLogRecovery(ControlData->checkPoint,data_dir);
-                break;
-            case DB_SHUTDOWNED:
-                break;
+#ifdef __TBASE__
+            elog(LOG, "Failed to establish a connection to active-GTM.");
+
+            /*
+             * if failed to establish a connection to active-GTM, just
+             * retry, but support the check status command.
+             */
+            gtm_standby_pre_server_loop(data_dir);
+#else
+            elog(ERROR, "Failed to establish a connection to active-GTM.");
+#endif
+        }
+        else
+        {
+            elog(LOG, "Standby GTM Startup connection established with active-GTM.");
         }
     }
 
+    SpinLockAcquire(&promote_status_lck);
+    if (promote_status == GTM_PRPMOTE_INIT)
+    {
+        promote_status = GTM_PRPMOTE_CONNED;
+    }
+    SpinLockRelease(&promote_status_lck);
+
+#ifdef __XLOG__
     GTM_XLogFileInit(data_dir);
 
     GTM_RWLockAcquire(&ControlDataLock,GTM_LOCKMODE_WRITE);
@@ -1090,12 +1117,6 @@ main(int argc, char *argv[])
 
 #endif
     
-#ifdef __TBASE__
-    elog(LOG, "Starting GTM server at (%s:%d) with syn storage", ListenAddresses, GTMPortNumber);
-#else
-    elog(LOG, "Starting GTM server at (%s:%d) -- control file %s", ListenAddresses, GTMPortNumber, GTMControlFile);
-#endif    
-
     /*
      * Read the last GXID and start from there
      */
@@ -1109,6 +1130,8 @@ main(int argc, char *argv[])
         GlobalTimestamp gts = 0;
         int  max_retry_times = 10;
         
+        system("rm -rf gtm_xlog/*");
+
         bret = GTM_StoreGetSysInfo(&identifier, &lsn, &gts);
         if (!bret)
         {
@@ -1434,8 +1457,6 @@ main(int argc, char *argv[])
         process_thread_num = g_max_thread_number < process_thread_num ? g_max_thread_number : process_thread_num;
     }
 
-    g_max_lock_number = 6000;
-    
     /* Create GTM threads handling requests */
     g_timekeeper_thread = GTM_ThreadCreate(GTM_ThreadTimeKeeper, g_max_lock_number);
     if (NULL == g_timekeeper_thread)
@@ -1521,7 +1542,11 @@ main(int argc, char *argv[])
         util_thread_cnt++;
     }
     
-    for(i = 0; i < process_thread_num; i++)
+    /*
+     * maybe one GTM_ThreadMain create as g_standby_pre_server_thread before
+     */
+    i = (g_standby_pre_server_thread == NULL) ? 0 : 1;
+	for(; i < process_thread_num; i++)
     {
         elog(DEBUG8, "Create thread %d.\n", i);
         if (NULL == GTM_ThreadCreate(GTM_ThreadMain, g_max_lock_number))
@@ -1807,6 +1832,206 @@ ServerLoop(void)
     }
 }
 
+/*
+ * add connection into g_standby_pre_server_thread
+ */
+static int
+gtm_add_connection_standby_pre_server(Port *port)
+{
+    GTM_ConnectionInfo *conninfo = NULL;
+    struct epoll_event event;
+
+    if (!g_standby_pre_server_thread->thr_epoll_ok)
+    {
+        elog(LOG, "g_standby_pre_server_thread epoll not ready.");
+        return STATUS_ERROR;
+    }
+
+    conninfo = (GTM_ConnectionInfo *)palloc0(sizeof (GTM_ConnectionInfo));
+    conninfo->con_port = port;
+    conninfo->con_init = false;
+    port->conn = conninfo;
+
+    /* Set conn to non-blocking mode for epoll wait */
+    SetNonBlockConnection(conninfo);
+
+    conninfo->con_thrinfo = g_standby_pre_server_thread;
+    event.data.ptr = conninfo;
+    event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP;
+    if(-1 == epoll_ctl (g_standby_pre_server_thread->thr_efd, EPOLL_CTL_ADD, conninfo->con_port->sock, &event))
+    {
+        elog(LOG, "failed to add socket to epoll");
+        return STATUS_ERROR;
+    }
+
+    return STATUS_OK;
+}
+
+/*
+ * handle loop before establish a connection to active-GTM
+ */
+static void
+gtm_standby_pre_server_loop(const char *data_dir)
+{
+    fd_set		readmask;
+    int			nSockets;
+    sigjmp_buf  local_sigjmp_buf;
+
+    /*
+     * recovery here first
+     */
+    GTM_XLogRecoveryIfNeed(data_dir);
+
+    /*
+     * start GTM_ThreadMain to support get gtm status command
+     */
+    g_standby_pre_server_thread = GTM_ThreadCreate(GTM_ThreadMain, g_max_lock_number);
+    if (NULL == g_standby_pre_server_thread)
+    {
+        elog(LOG, "Failed to create standby_pre_server_thread thread");
+        exit(1);
+    }
+
+    if (sigsetjmp(local_sigjmp_buf, 1) != 0)
+    {
+        RWLockCleanUp();
+        /* Report the error to the server log */
+        EmitErrorReport(NULL);
+
+        /*
+         * Now return to normal top-level context and clear ErrorContext for
+         * next time.
+         */
+        FlushErrorState();
+    }
+
+    /* We can now handle ereport(ERROR) */
+    PG_exception_stack = &local_sigjmp_buf;
+
+    nSockets = initMasks(&readmask);
+    while (Recovery_IsStandby())
+    {
+        fd_set		rmask;
+        int			selres;
+
+        /*
+         * Wait for a connection request to arrive.
+         *
+         * We wait at most one minute, to ensure that the other background
+         * tasks handled below get done even when no requests are arriving.
+         */
+        memcpy((char *) &rmask, (char *) &readmask, sizeof(fd_set));
+
+        PG_SETMASK(&UnBlockSig);
+
+        /* if timekeeper thread exit, main thread should prepare to exit. */
+        if (GTMAbortPending)
+        {
+            /*
+             * XXX We should do a clean shutdown here. For the time being, just
+             * write the next GXID to be issued in the control file and exit
+             * gracefully
+             */
+
+            elog(LOG, "GTM shutting down.");
+
+            /*
+             * Tell GTM that we are shutting down so that no new GXIDs are
+             * issued this point onwards
+             */
+            GTM_SetShuttingDown();
+
+            GTM_RWLockAcquire(&ControlDataLock,GTM_LOCKMODE_WRITE);
+            ControlData->state = DB_SHUTDOWNED;
+            ControlDataSync(false);
+            GTM_RWLockRelease(&ControlDataLock);
+
+            /* Delete pid file */
+            DeleteLockFile(GTM_PID_FILE);
+#ifdef HAVE_UNIX_SOCKETS
+            RemoveSocketFile();
+#endif
+            elog(LOG, "GTM exits");
+            exit(1);
+        }
+
+        {
+            /* must set timeout each time; some OSes change it! */
+            struct timeval timeout;
+
+            timeout.tv_sec = 5;
+            timeout.tv_usec = 0;
+
+            selres = select(nSockets, &rmask, NULL, NULL, &timeout);
+        }
+
+        /*
+         * Block all signals until we wait again.  (This makes it safe for our
+         * signal handlers to do nontrivial work.)
+         */
+        PG_SETMASK(&BlockSig);
+
+        /* Now check the select() result */
+        if (selres < 0)
+        {
+            if (errno != EINTR && errno != EWOULDBLOCK)
+            {
+                ereport(LOG,
+                        (EACCES,
+                                errmsg("select() failed in main thread: %m")));
+                exit(1);
+            }
+        }
+
+        /*
+         * New connection pending on any of our sockets? If so, fork a child
+         * process to deal with it.
+         */
+        if (selres > 0)
+        {
+            int			i;
+
+            for (i = 0; i < MAXLISTEN; i++)
+            {
+                if (ListenSocket[i] == -1)
+                {
+                    break;
+                }
+
+                if (FD_ISSET(ListenSocket[i], &rmask))
+                {
+                    Port	   *port;
+
+                    port = ConnCreate(ListenSocket[i]);
+                    if (port)
+                    {
+                        if (gtm_add_connection_standby_pre_server(port) != STATUS_OK)
+                        {
+                            StreamClose(port->sock);
+                            ConnFree(port);
+                        }
+                    }
+                }
+            }
+        }
+
+        /*
+         * retry establish a connection between the active and standby,
+         * controlling frequency with select timeout
+         */
+        if (gtm_standby_start_startup())
+        {
+            elog(LOG, "Standby GTM Startup connection established with active-GTM.");
+            break;
+        }
+        elog(LOG, "Failed to establish a connection to active-GTM.");
+    }
+
+    /*
+     * clear exception stack here
+     */
+    PG_exception_stack = NULL;
+}
 
 /*
  * Initialise the masks for select() for the ports we are listening on.
@@ -2967,7 +3192,10 @@ reconnect:
         goto promote;
 
     if(GTM_ActiveConn)
+    {
         GTMPQfinish(GTM_ActiveConn);
+        GTM_ActiveConn = NULL;
+    }
 
     sleep(1);
 
@@ -3619,7 +3847,18 @@ ProcessCommand(Port *myport, StringInfo input_message)
      * compile option.
      */
     elog(DEBUG1, "mtype = %s (%d).", gtm_util_message_name(mtype), (int)mtype);
+
 #ifdef __TBASE__
+    if (promote_status != GTM_PRPMOTE_NORMAL)
+    {
+        if (mtype != MSG_CHECK_GTM_STATUS)
+        {
+            elog(ERROR, "standby gtm only support get gtm status command before establish a connection to active-GTM or promote, mtype = %s (%d).", gtm_util_message_name(mtype), (int)mtype);
+        }
+
+        return ProcessStandbyPreCheckGTMCommand(myport, input_message);
+    }
+
     start_time = getSystemTime();
     /*
      * Get Timestamp does not need to sync with standby
@@ -4054,6 +4293,7 @@ GTMAddConnection(Port *port, GTM_Conn *standby)
         if(-1 == epoll_ctl (thrinfo->thr_efd, EPOLL_CTL_ADD, conninfo->con_port->sock, &event))
         {
             elog(LOG, "failed to add socket to epoll");
+            return STATUS_ERROR;
         }
         break;
     }
