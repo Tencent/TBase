@@ -133,6 +133,7 @@ extern int  GTMStartupGTSDelta;
 static bool      g_recovery_finish;
 static bool     *g_GTMStoreDirtyMap;
 static GTM_MutexLock g_CheckPointLock;
+extern enum GTM_PromoteStatus promote_status;
 
 XLogCtlData     *XLogCtl;
 XLogSyncStandby *XLogSync;
@@ -2344,7 +2345,7 @@ RedoRangeOverwrite(XLogCmdRangerOverWrite *cmd)
     if(enalbe_gtm_xlog_debug)
         PrintRedoRangeOverwrite(cmd);
 
-    if(Recovery_IsStandby() && recovery_pitr_mode == false)
+    if(Recovery_IsStandby() && recovery_pitr_mode == false && promote_status == GTM_PRPMOTE_NORMAL)
     {
         memcpy(g_GTMStoreMapAddr + cmd->offset,cmd->data,cmd->bytes);
 
@@ -2386,7 +2387,7 @@ RedoCheckPoint(XLogCmdCheckPoint *cmd,XLogRecPtr pos)
 
     SetCurrentTimeLineID(cmd->timeline);
 
-    if(Recovery_IsStandby() && recovery_pitr_mode == false)
+    if(Recovery_IsStandby() && recovery_pitr_mode == false && promote_status == GTM_PRPMOTE_NORMAL)
         DoCheckPoint(false);
 
     return sizeof(XLogCmdCheckPoint);
