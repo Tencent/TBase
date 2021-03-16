@@ -59,7 +59,7 @@ SELECT * FROM viewtest;
 EXPLAIN SELECT a FROM viewtest;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- Subquery Scan on viewtest  (cost=22.23..25.04 rows=225 width=4)
+ Subquery Scan on viewtest  (cost=22.23..27.29 rows=225 width=4)
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=22.23..22.79 rows=225 width=8)
          ->  Sort  (cost=22.23..22.79 rows=225 width=8)
                Sort Key: viewtest_tbl.b DESC
@@ -78,8 +78,8 @@ SELECT a FROM viewtest;
 EXPLAIN SELECT * FROM viewtest ORDER BY a;
                                         QUERY PLAN                                         
 -------------------------------------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=33.83..34.39 rows=225 width=8)
-   ->  Sort  (cost=33.83..34.39 rows=225 width=8)
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=36.08..36.64 rows=225 width=8)
+   ->  Sort  (cost=36.08..36.64 rows=225 width=8)
          Sort Key: viewtest_tbl.a
          ->  Sort  (cost=22.23..22.79 rows=225 width=8)
                Sort Key: viewtest_tbl.b DESC

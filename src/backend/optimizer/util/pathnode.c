@@ -7001,7 +7001,7 @@ reparameterize_path(PlannerInfo *root, Path *path,
 
 #ifdef __TBASE__
 /*
- * count datanode number for given path, consider replication table as 1
+ * Count datanode number for given path, consider replication table as 1
  * because we use this function to figure out how many parts that data
  * had been separated into, when we estimating costs of a plan. Therefore
  * to get more accurate estimating result as in a distributed system.
