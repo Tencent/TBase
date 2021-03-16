@@ -706,14 +706,14 @@ HandleRemoteInstr(char *msg_body, size_t len, int nodeid, ResponseCombiner *comb
 	bool        found;
 	RemoteInstr *cur_instr;
 	
-	/* must doing this under per query context */
-	MemoryContext oldcontext = MemoryContextSwitchTo(combiner->ss.ps.state->es_query_cxt);
-	
 	if (combiner->recv_instr_htbl == NULL)
 	{
 		elog(ERROR, "combiner is not prepared for instrumentation");
 	}
 	elog(DEBUG1, "Handle remote instrument: nodeid %d", nodeid);
+	
+	/* must doing this under per query context */
+	MemoryContext oldcontext = MemoryContextSwitchTo(combiner->ss.ps.state->es_query_cxt);
 	
 	recv_str = makeStringInfo();
 	appendBinaryStringInfo(recv_str, msg_body, len);

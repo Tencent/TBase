@@ -45,6 +45,7 @@
 #include "optimizer/planner.h"
 #include "executor/execParallel.h"
 #include "commands/defrem.h"
+#include "commands/explain_dist.h"
 #include "commands/vacuum.h"
 #include "postmaster/postmaster.h"
 #include "optimizer/planmain.h"
@@ -65,7 +66,8 @@ static void ProcessQuery(PlannedStmt *plan,
              ParamListInfo params,
              QueryEnvironment *queryEnv,
              DestReceiver *dest,
-             char *completionTag);
+			 char *completionTag,
+			 int instrument);
 static void FillPortalStore(Portal portal, bool isTopLevel);
 static uint64 RunFromStore(Portal portal, ScanDirection direction, uint64 count,
              DestReceiver *dest);
@@ -179,8 +181,9 @@ ProcessQuery(PlannedStmt *plan,
              ParamListInfo params,
              QueryEnvironment *queryEnv,
              DestReceiver *dest,
-             char *completionTag)
-{// #lizard forgives
+			 char *completionTag,
+			 int instrument)
+{
     QueryDesc  *queryDesc;
 
     /*
@@ -191,13 +194,13 @@ ProcessQuery(PlannedStmt *plan,
     {
         queryDesc = CreateQueryDesc(plan, sourceText,
                             InvalidSnapshot, InvalidSnapshot,
-                            dest, params, queryEnv, 0);
+							dest, params, queryEnv, instrument);
     }
     else
 #endif
     queryDesc = CreateQueryDesc(plan, sourceText,
                                 GetActiveSnapshot(), InvalidSnapshot,
-                                dest, params, queryEnv, 0);
+								dest, params, queryEnv, instrument);
 
     /*
      * Call ExecutorStart to prepare the plan for execution
@@ -247,6 +250,13 @@ ProcessQuery(PlannedStmt *plan,
                 break;
         }
     }
+
+#ifdef __TBASE__
+	if (instrument && queryDesc->planstate)
+	{
+		SendLocalInstr(queryDesc->planstate);
+	}
+#endif
 
     /*
      * Now, we close down all the scans and free allocated resources.
@@ -2090,7 +2100,8 @@ PortalRunMulti(Portal portal,
                              portal->sourceText,
                              portal->portalParams,
                              portal->queryEnv,
-                             dest, completionTag);
+							 dest, completionTag,
+							 portal->up_instrument);
 #ifdef PGXC
                 /* it's special for INSERT */
                 if (IS_PGXC_COORDINATOR &&
@@ -2106,7 +2117,8 @@ PortalRunMulti(Portal portal,
                              portal->sourceText,
                              portal->portalParams,
                              portal->queryEnv,
-                             altdest, NULL);
+							 altdest, NULL,
+							 portal->up_instrument);
             }
 
             if (log_executor_stats)
