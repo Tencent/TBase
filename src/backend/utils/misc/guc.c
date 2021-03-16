@@ -6985,6 +6985,7 @@ SelectConfigFiles(const char *userDoption, const char *progname)
                      strerror(errno));
         if (errno == ENOENT)
             write_stderr("Run initdb or pg_basebackup to initialize a PostgreSQL data directory.\n");
+		free(configdir);
         return false;
     }
 
@@ -7054,6 +7055,7 @@ SelectConfigFiles(const char *userDoption, const char *progname)
                      "or by the -D invocation option, or by the "
                      "PGDATA environment variable.\n",
                      progname, ConfigFileName);
+		free(configdir);
         return false;
     }
 
@@ -7102,6 +7104,7 @@ SelectConfigFiles(const char *userDoption, const char *progname)
                      "or by the -D invocation option, or by the "
                      "PGDATA environment variable.\n",
                      progname, ConfigFileName);
+		free(configdir);
         return false;
     }
     SetConfigOption("hba_file", fname, PGC_POSTMASTER, PGC_S_OVERRIDE);

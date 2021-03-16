@@ -435,7 +435,7 @@ GetCurrentDateTime(struct pg_tm *tm)
     int            tz;
     fsec_t        fsec;
 
-    timestamp2tm(GetCurrentTransactionStartTimestamp(), &tz, tm, &fsec,
+    (void) timestamp2tm(GetCurrentTransactionStartTimestamp(), &tz, tm, &fsec,
                  NULL, NULL);
     /* Note: don't pass NULL tzp to timestamp2tm; affects behavior */
 }
@@ -451,7 +451,7 @@ GetCurrentTimeUsec(struct pg_tm *tm, fsec_t *fsec, int *tzp)
 {
     int            tz;
 
-    timestamp2tm(GetCurrentTransactionStartTimestamp(), &tz, tm, fsec,
+    (void) timestamp2tm(GetCurrentTransactionStartTimestamp(), &tz, tm, fsec,
                  NULL, NULL);
     /* Note: don't pass NULL tzp to timestamp2tm; affects behavior */
     if (tzp != NULL)

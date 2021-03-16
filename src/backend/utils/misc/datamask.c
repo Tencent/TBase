@@ -625,10 +625,10 @@ bool datamask_scan_key_contain_mask(ScanState *node)
 	ScanKey		ScanKeys;
 	int			NumScanKeys;
 
-	if(!IsA(node, IndexScanState) && !IsA(node, IndexOnlyScanState))
+	if(node == NULL)
 		return false;
 
-	if(node == NULL)
+	if(!IsA(node, IndexScanState) && !IsA(node, IndexOnlyScanState))
 		return false;
 
     if (node->ss_currentRelation &&

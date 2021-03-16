@@ -83,7 +83,10 @@ pool_listen(unsigned short port, const char *unixSocketName)
 
     /* bind the name to the descriptor */
     if (bind(fd, (struct sockaddr *) & unix_addr, len) < 0)
+	{
+		close(fd);
         return -1;
+	}
 
     /*
      * Select appropriate accept-queue length limit.  PG_SOMAXCONN is only
@@ -96,7 +99,10 @@ pool_listen(unsigned short port, const char *unixSocketName)
 
     /* tell kernel we're a server */
     if (listen(fd, maxconn) < 0)
+	{
+		close(fd);
         return -1;
+	}
 
 
 
@@ -165,7 +171,10 @@ pool_connect(unsigned short port, const char *unixSocketName)
         strlen(unix_addr.sun_path) + 1;
 
     if (connect(fd, (struct sockaddr *) & unix_addr, len) < 0)
+	{
+		close(fd);
         return -1;
+	}
 
     return fd;
 #else
@@ -833,14 +842,9 @@ pool_recvfds(PoolPort *port, int *fds, int count)
             }
             else if (r == 0)
             {
-                if(recved_size == size)
-                    break;
-                else
-                {
                     error_no = errno;
                     goto receive_error;
                 }
-            }
 
             recved_size += r;
             if(recved_size == size)
@@ -1159,8 +1163,8 @@ pool_sendres_with_command_id(PoolPort *port, int res, CommandId cmdID, char *err
 failure:
     if (buf)
     {
-        buf = NULL;
         free(buf);
+		buf = NULL;
     }
     
     if (PoolConnectDebugPrint)
@@ -1329,9 +1333,6 @@ pool_recvres(PoolPort *port, bool need_log)
 		}
 		else if (r == 0)
 		{
-			if(recved_size == size)
-				break;
-			else
 				goto failure;
 		}
 
@@ -1449,9 +1450,6 @@ pool_recvpids(PoolPort *port, int **pids)
         }
         else if (r == 0)
         {
-            if(size == recved_size)
-                break;
-            else 
                 goto failure;
         }
         
@@ -1476,6 +1474,7 @@ pool_recvpids(PoolPort *port, int **pids)
     if (n32 == 0)
     {
         elog(WARNING, "No transaction to abort");
+		free(buf);
         return 0;
     }
 

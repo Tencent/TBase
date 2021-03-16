@@ -1975,6 +1975,7 @@ get_best_segment(dsa_area *area, Size npages)
 
     Assert(LWLockHeldByMe(DSA_AREA_LOCK(area)));
 	check_for_freed_segments_locked(area);
+    Assert(npages > 0);
 
     /*
      * Start searching from the first bin that *might* have enough contiguous

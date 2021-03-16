@@ -83,6 +83,7 @@ PG_MODULE_MAGIC;
 #define GET_READONLY "readonly"
 #define GIDSIZE (200 + 24)
 #define MAX_TWOPC_TXN 1000
+#define STRING_BUFF_LEN 1024
 
 #define MAX_CMD_LENGTH 120
 
@@ -1302,7 +1303,7 @@ database_info *add_database_info(char *database_name)
 {
 	database_info *rv;
     HASHCTL txn_ctl;
-    char tabname[MAX_GID];
+    char tabname[STRING_BUFF_LEN];
 
 	if ((rv = find_database_info(database_name)) != NULL)
 		return rv;		/* Already in the list */
@@ -1322,7 +1323,7 @@ database_info *add_database_info(char *database_name)
 	rv->last_txn_info = NULL;
 #endif
 
-    snprintf(tabname, 64, "%s txn info", rv->database_name);
+    snprintf(tabname, STRING_BUFF_LEN, "%s txn info", rv->database_name);
     txn_ctl.keysize = MAX_GID;
     txn_ctl.entrysize = sizeof(txn_info); 
     rv->all_txn_info = hash_create(tabname, 64, 
@@ -1342,7 +1343,7 @@ database_info *add_database_info(char *database_name)
 
 int find_node_index(Oid node_oid)
 {
-	int res;
+	int res = -1;
 	int i;
 	if (get_pgxc_nodetype(node_oid) == 'C')
 	{
@@ -2078,12 +2079,12 @@ Datum pgxc_clear_2pc_records(PG_FUNCTION_ARGS)
     /*collect the 2pc file in nodes*/
     for (i = 0; i < cn_nodes_num; i++)
     {
-        execute_query_on_single_node(cn_node_list[i], query, 1, result+i);
+        (void) execute_query_on_single_node(cn_node_list[i], query, 1, result+i);
     }
 
     for (i = 0; i < dn_nodes_num; i++)
     {
-        execute_query_on_single_node(dn_node_list[i], query, 1, result+cn_nodes_num+i);
+        (void) execute_query_on_single_node(dn_node_list[i], query, 1, result+cn_nodes_num+i);
     }
 	/*get all database info*/
 	getDatabaseList();

@@ -67,7 +67,12 @@ CreateStatistics(CreateStatsStmt *stmt)
 	Oid			relid;
 	ObjectAddress parentobject,
 				myself;
+#ifdef __TBASE__
+    Datum		types[3];		/* one for each possible type of statistic */
+#else
 	Datum		types[2];		/* one for each possible type of statistic */
+#endif
+
 	int			ntypes;
 	ArrayType  *stxkind;
 	bool		build_ndistinct;

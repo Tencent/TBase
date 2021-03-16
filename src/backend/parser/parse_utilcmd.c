@@ -3314,6 +3314,9 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
     cxt.ispartitioned = (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE);
     cxt.partbound = NULL;
 	cxt.ofType = false;
+	cxt.interval_child = false;
+	cxt.interval_child_idx = -1;
+	cxt.interval_parentId = InvalidOid;
 
     /*
      * The only subtypes that currently require parse transformation handling

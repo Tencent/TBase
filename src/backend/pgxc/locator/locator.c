@@ -1767,6 +1767,7 @@ static int locate_shard_insert(Locator *self, Datum value, bool isnull,
                 }
                 else
                 {
+                    Assert(global_index >= 0);
                     local_index = self->nodeindexMap[global_index];    
                 }
                 ((void **) self->results)[0] = ((void **) self->nodeMap)[local_index];
@@ -1893,6 +1894,7 @@ static int locate_shard_select(Locator *self, Datum value, bool isnull,
             hashvalue = compute_hash(self->dataType, value, LOCATOR_TYPE_SHARD);
 
             global_index = GetNodeIndexByHashValue(self->groupid, hashvalue);
+			Assert(global_index >= 0);
             
             switch (self->listType)
             {

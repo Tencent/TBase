@@ -567,7 +567,7 @@ kill_zombie()
         }
     }
 
-    fclose(fp);
+	pclose(fp);
 }
 
 static void
@@ -1097,8 +1097,11 @@ do_status(void)
         printf("\"-D\" \"%s\"",gtm_data);
         optlines = readfile(gtmopts_file);
         if (optlines != NULL)
+		{
             for (; *optlines != NULL; optlines++)
                 fputs(*optlines, stdout);
+			free(optlines);
+		}
     }
 
 

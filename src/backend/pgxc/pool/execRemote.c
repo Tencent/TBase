@@ -252,9 +252,11 @@ stat_log()
             for (i = 0; i < MAX_STATEMENTS_PER_TRAN; i++)
                 elog(DEBUG1, "%d Statements per Transaction: %d (%d%%)",
                      i, statements_per_transaction[i], statements_per_transaction[i] * 100 / total_transactions);
-        }
+
         elog(DEBUG1, "%d+ Statements per Transaction: %d (%d%%)",
              MAX_STATEMENTS_PER_TRAN, statements_per_transaction[MAX_STATEMENTS_PER_TRAN], statements_per_transaction[MAX_STATEMENTS_PER_TRAN] * 100 / total_transactions);
+		}
+
         if (nodes_per_transaction)
         {
             int            i;
@@ -9233,19 +9235,12 @@ ExecRemoteQuery(PlanState *pstate)
 #ifdef __TBASE__
     if (enable_statistic)
     {
-        double __tmp__ = ((double)combiner->recv_tuples);
-        if (__tmp__ != 0)
-        {
-            elog(LOG, "FetchTuple: recv_node_count:%d, recv_tuples:%lu, recv_total_time:%ld, avg_time:%lf.",
-                   combiner->recv_node_count, combiner->recv_tuples, combiner->recv_total_time, 
-                   ((double)combiner->recv_total_time) / __tmp__);
-        }
-        else
-        {
-            elog(LOG, "FetchTuple: recv_node_count:%d, recv_tuples:%lu, recv_total_time:%ld, avg_time:--",
-                               combiner->recv_node_count, combiner->recv_tuples, combiner->recv_total_time
-                              );
-        }
+        elog(LOG, "FetchTuple: recv_node_count:%d, recv_tuples:%lu, "
+                    "recv_total_time:%ld, avg_time:%lf.",
+                    combiner->recv_node_count,combiner->recv_tuples,
+                    combiner->recv_total_time,
+                    combiner->recv_tuples ? ((double)combiner->recv_total_time)/
+                    ((double)combiner->recv_tuples) : -1);
     }
 #endif
     return NULL;
@@ -11184,19 +11179,12 @@ primary_mode_phase_two:
 #ifdef __TBASE__
     if (enable_statistic)
     {
-        double __tmp__= (double)combiner->recv_tuples;
-        if(__tmp__)
-        {
-        elog(LOG, "FetchTuple: worker:%d, recv_node_count:%d, recv_tuples:%lu, recv_total_time:%ld, avg_time:%lf.",
-                   ParallelWorkerNumber, combiner->recv_node_count, combiner->recv_tuples, combiner->recv_total_time, 
-                   ((double)combiner->recv_total_time) / __tmp__);
-        }
-        else
-        {
-            elog(LOG, "FetchTuple: worker:%d, recv_node_count:%d, recv_tuples:%lu, recv_total_time:%ld, avg_time:--.",
-                       ParallelWorkerNumber, combiner->recv_node_count, combiner->recv_tuples, combiner->recv_total_time
-                       );
-        }
+        elog(LOG, "FetchTuple: recv_node_count:%d, recv_tuples:%lu, "
+                    "recv_total_time:%ld, avg_time:%lf.",
+                    combiner->recv_node_count,combiner->recv_tuples,
+                    combiner->recv_total_time,
+                    combiner->recv_tuples ? ((double)combiner->recv_total_time)/
+                    ((double)combiner->recv_tuples) : -1);
     }
 #endif
     return NULL;
@@ -12560,7 +12548,7 @@ is_node_prepared(RemoteQueryState *rstate, int node)
 {
     int32 wordindex  = 0;
     int32 wordoffset = 0;
-    if (node > MAX_NODES_NUMBER)
+	if (node >= MAX_NODES_NUMBER)
     {
         elog(ERROR, "invalid nodeid:%d is bigger than maximum node number of the cluster", node);
     }

@@ -431,7 +431,7 @@ exec_policy_funct_on_other_node(char *query_string)
         {
             cn_node_list = (Oid *) palloc0(cn_nodes_num * sizeof(Oid));
                 
-            PGXCGetCoordOidOthers(&cn_node_list);
+            PGXCGetCoordOidOthers(cn_node_list);
             pgxc_execute_on_nodes(cn_nodes_num, cn_node_list, query_string);
         }
     }
@@ -1822,6 +1822,7 @@ process_fga_trigger(bool timeout)
                 else
                 {
                     elog(LOG, "AUDIT_FGA: cannot connect to db");
+	                PQfinish(conn);
                 }
             }
         }

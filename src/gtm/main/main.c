@@ -563,7 +563,10 @@ static int CheckTscFeatures(char *cmd)
     if (file == NULL)
         return false;
 
-    fscanf(file, "%d", &count);
+	if (fscanf(file, "%d", &count) == EOF)
+    {
+	    count = 0;
+    }
     pclose(file);
     
     return count;
@@ -2190,6 +2193,7 @@ GTM_ThreadTimeKeeper(void *argp)
        
     action.sa_flags = 0;  
     action.sa_handler = GTM_ThreadSigHandler;  
+	sigemptyset(&action.sa_mask);
          
     ret = sigaction(SIGQUIT, &action, NULL);  
     if (ret)
@@ -2451,7 +2455,7 @@ GTM_ThreadCheckPointer(void *argp)
        
     action.sa_flags = 0;  
     action.sa_handler = GTM_ThreadSigHandler;  
-         
+	sigemptyset(&action.sa_mask);
     ret = sigaction(SIGQUIT, &action, NULL);  
     if (ret)
     {
@@ -2567,6 +2571,7 @@ GTM_ThreadWalSender(void *argp)
 
     action.sa_flags = 0;
     action.sa_handler = GTM_ThreadSigHandler;  
+	sigemptyset(&action.sa_mask);
     ret = sigaction(SIGQUIT, &action, NULL);  
     
     if (ret)
@@ -2859,6 +2864,8 @@ GTM_ThreadArchiver(void *argp)
 
     action.sa_flags = 0;
     action.sa_handler = GTM_ThreadSigHandler;
+	sigemptyset(&action.sa_mask);
+
     ret = sigaction(SIGQUIT, &action, NULL);
 
     if (ret)
@@ -3081,6 +3088,7 @@ GTM_ThreadWalRedoer(void *argp)
 
     action.sa_flags = 0;
     action.sa_handler = GTM_ThreadSigHandler;  
+	sigemptyset(&action.sa_mask);
     ret = sigaction(SIGQUIT, &action, NULL);  
     
     if (ret)
@@ -3149,6 +3157,8 @@ GTM_ThreadWalReceiver(void *argp)
     
     action.sa_flags = 0;  
     action.sa_handler = GTM_ThreadSigHandler;  
+	sigemptyset(&action.sa_mask);
+
     ret = sigaction(SIGQUIT, &action, NULL);
 
     if (ret)
@@ -3348,6 +3358,7 @@ GTM_ThreadMain(void *argp)
        
     action.sa_flags = 0;  
     action.sa_handler = GTM_ThreadSigHandler;  
+	sigemptyset(&action.sa_mask);
          
     ret = sigaction(SIGQUIT, &action, NULL);  
 	if (ret)
@@ -3611,6 +3622,7 @@ GTM_ThreadBasebackup(void *argp)
 
     action.sa_flags = 0;
     action.sa_handler = GTM_ThreadSigHandler;
+	sigemptyset(&action.sa_mask);
 
     ret = sigaction(SIGQUIT, &action, NULL);
     if (ret)
@@ -3877,7 +3889,7 @@ ProcessCommand(Port *myport, StringInfo input_message)
                       mtype != MSG_CHECK_GTM_STATUS
     );
 
-    if(GetMyThreadInfo->handle_standby)
+    if(my_threadinfo->handle_standby)
     {
 #ifndef __XLOG__
         /* Handle standby connecion staff. */
@@ -4259,6 +4271,7 @@ GTMAddConnection(Port *port, GTM_Conn *standby)
                 if (NULL == GTM_ThreadCreate(GTM_ThreadMain, g_max_lock_number))
                 {
                     elog(WARNING, "Failed to create gtm thread.");
+	                GTM_RWLockAcquire(&GTMThreads->gt_lock, GTM_LOCKMODE_READ);
                     break;
                 }
                 GTM_RWLockAcquire(&GTMThreads->gt_lock, GTM_LOCKMODE_READ);

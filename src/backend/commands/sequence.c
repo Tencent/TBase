@@ -168,7 +168,7 @@ DefineSequence(ParseState *pstate, CreateSeqStmt *seq)
     List       *owned_by;
     CreateStmt *stmt = makeNode(CreateStmt);
     Oid            seqoid;
-    ObjectAddress address;
+	ObjectAddress address = InvalidObjectAddress;
     Relation    rel;
     HeapTuple    tuple;
     TupleDesc    tupDesc;
@@ -575,7 +575,7 @@ AlterSequence(ParseState *pstate, AlterSeqStmt *stmt)
     bool            cycle;
     bool            is_restart;
 #endif
-    ObjectAddress address;
+	ObjectAddress address = InvalidObjectAddress;
     Relation    rel;
     HeapTuple    seqtuple;
     HeapTuple    newdatatuple;

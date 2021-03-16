@@ -1436,7 +1436,7 @@ int add_datanodeSlave(char *name, char *host, int port, int pooler, char *dir,
     fprintf(f, 
             "#================================================\n"
             "# Additional entry by adding the slave, %s\n",
-            timeStampString(date, MAXPATH));
+			timeStampString(date, MAXTOKEN+1));
 
     for (kk = 0; aval(VAR_datanodePgHbaEntries)[kk]; kk++)
     {

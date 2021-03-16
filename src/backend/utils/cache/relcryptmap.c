@@ -283,7 +283,7 @@ void cyprt_key_info_hash_init(void)
                                           CRYPT_KEY_INFO_HASHTABLE_INIT_SIZE, 
                                           CRYPT_KEY_INFO_HASHTABLE_MAX_SIZE,
                                           &info,
-                                          HASH_ELEM  | HASH_PARTITION | HASH_COMPARE);
+        								  HASH_ELEM  | HASH_PARTITION | HASH_COMPARE | HASH_BLOBS);
     g_crypt_key_info_lock = (CryptKeyInfoLock) ShmemInitStruct("crypt key info lock shmem",
                                                               MAXALIGN64(sizeof(CryptKeyInfoLockData)),
                                                               &found);

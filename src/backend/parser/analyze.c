@@ -326,7 +326,7 @@ transformOptionalSelectInto(ParseState *pstate, Node *parseTree)
             stmt = stmt->larg;
         Assert(stmt && IsA(stmt, SelectStmt) &&stmt->larg == NULL);
 
-        if ((stmt != NULL) && (stmt->intoClause))
+		if (stmt && stmt->intoClause)
         {
             CreateTableAsStmt *ctas = makeNode(CreateTableAsStmt);
 

@@ -123,9 +123,6 @@ attribute_out_text(StringInfo buf, char *string)
                         c = 'v';
                         break;
                     default:
-                        /* If it's the delimiter, must backslash it */
-                        if (c == delimc)
-                            break;
                         /* All ASCII control chars are length 1 */
                         ptr++;
                         continue;        /* fall to end of loop */

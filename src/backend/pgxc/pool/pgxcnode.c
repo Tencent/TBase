@@ -1274,9 +1274,6 @@ retry:
         return EOF;
     }
 
-    if (someread)
-        return 1;                /* got a zero read after successful tries */
-
     return 0;
 }
 
@@ -4926,7 +4923,12 @@ PGXCNodeGetTransactionParamStr(void)
 void
 pgxc_node_set_query(PGXCNodeHandle *handle, const char *set_query)
 {
-    pgxc_node_send_query(handle, set_query);
+	if (pgxc_node_send_query(handle, set_query) != 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+						errmsg("Failed to send query %s",set_query)));
+	}
     /*
      * Now read responses until ReadyForQuery.
      * XXX We may need to handle possible errors here.
@@ -5787,7 +5789,7 @@ PGXCNodeTypeString(char node_type)
 #endif
 
 #ifdef __AUDIT_FGA__
-void PGXCGetCoordOidOthers(Oid **nodelist)
+void PGXCGetCoordOidOthers(Oid *nodelist)
 {
     Oid     node_oid; 
     int     i;
@@ -5798,7 +5800,7 @@ void PGXCGetCoordOidOthers(Oid **nodelist)
         node_oid  = co_handles[i].nodeoid;
         if (co_handles[PGXCNodeId - 1].nodeoid != node_oid)
         {
-            (*nodelist)[j] = node_oid;
+            nodelist[j] = node_oid;
             j++;
         }
     }

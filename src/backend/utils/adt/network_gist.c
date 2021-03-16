@@ -472,7 +472,7 @@ build_inet_union_key(int family, int minbits, int commonbits,
                      unsigned char *addr)
 {
     GistInetKey *result;
-
+    Assert(commonbits >= 0);
     /* Make sure any unused bits are zeroed. */
     result = (GistInetKey *) palloc0(sizeof(GistInetKey));
 

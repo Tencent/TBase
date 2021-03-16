@@ -1715,7 +1715,7 @@ int add_coordinatorSlave(char *name, char *host, int port, int pooler_port, char
             "# archive_command = 'rsync %%p %s@%s:%s/%%f'\n"
             "max_wal_senders = %d\n"
             "# End of Addition\n",
-            timeStampString(date, MAXPATH),
+			timeStampString(date, MAXTOKEN+1),
             sval(VAR_pgxcUser), host, archDir,
             getDefaultWalSender(TRUE));
     pclose(f);

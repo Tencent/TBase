@@ -3386,7 +3386,7 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
     {
         XLogBeginInsert();
         XLogRegisterData((char *)tid, strlen(tid)+1);
-        XLogRegisterData((char *)&commit_timestamp, sizeof(GlobalTimestamp) + 1);
+        XLogRegisterData((char *)&commit_timestamp, sizeof(GlobalTimestamp));
         xlogrec = XLogInsert(RM_XLOG_ID, XLOG_RECORD_2PC_TIMESTAMP);
         /* only start node need to flush and sync XLOG_RECORD_2PC_TIMESTAMP */
         if (IS_PGXC_LOCAL_COORDINATOR)
@@ -3398,7 +3398,7 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 
     if (enable_distri_print)
     {
-        read(fd, file_content, 2048);//FileRead(fd, file_content, 2048, WAIT_EVENT_BUFFILE_READ);
+        (void) read(fd, file_content, 2048);//FileRead(fd, file_content, 2048, WAIT_EVENT_BUFFILE_READ);
         elog(LOG, "before append 2pc file: %s, file_content: %s", tid, file_content);
     }
 

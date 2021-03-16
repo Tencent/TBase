@@ -305,7 +305,7 @@ extern const char * PGXCNodeTypeString(char node_type);
 #endif
 
 #ifdef __AUDIT_FGA__
-extern void PGXCGetCoordOidOthers(Oid **nodelist);
+extern void PGXCGetCoordOidOthers(Oid *nodelist);
 extern void PGXCGetAllDnOid(Oid *nodelist);
 #endif
 

@@ -3868,7 +3868,6 @@ create_index_path(PlannerInfo *root,
     List       *indexquals,
                *indexqualcols;
 #ifdef __COLD_HOT__
-    bool or_clause = false;
     List *quals = NULL;
     RangeTblEntry    *rte = planner_rt_fetch(rel->relid, root);
     RelationLocInfo *rel_loc_info = GetRelationLocInfo(rte->relid);
@@ -3939,7 +3938,7 @@ create_index_path(PlannerInfo *root,
         }
     }
     
-    if (IS_PGXC_COORDINATOR && !or_clause)
+	if (IS_PGXC_COORDINATOR)
     {
         int count = 0;
         Distribution   *distribution = ((Path *)pathnode)->distribution;
@@ -4013,15 +4012,6 @@ create_index_path(PlannerInfo *root,
             }
         }
     }
-/*
-    else if (IS_PGXC_COORDINATOR && or_clause && root->parse->commandType == CMD_SELECT)
-    {
-        if (rel_loc_info && AttributeNumberIsValid(rel_loc_info->secAttrNum))
-        {
-            add_groups_to_list(false, rte->relid, rel_loc_info, NULL, NULL, NULL);
-        }
-    }
-*/
 #ifdef __COLD_HOT__
     if (IS_PGXC_COORDINATOR)
     {

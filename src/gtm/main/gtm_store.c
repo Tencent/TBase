@@ -3448,7 +3448,13 @@ int32 GTM_StoreDropAllSeqInDatabase(GTM_SequenceKey seq_database_key)
         {
             elog(LOG, "GTM_StoreDropAllSeqInDatabase drop %s",seq_list[i].gs_key.gsk_key);
         }
-        GTM_StoreDropSeq(seq_list[i].gti_store_handle);
+
+        if (GTM_StoreDropSeq(seq_list[i].gti_store_handle))
+        {
+            ereport(LOG,
+                    (ERANGE,
+                            errmsg("GTM_StoreDropSeq fail")));
+        }
     }
 
     if (enable_gtm_sequence_debug)
@@ -3973,7 +3979,7 @@ ProcessCheckStorageTransactionCommand(Port *myport, StringInfo message)
         if (error)
         {
             memcpy(&txn_list[txn_count].txn, txn_info, sizeof(GTM_StoredTransactionInfo));         
-            if (error || GTMStorageStatus_CRC_error)
+			if (error & GTMStorageStatus_CRC_error)
             {
                 if (need_fix)
                 {
@@ -3986,12 +3992,12 @@ ProcessCheckStorageTransactionCommand(Port *myport, StringInfo message)
                 }
             }
 
-            if (error || GTMStorageStatus_freelist_error)
+			if (error & GTMStorageStatus_freelist_error)
             {
                 txn_list[txn_count].status |= GTMStorageStatus_freelist_unchanged;
             }
 
-            if (error || GTMStorageStatus_hashtab_error)
+			if (error & GTMStorageStatus_hashtab_error)
             {
                 txn_list[txn_count].status |= GTMStorageStatus_hashtab_unchanged;
             }

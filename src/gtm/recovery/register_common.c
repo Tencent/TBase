@@ -598,12 +598,17 @@ Recovery_RecordRegisterInfo(GTM_PGXCNodeInfo *nodeinfo, bool is_register)
     int ctlfd;
     int len;
 
+	if (nodeinfo == NULL)
+	{
+		return;
+	}
+
     GTM_RWLockAcquire(&RegisterFileLock, GTM_LOCKMODE_WRITE);
 
     ctlfd = open(GTMPGXCNodeFile, O_WRONLY | O_CREAT | O_APPEND,
                  S_IRUSR | S_IWUSR);
 
-    if (ctlfd == -1 || nodeinfo == NULL)
+	if (ctlfd == -1)
     {
         GTM_RWLockRelease(&RegisterFileLock);
         return;

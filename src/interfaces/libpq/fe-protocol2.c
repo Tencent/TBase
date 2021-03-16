@@ -1064,8 +1064,6 @@ pqGetErrorNotice2(PGconn *conn, bool isError)
     return 0;
 
 failure:
-    if (res)
-        PQclear(res);
     termPQExpBuffer(&workBuf);
     return EOF;
 }

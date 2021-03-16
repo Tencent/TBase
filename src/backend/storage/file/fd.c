@@ -1584,7 +1584,7 @@ OpenTemporaryFileInTablespace(Oid tblspcOid, bool rejectError)
          * just did the same thing.  If it doesn't work then we'll bomb out on
          * the second create attempt, instead.
          */
-        mkdir(tempdirpath, S_IRWXU);
+        (void) mkdir(tempdirpath, S_IRWXU);
 
         file = PathNameOpenFile(tempfilepath,
                                 O_RDWR | O_CREAT | O_TRUNC | PG_BINARY,

@@ -3134,7 +3134,7 @@ ProcessUtilitySlow(ParseState *pstate,
     bool        isCompleteQuery = (context <= PROCESS_UTILITY_QUERY);
     bool        needCleanup;
     bool        commandCollected = false;
-    ObjectAddress address;
+	ObjectAddress address = InvalidObjectAddress;
     ObjectAddress secondaryObject = InvalidObjectAddress;
 
     /* All event trigger calls are done only when isCompleteQuery is true */

@@ -606,8 +606,6 @@ error:
 
 oom_error:
     termPQExpBuffer(&mechanism_buf);
-    if (initialresponse)
-        free(initialresponse);
     printfPQExpBuffer(&conn->errorMessage,
                       libpq_gettext("out of memory\n"));
     return STATUS_ERROR;

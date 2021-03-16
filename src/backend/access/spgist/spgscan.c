@@ -590,6 +590,10 @@ storeGettuple(SpGistScanOpaque so, ItemPointer heapPtr,
     so->recheck[so->nPtrs] = recheck;
     if (so->want_itup)
     {
+        if (so->indexTupDesc->natts != 1)
+            ereport(ERROR,
+                    (errcode(ERRCODE_DATATYPE_MISMATCH),
+                            errmsg("wrong natts in indexTupDesc.")));
         /*
          * Reconstruct index data.  We have to copy the datum out of the temp
          * context anyway, so we may as well create the tuple here.

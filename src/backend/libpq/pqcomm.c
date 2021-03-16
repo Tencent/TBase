@@ -2024,7 +2024,12 @@ SetSockKeepAlive(int sock)
 	struct tcp_info info;
 	int len = sizeof(info);
 	/* check sock */
-	getsockopt(sock, IPPROTO_TCP, TCP_INFO, &info, (socklen_t *)&len);
+	if (getsockopt(sock, IPPROTO_TCP, TCP_INFO, &info, (socklen_t *)&len) < 0)
+    {
+        elog(LOG, "getsockopt(TCP_INFO) failed");
+        return;
+    }
+
 	if (info.tcpi_state != TCP_ESTABLISHED)
 	{
 		return;

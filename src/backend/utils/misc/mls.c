@@ -1317,10 +1317,10 @@ void InsertTrsprtCryptPolicyMapTuple(Relation pg_transp_crypt_map_desc,
 
     rd_rel = pg_transp_crypt_map_desc->rd_rel;
 
-    memset(&NameStr(schemaname), 0, NAMEDATALEN);
-    memcpy(&NameStr(schemaname), GetSchemaNameByOid(relnamespace), NAMEDATALEN);
-    memset(&NameStr(spcname),    0, NAMEDATALEN);
-    memcpy(&NameStr(spcname),    get_tablespace_name(spaceoid), NAMEDATALEN);
+    memset(NameStr(schemaname), 0, NAMEDATALEN);
+    strncpy(NameStr(schemaname), GetSchemaNameByOid(relnamespace), NAMEDATALEN);
+    memset(NameStr(spcname),    0, NAMEDATALEN);
+    strncpy(NameStr(spcname), get_tablespace_name(spaceoid), NAMEDATALEN);
 
     
     /*

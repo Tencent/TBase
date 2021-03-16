@@ -449,6 +449,7 @@ printtup(TupleTableSlot *slot, DestReceiver *self)
         {
 	            int len = strlen(outputstr);
 #ifdef __TBASE__
+	            int len = strlen(outputstr);
 	            if (slot->tts_tupleDescriptor->attrs[i]->atttypid == RECORDOID && self->mydest == DestRemoteExecute)
 	            {
 		            Oid			    tupType;

@@ -70,7 +70,7 @@
 #define AUDIT_TRIGGER_FEEDBACK_LEN  256
 
 extern bool enable_fga;
-extern char *g_commandTag;
+extern const char *g_commandTag;
 
 
 /* simple list of strings */

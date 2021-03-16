@@ -1615,7 +1615,7 @@ PortalRun(Portal portal, long count, bool isTopLevel, bool run_once,
      * saveResourceOwner points to subtransaction's resourceOwner, but ROLLBACK SUBTXN
      * has already released the resource, so we need to switch to current transaction owner.
      */
-    else if (IS_PGXC_DATANODE && (strcmp(portal->commandTag, "ROLLBACK SUBTXN") == 0))
+	else if (IS_PGXC_DATANODE && portal->commandTag && (strcmp(portal->commandTag, "ROLLBACK SUBTXN") == 0))
     {
         CurrentResourceOwner = GetCurrentTransactionResourceOwner();
     }

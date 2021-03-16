@@ -2260,7 +2260,7 @@ text * decrypt_procedure(AlgoId algo_id, text * text_src, int context_length)
             
             sm4_crypt_ecb(&(cryptkey->sm4_ctx_decrypt), 0, ctx_len, (unsigned char*)VARDATA_ANY(text_src), (unsigned char*)VARDATA_ANY(text_src));
             
-            text_ret = text_src;
+            text_ret = NULL;
         }
         
     }
@@ -2273,7 +2273,7 @@ text * decrypt_procedure(AlgoId algo_id, text * text_src, int context_length)
                                             PointerGetDatum(text_src),
                                             PointerGetDatum(privatekey),
                                             PointerGetDatum(text_src));
-        text_ret    = text_src;
+        text_ret    = NULL;
     }
     else
     {

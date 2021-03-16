@@ -469,7 +469,7 @@ main(int argc, char *const argv[])
                  */
                 if (ret_value != 0)
                 {
-                    if (strcmp(output_filename, "-") != 0 && unlink(output_filename) != 0)
+					if (output_filename && strcmp(output_filename, "-") != 0 && unlink(output_filename) != 0)
                         fprintf(stderr, _("could not remove output file \"%s\"\n"), output_filename);
                 }
             }

@@ -3631,8 +3631,8 @@ sendTerminateConn(PGconn *conn)
          * Try to send "close connection" message to backend. Ignore any
          * error.
          */
-        pqPutMsgStart('X', false, conn);
-        pqPutMsgEnd(conn);
+        (void) pqPutMsgStart('X', false, conn);
+        (void) pqPutMsgEnd(conn);
         (void) pqFlush(conn);
     }
 }
