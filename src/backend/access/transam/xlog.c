@@ -10199,11 +10199,11 @@ xlog_redo(XLogReaderState *record)
         {
             startnode = temp;
             memcpy(&startxid, pos, sizeof(TransactionId));
-            pos = pos + sizeof(TransactionId) + 1;
+            pos = pos + sizeof(TransactionId) ;
             nodestring = pos;
             pos = pos + strlen(nodestring) + 1;
             memcpy(&xid, pos, sizeof(TransactionId));
-            pos = pos + sizeof(TransactionId) + 1;
+            pos = pos + sizeof(TransactionId) ;
             if (IsXidImplicit(gid))
             {
                 memcpy(&commit_timestamp, pos, sizeof(GlobalTimestamp));

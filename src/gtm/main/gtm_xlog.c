@@ -836,7 +836,7 @@ ReadXLogFileToBuffIntern(GTM_XLogSegmentBuff *buff,TimeLineID timeline,XLogSegNo
 
     for(;;)
     {
-        bytes = read(fd,buff->buff + buff->total_length,GTM_XLOG_SEG_SIZE);
+        bytes = read(fd,buff->buff + buff->total_length,GTM_XLOG_SEG_SIZE - buff->total_length);
 
         if(bytes < 0)
         {
@@ -1227,7 +1227,7 @@ GTM_XLogCtlDataInit(void)
     g_checkpointDirtySize  = (uint32 *)palloc(sizeof(uint32) * g_GTMStoreSize);
     g_checkpointDirtyStart = (uint32 *)palloc(sizeof(uint32) * g_GTMStoreSize);
 
-    if(enalbe_gtm_xlog_debug || enalbe_gtm_xlog_debug)
+    if(enalbe_gtm_xlog_debug || enable_gtm_debug)
     {
         elog(LOG,"Read ControlData CurrBytePos to %"PRIu64" PrevBytePos to %"PRIu64"",Insert->CurrBytePos,Insert->PrevBytePos);
         elog(LOG,"Read ControlData EndOfXLog to %X/%X PreEndOfXLog to %X/%X",
@@ -3437,9 +3437,6 @@ XLogWrite(XLogRecPtr req)
 
     do
     {
-        if(nleft == 0)
-            break;
-
         errno = 0;
         written = write(XLogCtl->xlog_fd, XLogCtl->writerBuff + start_pos, nleft);
         if (written <= 0)

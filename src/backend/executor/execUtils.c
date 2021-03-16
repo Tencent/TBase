@@ -1083,6 +1083,7 @@ GetAttributeByName(HeapTupleHeader tuple, const char *attname, bool *isNull)
     tmptup.t_len = HeapTupleHeaderGetDatumLength(tuple);
     ItemPointerSetInvalid(&(tmptup.t_self));
     tmptup.t_tableOid = InvalidOid;
+	tmptup.t_xc_node_id = InvalidOid;
     tmptup.t_data = tuple;
 
     result = heap_getattr(&tmptup,
@@ -1131,6 +1132,7 @@ GetAttributeByNum(HeapTupleHeader tuple,
     tmptup.t_len = HeapTupleHeaderGetDatumLength(tuple);
     ItemPointerSetInvalid(&(tmptup.t_self));
     tmptup.t_tableOid = InvalidOid;
+	tmptup.t_xc_node_id = InvalidOid;
     tmptup.t_data = tuple;
 
     result = heap_getattr(&tmptup,

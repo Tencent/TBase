@@ -5781,7 +5781,7 @@ ExecFastSendDatarow(TupleTableSlot *slot, void *sndctl, int32 nodeindex, MemoryC
         uint32 remaining_length = 0;
         MemoryContext    savecxt = NULL;
 
-        ReserveSpace(node->buffer, tuple_len, &data_offset);
+        (void) ReserveSpace(node->buffer, tuple_len, &data_offset);
         remaining_length = tuple_len;
         /* MsgType */
         FillReserveSpace(node->buffer, data_offset, "D", 1);
@@ -8167,7 +8167,7 @@ ParallelFastSendDatarow(ParallelSendDataQueue *buf, TupleTableSlot *slot, void *
         uint32 remaining_length = 0;
         MemoryContext    savecxt = NULL;
 
-        ReserveBufferSpace(buf, tuple_len, &data_offset);
+        (void) ReserveBufferSpace(buf, tuple_len, &data_offset);
         remaining_length = tuple_len;
         /* MsgType */
         FillReserveBufferSpace(buf, data_offset, "D", 1);

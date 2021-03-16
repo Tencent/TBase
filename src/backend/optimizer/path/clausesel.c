@@ -938,7 +938,7 @@ clause_selectivity_could_under_estimated(PlannerInfo *root, Path *path)
 			if (is_opclause(clause))
 			{
 				OpExpr	   		   *opclause = (OpExpr *) clause;
-				char		 	   *oprname;
+				char		 	   *oprname  = NULL;
 				Oid					opno = opclause->opno;
 				HeapTuple 			opTuple;
 				Form_pg_operator 	operform;

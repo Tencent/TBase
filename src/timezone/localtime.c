@@ -230,8 +230,6 @@ tzloadbody(char const *name, char *canonname, struct state *sp, bool doextend,
     if (!name)
     {
         name = TZDEFAULT;
-        if (!name)
-            return EINVAL;
     }
 
     if (name[0] == ':')

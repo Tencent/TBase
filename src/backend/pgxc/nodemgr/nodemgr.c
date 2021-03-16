@@ -36,6 +36,7 @@
 #include "catalog/pgxc_shard_map.h"
 #include "utils/fmgroids.h"
 #include "catalog/pgxc_class.h"
+#include "access/xact.h"
 #endif
 
 #ifdef __TBASE__

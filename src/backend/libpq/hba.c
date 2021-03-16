@@ -2542,38 +2542,59 @@ gethba_options(HbaLine *hba)
                 CStringGetTextDatum(psprintf("ldapbinddn=%s", hba->ldapbinddn));
 
         if (hba->ldapbindpasswd)
+        {
+            Assert(noptions < MAX_HBA_OPTIONS);
             options[noptions++] =
                 CStringGetTextDatum(psprintf("ldapbindpasswd=%s",
                                              hba->ldapbindpasswd));
+        }
 
         if (hba->ldapsearchattribute)
+        {
+            Assert(noptions < MAX_HBA_OPTIONS);
             options[noptions++] =
                 CStringGetTextDatum(psprintf("ldapsearchattribute=%s",
                                              hba->ldapsearchattribute));
+        }
 
         if (hba->ldapscope)
+        {
+            Assert(noptions < MAX_HBA_OPTIONS);
             options[noptions++] =
                 CStringGetTextDatum(psprintf("ldapscope=%d", hba->ldapscope));
     }
+	}
 
     if (hba->auth_method == uaRADIUS)
     {
         if (hba->radiusservers_s)
+        {
+            Assert(noptions < MAX_HBA_OPTIONS);
             options[noptions++] =
                 CStringGetTextDatum(psprintf("radiusservers=%s", hba->radiusservers_s));
+        }
 
         if (hba->radiussecrets_s)
+        {
+            Assert(noptions < MAX_HBA_OPTIONS);
             options[noptions++] =
                 CStringGetTextDatum(psprintf("radiussecrets=%s", hba->radiussecrets_s));
+        }
 
         if (hba->radiusidentifiers_s)
+        {
+            Assert(noptions < MAX_HBA_OPTIONS);
             options[noptions++] =
                 CStringGetTextDatum(psprintf("radiusidentifiers=%s", hba->radiusidentifiers_s));
+        }
 
         if (hba->radiusports_s)
+        {
+            Assert(noptions < MAX_HBA_OPTIONS);
             options[noptions++] =
                 CStringGetTextDatum(psprintf("radiusports=%s", hba->radiusports_s));
     }
+	}
 
     Assert(noptions <= MAX_HBA_OPTIONS);
 

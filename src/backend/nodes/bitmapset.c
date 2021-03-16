@@ -1246,7 +1246,7 @@ bms_any_member(Bitmapset *a)
     int member;
     int random = abs(rand()) % bms_num_members(a);
     for (member = 0; member < random; member++)
-        bms_first_member(a);
+        (void) bms_first_member(a);
     return bms_first_member(a);
 }
 #endif

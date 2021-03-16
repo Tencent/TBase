@@ -299,7 +299,10 @@ ecpg_is_type_an_array(int type, const struct statement *stmt, const struct varia
     else
         return (ECPG_ARRAY_ERROR);
 
-    ecpg_type_infocache_push(&(stmt->connection->cache_head), type, isarray, stmt->lineno);
+    if (!ecpg_type_infocache_push(&(stmt->connection->cache_head), type, isarray, stmt->lineno))
+    {
+        return (ECPG_ARRAY_ERROR);
+    }
     ecpg_log("ecpg_is_type_an_array on line %d: type (%d); C (%d); array (%s)\n", stmt->lineno, type, var->type, ECPG_IS_ARRAY(isarray) ? "yes" : "no");
     return isarray;
 }

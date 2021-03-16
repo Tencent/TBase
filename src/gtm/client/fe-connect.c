@@ -635,7 +635,7 @@ keep_going:                        /* We will come back to here until there is
         case CONNECTION_STARTED:
             {
                 int            optval;
-                size_t optlen = sizeof(optval);
+				ACCEPT_TYPE_ARG3 optlen = sizeof(optval);
 
                 /*
                  * Write ready, since we've made it here, so the connection
@@ -1052,9 +1052,9 @@ closeGTM_Conn(GTM_Conn *conn)
          * Force length word for backends may try to read that in a generic
          * code
          */
-        gtmpqPutMsgStart('X', true, conn);
-        gtmpqPutMsgEnd(conn);
-        gtmpqFlush(conn);
+        (void) gtmpqPutMsgStart('X', true, conn);
+        (void) gtmpqPutMsgEnd(conn);
+        (void) gtmpqFlush(conn);
     }
 
     /*
@@ -1463,7 +1463,11 @@ GTMSetSockKeepAlive(GTM_Conn *conn, int tcp_keepalives_idle,
 	struct tcp_info info;
 	int len = sizeof(info);
 	/* check sock */
-	getsockopt(sock, IPPROTO_TCP, TCP_INFO, &info, (socklen_t *)&len);
+	if (getsockopt(sock, IPPROTO_TCP, TCP_INFO, &info, (socklen_t *)&len) < 0)
+    {
+        return false;
+    }
+    
 	if (info.tcpi_state != TCP_ESTABLISHED)
 	{
 		/* No need to set */

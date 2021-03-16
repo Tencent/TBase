@@ -744,12 +744,6 @@ ModifyPgxcClass(PgxcClassModifyType type, PgxcClassModifyData *data)
                                 pfree(nodelist);
                                 pfree(newtup);
                             }
-                            else
-                            {
-                                heap_endscan(scan);
-                                heap_close(rel,AccessExclusiveLock);
-                                elog(ERROR, "unknow PgxcClassModifyType %d.", type);
-                            }
                         }
                         
                         tup = heap_getnext(scan, ForwardScanDirection);

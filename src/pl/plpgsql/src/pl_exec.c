@@ -6197,6 +6197,7 @@ get_tuple_from_datum(Datum value)
     ItemPointerSetInvalid(&(tmptup.t_self));
     tmptup.t_tableOid = InvalidOid;
     tmptup.t_data = td;
+	tmptup.t_xc_node_id = InvalidOid;
 
     /* Build a copy and return it */
     return heap_copytuple(&tmptup);

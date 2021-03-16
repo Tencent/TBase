@@ -544,7 +544,7 @@ setup_config(void)
     }
 
     writefile(path, conflines);
-    chmod(path, S_IRUSR | S_IWUSR);
+    (void) chmod(path, S_IRUSR | S_IWUSR);
 
     free(conflines);
 

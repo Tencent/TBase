@@ -915,7 +915,8 @@ void bind_service_threads(void)
 }
 
 /* time keeper thread will not handle any signal, any signal will cause the thread exit. */
-void *
+void 
+*
 GTM_ThreadTimeKeeper(void *argp)
 {
     GTM_ThreadInfo *my_threadinfo = (GTM_ThreadInfo *)argp;
@@ -1028,7 +1029,8 @@ shutdown:
 
 
 /* time keeper thread will not handle any signal, any signal will cause the thread exit. */
-void *
+void 
+*
 GTM_ThreadTimeBackup(void *argp)
 {
     GTM_ThreadInfo *my_threadinfo = (GTM_ThreadInfo *)argp;
@@ -1047,6 +1049,7 @@ GTM_ThreadTimeBackup(void *argp)
        
     action.sa_flags = 0;  
     action.sa_handler = GTM_ThreadSigHandler;  
+	sigemptyset(&action.sa_mask);
          
     ret = sigaction(SIGQUIT, &action, NULL);  
     if (ret)
@@ -1174,6 +1177,7 @@ GTM_ThreadCheckPointer(void *argp)
        
     action.sa_flags = 0;  
     action.sa_handler = GTM_ThreadSigHandler;  
+	sigemptyset(&action.sa_mask);
          
     ret = sigaction(SIGQUIT, &action, NULL);  
     if (ret)
@@ -1253,7 +1257,7 @@ GTM_ThreadXLogWriter(void *argp)
        
     action.sa_flags = 0;  
     action.sa_handler = GTM_ThreadSigHandler;  
-         
+	sigemptyset(&action.sa_mask);
     ret = sigaction(SIGQUIT, &action, NULL);  
     if (ret)
     {

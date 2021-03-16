@@ -551,7 +551,7 @@ oidvector_append(oidvector *oldoids, Oid newOid)
     result->ndim = 1;
     SET_VARSIZE(result, OidVectorSize(oldlen + 1));
 
-    if ((oldoids) && (oldoids->dim1 > 0))
+	if (oldoids && oldoids->dim1 > 0)
         memcpy(result->values, oldoids->values, oldlen * sizeof(Oid));
 
     result->values[result->dim1-1] = newOid;

@@ -217,7 +217,7 @@ bool explain_stmt = false;
 #endif
 
 #ifdef __AUDIT_FGA__
-char *g_commandTag = NULL;
+const char *g_commandTag = NULL;
 #endif
 
 
@@ -1303,7 +1303,7 @@ exec_simple_query(const char *query_string)
         commandTag = CreateCommandTag(parsetree->stmt);
 
 #ifdef __AUDIT_FGA__
-        g_commandTag = pnstrdup(commandTag, strlen(commandTag));
+        g_commandTag = commandTag;
 #endif
 
 #ifdef __TBASE__

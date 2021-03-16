@@ -1440,6 +1440,7 @@ SelectConfigFiles(const char *userDoption, const char *progname)
                      "You must specify the --config-file or -D invocation "
                      "option or set the PGDATA environment variable.\n",
                      progname);
+		free(configdir);
         return false;
     }
 
@@ -2699,7 +2700,10 @@ set_config_sourcefile(const char *name, char *sourcefile, int sourceline)
     if (record == NULL)
     {
         if (isStartUp)
+        {
             write_stderr("unrecognized configuration parameter \"%s\"\n", name);
+            exit(1);
+        }
         else
             elog(ERROR, "unrecognized configuration parameter \"%s\"", name);
     }
@@ -2752,7 +2756,10 @@ GetConfigOption(const char *name, bool restrict_superuser)
     if (record == NULL)
     {
         if (isStartUp)
+        {
             write_stderr("unrecognized configuration parameter \"%s\"\n", name);
+            exit(1);
+        }
         else
             ereport(ERROR,
                     (0,
@@ -2801,7 +2808,10 @@ GetConfigOptionResetString(const char *name)
     if (record == NULL)
     {
         if (isStartUp)
+        {
             write_stderr("unrecognized configuration parameter \"%s\"\n", name);
+            exit(1);
+        }
         else
             ereport(ERROR,
                     (0,
@@ -2874,7 +2884,10 @@ GetConfigOptionByName(const char *name, const char **varname)
     if (record == NULL)
     {
         if (isStartUp)
+        {
             write_stderr("unrecognized configuration parameter \"%s\"\n", name);
+            exit(1);
+        }
         else
             ereport(ERROR,
                     (0,

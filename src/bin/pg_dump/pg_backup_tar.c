@@ -867,7 +867,7 @@ _CloseArchive(ArchiveHandle *AH)
          */
         th = tarOpen(AH, "restore.sql", 'w');
 
-        tarPrintf(AH, th, "--\n"
+        (void) tarPrintf(AH, th, "--\n"
                   "-- NOTE:\n"
                   "--\n"
                   "-- File paths need to be edited. Search for $$PATH$$ and\n"

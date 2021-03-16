@@ -1067,7 +1067,9 @@ pgxc_build_dml_statement(PlannerInfo *root, CmdType cmdtype,
     ListCell        *lc;
     bool            can_use_pk_for_rep_change = false;
     int16            *indexed_col_numbers = NULL;
+#if 0
     int                index_col_count = 0;
+#endif
 
     /* Make sure we are dealing with DMLs */
     if (cmdtype != CMD_UPDATE &&
@@ -1328,6 +1330,7 @@ pgxc_build_dml_statement(PlannerInfo *root, CmdType cmdtype,
                 rqplan->rq_param_types[rqplan->rq_num_params++] = INT4OID;
             }
         }
+#if 0
         else
         {
             /*
@@ -1360,6 +1363,7 @@ pgxc_build_dml_statement(PlannerInfo *root, CmdType cmdtype,
                             pkattno, resultRelationIndex, INT4OID, false);
             }
         }
+#endif
         query_to_deparse->jointree->quals = (Node *)make_andclause(
                         (List *)query_to_deparse->jointree->quals);
     }

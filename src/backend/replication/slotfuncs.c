@@ -352,7 +352,7 @@ RenameSlot(const char *oldname, const char *newname)
 Oid
 get_replication_slot_slotid(const char *slotname, bool missing_ok)
 {
-    Oid			oid;
+    Oid			oid = InvalidOid;
     int i = 0;
 
     for (i = 0; i < max_replication_slots; i++)
@@ -382,7 +382,7 @@ get_replication_slot_slotid(const char *slotname, bool missing_ok)
 Oid
 get_replication_slot_dbid(const char *slotname, bool missing_ok)
 {
-    Oid			oid;
+    Oid			oid = InvalidOid;
     int i = 0;
 
     for (i = 0; i < max_replication_slots; i++)

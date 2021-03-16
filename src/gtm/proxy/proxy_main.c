@@ -1522,7 +1522,10 @@ setjmp_again:
          * Make sure everything is on wire now
          */
         Enable_Longjmp();
-        gtmpqFlush(thrinfo->thr_gtm_conn);
+		if (gtmpqFlush(thrinfo->thr_gtm_conn))
+        {
+            elog(ERROR, "Error sending flush message");
+        }
         Disable_Longjmp();
 
         /*

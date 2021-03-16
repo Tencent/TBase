@@ -2828,9 +2828,12 @@ begin_transaction_multi(GTM_Conn *conn, int txn_count, GTM_IsolationLevel *txn_i
 
     for (i = 0; i < txn_count; i++)
     {
-        gtmpqPutInt(txn_isolation_level[i], sizeof(int), conn);
-        gtmpqPutc(txn_read_only[i], conn);
-        gtmpqPutInt(txn_connid[i], sizeof(int), conn);
+		if (gtmpqPutInt(txn_isolation_level[i], sizeof(int), conn) ||
+            gtmpqPutc(txn_read_only[i], conn) ||
+            gtmpqPutInt(txn_connid[i], sizeof(int), conn))
+        {
+            goto send_failed;
+        }
     }
 
     /* Finish the message. */

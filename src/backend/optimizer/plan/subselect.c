@@ -3580,7 +3580,7 @@ check_or_exist_qual_pullupable(PlannerInfo *root, Node *node)
 	}
 	else if (or_clause(node))
 	{
-		return pull_vars_of_level((Node *)lfirst(l), 1) == NIL;
+		return pull_vars_of_level(node, 1) == NIL;
 	}
 	else
 	{

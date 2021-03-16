@@ -3570,6 +3570,7 @@ getObjectDescription(const ObjectAddress *object)
             {
                 appendStringInfoString(&buffer, _("distributed "));
                 getRelationDescription(&buffer, object->objectId);
+				break;
             }
 
             /*

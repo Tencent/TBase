@@ -1430,12 +1430,17 @@ CloseGTM(void)
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
 GTM_Timestamp 
 GetGlobalTimestampGTM(void)
-{// #lizard forgives
-    Get_GTS_Result gts_result = {InvalidGlobalTimestamp,false};
-    GTM_Timestamp  latest_gts = InvalidGlobalTimestamp;
-    struct rusage start_r;
-    struct timeval start_t;
+{
+	struct rusage start_r;
+	struct timeval start_t;
 	int  retry_cnt = 0;
+	Get_GTS_Result gts_result = {InvalidGlobalTimestamp,false};
+	GTM_Timestamp  latest_gts = InvalidGlobalTimestamp;
+
+	if (!g_set_global_snapshot)
+	{
+		return LocalCommitTimestamp;
+	}
 
     if (log_gtm_stats)
         ResetUsageCommon(&start_r, &start_t);
