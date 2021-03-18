@@ -120,7 +120,15 @@ hashbuild(Relation heap, Relation index, IndexInfo *indexInfo)
              RelationGetRelationName(index));
 
     /* Estimate the number of rows currently present in the table */
+	if (IS_PGXC_COORDINATOR)
+	{
+		/* Coordinator has no data */
+		relpages = reltuples = allvisfrac  = 0;
+	}
+	else
+	{
     estimate_rel_size(heap, NULL, &relpages, &reltuples, &allvisfrac);
+	}
 
     /* Initialize the hash index metadata page and initial buckets */
     num_buckets = _hash_init(index, reltuples, MAIN_FORKNUM);
