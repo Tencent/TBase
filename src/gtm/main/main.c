@@ -610,7 +610,7 @@ static bool CheckClockSource(void)
 
 #endif
 
-static void GTM_XLogRecoveryIfNeed(const char *data_dir)
+static void GTM_XLogRecoveryIfNeed(char *data_dir)
 {
     Assert(ControlData != NULL);
 
