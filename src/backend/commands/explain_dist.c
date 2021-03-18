@@ -705,6 +705,7 @@ HandleRemoteInstr(char *msg_body, size_t len, int nodeid, ResponseCombiner *comb
 	StringInfo  recv_str;
 	bool        found;
 	RemoteInstr *cur_instr;
+	MemoryContext oldcontext;
 	
 	if (combiner->recv_instr_htbl == NULL)
 	{
@@ -713,7 +714,7 @@ HandleRemoteInstr(char *msg_body, size_t len, int nodeid, ResponseCombiner *comb
 	elog(DEBUG1, "Handle remote instrument: nodeid %d", nodeid);
 	
 	/* must doing this under per query context */
-	MemoryContext oldcontext = MemoryContextSwitchTo(combiner->ss.ps.state->es_query_cxt);
+	oldcontext = MemoryContextSwitchTo(combiner->ss.ps.state->es_query_cxt);
 	
 	recv_str = makeStringInfo();
 	appendBinaryStringInfo(recv_str, msg_body, len);

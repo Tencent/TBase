@@ -554,7 +554,6 @@ cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
     double        pages_fetched;
     double        rand_heap_pages;
     double        index_pages;
-	double		nodes = 1;
 	double		index_pages_per_dn;
 	double		baserel_pages_per_dn;
 	double		num_nodes = path_count_datanodes((Path *) path);
