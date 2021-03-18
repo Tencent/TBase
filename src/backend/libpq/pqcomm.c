@@ -2026,7 +2026,6 @@ SetSockKeepAlive(int sock)
 	/* check sock */
 	if (getsockopt(sock, IPPROTO_TCP, TCP_INFO, &info, (socklen_t *)&len) < 0)
     {
-        elog(LOG, "getsockopt(TCP_INFO) failed");
         return;
     }
 
