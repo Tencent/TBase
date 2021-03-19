@@ -1100,7 +1100,6 @@ do_status(void)
 		{
             for (; *optlines != NULL; optlines++)
                 fputs(*optlines, stdout);
-			free(optlines);
 		}
     }
 
