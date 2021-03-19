@@ -11717,7 +11717,7 @@ find_partidx_by_int(int64 start, int step, int partitions,
     int gap = -1;
     int align = -1;
 
-    if(value < start || value >= start + step*partitions)
+    if(value < start || value >= start + ((int64)step)*partitions)
     {
         return PARTITION_ROUTER_RESULT_NULL;
     }
