@@ -275,6 +275,7 @@ static void test_config_settings(void);
 static void setup_config(void);
 static void bootstrap_template1(void);
 static void setup_auth(FILE *cmdfd);
+static void setup_pgxc_node(FILE *cmdfd);
 static void get_su_pwd(void);
 static void setup_depend(FILE *cmdfd);
 static void setup_sysviews(FILE *cmdfd);
@@ -1516,6 +1517,30 @@ setup_auth(FILE *cmdfd)
     if (superuser_password)
         PG_CMD_PRINTF2("ALTER USER \"%s\" WITH PASSWORD E'%s';\n\n",
                        username, escape_quotes(superuser_password));
+}
+
+/*
+ * set up the pgxc_node table
+ */
+static void
+setup_pgxc_node(FILE *cmdfd)
+{
+	const char *const *line;
+	static const char *const pgxc_node_setup[] = {
+			/*
+			 * Grant all priviledge except node_host and node_port
+			 */
+			"REVOKE ALL on pgxc_node FROM public;\n\n",
+
+			"GRANT ALL (xmin_gts, xmax_gts, shardid, xc_node_id ,    "
+			" tableoid, cmax, xmax, cmin, xmin, oid, ctid, node_name,"
+			" node_type, nodeis_primary, nodeis_preferred, node_id,  "
+			" node_cluster_name) ON pgxc_node TO public;\n\n",
+			NULL
+	};
+
+	for (line = pgxc_node_setup; *line != NULL; line++)
+		PG_CMD_PUTS(*line);
 }
 
 /*
@@ -3121,6 +3146,8 @@ initialize_data_directory(void)
     PG_CMD_OPEN;
 
     setup_auth(cmdfd);
+
+	setup_pgxc_node(cmdfd);
 
     setup_depend(cmdfd);
 
