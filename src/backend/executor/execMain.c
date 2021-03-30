@@ -1906,13 +1906,10 @@ ExecEndPlan(PlanState *planstate, EState *estate)
  * which datanode will execute the sql command. After we get the result,
  * we should use the result to replace distribute key's function to
  * generate a new sql that will be shipped to datanode.
- * Note: for replication table, we should caculate all the results of
- * functions before ship the sql. Otherwise the value may not be same
- * in different datanodes.
  */
 static void
 RewriteForSql(RemoteQueryState *planstate, RemoteQuery *plan,
-			  char *distribcol, bool isreplic)
+				char *distribcol)
 {
 	Query			*query = copyObject(plan->forDeparse);
 	ListCell		*lc_deparse = NULL;
@@ -1928,13 +1925,10 @@ RewriteForSql(RemoteQueryState *planstate, RemoteQuery *plan,
 	foreach(lc_deparse, query->targetList)
 	{
 		entry_deparse = lfirst(lc_deparse);
-		if (isreplic)
-		{
-			entry_deparse->expr = (Expr *)replace_distribkey_func(
-									(Node *)entry_deparse->expr);
-			find_target = true;
-		}
-		else if (strcmp(entry_deparse->resname, distribcol) == 0)
+
+		/* Only rewrite distribute key's function. */
+		if (strcmp(entry_deparse->resname, distribcol) == 0 &&
+				!pgxc_is_expr_shippable(entry_deparse->expr, NULL))
 		{
 			entry_deparse->expr = (Expr *)replace_distribkey_func(
 									(Node *)entry_deparse->expr);
@@ -1988,16 +1982,6 @@ RewriteFuncNode(PlanState *planstate)
 	if ((!exec_nodes) || (!exec_nodes->need_rewrite))
 		return;
 
-	/* 
-	 * For replicated table, we need to execute func
-	 * and then ship to datanode 
-	 */
-	if (IsExecNodesReplicated(exec_nodes))
-	{
-		RewriteForSql(node, plan, NULL, true);
-		return;
-	}
-
 	if (exec_nodes->en_relid == InvalidOid || (!exec_nodes->en_expr))
 		return;
 
@@ -2006,7 +1990,7 @@ RewriteFuncNode(PlanState *planstate)
 		return;
 
 	distribcol = GetRelationDistribColumn(rel_loc_info);
-	RewriteForSql(node, plan, distribcol, false);
+	RewriteForSql(node, plan, distribcol);
 }
 
 /* ----------------------------------------------------------------

@@ -2028,7 +2028,9 @@ pgxc_is_query_shippable(Query *query, int query_level)
 	 * must know the function's result before real execute. So set
 	 * the flag to identify rewrite in ExecutePlan.
 	 */
-	if (bms_is_member(SS_NEED_FUNC_REWRITE, shippability))
+	if (bms_is_member(SS_NEED_FUNC_REWRITE, shippability) &&
+		(IsLocatorColumnDistributed(exec_nodes->baselocatortype) ||
+		IsLocatorDistributedByValue(exec_nodes->baselocatortype)))
 	{
 		exec_nodes->need_rewrite = true;
 		shippability = bms_del_member(shippability, SS_NEED_FUNC_REWRITE);

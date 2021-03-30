@@ -322,6 +322,27 @@ SELECT * from insert_fsq_test order by id;
 
 DEALLOCATE PREPARE ps_test_insert;
 DROP TABLE insert_fsq_test cascade;
+-- test non-distribute key with function, no need rewrite
+CREATE TABLE insert_fsq_test1(v int, w int);
+CREATE SEQUENCE test_seq;
+PREPARE ps_test_insert1(int) AS INSERT INTO insert_fsq_test1 values($1, nextval('test_seq'));
+EXECUTE ps_test_insert1(1);
+EXECUTE ps_test_insert1(2);
+EXECUTE ps_test_insert1(3);
+EXECUTE ps_test_insert1(4);
+EXECUTE ps_test_insert1(5);
+SELECT * from insert_fsq_test1 order by v;
+ v | w 
+---+---
+ 1 | 1
+ 2 | 2
+ 3 | 3
+ 4 | 4
+ 5 | 5
+(5 rows)
+
+DEALLOCATE PREPARE ps_test_insert1;
+DROP TABLE insert_fsq_test1 cascade;
 --
 -- gb18030 test
 --
