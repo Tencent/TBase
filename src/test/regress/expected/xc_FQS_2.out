@@ -1704,6 +1704,26 @@ select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select max(c) from sub
   1 | sz | 2
 (3 rows)
 
+explain select * from (select * from subquery_fqs where id = 1 order by c limit 1) where c = 2;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Remote Fast Query Execution  (cost=0.00..0.00 rows=0 width=0)
+   Node/s: datanode_1
+   ->  Subquery Scan on "__Alias_22__"  (cost=21.02..21.04 rows=1 width=40)
+         Filter: ("__Alias_22__".c = 2)
+         ->  Limit  (cost=21.02..21.02 rows=1 width=40)
+               ->  Sort  (cost=21.02..21.03 rows=4 width=40)
+                     Sort Key: subquery_fqs.c
+                     ->  Seq Scan on subquery_fqs  (cost=0.00..21.00 rows=4 width=40)
+                           Filter: (id = 1)
+(9 rows)
+
+select * from (select * from subquery_fqs where id = 1 order by c limit 1) where c = 2;
+ id | a  | c 
+----+----+---
+  1 | gd | 2
+(1 row)
+
 drop table tab1_rr;
 drop table tab1_hash;
 drop table tab1_modulo;

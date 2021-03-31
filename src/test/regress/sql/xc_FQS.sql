@@ -290,6 +290,8 @@ explain select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select c from 
 select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select c from subquery_fqs t2 where t2.id=1 order by c limit 1);
 explain select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select max(c) from subquery_fqs t2 where t2.id=1);
 select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select max(c) from subquery_fqs t2 where t2.id=1);
+explain select * from (select * from subquery_fqs where id = 1 order by c limit 1) where c = 2;
+select * from (select * from subquery_fqs where id = 1 order by c limit 1) where c = 2;
 
 drop table tab1_rr;
 drop table tab1_hash;
