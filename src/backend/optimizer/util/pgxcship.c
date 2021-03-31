@@ -1828,16 +1828,11 @@ pgxc_is_simple_subquery(Query *query)
 	 * Can't pushdown a subquery involving grouping, aggregation, SRFs,
 	 * sorting, limiting, or WITH.
 	 */
-	if (query->hasAggs ||
-		query->hasWindowFuncs ||
+	if (query->hasWindowFuncs ||
 		query->hasTargetSRFs ||
 		query->groupClause ||
 		query->groupingSets ||
-		query->havingQual ||
-		query->sortClause ||
 		query->distinctClause ||
-		query->limitOffset ||
-		query->limitCount ||
 		query->hasForUpdate ||
 		query->cteList)
 		return false;
