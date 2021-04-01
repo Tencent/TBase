@@ -2221,7 +2221,7 @@ pgxc_is_func_shippable(Oid funcid)
             
         default:
         {
-            result = (func_volatile(funcid) == PROVOLATILE_IMMUTABLE);
+			result = (func_volatile(funcid) != PROVOLATILE_VOLATILE);
             break;
         }
     }
