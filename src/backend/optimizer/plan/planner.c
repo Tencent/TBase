@@ -2361,6 +2361,8 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
          */
         if (limit_needed(parse))
         {
+			bool pushDown = false;
+
             /* If needed, add a LimitPath on top of a RemoteSubplan. */
             if (path->distribution)
             {
@@ -2392,7 +2394,16 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
                     path = (Path *) create_limit_path(root, final_rel, path,
                                               NULL,
                                               limitCount, /* LIMIT + OFFSET */
-                                              0, offset_est + count_est);
+											  0, offset_est + count_est,
+											  false);
+#ifdef __TBASE__
+					/*
+					 * Upper level limit node could skip early ExecFinishNode to save
+					 * 2~3ms of meaningless communication, since we've already push
+					 * down the limit.
+					 */
+					pushDown = true;
+#endif
                 }
 
                 path = create_remotesubplan_path(root, path, NULL);
@@ -2401,7 +2412,8 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
             path = (Path *) create_limit_path(root, final_rel, path,
                                               parse->limitOffset,
                                               parse->limitCount,
-                                              offset_est, count_est);
+											  offset_est, count_est,
+											  pushDown);
         }
 
         /*

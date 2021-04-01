@@ -1197,7 +1197,9 @@ _copyLimit(const Limit *from)
      */
     COPY_NODE_FIELD(limitOffset);
     COPY_NODE_FIELD(limitCount);
-
+#ifdef __TBASE__
+	COPY_SCALAR_FIELD(skipEarlyFinish);
+#endif
     return newnode;
 }
 

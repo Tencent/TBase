@@ -3656,7 +3656,9 @@ _readLimit(void)
 
     READ_NODE_FIELD(limitOffset);
     READ_NODE_FIELD(limitCount);
-
+#ifdef __TBASE__
+	READ_BOOL_FIELD(skipEarlyFinish);
+#endif
     READ_DONE();
 }
 

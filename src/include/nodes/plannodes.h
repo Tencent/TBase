@@ -988,6 +988,9 @@ typedef struct Limit
     Plan        plan;
     Node       *limitOffset;    /* OFFSET parameter, or NULL if none */
     Node       *limitCount;        /* COUNT parameter, or NULL if none */
+#ifdef __TBASE__
+	bool		skipEarlyFinish;	/* Early ExecFinishNode ? */
+#endif
 } Limit;
 
 
