@@ -1679,6 +1679,9 @@ _outLimit(StringInfo str, const Limit *node)
 
     WRITE_NODE_FIELD(limitOffset);
     WRITE_NODE_FIELD(limitCount);
+#ifdef __TBASE__
+    WRITE_BOOL_FIELD(skipEarlyFinish);
+#endif
 }
 
 #ifdef XCP
@@ -3454,6 +3457,9 @@ _outLimitPath(StringInfo str, const LimitPath *node)
     WRITE_NODE_FIELD(subpath);
     WRITE_NODE_FIELD(limitOffset);
     WRITE_NODE_FIELD(limitCount);
+#ifdef __TBASE__
+    WRITE_BOOL_FIELD(skipEarlyFinish);
+#endif
 }
 
 static void

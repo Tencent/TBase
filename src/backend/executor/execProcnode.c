@@ -1075,6 +1075,9 @@ ExecFinishNode(PlanState *node)
                 return;
             }
             break;
+		case T_LimitState:
+			elog(LOG, "[LIMITSTATE]");
+			break;
         default:
             break;
     }

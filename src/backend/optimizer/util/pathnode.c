@@ -6843,7 +6843,8 @@ LimitPath *
 create_limit_path(PlannerInfo *root, RelOptInfo *rel,
                   Path *subpath,
                   Node *limitOffset, Node *limitCount,
-                  int64 offset_est, int64 count_est)
+                  int64 offset_est, int64 count_est,
+                  bool skipEarlyFinish)
 {// #lizard forgives
     LimitPath  *pathnode = makeNode(LimitPath);
 
@@ -6864,6 +6865,7 @@ create_limit_path(PlannerInfo *root, RelOptInfo *rel,
     pathnode->subpath = subpath;
     pathnode->limitOffset = limitOffset;
     pathnode->limitCount = limitCount;
+	pathnode->skipEarlyFinish = skipEarlyFinish;
 
     pathnode->path.distribution = copyObject(subpath->distribution);
 

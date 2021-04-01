@@ -140,7 +140,7 @@ extern Agg *make_agg(List *tlist, List *qual,
          List *groupingSets, List *chain,
          double dNumGroups, Plan *lefttree);
 extern Limit *make_limit(Plan *lefttree, Node *limitOffset, Node *limitCount,
-                         int64 offset_est, int64 count_est);
+						 int64 offset_est, int64 count_est, bool skipEarlyFinish);
 extern RemoteSubplan *make_remotesubplan(PlannerInfo *root,
                    Plan *lefttree,
                    Distribution *resultDistribution,

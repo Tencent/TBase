@@ -142,6 +142,7 @@ ExecLimit(PlanState *pstate)
                         elog(LOG, "ExecLimit: pid %d nodeLimit finishing", MyProcPid);
                     }
                     
+					if (!((Limit *)node->ps.plan)->skipEarlyFinish)
                     ExecFinishNode(pstate);
 
                     if (g_DataPumpDebug)

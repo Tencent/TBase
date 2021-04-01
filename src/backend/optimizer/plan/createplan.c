@@ -2576,7 +2576,8 @@ create_minmaxagg_plan(PlannerInfo *root, MinMaxAggPath *best_path)
         plan = (Plan *) make_limit(plan,
                                    subparse->limitOffset,
                                    subparse->limitCount,
-                                   0, 1);
+								   0, 1,
+								   false);
 
         /* Must apply correct cost/width data to Limit node */
         plan->startup_cost = mminfo->path->startup_cost;
@@ -2608,7 +2609,8 @@ create_minmaxagg_plan(PlannerInfo *root, MinMaxAggPath *best_path)
             plan = (Plan *) make_limit(plan,
                                        subparse->limitOffset,
                                        subparse->limitCount,
-                                       0, 1);
+									   0, 1,
+									   false);
 
             plan->startup_cost = mminfo->path->startup_cost;
             plan->total_cost = mminfo->pathcost;
@@ -3066,7 +3068,8 @@ create_limit_plan(PlannerInfo *root, LimitPath *best_path, int flags,
     plan = make_limit(subplan,
                       best_path->limitOffset,
                       best_path->limitCount,
-                      offset_est, count_est);
+					  offset_est, count_est,
+					  best_path->skipEarlyFinish);
 
     copy_generic_path_info(&plan->plan, (Path *) best_path);
 
@@ -8386,7 +8389,7 @@ make_lockrows(Plan *lefttree, List *rowMarks, int epqParam)
  */
 Limit *
 make_limit(Plan *lefttree, Node *limitOffset, Node *limitCount,
-           int64 offset_est, int64 count_est)
+		   int64 offset_est, int64 count_est, bool skipEarlyFinish)
 {
     Limit       *node = makeNode(Limit);
     Plan       *plan = &node->plan;
@@ -8398,6 +8401,10 @@ make_limit(Plan *lefttree, Node *limitOffset, Node *limitCount,
 
     node->limitOffset = limitOffset;
     node->limitCount = limitCount;
+
+#ifdef __TBASE__
+	node->skipEarlyFinish = skipEarlyFinish;
+#endif
 
     return node;
 }
