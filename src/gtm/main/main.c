@@ -59,6 +59,7 @@
 #include "gtm/gtm_time.h"
 #include "gtm/gtm_stat.h"
 #include "gtm/gtm_stat_error.h"
+#include "gtm/syslogger.h"
 
 #ifdef __TBASE__
 #include "gtm/gtm_store.h"
@@ -76,6 +77,7 @@ extern char *optarg;
 #define GTM_DEFAULT_PORT        6666
 #define GTM_PID_FILE            "gtm.pid"
 #define GTM_LOG_FILE            "gtm.log"
+#define GTM_LOG_FILE_DIR		"gtm_log"
 
 #define LOOPS_UNTIL_HIBERNATE        50
 #define HIBERNATE_FACTOR        25
@@ -138,6 +140,8 @@ GTM_ThreadInfo  *g_timekeeper_thread = NULL;
 GTM_ThreadInfo    *g_timebackup_thread = NULL;
 GTM_ThreadInfo  *g_timer_thread = NULL;
 GTM_ThreadInfo  *g_logcollector_thread = NULL;
+GTM_ThreadInfo  *g_syslogger_thread = NULL;
+
 void *GTM_ThreadLogCollector(void *argp);
 extern void GTM_ErrorLogCollector(ErrorData *edata, StringInfo buff);
 GTM_ThreadInfo  *g_standby_pre_server_thread = NULL;
@@ -202,6 +206,8 @@ void GTM_PortCleanup(Port *con_port);
 #endif
 void *GTM_ThreadMain(void *argp);
 void *GTM_ThreadTimeKeeper(void *argp);
+static void *GTM_ThreadSysLogger(void *argp);
+static bool GTM_SysLoggerStart(void);
 
 #ifdef __XLOG__
 void *GTM_ThreadCheckPointer(void *argp);
@@ -247,7 +253,7 @@ static void ProcessBarrierCommand(Port *myport, GTM_MessageType mtype, StringInf
 static int 
 GTMInitConnection(GTM_ConnectionInfo *conninfo);
 static void SetNonBlockConnection(GTM_ConnectionInfo *conninfo);
-static void gtm_standby_pre_server_loop(const char *data_dir);
+static void gtm_standby_pre_server_loop(char *data_dir);
 
 #ifdef __XLOG__
 static void thread_replication_clean(GTM_StandbyReplication *replication);
@@ -255,6 +261,8 @@ void SendXLogSyncStatus(GTM_Conn *conn);
 static void WaitRedoertoExit(void);
 static void GTMSigHupHandler(void);
 #endif
+
+void GTM_Exit(void);
 
 /*
  * One-time initialization. It's called immediately after the main process
@@ -337,6 +345,8 @@ MainThreadInit()
     memset(thrinfo->locks_hold, 0x00, sizeof(void*) * g_max_lock_number);
 #endif
 
+	/* thread main is syslogger before syslogger thread create */
+    thrinfo->am_syslogger = true;
     GTM_RWLockInit(&thrinfo->thr_lock);
     GTM_RWLockAcquire(&thrinfo->thr_lock, GTM_LOCKMODE_WRITE);    
 
@@ -387,16 +397,22 @@ BaseInit(char *data_dir)
     SpinLockInit(&g_last_sync_gts_lock);
 #endif
 
+    if (Log_directory == NULL)
+    {
+        Log_directory = (char *) malloc(GTM_MAX_PATH);
+        sprintf(Log_directory, "%s/%s", GTMDataDir, GTM_LOG_FILE_DIR);
+    }
+
     if (GTMLogFile == NULL)
     {
         GTMLogFile = (char *) malloc(GTM_MAX_PATH);
-        sprintf(GTMLogFile, "%s/%s", GTMDataDir, GTM_LOG_FILE);
+        sprintf(GTMLogFile, "%s/%s", Log_directory, GTM_LOG_FILE);
     }
 
     /* Save Node Register File in register.c */
     Recovery_SaveRegisterFileName(GTMDataDir);
 
-    DebugFileOpen();
+	GTM_LogFileInit();
 
     GTM_InitTxnManager();
     GTM_InitSeqManager();
@@ -1460,6 +1476,14 @@ main(int argc, char *argv[])
         process_thread_num = g_max_thread_number < process_thread_num ? g_max_thread_number : process_thread_num;
     }
 
+	/* start syslogger thread to handle log */
+    if (!GTM_SysLoggerStart())
+    {
+        elog(ERROR, "Failed to create syslogger thread.");
+        exit(1);
+    }
+    util_thread_cnt++;
+
     /* Create GTM threads handling requests */
     g_timekeeper_thread = GTM_ThreadCreate(GTM_ThreadTimeKeeper, g_max_lock_number);
     if (NULL == g_timekeeper_thread)
@@ -1874,7 +1898,7 @@ gtm_add_connection_standby_pre_server(Port *port)
  * handle loop before establish a connection to active-GTM
  */
 static void
-gtm_standby_pre_server_loop(const char *data_dir)
+gtm_standby_pre_server_loop(char *data_dir)
 {
     fd_set		readmask;
     int			nSockets;
@@ -5912,4 +5936,312 @@ void CheckStandbyConnect(GTM_ThreadInfo *my_threadinfo, GTM_ConnectionInfo *conn
 }
 
 #endif
+
+
+/*
+ * syslogger thread, handle log rotation and write log to logfile.
+ */
+static void*
+GTM_ThreadSysLogger(void *argp)
+{
+#define GTM_SYSLOGGER_WAIT_EVENTS 2
+    GTM_ThreadInfo *my_threadinfo = (GTM_ThreadInfo *)argp;
+    sigjmp_buf      local_sigjmp_buf;
+    pg_time_t		now = 0;
+    int             efd = -1;
+    int             n = 0;
+    char		    logbuffer[READ_BUF_SIZE];
+    int			    bytes_in_logbuffer = 0;
+    char	        *currentLogFilename = NULL;
+    int			    currentLogRotationAge = 0;
+    bool            got_SIGHUP = false;
+    bool            pipe_eof_seen = false;
+    sigset_t        mask;
+    struct epoll_event events[GTM_SYSLOGGER_WAIT_EVENTS];
+
+    my_threadinfo->am_syslogger = true;
+
+    /* ignore signal */
+    sigfillset(&mask);
+    pthread_sigmask(SIG_BLOCK, &mask, NULL);
+
+    elog(DEBUG8, "Starting the syslogger thread");
+
+    bind_service_threads();
+
+    efd = GTM_InitSysloggerEpoll();
+    if (efd == -1)
+    {
+        elog(LOG, "failed to init syslogger epoll");
+        exit(1);
+    }
+
+    MessageContext = AllocSetContextCreate(TopMemoryContext,
+                                           "MessageContext",
+                                           ALLOCSET_DEFAULT_MINSIZE,
+                                           ALLOCSET_DEFAULT_INITSIZE,
+                                           ALLOCSET_DEFAULT_MAXSIZE,
+                                           false);
+
+    /*
+     * POSTGRES main processing loop begins here
+     *
+     * If an exception is encountered, processing resumes here so we abort the
+     * current transaction and start a new one.
+     *
+     * You might wonder why this isn't coded as an infinite loop around a
+     * PG_TRY construct.  The reason is that this is the bottom of the
+     * exception stack, and so with PG_TRY there would be no exception handler
+     * in force at all during the CATCH part.  By leaving the outermost setjmp
+     * always active, we have at least some chance of recovering from an error
+     * during error recovery.  (If we get into an infinite loop thereby, it
+     * will soon be stopped by overflow of elog.c's internal state stack.)
+     */
+    if (sigsetjmp(local_sigjmp_buf, 1) != 0)
+    {
+#ifdef __TBASE__
+        RWLockCleanUp();
+#endif
+        EmitErrorReport(NULL);
+
+        /*
+         * Now return to normal top-level context and clear ErrorContext for
+         * next time.
+         */
+        MemoryContextSwitchTo(TopMemoryContext);
+        FlushErrorState();
+    }
+
+    /* We can now handle ereport(ERROR) */
+    PG_exception_stack = &local_sigjmp_buf;
+
+    MemoryContextSwitchTo(MessageContext);
+    MemoryContextResetAndDeleteChildren(MessageContext);
+
+    /* remember active logfile parameters */
+    currentLogFilename = pstrdup(Log_filename);
+    currentLogRotationAge = Log_RotationAge;
+
+    /* set next planned rotation time */
+    set_next_rotation_time();
+
+    for(;;)
+    {
+        bool		time_based_rotation = false;
+        int			size_rotation_for = 0;
+        long		cur_timeout;
+        int         i = 0;
+
+        /*
+		 * Process any requests or signals received recently.
+		 */
+        if (got_SIGHUP)
+        {
+            got_SIGHUP = false;
+
+            if (strcmp(Log_filename, currentLogFilename) != 0)
+            {
+                pfree(currentLogFilename);
+                currentLogFilename = pstrdup(Log_filename);
+                rotation_requested = true;
+            }
+
+            /*
+             * If rotation time parameter changed, reset next rotation time,
+             * but don't immediately force a rotation.
+             */
+            if (currentLogRotationAge != Log_RotationAge)
+            {
+                currentLogRotationAge = Log_RotationAge;
+                set_next_rotation_time();
+            }
+
+            /*
+             * If we had a rotation-disabling failure, re-enable rotation
+             * attempts after SIGHUP, and force one immediately.
+             */
+            if (rotation_disabled)
+            {
+                rotation_disabled = false;
+                rotation_requested = true;
+            }
+        }
+
+        if (Log_RotationAge > 0 && !rotation_disabled)
+        {
+            /* Do a logfile rotation if it's time */
+            now = (pg_time_t) time(NULL);
+            if (now >= next_rotation_time)
+                rotation_requested = time_based_rotation = true;
+        }
+
+        if (!rotation_requested && Log_RotationSize > 0 && !rotation_disabled)
+        {
+            /* Do a rotation if file is too big */
+            if (ftell(gtmlogFile) >= Log_RotationSize * 1024L)
+            {
+                rotation_requested = true;
+                size_rotation_for |= LOG_DESTINATION_STDERR;
+            }
+        }
+
+        if (rotation_requested)
+        {
+            /*
+             * Force rotation when both values are zero. It means the request
+             * was sent by pg_rotate_logfile.
+             */
+            if (!time_based_rotation && size_rotation_for == 0)
+                size_rotation_for = LOG_DESTINATION_STDERR;
+            logfile_rotate(time_based_rotation, size_rotation_for);
+        }
+
+        /*
+         * Calculate time till next time-based rotation, so that we don't
+         * sleep longer than that.  We assume the value of "now" obtained
+         * above is still close enough.  Note we can't make this calculation
+         * until after calling logfile_rotate(), since it will advance
+         * next_rotation_time.
+         *
+         * Also note that we need to beware of overflow in calculation of the
+         * timeout: with large settings of Log_RotationAge, next_rotation_time
+         * could be more than INT_MAX msec in the future.  In that case we'll
+         * wait no more than INT_MAX msec, and try again.
+         */
+        if (Log_RotationAge > 0 && !rotation_disabled)
+        {
+            pg_time_t	delay;
+
+            delay = next_rotation_time - now;
+            if (delay > 0)
+            {
+                if (delay > INT_MAX / 1000)
+                    delay = INT_MAX / 1000;
+                cur_timeout = delay * 1000L;	/* msec */
+            }
+            else
+                cur_timeout = 0;
+        }
+        else
+        {
+            cur_timeout = -1L;
+        }
+
+        /*
+         * Sleep until there's something to do
+         */
+        n = epoll_wait (efd, events, GTM_SYSLOGGER_WAIT_EVENTS, cur_timeout);
+        for(i = 0; i < n; i++)
+        {
+            if(events[i].events & EPOLLIN)
+            {
+                if (events[i].data.fd == signalPipe[0])
+                {
+                    got_SIGHUP = true;
+                    GTM_drainNotifyBytes();
+                    elog(LOG, "Configuration update message received in syslogger thread.");
+                }
+                else
+                {
+                    int			bytesRead;
+
+                    bytesRead = read(syslogPipe[0],
+                                     logbuffer + bytes_in_logbuffer,
+                                     sizeof(logbuffer) - bytes_in_logbuffer);
+                    if (bytesRead < 0)
+                    {
+                        if (errno != EINTR)
+                            ereport(LOG,
+                                    (errmsg("could not read from logger pipe: %m")));
+                    }
+                    else if (bytesRead > 0)
+                    {
+                        bytes_in_logbuffer += bytesRead;
+                        process_pipe_input(logbuffer, &bytes_in_logbuffer, &pipe_eof_seen);
+                        continue;
+                    }
+                    else
+                    {
+                        /*
+                         * Zero bytes read when select() is saying read-ready means
+                         * EOF on the pipe: that is, there are no longer any processes
+                         * with the pipe write end open.  Therefore, the postmaster
+                         * and all backends are shut down, and we are done.
+                         */
+                        pipe_eof_seen = true;
+                    }
+                }
+            }
+        }
+
+        if (pipe_eof_seen)
+        {
+            elog(LOG, "GTM syslogger exit(%d)", exit_flag);
+            /* if there's any data left then force it out now */
+            flush_pipe_input(logbuffer, &bytes_in_logbuffer);
+
+            exit(exit_flag);
+        }
+    }
+
+    return my_threadinfo;
+}
+
+static bool
+GTM_SysLoggerStart(void)
+{
+    if (syslogPipe[0] < 0)
+    {
+        if (pipe(syslogPipe) < 0)
+            ereport(FATAL,
+                    (errmsg("could not create pipe for syslog: %m")));
+    }
+
+    if (signalPipe[0] < 0)
+    {
+        if (pipe(signalPipe) < 0)
+            ereport(FATAL,
+                    (errmsg("could not create pipe for signal: %m")));
+    }
+
+    /* Create GTM threads handling requests */
+    g_syslogger_thread = GTM_ThreadCreate(GTM_ThreadSysLogger, g_max_lock_number);
+    if (NULL == g_syslogger_thread)
+    {
+        return false;
+    }
+
+    fflush(stdout);
+    if (dup2(syslogPipe[1], fileno(stdout)) < 0)
+        ereport(FATAL,
+                (errmsg("could not redirect stdout: %m")));
+    fflush(stderr);
+    if (dup2(syslogPipe[1], fileno(stderr)) < 0)
+        ereport(FATAL,
+                (errmsg("could not redirect stderr: %m")));
+    /* Now we are done with the write end of the pipe. */
+    close(syslogPipe[1]);
+    syslogPipe[1] = -1;
+
+    GetMyThreadInfo->am_syslogger = false;
+    atexit(GTM_Exit);
+    return true;
+}
+
+/*
+ * let exit in syslogger
+ */
+void
+GTM_Exit(void)
+{
+    if (g_syslogger_thread != NULL && !GetMyThreadInfo->am_syslogger)
+    {
+        Assert(exit_flag != GTM_DEFAULT_EXIT_FLAG);
+
+        /* notify syslogger to do the exit */
+        elog(LOG, "notify syslogger to exit(%d).", exit_flag);
+        sleep(-1);
+    }
+}
+
 #endif

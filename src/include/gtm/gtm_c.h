@@ -385,6 +385,8 @@ typedef enum
     GTMStorageStatus_status_butty
 }GTMStorageCheckStatus;
 
+typedef int64 pg_time_t;
+
 /* 
  * Add delta 100s by assuming 10 timstamp/us 
  * at which rate the GTM can provide 1000w/s throughput.

@@ -299,6 +299,10 @@ typedef enum
 #define LOG_DESTINATION_EVENTLOG 4
 #define LOG_DESTINATION_CSVLOG     8
 
+#define GTM_DEFAULT_EXIT_FLAG	 1024
+extern int	exit_flag;
+#define exit(x) (exit)(exit_flag = (x))
+
 /* Other exported functions */
 extern void pg_re_throw(void);
 extern void DebugFileOpen(void);

@@ -30,7 +30,7 @@
 #include "gtm/gtm_opt_tables.h"
 #include "gtm/gtm_opt.h"
 #include "gtm/gtm_standby.h"
-
+#include "gtm/gtm_time.h"
 
 #define CONFIG_FILENAME "gtm.conf"
 const char *config_filename = CONFIG_FILENAME;
@@ -80,6 +80,11 @@ extern int     GTMGTSFreezeLimit;
 extern char*   unix_socket_directory;
 extern char*   unix_socket_group;
 extern int     unix_socket_permissions;
+
+extern char *Log_filename;
+extern int	Log_RotationAge;
+extern int	Log_RotationSize;
+extern bool	Log_truncate_on_rotation;
 
 /*
  * We have different sets for client and server message level options because
@@ -212,14 +217,24 @@ struct config_bool ConfigureNamesBool[] =
 	},
 #endif
 	{
-			{GTM_OPTNAME_CLUSTER_READ_ONLY, GTMC_STARTUP,
-			 gettext_noop("Nodes connected with gtm will be readonly."),
-			 gettext_noop("Default value is off."),
-			 0
-			},
-			&GTMClusterReadOnly,
-			false, NULL, NULL, false, NULL
+        {GTM_OPTNAME_CLUSTER_READ_ONLY, GTMC_STARTUP,
+         gettext_noop("Nodes connected with gtm will be readonly."),
+         gettext_noop("Default value is off."),
+         0
+        },
+        &GTMClusterReadOnly,
+        false, NULL, NULL, false, NULL
 	},
+
+    {
+        {GTM_OPTNAME_LOG_TRUNCATE_ON_ROTATION, GTMC_SIGHUP,
+         gettext_noop("Truncate existing log files of same name during log rotation."),
+         gettext_noop("Default value is off."),
+         0
+        },
+        &Log_truncate_on_rotation,
+        false, NULL, NULL, false, NULL
+    },
 
 	/* End-of-list marker */
 	{
@@ -360,44 +375,68 @@ struct config_int ConfigureNamesInt[] =
 	},
 #endif
 	{
-			{
-					GTM_OPTNAME_GTS_FREEZE_TIME_LIMIT, GTMC_STARTUP,
-					gettext_noop("refuse to start gtm before GTS has n days left,default 100 years"),
-					NULL,
-					0
-			},
-			&GTMGTSFreezeLimit,
-			365 * 100, 0, INT_MAX, NULL, NULL,
-			0, NULL
+        {
+            GTM_OPTNAME_GTS_FREEZE_TIME_LIMIT, GTMC_STARTUP,
+            gettext_noop("refuse to start gtm before GTS has n days left,default 100 years"),
+            NULL,
+            0
+        },
+        &GTMGTSFreezeLimit,
+        365 * 100, 0, INT_MAX, NULL, NULL,
+        0, NULL
 	},
 	{
-			{
-					GTM_OPTNAME_STARTUP_GTS_DELTA, GTMC_STARTUP,
-					gettext_noop("Add -d seconds to GTS when started"),
-					NULL,
-					0
-			},
-			&GTMStartupGTSDelta,
-			300 , 0, INT_MAX, NULL, NULL,
-			0, NULL
+        {
+            GTM_OPTNAME_STARTUP_GTS_DELTA, GTMC_STARTUP,
+            gettext_noop("Add -d seconds to GTS when started"),
+            NULL,
+            0
+        },
+        &GTMStartupGTSDelta,
+        300 , 0, INT_MAX, NULL, NULL,
+        0, NULL
 	},
 
     {
-            {
-                    GTM_OPTNAME_UNIX_SOCKET_PERMISSIONS, GTMC_STARTUP,
-                    gettext_noop("Sets the access permissions of the Unix-domain socket."
-                                 "Unix-domain sockets use the usual Unix file system "
-                                 "permission set. The parameter value is expected "
-                                 "to be a numeric mode specification in the form "
-                                 "accepted by the chmod and umask system calls. "
-                                 "(To use the customary octal format the number must "
-                                 "start with a 0 (zero).)"),
-                    NULL,
-                    0
-            },
-            &unix_socket_permissions,
-            0777, 0000, 0777, NULL, NULL,
-            0, NULL
+        {
+            GTM_OPTNAME_UNIX_SOCKET_PERMISSIONS, GTMC_STARTUP,
+            gettext_noop("Sets the access permissions of the Unix-domain socket."
+                         "Unix-domain sockets use the usual Unix file system "
+                         "permission set. The parameter value is expected "
+                         "to be a numeric mode specification in the form "
+                         "accepted by the chmod and umask system calls. "
+                         "(To use the customary octal format the number must "
+                         "start with a 0 (zero).)"),
+            NULL,
+            0
+        },
+        &unix_socket_permissions,
+        0777, 0000, 0777, NULL, NULL,
+        0, NULL
+    },
+
+    {
+        {
+            GTM_OPTNAME_LOG_ROTATION_AGE, GTMC_SIGHUP,
+            gettext_noop("Automatic log file rotation will occur after N minutes."),
+            NULL,
+            0
+        },
+        &Log_RotationAge,
+        HOURS_PER_DAY * MINS_PER_HOUR, 0, INT_MAX / SECS_PER_MINUTE, NULL, NULL,
+        0, NULL
+    },
+
+    {
+        {
+            GTM_OPTNAME_LOG_ROTATION_SIZE, GTMC_SIGHUP,
+            gettext_noop("Automatic log file rotation will occur after N kilobytes."),
+            NULL,
+            0
+        },
+        &Log_RotationSize,
+        10 * 1024, 0, INT_MAX / 1024, NULL, NULL,
+        0, NULL
     },
 
 	/* End-of-list marker */
@@ -491,6 +530,18 @@ struct config_string ConfigureNamesString[] =
 		NULL, NULL,
 		NULL, NULL
 	},
+
+    {
+        {GTM_OPTNAME_LOG_FILENAME_PATTERN, GTMC_SIGHUP,
+         gettext_noop("Sets the file name pattern for log files."),
+         NULL,
+         0
+        },
+        &Log_filename,
+        "gtm-%Y-%m-%d_%H%M%S.log",
+        NULL, NULL,
+        NULL, NULL
+    },
 
 	{
 		{GTM_OPTNAME_ERROR_REPORTER, GTMC_STARTUP,

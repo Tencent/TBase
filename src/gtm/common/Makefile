@@ -23,7 +23,7 @@ LDFLAGS=-L$(top_builddir)/common -L$(top_builddir)/libpq
 LIBS=-lpthread -lrt
 
 OBJS = gtm_opt_handler.o aset.o mcxt.o gtm_utils.o elog.o assert.o stringinfo.o gtm_lock.o \
-       gtm_list.o gtm_serialize.o gtm_serialize_debug.o gtm_time.o gtm_gxid.o heap.o datapump.o bloom.o
+       gtm_list.o gtm_serialize.o gtm_serialize_debug.o gtm_time.o gtm_gxid.o heap.o datapump.o bloom.o syslogger.o
 
 all:all-lib
 
