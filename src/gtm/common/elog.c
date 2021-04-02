@@ -28,6 +28,7 @@
 #include "gtm/gtm_ext.h"
 #include "gtm/libpq.h"
 #include "gtm/pqformat.h"
+#include "gtm/syslogger.h"
 
 #undef _
 #define _(x)    x
@@ -41,6 +42,8 @@ char *GTMLogFile = NULL;
 
 /* GUC parameters */
 int            Log_destination = LOG_DESTINATION_STDERR;
+
+int	exit_flag = GTM_DEFAULT_EXIT_FLAG;
 
 /* Macro for checking errordata_stack_depth is reasonable */
 #define CHECK_STACK_DEPTH() \
@@ -321,15 +324,15 @@ errfinish(int dummy,...)
     }
 
     /* Emit the message to the right places */
-    {    
         GTM_ThreadInfo *thrinfo = GetMyThreadInfo;
         if(thrinfo->thr_conn)
         {
             EmitErrorReport(thrinfo->thr_conn->con_port);
         }
-        
-    }
+    else
+    {
     EmitErrorReport(NULL);
+    }
 
     /* Now free up subsidiary data attached to stack entry, and release it */
     if (edata->message)
@@ -746,6 +749,76 @@ pg_re_throw(void)
 
 
 /*
+ * Send data to the syslogger using the chunked protocol
+ *
+ * Note: when there are multiple backends writing into the syslogger pipe,
+ * it's critical that each write go into the pipe indivisibly, and not
+ * get interleaved with data from other processes.  Fortunately, the POSIX
+ * spec requires that writes to pipes be atomic so long as they are not
+ * more than PIPE_BUF bytes long.  So we divide long messages into chunks
+ * that are no more than that length, and send one chunk per write() call.
+ * The collector process knows how to reassemble the chunks.
+ *
+ * Because of the atomic write requirement, there are only two possible
+ * results from write() here: -1 for failure, or the requested number of
+ * bytes.  There is not really anything we can do about a failure; retry would
+ * probably be an infinite loop, and we can't even report the error usefully.
+ * (There is noplace else we could send it!)  So we might as well just ignore
+ * the result from write().  However, on some platforms you get a compiler
+ * warning from ignoring write()'s result, so do a little dance with casting
+ * rc to void to shut up the compiler.
+ */
+static void
+write_pipe_chunks(char *data, int len, int dest)
+{
+    PipeProtoChunk p;
+    int			fd = fileno(stderr);
+    int			rc;
+
+    Assert(len > 0);
+
+    p.proto.nuls[0] = p.proto.nuls[1] = '\0';
+    p.proto.pid = (exit_flag == GTM_DEFAULT_EXIT_FLAG) ? (int) MyThreadID : 0;
+
+    /* write all but the last chunk */
+    while (len > PIPE_MAX_PAYLOAD)
+    {
+        p.proto.is_last = (dest == LOG_DESTINATION_CSVLOG ? 'F' : 'f');
+        p.proto.len = PIPE_MAX_PAYLOAD;
+        memcpy(p.proto.data, data, PIPE_MAX_PAYLOAD);
+
+        rc = write(fd, &p, PIPE_HEADER_SIZE + PIPE_MAX_PAYLOAD);
+
+#ifdef __TBASE__
+        /* if we are interruppted, just return */
+        if (EINTR == errno && rc < 0)
+        {
+            return;
+        }
+#endif
+        (void) rc;
+        data += PIPE_MAX_PAYLOAD;
+        len -= PIPE_MAX_PAYLOAD;
+    }
+
+    /* write the last chunk */
+    p.proto.is_last = (dest == LOG_DESTINATION_CSVLOG ? 'T' : 't');
+    p.proto.len = len;
+    memcpy(p.proto.data, data, len);
+
+    rc = write(fd, &p, PIPE_HEADER_SIZE + len);
+#ifdef __TBASE__
+    /* if we are interruppted, just return */
+    if (EINTR == errno && rc < 0)
+    {
+        return;
+    }
+#endif
+    (void) rc;
+}
+
+
+/*
  * Initialization of error output file
  */
 void
@@ -857,9 +930,11 @@ send_message_to_server_log(ErrorData *edata)
 						 edata->filename, edata->lineno);
 	}
 
-	/* Write to stderr, if enabled */
-	if (Log_destination & LOG_DESTINATION_STDERR)
-		write(fileno(stderr), buf.data, buf.len);
+    /* If in the syslogger thread, try to write messages direct to file */
+    if (GetMyThreadInfo->am_syslogger)
+        write_syslogger_file(buf.data, buf.len, LOG_DESTINATION_STDERR);
+    else
+        write_pipe_chunks(buf.data, buf.len, LOG_DESTINATION_STDERR);
 
     if (errlog_collection_func && (buf.len > 0) && ('\0' != buf.data[0]))
         (*errlog_collection_func) (edata, &buf);

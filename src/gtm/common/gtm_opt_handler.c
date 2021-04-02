@@ -47,6 +47,7 @@ static int gtm_opt_var_compare(const void *a, const void *b);
 static void InitializeOneGTMOption(struct config_generic * gconf);
 static void ReportGTMOption(struct config_generic * record);
 static char *_ShowOption(struct config_generic * record, bool use_units);
+extern void GTM_SendNotifyByte();
 
 /*
  * Variables to bel fed by specific option definition: gtm_opt.c and gtm_proxy_opt.c
@@ -350,6 +351,9 @@ ProcessConfigFile(GtmOptContext context)
     FreeConfigVariables(head);
     if (cvc)
         free(cvc);
+
+	/* notify the syslogger */
+    GTM_SendNotifyByte();
     return true;
 
 cleanup_list:
