@@ -1465,7 +1465,8 @@ GTMSetSockKeepAlive(GTM_Conn *conn, int tcp_keepalives_idle,
 	/* check sock */
 	if (getsockopt(sock, IPPROTO_TCP, TCP_INFO, &info, (socklen_t *)&len) < 0)
     {
-        return false;
+        /* No need to set */
+        return true;
     }
     
 	if (info.tcpi_state != TCP_ESTABLISHED)
