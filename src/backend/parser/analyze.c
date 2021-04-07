@@ -1146,7 +1146,7 @@ TRANSFORM_VALUELISTS:
             if (IsExtendedQuery() && qry->isMultiValues && !qry->hasUnshippableTriggers)
             {
                 /*
-                 * simple insert if all values are params
+				 * simple insert if all values are params or can be pushed down
                  *
                  * if not simple insert, do not transform insert into to copy from
                  */
@@ -1154,7 +1154,8 @@ TRANSFORM_VALUELISTS:
                 foreach(cell, sublist)
                 {
                     Node *node = (Node *)lfirst(cell);
-                    if (!IsA(node, Param))
+					if (!IsA(node, Param) &&
+					    !pgxc_is_expr_shippable(node, NULL))
                     {
                         qry->isMultiValues = false;
                         break;
