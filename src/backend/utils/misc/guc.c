@@ -2423,6 +2423,15 @@ static struct config_bool ConfigureNamesBool[] =
         NULL, NULL, NULL
     },
     {
+        {"enable_pooler_thread_log_print", PGC_USERSET, CUSTOM_OPTIONS,
+         gettext_noop("enable pooler manager sub thread log print"),
+         NULL
+        },
+        &PoolSubThreadLogPrint,
+        true,
+        NULL, NULL, NULL
+    },
+	{
         {"enable_plpgsql_debug_print", PGC_SUSET, CUSTOM_OPTIONS,
             gettext_noop("enable plpgsql debug infomation print"),
             NULL

@@ -268,6 +268,7 @@ extern int  PoolDNSetTimeout;
 extern int  PoolCheckSlotTimeout;
 extern int  PoolPrintStatTimeout;
 extern bool PoolConnectDebugPrint; 
+extern bool PoolSubThreadLogPrint;
 /* Status inquiry functions */
 extern void PGXCPoolerProcessIam(void);
 extern bool IsPGXCPoolerProcess(void);

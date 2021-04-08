@@ -100,6 +100,7 @@ char        *g_unpooled_user         = "mls_admin";
 
 bool         PoolConnectDebugPrint  = false; /* Pooler connect debug print */
 bool         PoolerStuckExit         = true;  /* Pooler exit when stucked */
+bool         PoolSubThreadLogPrint  = true;  /* Pooler sub thread log print */
 
 #define      POOL_ASYN_WARM_PIPE_LEN      32   /* length of asyn warm pipe */
 #define      POOL_ASYN_WARN_NUM           1      /* how many connections to warm once maintaince per node pool */
@@ -396,6 +397,20 @@ typedef struct
 	pg_time_t         cmd_start_time;   /* command start time, including the processing time in the main process */
     pg_time_t         cmd_end_time;     /* command end time */
 }PGXCPoolAsyncReq;
+
+static void pooler_subthread_write_log(int elevel, int lineno, const char *filename, const char *funcname, const char *fmt, ...)__attribute__((format(printf, 5, 6)));
+
+/* Use this macro when a sub thread needs to print logs */
+#define pooler_thread_logger(elevel, ...) \
+    do { \
+        pooler_subthread_write_log(elevel, __LINE__, __FILE__, PG_FUNCNAME_MACRO, __VA_ARGS__); \
+    } while(0)
+
+#define FORMATTED_TS_LEN                (128)                                          /* format timestamp buf length */
+#define POOLER_WRITE_LOG_ONCE_LIMIT     (5)                                            /* number of logs written at a time */
+#define MAX_THREAD_LOG_PIPE_LEN         (2 * 1024)                                     /* length of thread log pipe */
+#define DEFAULT_LOG_BUF_LEN             (1024)                                         /* length of thread log length */
+PGPipe  *g_ThreadLogQueue = NULL;
 
 static inline void RebuildAgentIndex(void);
 
@@ -5135,6 +5150,170 @@ destroy_node_pool_free_slots(PGXCNodePool *node_pool)
 }
 
 /*
+ * setup current log time
+ */
+static void
+setup_formatted_current_log_time(char* formatted_current_log_time)
+{
+    pg_time_t	stamp_time;
+    char		msbuf[13];
+    struct timeval timeval;
+
+    gettimeofday(&timeval, NULL);
+    stamp_time = (pg_time_t) timeval.tv_sec;
+
+    /*
+     * Note: we expect that guc.c will ensure that log_timezone is set up (at
+     * least with a minimal GMT value) before Log_line_prefix can become
+     * nonempty or CSV mode can be selected.
+     */
+    pg_strftime(formatted_current_log_time, FORMATTED_TS_LEN,
+            /* leave room for milliseconds... */
+                "%Y-%m-%d %H:%M:%S     %Z",
+                pg_localtime(&stamp_time, log_timezone));
+
+    /* 'paste' milliseconds into place... */
+    sprintf(msbuf, ".%03d", (int) (timeval.tv_usec / 1000));
+    memcpy(formatted_current_log_time + 19, msbuf, 4);
+}
+
+/*
+ * write pooler's subthread log into thread log queue
+ * only call by pooler's subthread in elog
+ */
+static void
+pooler_subthread_write_log(int elevel, int lineno, const char *filename, const char *funcname, const char *fmt, ...)
+{
+    char *buf = NULL;
+    int buf_len = 0;
+    int offset = 0;
+    char formatted_current_log_time[FORMATTED_TS_LEN];
+
+    if (!PoolSubThreadLogPrint)
+    {
+        /* not enable sun thread log print, return */
+        return;
+    }
+
+    if (PipeIsFull(g_ThreadLogQueue))
+    {
+        return;
+    }
+
+    /* use malloc in sub thread */
+    buf_len = strlen(filename) + strlen(funcname) + DEFAULT_LOG_BUF_LEN;
+    buf = (char*)malloc(buf_len);
+    if (buf == NULL)
+    {
+        /* no log */
+        return;
+    }
+
+    /* construction log, format: elevel | lineno | filename | funcname | log content */
+    *(int*)(buf + offset) = elevel;
+    offset += sizeof(elevel);
+    *(int*)(buf + offset) = lineno;
+    offset += sizeof(lineno);
+    memcpy(buf + offset, filename, strlen(filename) + 1);
+    offset += (strlen(filename) + 1);
+    memcpy(buf + offset, funcname, strlen(funcname) + 1);
+    offset += (strlen(funcname) + 1);
+
+    /*
+     * because the main thread writes the log of the sub thread asynchronously,
+     * record the actual log writing time here
+     */
+    setup_formatted_current_log_time(formatted_current_log_time);
+    memcpy(buf + offset, formatted_current_log_time, strlen(formatted_current_log_time));
+    offset += strlen(formatted_current_log_time);
+    *(char*)(buf + offset) = ' ';
+    offset += sizeof(char);
+
+    /* Generate actual output --- have to use appendStringInfoVA */
+    for (;;)
+    {
+        va_list		args;
+        int			avail;
+        int			nprinted;
+
+        avail = buf_len - offset - 1;
+        va_start(args, fmt);
+        nprinted = vsnprintf(buf + offset, avail, fmt, args);
+        va_end(args);
+        if (nprinted >= 0 && nprinted < avail - 1)
+        {
+            offset += nprinted;
+            *(char*)(buf + offset) = '\0';
+			offset += sizeof(char);
+            break;
+        }
+
+        buf_len = (buf_len * 2 > (int) MaxAllocSize) ? MaxAllocSize : buf_len * 2;
+        buf = (char *) realloc(buf, buf_len);
+        if (buf == NULL)
+        {
+            /* no log */
+            return;
+        }
+    }
+
+    /* put log into thread log queue, drop log if queue is full */
+    if (-1 == PipePut(g_ThreadLogQueue, buf))
+    {
+        free(buf);
+    }
+}
+
+/*
+ * write subthread log in main thread
+ */
+static void
+pooler_handle_subthread_log(bool is_pooler_exit)
+{
+    int write_log_cnt = 0;
+    int offset = 0;
+    int elevel = LOG;
+    int lineno = 0;
+    char *log_buf = NULL;
+    char *filename = NULL;
+    char *funcname = NULL;
+    char *log_content = NULL;
+
+    while ((log_buf = (char*)PipeGet(g_ThreadLogQueue)) != NULL)
+    {
+        /* elevel | lineno | filename | funcname | log content */
+        elevel = *(int*)log_buf;
+        offset = sizeof(elevel);
+        lineno = *(int*)(log_buf + offset);
+        offset += sizeof(lineno);
+        filename = log_buf + offset;
+        offset += (strlen(filename) + 1);
+        funcname = log_buf + offset;
+        offset += (strlen(funcname) + 1);
+        log_content = log_buf + offset;
+
+        /* write log here */
+        elog_start(filename, lineno,
+#ifdef USE_MODULE_MSGIDS
+                PGXL_MSG_MODULE, PGXL_MSG_FILEID, __COUNTER__,
+#endif
+                funcname);
+        elog_finish(elevel, "%s", log_content);
+
+        free(log_buf);
+
+        /*
+         * if the number of logs written at one time exceeds POOLER_WRITE_LOG_ONCE_LIMIT,
+         * in order not to block the main thread, return here
+         */
+        if (write_log_cnt++ >= POOLER_WRITE_LOG_ONCE_LIMIT && !is_pooler_exit)
+        {
+            return;
+        }
+    }
+}
+
+/*
  * Main handling loop
  */
 static void
@@ -5199,6 +5378,9 @@ PoolerLoop(void)
         pfree(rawstring);
     }
 #endif
+
+    /* create log queue */
+    g_ThreadLogQueue = CreatePipe(MAX_THREAD_LOG_PIPE_LEN);
 
     /* create utility thread */
     g_AsynUtilityPipeSender = CreatePipe(POOL_ASYN_WARM_PIPE_LEN);
@@ -5282,6 +5464,7 @@ PoolerLoop(void)
          */
         if (!PostmasterIsAlive())
         {
+            pooler_handle_subthread_log(true);
             exit(1);
         }
         
@@ -5309,6 +5492,7 @@ PoolerLoop(void)
              *  Just close the socket and exit. Linux will help to release the resouces.
               */        
             close(server_fd);
+            pooler_handle_subthread_log(true);
             exit(0);
         }        
 
@@ -5420,6 +5604,9 @@ PoolerLoop(void)
         check_duplicate_allocated_conn();
 #endif
         print_pooler_statistics();
+
+		/* handle sub thread's log */
+        pooler_handle_subthread_log(false);
     }
 }
 
