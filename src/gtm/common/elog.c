@@ -290,6 +290,7 @@ errfinish(int dummy,...)
 {// #lizard forgives
     ErrorData  *edata = &errordata[errordata_stack_depth];
     int            elevel = edata->elevel;
+	GTM_ThreadInfo *thrinfo = GetMyThreadInfo;
 
     MemoryContext oldcontext;
     recursion_depth++;
@@ -324,7 +325,6 @@ errfinish(int dummy,...)
     }
 
     /* Emit the message to the right places */
-        GTM_ThreadInfo *thrinfo = GetMyThreadInfo;
         if(thrinfo->thr_conn)
         {
             EmitErrorReport(thrinfo->thr_conn->con_port);
