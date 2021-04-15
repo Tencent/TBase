@@ -359,8 +359,13 @@ PortalCleanup(Portal portal)
 #ifdef XCP
         if (portal->strategy == PORTAL_DISTRIBUTED)
         {
-            /* If portal is producing it has an executor which should be
-             * shut down */
+			/* If cleanup fails below prevent double cleanup */
+			portal->queryDesc = NULL;
+			
+			/*
+			 * If portal is producing it has an executor which should be
+			 * shut down
+			 */
             if (queryDesc->myindex == -1)
             {
                 if (portal->status == PORTAL_FAILED)
@@ -370,8 +375,6 @@ PortalCleanup(Portal portal)
                      * producers list.
                      */
                     removeProducingPortal(portal);
-                    /* If cleanup fails below prevent double cleanup */
-                    portal->queryDesc = NULL;
                     /*
                      * Inform consumers about failed producer if they are
                      * still waiting
@@ -384,28 +387,33 @@ PortalCleanup(Portal portal)
                 {
                     ResourceOwner saveResourceOwner;
 
-                    /* We must make the portal's resource owner current to
-                     * release resources properly */
+					/*
+					 * We must make the portal's resource owner current to
+					 * release resources properly
+					 */
                     saveResourceOwner = CurrentResourceOwner;
                     PG_TRY();
                     {
+						if (portal->resowner)
                         CurrentResourceOwner = portal->resowner;
+						/* do nothing about executor if portal is failed */
+						if (portal->status != PORTAL_FAILED)
+						{
                         /* Finish executor if it is not yet finished */
                         if (!queryDesc->estate->es_finished)
                             ExecutorFinish(queryDesc);
-                        /* Destroy executor if not yet destroyed */
-                        if (queryDesc->estate)
                             ExecutorEnd(queryDesc);
-                        if (portal->status == PORTAL_FAILED)
+							FreeQueryDesc(queryDesc);
+						}
+						else
                         {
                             /*
-                             * If portal if failed we can allow to be blocked
+							 * If portal is failed we can allow to be blocked
                              * here while UnBind is waiting for finishing
                              * consumers.
                              */
                             if (queryDesc->squeue)
                                 SharedQueueUnBind(queryDesc->squeue, true);
-                            FreeQueryDesc(queryDesc);
                         }
                     }
                     PG_CATCH();
@@ -428,8 +436,6 @@ PortalCleanup(Portal portal)
                 PG_TRY();
                 {
                     CurrentResourceOwner = portal->resowner;
-                    /* Prevent double cleanup in case of error below */
-                    portal->queryDesc = NULL;
                     /* Reset the squeue if exists */
                     if (queryDesc->squeue)
                         SharedQueueReset(queryDesc->squeue, queryDesc->myindex);

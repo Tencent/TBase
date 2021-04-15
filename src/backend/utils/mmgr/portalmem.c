@@ -606,15 +606,6 @@ PortalDrop(Portal portal, bool isTopCommit)
      */
     if (portalIsProducing(portal))
         return;
-
-    if (portal->queryDesc)
-    {
-        ResourceOwner saveResourceOwner = CurrentResourceOwner;
-        CurrentResourceOwner = portal->resowner;
-        FreeQueryDesc(portal->queryDesc);
-        CurrentResourceOwner = saveResourceOwner;
-        portal->queryDesc = NULL;
-    }
 #endif
 
     /*
