@@ -822,6 +822,7 @@ pgxc_node_receive(const int conn_count,
     }
 
 retry:
+	CHECK_FOR_INTERRUPTS();
     poll_val  = poll(pool_fd, conn_count, timeout_ms);
     if (poll_val < 0)
     {
