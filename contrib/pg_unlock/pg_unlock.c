@@ -41,6 +41,7 @@ PG_MODULE_MAGIC;
 #define MAX_RELNAME 64
 #define MAX_MODE 30
 #define MAX_DEADLOCK 10000
+#define MAX_DEADLOCK_CHECKLOOP (10)
 
 /*macros about space allocation and release*/
 #define INIT(x)\
@@ -461,6 +462,11 @@ pg_unlock_execute(PG_FUNCTION_ARGS)
 			if (Partxns->Ptxns[Partxns->Ptxns_count].txn_count > 0)
 			{
 				Partxns->Ptxns_count++;
+				if (Partxns->Ptxns_count >= MAX_DEADLOCK_CHECKLOOP)
+                {
+				    /* avoid deadlock all the time */
+				    break;
+                }
 			}
 			DropAlldeadlocks();
 			DropAlltransactions();
@@ -1029,6 +1035,46 @@ void GetAllTransInfo(void)
 	}
 }
 
+/*
+ * BinarySearchGid -- Binary search gid in pgxc_transaction
+ * input: 	gid
+ * return:	gid pos or insert pos, was gid found
+ */
+static int
+BinarySearchGid(char *gid, bool *found)
+{
+    int low = 0;
+    int high = pgxc_transaction_count - 1;
+    int mid = 0;
+    int cmp_result = 0;
+    *found = false;
+
+    while (low <= high)
+    {
+        mid = (low + high) / 2;
+        cmp_result = strcmp(gid, pgxc_transaction[mid].gid);
+        if (cmp_result == 0)
+        {
+            /* gid == pgxc_transaction[mid].gid */
+            *found = true;
+            return mid;
+        }
+        else if (cmp_result > 0)
+        {
+            /* gid > pgxc_transaction[mid].gid */
+            low = mid + 1;
+        }
+        else
+        {
+            /* gid < pgxc_transaction[mid].gid */
+            high = mid - 1;
+        }
+    }
+
+    /* return insert pos */
+    return high + 1;
+}
+
 /* 
  * LoadTransaction -- get transactions from certain node and stores them in pgxc_transaction
  * input: 	node oid
@@ -1037,7 +1083,7 @@ void GetAllTransInfo(void)
 void LoadTransaction(Oid node)
 {	
 	const char *query_stmt = "select a1.pid::text, a1.locktype::text, a2.datname::text, a2.relname::text, "
-						 "a1.page::text, a1.tuple::text, a1.mode::text, a1.granted::text, a1.transactionid::text, a3.query::text "
+						 "a1.page::text, a1.tuple::text, a1.mode::text, a1.granted::text, a1.transactionid::text, a3.query::text, pg_findgxid(a1.pid::int)::text "
 						 "from (select locktype::text, database, relation, page::text, "
 									  "tuple::text, mode::text, granted::text, pid::text, transactionid::text "
 									  "from pg_locks where (locktype = 'relation' or locktype = 'page' or locktype = 'tuple' or locktype = 'transactionid')"
@@ -1070,9 +1116,10 @@ void LoadTransaction(Oid node)
 	char *gid = NULL;
     int nodeid = 0;
 	lockinfo templock;
-	
+	bool found = false;
+
     sprintf(query_txnid, query_stmt, MyProcPid);
-	execute_on_single_node(node, query_txnid, 10, &result_txnid);
+	execute_on_single_node(node, query_txnid, 11, &result_txnid);
 	if (result_txnid.slot == NULL) 
 	{
 		elog(DEBUG1, "pg_unlock: there is no transaction on node %s", get_pgxc_nodename(node));
@@ -1084,37 +1131,29 @@ void LoadTransaction(Oid node)
 	{
 		pid = strtoul(TTSgetvalue(&result_txnid, i, 0), NULL, 10);
 		/*get global xid of pid on node*/
-		gid = GetGxid(node, pid);
-			/*select for update apply for transactionid without global xid*/
+        gid = TTSgetvalue(&result_txnid, i, 10);
+		/*select for update apply for transactionid without global xid*/
 		if (gid == NULL)
 		{
 			continue;
 		}
 		
 		/*check whether the gid is already existed*/
-		for (i_txn = 0; i_txn < pgxc_transaction_count; i_txn++)
-		{
-			if (strcmp(gid, pgxc_transaction[i_txn].gid) == 0)
-			{
-				break;
-			}
-		}
-		
+        i_txn = BinarySearchGid(gid, &found);
 		/*insert this new transaction when gid is not find in pgxc_transaction*/
-		if (i_txn >= pgxc_transaction_count)
+		if (!found)
 		{
 			RPALLOC(pgxc_transaction);
-			InitTransaction(pgxc_transaction_count);
-			memcpy(pgxc_transaction[pgxc_transaction_count].gid, gid, sizeof(char) * MAX_GID);
+            memmove(&pgxc_transaction[i_txn + 1], &pgxc_transaction[i_txn], (pgxc_transaction_count - i_txn) * sizeof(transaction));
+			InitTransaction(i_txn);
+			memcpy(pgxc_transaction[i_txn].gid, gid, sizeof(char) * MAX_GID);
 			pgxc_transaction_count++;
-			i_txn = pgxc_transaction_count-1;
 		}
 		add_pid_node(i_txn, pid, node);
 		ptr = strtok(gid, ":");
         nodeid = atoi(ptr);
         pgxc_transaction[i_txn].initiator = get_nodeoid_from_nodeid(nodeid, PGXC_NODE_COORDINATOR);
 		//pgxc_transaction[i_txn].initiator = get_pgxc_nodeoid(ptr);
-		pfree(gid);
 
 		/*read lockinfo from result_txnid*/
 		templock.m_pid = pid;
