@@ -82,7 +82,6 @@ int            PoolConnKeepAlive      = 600;
 int            PoolMaintenanceTimeout = 30;
 int            PoolSizeCheckGap       = 120;  /* max check memory size gap, in seconds */
 int            PoolConnMaxLifetime    = 600;  /* max lifetime of a pooled connection, in seconds */
-int            PoolWarmConnMaxLifetime = 7200;  /* max lifetime of a warm-needed pooled connection, in seconds */
 int            PoolMaxMemoryLimit     = 10;
 int            PoolConnectTimeOut     = 10;
 int            PoolScaleFactor        = 2;
@@ -207,7 +206,7 @@ typedef struct
     Oid                  nodeoid;      /* Node Oid related to this pool */
     char                *connstr;    /* palloc memory, need free */
 
-    int32             m_version;  /* version of node pool */
+	time_t            m_version;  /* version of node pool */
     int32             size;        /* total pool size */
     int32               validSize;  /* valid data element number */    
     bool              failed;
@@ -567,7 +566,7 @@ static void  *pooler_async_utility_thread(void *arg);
 static void  *pooler_async_connection_management_thread(void *arg);
 static void  *pooler_sync_remote_operator_thread(void *arg);
 
-static bool   pooler_async_build_connection(DatabasePool *pool, int32 pool_version, int32 nodeidx, Oid node, 
+static bool   pooler_async_build_connection(DatabasePool *pool, time_t pool_version, int32 nodeidx, Oid node, 
                                             int32 size, char *connStr, bool bCoord);
 static BitmapMgr *BmpMgrCreate(uint32 objnum);
 static int        BmpMgrAlloc(BitmapMgr *mgr);
@@ -597,7 +596,6 @@ static void handle_clean_connection(PoolAgent * agent, StringInfo s);
 static void handle_get_connections(PoolAgent * agent, StringInfo s);
 static void handle_query_cancel(PoolAgent * agent, StringInfo s);
 static void handle_session_command(PoolAgent * agent, StringInfo s);
-static bool remove_all_agent_references(Oid nodeoid);
 static int  refresh_database_pools(PoolAgent *agent);
 
 static void pooler_async_ping_node(Oid node);
@@ -3149,6 +3147,17 @@ agent_acquire_connections(PoolAgent *agent, List *datanodelist, List *coordlist,
             else
             {
                 acquire_succeed_num++;    
+				if (!slot->bdestoryed && difftime(time(NULL), slot->created) > PoolConnMaxLifetime)
+				{
+					elog(WARNING,
+						POOL_MGR_PREFIX"agent_acquire_connections acquired connection to "
+						"database:%s user:%s "
+						"node:%s backend_pid:%d nodeidx:%d "
+						"nodepool size:%d freeSize:%d that should be destoried.",
+						agent->pool->database, agent->pool->user_name,
+						nodePool->node_name, slot->backend_pid, node,
+						nodePool->size, nodePool->freeSize);
+				}
                 if (PoolConnectDebugPrint)
                 {
                     /* double check, to ensure no double destory and multiple agents for one slot */
@@ -4470,7 +4479,12 @@ reload_database_pools(PoolAgent *agent)
                 if (nodePool->size == nodePool->freeSize)
 #endif
                 {
-                    elog(LOG, POOL_MGR_PREFIX"nodePool:%s has been changed, size:%d, freeSize:%d, destory it now", nodePool->connstr, nodePool->size, nodePool->freeSize);                    
+					elog(LOG, POOL_MGR_PREFIX"nodePool:%s has been changed, "
+						"size:%d, freeSize:%d, reload_database_pools: nodePools "
+						"of node (%u, %s) is removed.",
+						nodePool->connstr,
+						nodePool->size, nodePool->freeSize,
+						nodePool->nodeoid, nodePool->node_name);
                     destroy_node_pool(nodePool);
                     hash_search(databasePool->nodePools, &nodePool->nodeoid,
                                 HASH_REMOVE, NULL);
@@ -4480,7 +4494,13 @@ reload_database_pools(PoolAgent *agent)
                     destroy_node_pool_free_slots(nodePool);
 
                     /* increase the node pool version */
-                    nodePool->m_version++;    
+					nodePool->m_version = time(NULL);
+					elog(LOG, POOL_MGR_PREFIX"nodePool:%s has been changed, "
+						"size:%d, freeSize:%d, reload_database_pools: nodePools "
+						"of node (%u, %s) has increased version %lu.",
+						nodePool->connstr,
+						nodePool->size, nodePool->freeSize,
+						nodePool->nodeoid, nodePool->node_name, nodePool->m_version);
 
                     /* fresh the connect string so that new coming connection will connect to the new node  */
                     if (connstr_chk)
@@ -4687,7 +4707,11 @@ release_connection(DatabasePool *dbPool, PGXCNodePoolSlot *slot,
 
     nodePool = (PGXCNodePool *) hash_search(dbPool->nodePools, &node, HASH_FIND,
                                             NULL);
-    if (nodePool == NULL)
+	/*
+	 * The node pool of connections may has been created just now and the size is
+	 * initialized to 0. This situation needs to be excluded.
+	 */
+	if ((nodePool == NULL) || (nodePool->size == 0))
     {
         /*
          * The node may be altered or dropped.
@@ -4695,8 +4719,14 @@ release_connection(DatabasePool *dbPool, PGXCNodePoolSlot *slot,
          */
         if (PoolConnectDebugPrint)
         {
-            elog(LOG, POOL_MGR_PREFIX"release_connection connection to node:%s backend_pid:%d nodeidx:%d size:%d freeSize:%d can not find nodepool, just destory it", nodePool->node_name, slot->backend_pid, nodeidx, nodePool->size, nodePool->freeSize);
-            abort();
+			elog(LOG,
+				POOL_MGR_PREFIX"release_connection connection to "
+				"database:%s user:%s "
+				"node:%s backend_pid:%d nodeidx:%d "
+				"size:%d freeSize:%d can not find nodepool, just destory it",
+				dbPool->database, dbPool->user_name,
+				nodePool->node_name, slot->backend_pid, nodeidx,
+				nodePool->size, nodePool->freeSize);
         }
         destroy_slot(nodeidx, node, slot);
         return;
@@ -4704,7 +4734,14 @@ release_connection(DatabasePool *dbPool, PGXCNodePoolSlot *slot,
 
     if (PoolConnectDebugPrint)
     {
-        elog(LOG, POOL_MGR_PREFIX"release_connection connection to nodename:%s backend_pid:%d nodeidx:%d size:%d freeSize:%d begin to release", nodePool->node_name, slot->backend_pid, nodeidx, nodePool->size, nodePool->freeSize);
+		elog(LOG,
+			POOL_MGR_PREFIX"release_connection connection to "
+			"database:%s user:%s "
+			"nodename:%s backend_pid:%d nodeidx:%d "
+			"size:%d freeSize:%d begin to release",
+			dbPool->database, dbPool->user_name,
+			nodePool->node_name, slot->backend_pid, nodeidx,
+			nodePool->size, nodePool->freeSize);
     }
 
     /* force destroy the connection when pool not enabled */
@@ -4716,11 +4753,19 @@ release_connection(DatabasePool *dbPool, PGXCNodePoolSlot *slot,
     /* destory the slot of former nodePool */
     if (slot->m_version != nodePool->m_version)
     {
-        force_destroy = true;
         if (PoolConnectDebugPrint)
         {
-            elog(LOG, POOL_MGR_PREFIX"release_connection connection to node:%s backend_pid:%d nodeidx:%d agentCount:%d size:%d freeSize:%d node version:%d slot version:%d not match", nodePool->node_name, slot->backend_pid, nodeidx, agentCount, nodePool->size, nodePool->freeSize, nodePool->m_version, slot->m_version);
+			elog(LOG,
+				POOL_MGR_PREFIX"release_connection connection to "
+				"database:%s user:%s "
+				"node:%s backend_pid:%d nodeidx:%d agentCount:%d "
+				"size:%d freeSize:%d node version:%lu slot version:%lu not match",
+				dbPool->database, dbPool->user_name,
+				nodePool->node_name, slot->backend_pid, nodeidx, agentCount,
+				nodePool->size, nodePool->freeSize, nodePool->m_version, slot->m_version);
         }
+		destroy_slot(nodeidx, node, slot);
+		return;
     }
     
     if (!force_destroy)
@@ -4731,24 +4776,38 @@ release_connection(DatabasePool *dbPool, PGXCNodePoolSlot *slot,
             /* warm a connection is a hard job, when release them, we need make sure it has worked long enough. */
             if (slot->bwarmed)
             {
-                if (nodePool->freeSize > MinFreeSize && difftime(now, slot->created) > PoolWarmConnMaxLifetime)
+				if (nodePool->freeSize > MinFreeSize || difftime(now, slot->created) > PoolConnMaxLifetime)
                 {
                     force_destroy = true;
                     if (PoolConnectDebugPrint)
                     {
-                        elog(LOG, POOL_MGR_PREFIX"warmed connection to node:%s backend_pid:%d nodeidx:%d lifetime expired, closed it, size:%d freeSize:%d", nodePool->node_name, slot->backend_pid, nodeidx, nodePool->size, nodePool->freeSize);
+						elog(LOG,
+							POOL_MGR_PREFIX"warmed connection to "
+							"database:%s user:%s "
+							"node:%s backend_pid:%d nodeidx:%d lifetime expired, "
+							"closed it, size:%d freeSize:%d",
+							dbPool->database, dbPool->user_name,
+							nodePool->node_name, slot->backend_pid, nodeidx,
+							nodePool->size, nodePool->freeSize);
                     }
                 }                
             }
             else 
             {
                 if (((nodePool->freeSize > 0) && (nodePool->nwarming + nodePool->nquery) > MinFreeSize) ||                                         
-                    (difftime(now, slot->created) >= PoolWarmConnMaxLifetime))
+					(difftime(now, slot->created) >= PoolConnMaxLifetime))
                 {
                     force_destroy = true;
                     if (PoolConnectDebugPrint)
                     {
-                        elog(LOG, POOL_MGR_PREFIX"unwarmed connection to node:%s backend_pid:%d nodeidx:%d lifetime expired, closed it, size:%d freeSize:%d", nodePool->node_name, slot->backend_pid, nodeidx, nodePool->size, nodePool->freeSize);
+						elog(LOG,
+							POOL_MGR_PREFIX"unwarmed connection to "
+							"database:%s user:%s "
+							"node:%s backend_pid:%d nodeidx:%d lifetime expired, "
+							"closed it, size:%d freeSize:%d",
+							dbPool->database, dbPool->user_name,
+							nodePool->node_name, slot->backend_pid, nodeidx,
+							nodePool->size, nodePool->freeSize);
                     }
                 }
             }
@@ -4759,7 +4818,14 @@ release_connection(DatabasePool *dbPool, PGXCNodePoolSlot *slot,
             force_destroy = true;
             if (PoolConnectDebugPrint)
             {
-                elog(LOG, POOL_MGR_PREFIX"connection to node:%s backend_pid:%d nodeidx:%d lifetime expired, closed it, size:%d freeSize:%d", nodePool->node_name, slot->backend_pid, nodeidx, nodePool->size, nodePool->freeSize);
+				elog(LOG,
+					POOL_MGR_PREFIX"connection to "
+					"database:%s user:%s "
+					"node:%s backend_pid:%d nodeidx:%d lifetime expired, "
+					"closed it, size:%d freeSize:%d",
+					dbPool->database, dbPool->user_name,
+					nodePool->node_name, slot->backend_pid, nodeidx,
+					nodePool->size, nodePool->freeSize);
             }
         }
     }
@@ -4795,7 +4861,14 @@ release_connection(DatabasePool *dbPool, PGXCNodePoolSlot *slot,
                 slot->released = now;
                 if (PoolConnectDebugPrint)
                 {
-                    elog(LOG, POOL_MGR_PREFIX"release_connection return connection to node:%s backend_pid:%d nodeidx:%d nodepool size:%d freeSize:%d", nodePool->node_name, slot->backend_pid, nodeidx, nodePool->size, nodePool->freeSize);
+					elog(LOG,
+						POOL_MGR_PREFIX"release_connection return connection to "
+						"database:%s user:%s "
+						"node:%s backend_pid:%d nodeidx:%d "
+						"nodepool size:%d freeSize:%d",
+						dbPool->database, dbPool->user_name,
+						nodePool->node_name, slot->backend_pid, nodeidx,
+						nodePool->size, nodePool->freeSize);
                 }
             }
         }    
@@ -4805,7 +4878,14 @@ release_connection(DatabasePool *dbPool, PGXCNodePoolSlot *slot,
         elog(DEBUG1, POOL_MGR_PREFIX"Cleaning up connection from pool %s, closing", nodePool->connstr);
         if (PoolConnectDebugPrint)
         {
-            elog(LOG, POOL_MGR_PREFIX"release_connection destory connection to node:%s backend_pid:%d nodeidx:%d nodepool size:%d freeSize:%d", nodePool->node_name, slot->backend_pid, nodeidx, nodePool->size, nodePool->freeSize);
+			elog(LOG,
+				POOL_MGR_PREFIX"release_connection destory connection to "
+				"database:%s user:%s "
+				"node:%s backend_pid:%d nodeidx:%d "
+				"nodepool size:%d freeSize:%d",
+				dbPool->database, dbPool->user_name,
+				nodePool->node_name, slot->backend_pid, nodeidx,
+				nodePool->size, nodePool->freeSize);
         }
         destroy_slot(nodeidx, node, slot);
         
@@ -4819,6 +4899,18 @@ release_connection(DatabasePool *dbPool, PGXCNodePoolSlot *slot,
             grow_pool(dbPool, nodeidx, node, bCoord);
         }        
     }
+
+	if (!slot->bdestoryed && difftime(time(NULL), slot->created) > PoolConnMaxLifetime)
+	{
+		elog(WARNING,
+			POOL_MGR_PREFIX"release_connection has not destoried connection to "
+			"database:%s user:%s "
+			"node:%s backend_pid:%d nodeidx:%d "
+			"nodepool size:%d freeSize:%d",
+			dbPool->database, dbPool->user_name,
+			nodePool->node_name, slot->backend_pid, nodeidx,
+			nodePool->size, nodePool->freeSize);
+	}
 }
 
 /*
@@ -4872,6 +4964,11 @@ grow_pool(DatabasePool *dbPool, int32 nodeidx, Oid node, bool bCoord)
         }
         snprintf(nodePool->node_name, NAMEDATALEN, "%s", name_str);
         MemoryContextSwitchTo(oldcontext);
+
+		nodePool->m_version = time(NULL);
+		elog(LOG,
+			"grow_pool: nodePools of node (%u, %s) is created.",
+			nodePool->nodeoid, nodePool->node_name);
     }    
 
     /* here, we move the connection build work to async threads */
@@ -5110,6 +5207,8 @@ destroy_node_pool(PGXCNodePool *node_pool)
             destroy_slot(nodeidx, node_pool->nodeoid, node_pool->slot[i]);
         }
         pfree(node_pool->slot);
+		node_pool->size -= node_pool->freeSize;
+		node_pool->freeSize = 0;
     }
 }
 
@@ -5128,8 +5227,11 @@ destroy_node_pool_free_slots(PGXCNodePool *node_pool)
 
     if (PoolConnectDebugPrint)
     {
-        elog(LOG, POOL_MGR_PREFIX"About to destroy slots of node pool %s, agentCount is %d, node_pool version:%d current size is %d, freeSize is %d, %d connections are in use",
-             node_pool->connstr, node_pool->m_version, agentCount, node_pool->size, node_pool->freeSize, node_pool->size - node_pool->freeSize);    
+		elog(LOG,
+			POOL_MGR_PREFIX"About to destroy slots of node pool %s, node_pool version:%lu "
+			"agentCount is %d current size is %d, freeSize is %d, %d connections are in use",
+			node_pool->connstr, node_pool->m_version,
+			agentCount, node_pool->size, node_pool->freeSize, node_pool->size - node_pool->freeSize);
     }
 
     if (node_pool->slot)
@@ -5141,8 +5243,8 @@ destroy_node_pool_free_slots(PGXCNodePool *node_pool)
             destroy_slot(nodeidx, node_pool->nodeoid, node_pool->slot[i]);
             node_pool->slot[i] = NULL;
         }
-        node_pool->freeSize = 0;
         node_pool->size     -= node_pool->freeSize;        
+		node_pool->freeSize = 0;
     }
 }
 
@@ -5829,7 +5931,14 @@ shrink_pool(DatabasePool *pool)
                 {                    
                     if (PoolConnectDebugPrint)
                     {
-                        elog(LOG, POOL_MGR_PREFIX"shrink_pool destroy a connection to node:%s backend_pid:%d nodeidx:%d nodepool size:%d freeSize:%d", nodePool->node_name, slot->backend_pid, nodeidx, nodePool->size, nodePool->freeSize);
+						elog(LOG,
+							POOL_MGR_PREFIX"shrink_pool destroy a connection to "
+							"database:%s user:%s "
+							"node:%s backend_pid:%d nodeidx:%d "
+							"nodepool size:%d freeSize:%d",
+							pool->database, pool->user_name,
+							nodePool->node_name, slot->backend_pid, nodeidx,
+							nodePool->size, nodePool->freeSize);
                     }
                     /* connection is idle for long, close it */                    
                     destroy_slot(nodeidx, nodePool->nodeoid, slot);
@@ -5884,9 +5993,13 @@ shrink_pool(DatabasePool *pool)
         {
             if (PoolConnectDebugPrint)
             {
-                elog(LOG, POOL_MGR_PREFIX"close %d long time free node:%u, poolsize:%d, freeSize:%d", freeCount, nodePool->nodeoid, 
-                                                                                       nodePool->size, 
-                                                                                       nodePool->freeSize);            
+				elog(LOG,
+					POOL_MGR_PREFIX"close %d long time free connections of "
+						"database:%s user:%s "
+						"node:%u, poolsize:%d, freeSize:%d",
+						freeCount,
+						pool->database, pool->user_name,
+						nodePool->nodeoid, nodePool->size, nodePool->freeSize);
             }
 
             /* only grow pool when pool needed. */
@@ -5896,12 +6009,40 @@ shrink_pool(DatabasePool *pool)
             }
         }
         
+		if (PoolConnectDebugPrint)
+		{
+			for (i = 0; i < nodePool->freeSize; i++)
+			{
+				PGXCNodePoolSlot *slot = nodePool->slot[i];
+
+				if (slot && !slot->bdestoryed && difftime(time(NULL), slot->created) > PoolConnMaxLifetime)
+				{
+					elog(WARNING,
+						POOL_MGR_PREFIX"shrink_pool found connection to "
+						"database:%s user:%s "
+						"nodename:%s nodeid:%d "
+						"nodepool size:%d freeSize:%d that should be destoried.",
+						pool->database, pool->user_name,
+						nodePool->node_name, nodePool->nodeoid,
+						nodePool->size, nodePool->freeSize);
+
+					break;
+				}
+			}
+		}
+
         if (nodePool->size > 0)
         {
             empty = false;
         }
         else
         {
+			if (PoolConnectDebugPrint)
+			{
+				elog(LOG,
+					"shrink_pool: nodePools of node (%u, %s) is removed.",
+					nodePool->nodeoid, nodePool->node_name);
+			}
             destroy_node_pool(nodePool);
             hash_search(pool->nodePools, &nodePool->nodeoid, HASH_REMOVE, NULL);
         }
@@ -6561,9 +6702,10 @@ static void pooler_sync_connections_to_nodepool(void)
                 
                 nodePool = (PGXCNodePool *) hash_search(asyncInfo->dbPool->nodePools, &asyncInfo->node,
                                     HASH_ENTER, &found);
-
                 if (!found)
                 {
+					elog(WARNING, POOL_MGR_PREFIX"The nodePool has not found when the slot is warmed up.");
+
                     oldcontext = MemoryContextSwitchTo(PoolerMemoryContext);
                     nodePool->connstr = build_node_conn_str(asyncInfo->node, asyncInfo->dbPool);
                     if (!nodePool->connstr)
@@ -6587,6 +6729,7 @@ static void pooler_sync_connections_to_nodepool(void)
                     nodePool->coord      = false; /* in this case, only datanode */
                     nodePool->nwarming   = 0;
                     nodePool->nquery     = 0;
+					nodePool->m_version = time(NULL);
 
                     name_str = get_node_name_by_nodeoid(asyncInfo->node);
                     if (NULL == name_str)
@@ -6632,16 +6775,18 @@ static void pooler_sync_connections_to_nodepool(void)
                 }
                 else
                 {                    
-                    
-                    nodeidx = get_node_index_by_nodeoid(asyncInfo->node);
-                    destroy_slot(nodeidx, asyncInfo->node, asyncInfo->slot);
-                    
-                    /* Decrease pool size */
-                    DecreasePoolerSize(nodePool,__FILE__, __LINE__);                    
                     if (PoolConnectDebugPrint)
                     {
-                        elog(LOG, POOL_MGR_PREFIX"destory connection to node:%u nodeidx:%d nodepool size:%d freeSize:%d for unmatch version, slot->m_version:%d, nodePool->m_version:%d", asyncInfo->node, nodeidx, nodePool->size, nodePool->freeSize, asyncInfo->slot->m_version, nodePool->m_version);
+						elog(LOG, POOL_MGR_PREFIX"destory connection to node:%u "
+							"nodeidx:%d nodepool size:%d freeSize:%d for unmatch "
+							"version, slot->m_version:%lu, nodePool->m_version:%lu",
+							asyncInfo->node,
+							nodeidx, nodePool->size, nodePool->freeSize,
+							asyncInfo->slot->m_version, nodePool->m_version);
                     }
+					nodeidx = get_node_index_by_nodeoid(asyncInfo->node);
+					destroy_slot(nodeidx, asyncInfo->node, asyncInfo->slot);
+					break;
                 }
                 
                 if (COMMAND_CONNECTION_WARM == asyncInfo->cmd)
@@ -6753,6 +6898,12 @@ static void pooler_sync_connections_to_nodepool(void)
                                      errmsg(POOL_MGR_PREFIX"get node %u name failed", connRsp->nodeoid)));
                         }
                         snprintf(nodePool->node_name, NAMEDATALEN, "%s", name_str);
+
+						nodePool->m_version = now;
+						elog(LOG,
+							"pooler_sync_connections_to_nodepool: nodePools of "
+							"node (%u, %s) is created.",
+							nodePool->nodeoid, nodePool->node_name);
                     }
 
                     /* add connection to hash table */
@@ -6801,14 +6952,12 @@ static void pooler_sync_connections_to_nodepool(void)
                             destroy_slot(connRsp->nodeindex, connRsp->nodeoid, slot);
                             if (PoolConnectDebugPrint)
                             {
-                                elog(LOG, POOL_MGR_PREFIX"destroy slot poolsize:%d, freeSize:%d, node:%u, MaxPoolSize:%d, connRsp->m_version:%d, nodePool->m_version:%d", 
+								elog(LOG, POOL_MGR_PREFIX"destroy slot poolsize:%d, "
+									"freeSize:%d, node:%u, MaxPoolSize:%d, "
+									"connRsp->m_version:%lu, nodePool->m_version:%lu",
                                                                                                                            nodePool->size, 
-                                                                                                                           nodePool->freeSize, 
-                                                                                                                           nodePool->nodeoid, 
-                                                                                                                           MaxPoolSize,
-                                                                                                                           connRsp->m_version,
-                                                                                                                           nodePool->m_version
-                                                                                                                           );
+									nodePool->freeSize, nodePool->nodeoid, MaxPoolSize,
+									connRsp->m_version, nodePool->m_version);
                             }
                         }
                                     
@@ -6998,7 +7147,7 @@ static void pooler_async_ping_node(Oid node)
 
 
 /* async batch connection build  */
-static bool pooler_async_build_connection(DatabasePool *pool, int32 pool_version, int32 nodeidx, Oid node, int32 size, char *connStr, bool bCoord)
+static bool pooler_async_build_connection(DatabasePool *pool, time_t pool_version, int32 nodeidx, Oid node, int32 size, char *connStr, bool bCoord)
 {
 	int32 threadid; 
 	uint64 pipeput_loops = 0;
@@ -7308,6 +7457,11 @@ preconnect_and_warm(DatabasePool *dbPool)
                          errmsg(POOL_MGR_PREFIX"get node %u name failed", dnOids[i])));
             }
             snprintf(nodePool->node_name, NAMEDATALEN, "%s", name_str);
+
+			nodePool->m_version = time(NULL);
+			elog(LOG,
+				"preconnect_and_warm: nodePools of node (%u, %s) is created.",
+				nodePool->nodeoid, nodePool->node_name);
         }
 
         while (nodePool->size < MinPoolSize || (nodePool->freeSize < MinFreeSize && nodePool->size < MaxPoolSize))
@@ -7761,8 +7915,9 @@ void *pooler_sync_remote_operator_thread(void *arg)
                             {
                                 if (PoolConnectStaus_connected == request->final_status)
                                 {
-                                    finish_task_request(request->taskControl);
+								    /* Increase success count first and then finish count */
                                     acquire_command_increase_succeed(request->taskControl);
+									finish_task_request(request->taskControl);
                                     request->current_status = PoolConnectStaus_done;
                                 }
                                 else
@@ -7847,8 +8002,9 @@ void *pooler_sync_remote_operator_thread(void *arg)
                                     {
                                         /* job succeed */
                                         request->current_status = PoolConnectStaus_done;
-                                        finish_task_request(request->taskControl);    
+                                        /* Increase success count first and then finish count */
                                         acquire_command_increase_succeed(request->taskControl);
+										finish_task_request(request->taskControl);
                                     }
                                 }                                                            
                                 continue;
@@ -7864,9 +8020,10 @@ void *pooler_sync_remote_operator_thread(void *arg)
                             {
                                 int32                ret2    = 0;
                                                 
+                                /* Increase success count first and then finish count */
+                                acquire_command_increase_succeed(request->taskControl);
                                 /* set myself finish count */
                                 finish_task_request(request->taskControl);
-                                acquire_command_increase_succeed(request->taskControl);
                                 
                                 /* wait for others to finish */    
                                 while (!check_is_task_done(request->taskControl))
@@ -8452,6 +8609,9 @@ static inline bool dispatch_connection_request(PGXCASyncTaskCtl  *taskControl,
         
         /* use version to tag every slot */
         slot->m_version = nodepool->m_version;    
+		slot->created = time(NULL);
+		slot->checked = slot->created;
+		slot->released = slot->created;
     }
 
 
@@ -9916,7 +10076,7 @@ static void print_pooler_slot(PGXCNodePoolSlot  *slot)
     }
     else
     {
-        elog(LOG, "slot=%p bwarmed=%d usecount=%d refcount=%d m_version=%d pid=%d seqnum=%d "
+		elog(LOG, "slot=%p bwarmed=%d usecount=%d refcount=%d m_version=%lu pid=%d seqnum=%d "
                   "bdestoryed=%d file=%s lineno=%d node_name=%s backend_pid=%d",
                   slot, slot->bwarmed,
                   slot->usecount, slot->refcount,slot->m_version,slot->pid,slot->seqnum,
@@ -10744,65 +10904,6 @@ handle_session_command(PoolAgent * agent, StringInfo s)
 }
 
 
-
-static bool
-remove_all_agent_references(Oid nodeoid)
-{// #lizard forgives
-    int i, j;
-    bool res = true;
-
-    /*
-     * Identify if it's a coordinator or datanode first
-     * and get its index
-     */
-    for (i = 1; i <= agentCount; i++)
-    {
-        bool found = false;
-
-        PoolAgent *agent = poolAgents[i - 1];
-        for (j = 0; j < agent->num_dn_connections; j++)
-        {
-            if (agent->dn_conn_oids[j] == nodeoid)
-            {
-                found = true;
-                break;
-            }
-        }
-        if (found)
-        {
-            PGXCNodePoolSlot *slot = agent->dn_connections[j];
-            if (slot)
-                release_connection(agent->pool, slot, j, agent->dn_conn_oids[j], false, false);
-            agent->dn_connections[j] = NULL;
-        }
-        else
-        {
-            for (j = 0; j < agent->num_coord_connections; j++)
-            {
-                if (agent->coord_conn_oids[j] == nodeoid)
-                {
-                    found = true;
-                    break;
-                }
-            }
-            if (found)
-            {
-                PGXCNodePoolSlot *slot = agent->coord_connections[j];
-                if (slot)
-                    release_connection(agent->pool, slot, j, agent->coord_conn_oids[j], true, true);
-                agent->coord_connections[j] = NULL;
-            }
-            else
-            {
-                elog(LOG, "Node not found! (%u)", nodeoid);
-                res = false;
-            }
-        }
-    }
-    return res;
-}
-
-
 /*
  * refresh_database_pools
  *        refresh information for all database pools
@@ -10875,22 +10976,44 @@ refresh_database_pools(PoolAgent *agent)
 
             if (strcmp(connstr_chk, nodePool->connstr))
             {
-                elog(LOG, "Found an altered node (%u)", nodePool->nodeoid);
-                /*
-                 * Node has been altered. First remove
-                 * all references to this node from ALL the
-                 * agents before destroying it..
-                 */
-                if (!remove_all_agent_references(nodePool->nodeoid))
+				if (nodePool->size == nodePool->freeSize)
                 {
-                    res = POOL_REFRESH_FAILED;
-                    break;
-                }
-
+					elog(LOG,
+						"refresh_database_pools: Found an altered node (%u %s) "
+						"size %d freesize %d is removed. "
+						"connstr_chk=%s, nodePool->connstr=%s",
+						nodePool->nodeoid, nodePool->node_name,
+						nodePool->size, nodePool->freeSize,
+						connstr_chk, nodePool->connstr);
                 destroy_node_pool(nodePool);
                 hash_search(databasePool->nodePools, &nodePool->nodeoid,
                             HASH_REMOVE, NULL);
             }
+				else
+				{
+					destroy_node_pool_free_slots(nodePool);
+
+					/* increase the node pool version */
+					nodePool->m_version = time(NULL);
+					elog(LOG,
+						"refresh_database_pools: Found an altered node (%u %s) "
+						"size %d freesize %d increased m_version %lu"
+						"connstr_chk=%s, nodePool->connstr=%s",
+						nodePool->nodeoid, nodePool->node_name,
+						nodePool->size, nodePool->freeSize, nodePool->m_version,
+						connstr_chk, nodePool->connstr);
+
+					/* fresh the connect string so that new coming connection will connect to the new node  */
+					if (connstr_chk)
+					{
+						if (nodePool->connstr)
+						{
+							pfree(nodePool->connstr);
+						}
+						nodePool->connstr = pstrdup(connstr_chk);
+					}
+				}
+			}
 
             if (connstr_chk)
                 pfree(connstr_chk);
@@ -11181,7 +11304,7 @@ handle_close_pooled_connections(PoolAgent * agent, StringInfo s)
                 destroy_node_pool_free_slots(nodePool);
 
                 /* increase the node pool version */
-                nodePool->m_version++;    
+				nodePool->m_version = time(NULL);
             }
         }
 

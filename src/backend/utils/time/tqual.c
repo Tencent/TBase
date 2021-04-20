@@ -243,6 +243,9 @@ SetHintBits(HeapTupleHeader tuple, Buffer buffer,
     GlobalTimestamp global_timestamp;
 #endif
 
+	BufferDesc *buf = NULL;
+	bool mprotect = false;
+
     if (TransactionIdIsValid(xid))
     {
         /* NB: xid must be known committed here! */
@@ -256,10 +259,18 @@ SetHintBits(HeapTupleHeader tuple, Buffer buffer,
         }
     }
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-	if (enable_buffer_mprotect)
+	/*
+	 * BUFFER_LOCK_EXCLUSIVE has made the buffer writable, but BUFFER_LOCK_SHARED
+	 * does not, so it has to be set to be writable.
+	 *
+	 * After setting GTS, it needs to set the memory protection again.
+	 */
+	buf = GetBufferDescriptor(buffer - 1);
+	mprotect = enable_buffer_mprotect &&
+		LWLockHeldByMeInMode(BufferDescriptorGetContentLock(buf), LW_SHARED);
+	if (mprotect)
 	{
-		LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
-		LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+		BufDisableMemoryProtection(BufferGetPage(buffer), false);
 	}
     if(infomask & HEAP_XMIN_COMMITTED)
     {
@@ -323,6 +334,11 @@ SetHintBits(HeapTupleHeader tuple, Buffer buffer,
 
     tuple->t_infomask |= infomask;
     MarkBufferDirtyHint(buffer, true);
+
+	if (mprotect)
+	{
+		BufEnableMemoryProtection(BufferGetPage(buffer), false);
+	}
 }
 
 

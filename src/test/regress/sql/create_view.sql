@@ -584,3 +584,11 @@ select pg_get_ruledef(oid, true) from pg_rewrite
 \set VERBOSITY terse \\ -- suppress cascade details
 DROP SCHEMA temp_view_test CASCADE;
 DROP SCHEMA testviewschm2 CASCADE;
+
+-- check plan without sort operator, but need merge sort
+set enable_seqscan = off;
+create table test(v int primary key, w int) distribute by shard(v); 
+insert into test values(generate_series(1,50), generate_series(1,50));
+create view test_sort as select * from test where v in (select v from test where w < 20) order by v asc;
+select * from test_sort;
+drop table test cascade;

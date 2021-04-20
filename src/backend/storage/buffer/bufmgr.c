@@ -2966,7 +2966,9 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln)
         if (REL_CRYPT_ENTRY_IS_VALID(&(reln->smgr_relcrypt)) 
             && (MAIN_FORKNUM == buf->tag.forkNum || EXTENT_FORKNUM == buf->tag.forkNum))
         {
+			BufDisableMemoryProtection(bufBlock, false);
             bufBlockEncrypt = rel_crypt_page_encrypt((RelCrypt)&(reln->smgr_relcrypt), bufToWrite);
+			BufEnableMemoryProtection(bufBlock, false);
         }
         else
         {       
@@ -3505,7 +3507,9 @@ FlushRelationBuffers(Relation rel)
                 if (REL_CRYPT_ENTRY_IS_VALID(&(rel->rd_smgr->smgr_relcrypt))
                     && (MAIN_FORKNUM == bufHdr->tag.forkNum || EXTENT_FORKNUM == bufHdr->tag.forkNum))
                 {
+					BufDisableMemoryProtection(localpage, false);
                     bufBlockEncrypt = rel_crypt_page_encrypt((RelCrypt)&(rel->rd_smgr->smgr_relcrypt), localpage);
+					BufDisableMemoryProtection(localpage, false);
                 }
                 else
                 {

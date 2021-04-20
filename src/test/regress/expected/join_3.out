@@ -3513,13 +3513,13 @@ left join
   ) foo3
 using (join_key);
                                    QUERY PLAN                                   
---------------------------------------------------------------------------------
- Hash Right Join
-   Output: "*VALUES*".column1, i1.f1, (666)
-   Hash Cond: (i1.f1 = "*VALUES*".column1)
-   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-         Output: i1.f1, 666
-         ->  Merge Right Join
+-----------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   Output: "*VALUES*".column1, i1.f1, 666
+   ->  Hash Right Join
+         Output: "*VALUES*".column1, i1.f1, (666)
+         Hash Cond: (i1.f1 = "*VALUES*".column1)
+         ->  Hash Right Join
                Output: i1.f1, 666
                Merge Cond: (i2.unique2 = i1.f1)
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
@@ -3540,9 +3540,12 @@ using (join_key);
                                        Output: i1.f1
    ->  Hash
          Output: "*VALUES*".column1
+               ->  Remote Subquery Scan on all (datanode_1)
+                     Output: "*VALUES*".column1
+                     Distribute results by H: column1
          ->  Values Scan on "*VALUES*"
                Output: "*VALUES*".column1
-(28 rows)
+(27 rows)
 
 select foo1.join_key as foo1_id, foo3.join_key AS foo3_id, bug_field from
   (values (0),(1)) foo1(join_key)
@@ -3558,8 +3561,8 @@ left join
 using (join_key);
  foo1_id | foo3_id | bug_field 
 ---------+---------+-----------
-       0 |       0 |       666
        1 |         |          
+       0 |       0 |       666
 (2 rows)
 
 --
@@ -5431,15 +5434,13 @@ select * from
            where f1 = any (select unique1 from tenk1
                            where unique2 = v.x offset 0)) ss;
                                        QUERY PLAN                                       
-----------------------------------------------------------------------------------------
- Nested Loop
+----------------------------------------------------------------------------------
+ Remote Subquery Scan on all
+   Output: "*VALUES*".column1, "*VALUES*".column2, int4_tbl.f1
+   ->  Nested Loop
    Output: "*VALUES*".column1, "*VALUES*".column2, int4_tbl.f1
    ->  Values Scan on "*VALUES*"
          Output: "*VALUES*".column1, "*VALUES*".column2
-   ->  Materialize
-         Output: int4_tbl.f1
-         ->  Remote Subquery Scan on all
-               Output: int4_tbl.f1
                ->  Hash Join
                      Output: int4_tbl.f1
                      Inner Unique: true
@@ -5454,7 +5455,7 @@ select * from
                                  ->  Index Scan using tenk1_unique2 on public.tenk1
                                        Output: tenk1.unique1
                                        Index Cond: (tenk1.unique2 = "*VALUES*".column2)
-(22 rows)
+(20 rows)
 
 select * from
   (values (0,9998), (1,1000)) v(id,x),
@@ -5478,19 +5479,17 @@ lateral (select * from int8_tbl t1,
                                        and (select v.id=0)) offset 0) ss2) ss
          where t1.q1 = ss.q2) ss0;
                                     QUERY PLAN                                     
------------------------------------------------------------------------------------
- Nested Loop
+-----------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1)
    Output: "*VALUES*".column1, t1.q1, t1.q2, ss2.q1, ss2.q2
-   ->  Values Scan on "*VALUES*"
-         Output: "*VALUES*".column1
-   ->  Materialize
-         Output: t1.q1, t1.q2, ss2.q1, ss2.q2
-         ->  Remote Subquery Scan on all (datanode_1)
-               Output: t1.q1, t1.q2, ss2.q1, ss2.q2
                ->  Nested Loop
-                     Output: t1.q1, t1.q2, ss2.q1, ss2.q2
+         Output: "*VALUES*".column1, t1.q1, t1.q2, ss2.q1, ss2.q2
                      ->  Seq Scan on public.int8_tbl t1
                            Output: t1.q1, t1.q2
+         ->  Nested Loop
+               Output: "*VALUES*".column1, ss2.q1, ss2.q2
+               ->  Values Scan on "*VALUES*"
+                     Output: "*VALUES*".column1
                      ->  Subquery Scan on ss2
                            Output: ss2.q1, ss2.q2
                            Filter: (t1.q1 = ss2.q2)
@@ -5512,7 +5511,7 @@ lateral (select * from int8_tbl t1,
                                                ->  Seq Scan on public.int8_tbl t3
                                                      Output: t3.q1, t3.q2
                                                      Filter: (t3.q2 = $2)
-(33 rows)
+(31 rows)
 
 select * from (values (0), (1)) v(id),
 lateral (select * from int8_tbl t1,

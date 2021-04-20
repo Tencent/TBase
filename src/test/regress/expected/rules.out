@@ -3197,11 +3197,12 @@ RETURNING *;
          Conflict Arbiter Indexes: hat_data_unique_idx
          Conflict Filter: ((excluded.hat_color <> 'forbidden'::bpchar) AND (hat_data.* <> excluded.*))
          CTE data
+           ->  Remote Subquery Scan on all
            ->  Values Scan on "*VALUES*"
          ->  Remote Subquery Scan on all
                Distribute results by H: hat_name
                ->  CTE Scan on data
-(10 rows)
+(11 rows)
 
 SELECT * FROM hat_data WHERE hat_name IN ('h8', 'h9', 'h7') ORDER BY hat_name;
   hat_name  | hat_color  

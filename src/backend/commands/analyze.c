@@ -5133,6 +5133,11 @@ acquire_coordinator_sample_rows(Relation onerel, int elevel,
 	dummy = makeVar(1, 5, onerel->rd_rel->reltype, 0, InvalidOid, 0);
 	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
 										 makeTargetEntry((Expr *) dummy, 5, "rows", false));
+	/*
+	 * ANALYZE has known it's result slot desc, should
+	 * ignore received one to avoid duplicate name issue
+	 */
+	step->ignore_tuple_desc = true;
 
 	/* Execute query on the data nodes */
 	estate = CreateExecutorState();

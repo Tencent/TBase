@@ -749,9 +749,7 @@ static void* mls_crypt_worker(void * input)
         buf_need_encrypt = page_new + BLCKSZ;
 
         /* 2.2 do the encrypt */
-        need_mprotect = enable_buffer_mprotect &&
-            !BufferIsLocal(encrypt_element.buf_id) &&
-            BufferIsValid(encrypt_element.buf_id);
+        need_mprotect = enable_buffer_mprotect && !BufferIsLocal(encrypt_element.buf_id);
         if (need_mprotect)
         {
             BufDisableMemoryProtection(buf, false);

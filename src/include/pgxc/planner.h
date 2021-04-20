@@ -227,6 +227,7 @@ typedef struct
 
 	Node			*parsetree;  /* to recognize subtxn cmds (savepoint, rollback to, release savepoint) */
 	bool            is_set;      /* is SET statement ? */
+	bool            ignore_tuple_desc; /* should ignore received tuple slot desc ? */
 #endif
 } RemoteQuery;
 

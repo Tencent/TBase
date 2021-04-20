@@ -104,6 +104,7 @@
 int remote_subplan_depth = 0;
 List *groupOids = NULL;
 bool mergejoin = false;
+bool child_of_gather = false;
 bool enable_group_across_query = false;
 bool enable_distributed_unique_plan = false;
 #endif
@@ -1955,6 +1956,14 @@ create_gather_plan(PlannerInfo *root, GatherPath *best_path)
     Gather       *gather_plan;
     Plan       *subplan;
     List       *tlist;
+    bool reset = false;
+
+    /* if child_of_gather is false, set child_of_gather true, and reset the value before return */
+    if (!child_of_gather)
+    {
+        child_of_gather = true;
+        reset = true;
+    }
 
     /*
      * Although the Gather node can project, we prefer to push down such work
@@ -1974,6 +1983,11 @@ create_gather_plan(PlannerInfo *root, GatherPath *best_path)
 
     /* use parallel mode for parallel plans. */
     root->glob->parallelModeNeeded = true;
+
+	if (reset)
+    {
+        child_of_gather = false;
+    }
 
     return gather_plan;
 }
@@ -7086,7 +7100,7 @@ make_remotesubplan(PlannerInfo *root,
         gather_plan->parallelWorker_sendTuple = true;
     }
 
-    if ((IsA(lefttree, Gather) || lefttree->parallel_aware) &&
+	if ((IsA(lefttree, Gather) || lefttree->parallel_aware || child_of_gather) &&
         olap_optimizer)
     {
         plan->parallel_aware = true;

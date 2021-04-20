@@ -1341,6 +1341,7 @@ _copyRemoteQuery(const RemoteQuery *from)
     COPY_SCALAR_FIELD(jf_xc_wholerow);
     COPY_BITMAPSET_FIELD(conflict_cols);
 	COPY_SCALAR_FIELD(is_set);
+	COPY_SCALAR_FIELD(ignore_tuple_desc);
 #endif
     return newnode;
 }

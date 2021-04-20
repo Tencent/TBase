@@ -32,6 +32,7 @@ CREATE OR REPLACE FUNCTION tbase_get_pooler_conn_statistics(
 	OUT warming_cnt int4,
 	OUT query_cnt int4,
 	OUT exceed_keepalive_cnt int4,
+	OUT exceed_deadtime_cnt int4,
 	OUT exceed_maxlifetime_cnt int4
 )
 RETURNS SETOF record

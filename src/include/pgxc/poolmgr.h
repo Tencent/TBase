@@ -105,7 +105,7 @@ typedef struct
 
     /* trace info */    
     int32  refcount;   /* reference count */
-    int32  m_version;  /* version of node slot */
+	time_t m_version;  /* version of node slot */
     int32  pid;           /* agent pid that contains the slot */
     int32  seqnum;       /* slot seqnum for the slot, unique for one slot */
     bool   bdestoryed; /* used to show whether we are destoryed */
@@ -128,7 +128,7 @@ typedef struct
     int            size;          /* total pool size */
 
     char        node_name[NAMEDATALEN]; /* name of the node.*/
-    int32       m_version;    /* version of node pool */
+	time_t		m_version;	/* version of node pool */
     PGXCNodePoolSlot **slot;
 } PGXCNodePool;
 

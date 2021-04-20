@@ -44,6 +44,7 @@
 #include "optimizer/var.h"
 #include "parser/parse_clause.h"
 #include "parser/parsetree.h"
+#include "pgxc/nodemgr.h"
 #ifdef PGXC
 #include "nodes/makefuncs.h"
 #include "miscadmin.h"
@@ -141,6 +142,7 @@ static void recurse_push_qual(Node *setOp, Query *topquery,
 static void remove_unused_subquery_outputs(Query *subquery, RelOptInfo *rel);
 static void add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel,
                         List *live_childrels);
+static bool check_list_contain_all_const(List *list);
 
 
 /*
@@ -2079,6 +2081,35 @@ set_function_pathlist(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 }
 
 /*
+ * check_list_contain_all_const
+ *      Check the list is contain all consts.
+ */
+static bool
+check_list_contain_all_const(List *list)
+{
+	ListCell *lc = NULL;
+	Node   *node = NULL;
+
+	foreach(lc, list)
+	{
+		node = lfirst(lc);
+		if (IsA(node, List))
+		{
+			if (!check_list_contain_all_const(node))
+			{
+				return false;
+			}
+		}
+		else if (!IsA(node, Const))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/*
  * set_values_pathlist
  *        Build the (single) access path for a VALUES RTE
  */
@@ -2086,6 +2117,7 @@ static void
 set_values_pathlist(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 {
     Relids        required_outer;
+	Path        *new_path = NULL;
 
     /*
      * We don't support pushing join clauses into the quals of a values scan,
@@ -2095,7 +2127,29 @@ set_values_pathlist(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
     required_outer = rel->lateral_relids;
 
     /* Generate appropriate path */
-    add_path(rel, create_valuesscan_path(root, rel, required_outer));
+	new_path = create_valuesscan_path(root, rel, required_outer);
+
+	/* Mark scan as replicated if selected value list is all const */
+	if (root->parse->commandType == CMD_SELECT &&
+	    check_list_contain_all_const((List *)rte->values_lists))
+	{
+		Distribution *targetd = NULL;
+		int node_index = 0;
+
+		targetd = makeNode(Distribution);
+		targetd->distributionType = LOCATOR_TYPE_REPLICATED;
+		targetd->nodes = NULL;
+
+		for (node_index = 0; node_index < NumDataNodes; node_index++)
+		{
+			targetd->nodes = bms_add_member(targetd->nodes, node_index);
+		}
+
+		targetd->restrictNodes = NULL;
+		new_path->distribution = targetd;
+	}
+
+	add_path(rel, new_path);
 }
 
 /*

@@ -129,7 +129,8 @@ cross join lateral
                                       QUERY PLAN                                      
 --------------------------------------------------------------------------------------
  Nested Loop
-   ->  Values Scan on "*VALUES*"
+   ->  Remote Subquery Scan on all (datanode_1)
+         ->  Values Scan on "*VALUES*"
    ->  Materialize
          ->  Limit
                ->  Remote Subquery Scan on all (datanode_1)
@@ -137,7 +138,7 @@ cross join lateral
                            ->  Index Only Scan using gist_tbl_point_index on gist_tbl
                                  Index Cond: (p <@ "*VALUES*".column1)
                                  Order By: (p <-> ("*VALUES*".column1)[0])
-(9 rows)
+(10 rows)
 
 select p from
   (values (box(point(0,0), point(0.5,0.5))),

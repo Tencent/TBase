@@ -242,17 +242,22 @@ select pct, count(unique1) from
   (values (0),(100)) v(pct),
   lateral (select * from tenk1 tablesample bernoulli (pct)) ss
   group by pct;
-                              QUERY PLAN                               
------------------------------------------------------------------------
- HashAggregate
-   Group Key: "*VALUES*".column1
-   ->  Nested Loop
-         ->  Values Scan on "*VALUES*"
-         ->  Materialize
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   ->  Finalize GroupAggregate
+         Group Key: "*VALUES*".column1
+         ->  Sort
+               Sort Key: "*VALUES*".column1
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                     ->  Sample Scan on tenk1
-                           Sampling: bernoulli ("*VALUES*".column1)
-(8 rows)
+                     Distribute results by H: column1
+                     ->  Partial HashAggregate
+                           Group Key: "*VALUES*".column1
+                           ->  Nested Loop
+                                 ->  Values Scan on "*VALUES*"
+                                 ->  Sample Scan on tenk1
+                                       Sampling: bernoulli ("*VALUES*".column1)
+(13 rows)
 
 select pct, count(unique1) from
   (values (0),(100)) v(pct),
@@ -260,7 +265,8 @@ select pct, count(unique1) from
   group by pct;
  pct | count 
 -----+-------
-(0 rows)
+ 100 | 10000
+(1 row)
 
 select pct, count(unique1) from
   (values (0),(100)) v(pct),
@@ -268,7 +274,8 @@ select pct, count(unique1) from
   group by pct;
  pct | count 
 -----+-------
-(0 rows)
+ 100 | 10000
+(1 row)
 
 -- errors
 SELECT id FROM test_tablesample TABLESAMPLE FOOBAR (1);

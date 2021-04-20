@@ -1410,14 +1410,16 @@ explain (costs off)
    Hash Key: four
    Hash Key: ten
    Hash Key: hundred
-   Hash Key: thousand
-   Hash Key: twothousand
    Group Key: unique1
+   Sort Key: twothousand
+     Group Key: twothousand
+   Sort Key: thousand
+     Group Key: thousand
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Sort
                Sort Key: unique1
                ->  Seq Scan on tenk1
-(12 rows)
+(14 rows)
 
 explain (costs off)
   select unique1,
@@ -1448,16 +1450,18 @@ explain (costs off)
     from tenk1 group by grouping sets (unique1,twothousand,thousand,hundred,ten,four,two);
                         QUERY PLAN                         
 -----------------------------------------------------------
- HashAggregate
-   Hash Key: unique1
-   Hash Key: twothousand
-   Hash Key: thousand
-   Hash Key: hundred
-   Hash Key: ten
-   Hash Key: four
+ MixedAggregate
    Hash Key: two
+   Hash Key: four
+   Hash Key: ten
+   Hash Key: hundred
+   Hash Key: thousand
+   Hash Key: twothousand
+   Group Key: unique1
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-         ->  Seq Scan on tenk1
-(10 rows)
+         ->  Sort
+               Sort Key: unique1
+               ->  Seq Scan on tenk1
+(12 rows)
 
 -- end

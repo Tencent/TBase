@@ -220,6 +220,7 @@ extent_readbuffer(Relation rel, BlockNumber blkno, bool extend)
     buf = ReadBufferExtended(rel, EXTENT_FORKNUM, blkno, RBM_ZERO_ON_ERROR, NULL);
     if (PageIsNew(BufferGetPage(buf)))
     {
+		LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
         PageInit_shard(BufferGetPage(buf), BLCKSZ, 0, InvalidShardID, true);
         switch(pagetype)
         {
@@ -236,6 +237,7 @@ extent_readbuffer(Relation rel, BlockNumber blkno, bool extend)
                 elog(PANIC, "page type %d is not supported.", pagetype);
                 break;
         }
+		LockBuffer(buf, BUFFER_LOCK_UNLOCK);
     }
     return buf;
 }
@@ -324,6 +326,7 @@ extent_readbuffer_for_redo(RelFileNode rnode, BlockNumber blkno, bool extend)
     buf = XLogReadBufferExtended(rnode, EXTENT_FORKNUM, blkno, RBM_ZERO_ON_ERROR);
     if (PageIsNew(BufferGetPage(buf)))
     {
+		LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
         PageInit_shard(BufferGetPage(buf), BLCKSZ, 0, InvalidShardID, true);
         switch(pagetype)
         {
@@ -340,6 +343,7 @@ extent_readbuffer_for_redo(RelFileNode rnode, BlockNumber blkno, bool extend)
                 elog(PANIC, "page type %d is not supported.", pagetype);
                 break;
         }
+		LockBuffer(buf, BUFFER_LOCK_UNLOCK);
     }
     return buf;
 }

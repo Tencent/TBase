@@ -164,7 +164,7 @@ static void FreePagePushSpanLeader(FreePageManager *fpm, Size first_page,
 static Size FreePageManagerLargestContiguous(FreePageManager *fpm);
 static void FreePageManagerUpdateLargest(FreePageManager *fpm);
 
-#if FPM_EXTRA_ASSERTS
+#ifdef FPM_EXTRA_ASSERTS
 static Size sum_free_pages(FreePageManager *fpm);
 #endif
 
@@ -231,7 +231,7 @@ FreePageManagerGet(FreePageManager *fpm, Size npages, Size *first_page)
 
     /*
      * FreePageManagerGetInternal may have set contiguous_pages_dirty.
-     * Recompute contigous_pages if so.
+	 * Recompute contiguous_pages if so.
      */
     FreePageManagerUpdateLargest(fpm);
 
@@ -455,7 +455,7 @@ FreePageManagerDump(FreePageManager *fpm)
     recycle = relptr_access(base, fpm->btree_recycle);
     if (recycle != NULL)
     {
-        appendStringInfo(&buf, "btree recycle:");
+		appendStringInfoString(&buf, "btree recycle:");
         FreePageManagerDumpSpans(fpm, recycle, 1, &buf);
     }
 
@@ -468,7 +468,7 @@ FreePageManagerDump(FreePageManager *fpm)
             continue;
         if (!dumped_any_freelist)
         {
-            appendStringInfo(&buf, "freelists:\n");
+			appendStringInfoString(&buf, "freelists:\n");
             dumped_any_freelist = true;
         }
         appendStringInfo(&buf, "  %zu:", f + 1);
@@ -742,8 +742,8 @@ FreePageBtreeConsolidate(FreePageManager *fpm, FreePageBtree *btp)
 
     /*
      * If we can fit our keys onto our left sibling's page, consolidate. In
-     * this case, we move our keys onto the other page rather than visca
-     * versa, to avoid having to adjust ancestor keys.
+	 * this case, we move our keys onto the other page rather than vice versa,
+	 * to avoid having to adjust ancestor keys.
      */
     np = FreePageBtreeFindLeftSibling(base, btp);
     if (np != NULL && btp->hdr.nused + np->hdr.nused <= max)
@@ -1275,7 +1275,7 @@ FreePageManagerDumpBtree(FreePageManager *fpm, FreePageBtree *btp,
                              btp->u.leaf_key[index].first_page,
                              btp->u.leaf_key[index].npages);
     }
-    appendStringInfo(buf, "\n");
+	appendStringInfoChar(buf, '\n');
 
     if (btp->hdr.magic == FREE_PAGE_INTERNAL_MAGIC)
     {
@@ -1308,7 +1308,7 @@ FreePageManagerDumpSpans(FreePageManager *fpm, FreePageSpanLeader *span,
         span = relptr_access(base, span->next);
     }
 
-    appendStringInfo(buf, "\n");
+	appendStringInfoChar(buf, '\n');
 }
 
 /*
@@ -1470,9 +1470,7 @@ FreePageManagerGetInternal(FreePageManager *fpm, Size npages, Size *first_page)
  * pages; if false, do it always.  Returns 0 if the soft flag caused the
  * insertion to be skipped, or otherwise the size of the contiguous span
  * created by the insertion.  This may be larger than npages if we're able
- * to consolidate with an adjacent range.  *internal_pages_used is set to
- * true if the btree allocated pages for internal purposes, which might
- * invalidate the current largest run requiring it to be recomputed.
+ * to consolidate with an adjacent range.
  */
 static Size
 FreePageManagerPutInternal(FreePageManager *fpm, Size first_page, Size npages,
@@ -1526,6 +1524,9 @@ FreePageManagerPutInternal(FreePageManager *fpm, Size first_page, Size npages,
 
             if (!relptr_is_null(fpm->btree_recycle))
                 root = FreePageBtreeGetRecycled(fpm);
+			/* Should not allocate if soft. */
+			else if (soft)
+				return 0;
             else if (FreePageManagerGetInternal(fpm, 1, &root_page))
                 root = (FreePageBtree *) fpm_page_to_pointer(base, root_page);
             else
@@ -1692,7 +1693,7 @@ FreePageManagerPutInternal(FreePageManager *fpm, Size first_page, Size npages,
 
             /*
              * The act of allocating pages to recycle may have invalidated the
-             * results of our previous btree reserch, so repeat it. (We could
+			 * results of our previous btree research, so repeat it. (We could
              * recheck whether any of our split-avoidance strategies that were
              * not viable before now are, but it hardly seems worthwhile, so
              * we don't bother. Consolidation can't be possible now if it

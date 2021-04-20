@@ -545,6 +545,15 @@ HandleRowDescription(ResponseCombiner *combiner, char *msg_body, size_t len)
                 (errcode(ERRCODE_DATA_CORRUPTED),
                  errmsg("Unexpected response from the Datanodes for 'T' message, current request type %d", combiner->request_type)));
     }
+	
+	/* should ignore received tuple desc if already got one to avoid duplicate name issue */
+	if (combiner->ss.ps.plan != NULL &&
+		IsA(combiner->ss.ps.plan, RemoteQuery) &&
+		((RemoteQuery *) combiner->ss.ps.plan)->ignore_tuple_desc)
+	{
+		return false;
+	}
+	
     /* Increment counter and check if it was first */
     if (combiner->description_count == 0)
     {

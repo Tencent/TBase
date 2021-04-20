@@ -284,7 +284,16 @@ hashgettuple(IndexScanDesc scan, ScanDirection dir)
      * Reacquire the read lock here.
      */
     if (BufferIsValid(so->hashso_curbuf))
+	{
+		if (enable_buffer_mprotect)
+		{
+			LockBuffer(so->hashso_curbuf, BUFFER_LOCK_EXCLUSIVE);
+		}
+		else
+		{
         LockBuffer(so->hashso_curbuf, BUFFER_LOCK_SHARE);
+		}
+	}
 
     /*
      * If we've already initialized this scan, we can just advance it in the

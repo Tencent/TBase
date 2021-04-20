@@ -1884,6 +1884,16 @@ pgxc_query_contains_only_pg_catalog(List *rtable)
     return true;
 }
 
+ExecNodes *
+make_FQS_single_node()
+{
+	ExecNodes       *exec_nodes;
+	exec_nodes = makeNode(ExecNodes);
+	exec_nodes->accesstype = RELATION_ACCESS_READ_FQS;
+	exec_nodes->nodeList = lappend_int(exec_nodes->nodeList, 0);
+	return exec_nodes;
+}
+
 /*
  * pgxc_is_query_shippable
  * This function calls the query walker to analyse the query to gather
@@ -1917,10 +1927,19 @@ pgxc_is_query_shippable(Query *query, int query_level)
 
 	exec_nodes = sc_context.sc_exec_nodes;
 
-	/* For single datanode and select command, we ship it directly. */
-	if (NumDataNodes == 1 && query->commandType == CMD_SELECT &&
-		!bms_is_member(SS_NEEDS_COORD, sc_context.sc_shippability))
+	/* For single datanode and select command, if we don't need coord
+	 * and exec_nodes exists, return it directly. But if exec_nodes is
+	 * NULL we make exec_nodes for FQS;
+	 */
+	if (!bms_is_member(SS_NEEDS_COORD, sc_context.sc_shippability))
+	{
+		if (NumDataNodes == 1 && query->commandType == CMD_SELECT)
+		{
+			if (exec_nodes)
 		return exec_nodes;
+			return make_FQS_single_node();
+		}
+	}
 		
 	/*
 	 * The shippability context contains two ExecNodes, one for the subLinks
