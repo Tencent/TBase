@@ -2275,6 +2275,11 @@ ExecModifyTable(PlanState *pstate)
     {
         subplanstate = node->partplans[node->part_whichplan];
         part_resultRelInfo = resultRelInfo->part_relinfo[node->part_whichplan];
+        /* when use update ... returning  this fuction will be reentered, 
+         * so the execution should ues the last state of part_resultRelInfo
+         * */ 
+        junkfilter = resultRelInfo->ri_junkFilter;
+        estate->es_result_relation_info = part_resultRelInfo;
     }
     else
     {
