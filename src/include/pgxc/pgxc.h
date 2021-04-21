@@ -76,6 +76,7 @@
 #define PGXC_H
 
 #include "postgres.h"
+#include "nodes/pg_list.h"
 
 extern bool isPGXCCoordinator;
 extern bool isPGXCDataNode;
@@ -107,6 +108,8 @@ extern char *PGXCMainClusterName;
 extern char *PGXCDefaultClusterName;
 #ifdef __TBASE__
 extern char PGXCSessionId[NAMEDATALEN];
+extern int PGXCLevelId;
+extern List *PGXCGroupNodeList;
 #endif
 
 

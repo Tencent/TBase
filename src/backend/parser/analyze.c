@@ -753,36 +753,17 @@ transformInsertStmt(ParseState *pstate, InsertStmt *stmt)
         ParseState *sub_pstate = make_parsestate(pstate);
         Query       *selectQuery;
 
-#ifdef __TBASE__
+#ifdef __COLD_HOT__
 		/* prevent insert into cold_hot table select ... */
 		if (pstate->p_target_relation)
 		{
-			RelationLocInfo *target_rel_loc_info = pstate->p_target_relation->rd_locator_info;
-			RelationLocInfo *from_rel_loc_info;
-
-			if (target_rel_loc_info && target_rel_loc_info->locatorType == LOCATOR_TYPE_SHARD)
+			RelationLocInfo *rel_loc_info = pstate->p_target_relation->rd_locator_info;
+			if (rel_loc_info)
 			{
-				foreach(lc, selectStmt->fromClause)
+				if (AttributeNumberIsValid(rel_loc_info->secAttrNum)
+				    || OidIsValid(rel_loc_info->coldGroupId))
 				{
-					Node   *node = lfirst(lc);
-					if (IsA(node, RangeVar))
-					{
-						Oid relid = RangeVarGetRelid((RangeVar *) node, NoLock, true);
-						
-						if (InvalidOid != relid)
-						{
-							Relation rel = heap_open(relid, AccessShareLock);
-
-							from_rel_loc_info = rel->rd_locator_info;
-							if (!is_table_allowed_insert(from_rel_loc_info, target_rel_loc_info))
-							{
-								elog(ERROR,
-									"shard table could not be inserted from any other tables in different group");
-							}
-							
-							heap_close(rel, AccessShareLock);
-						}
-					}
+					elog(ERROR, "table in cold-hot group or key-value group could not join with other tables.");
 				}
 			}
 		}
