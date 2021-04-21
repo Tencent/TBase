@@ -234,6 +234,11 @@ extern bool ScanNeedExecute(Relation rel);
 
 extern List* GetShardMapRangeList(Oid group, Oid coldgroup, Oid relation, Oid type, Datum dvalue, AttrNumber secAttr, Oid secType, 
                     Datum minValue, Datum maxValue, bool  equalMin, bool  equalMax, RelationAccessType accessType);
+
+extern StringInfo SerializeShardmap(void);
+extern void DeserializeShardmap(const char *data);
+extern void InvalidRemoteShardmap(void);
+extern Oid GetMyGroupOid(void);
 #endif
 
 #endif /*_SHARDMAP_H_*/

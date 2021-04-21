@@ -50,6 +50,7 @@
 #include "optimizer/pgxcship.h"
 #include "pgxc/groupmgr.h"
 #include "pgxc/pgxcnode.h"
+#include "utils/memutils.h"
 #endif
 
 #ifdef _MIGRATE_
@@ -67,6 +68,11 @@ int replication_level;
 bool restrict_query = false;
 /* Support fast query shipping for subquery */
 bool enable_subquery_shipping = false;
+
+/* join will happen in these nodes forcibly */
+char  *g_constrain_group; /* the GUC variable */
+static Bitmapset *constrainNodes = NULL;
+#define BMS_EQUAL_CONSTRAINT(bms) (bms_is_empty(constrainNodes) || bms_equal(constrainNodes, (bms)))
 
 #define  REPLICATION_FACTOR 0.8
 #endif
@@ -1679,28 +1685,6 @@ set_joinpath_distribution(PlannerInfo *root, JoinPath *pathnode)
 	}
 
 	/*
-	 * If outer or inner subpaths are distributed by shard and they do not exist
-	 * in same node set, which means we may need to redistribute tuples to data
-	 * nodes which use different router map to producer.
-	 * We don't support that, so pull it up to CN to accomplish the join.
-	 * 
-	 * TODO:
-	 *      1. if the join is "REPLICATION join SHARD", and node set of SHARD table
-	 *      is subset of REPLICATION table, no need to pull up.
-	 *      2. find out which side of this join needs to dispatch, and only decide
-	 *      whether to pull up by the distributionType of another side subpath.
-	 *      3. pass target router map to another group maybe ? thus nothing need to
-	 *      pull up to CN.
-	 */
-	if (innerd && outerd && 
-		(outerd->distributionType == LOCATOR_TYPE_SHARD ||
-		(innerd->distributionType == LOCATOR_TYPE_SHARD)) &&
-		!bms_equal(outerd->nodes, innerd->nodes))
-	{
-		goto pull_up;
-	}
-	
-	/*
 	 * the join of cold-hot tables must be pulled up to CN until we find a way 
 	 * to determine whether this join occurs in a specific group.
 	 */
@@ -1818,7 +1802,8 @@ set_joinpath_distribution(PlannerInfo *root, JoinPath *pathnode)
 		innerd->distributionType == outerd->distributionType &&
 		innerd->distributionExpr &&
 		outerd->distributionExpr &&
-		bms_equal(innerd->nodes, outerd->nodes))
+	    bms_equal(innerd->nodes, outerd->nodes) &&
+	    BMS_EQUAL_CONSTRAINT(innerd->nodes))
 	{
 		ListCell   *lc;
 
@@ -2245,7 +2230,7 @@ not_allowed_join:
 					 */
 					cost_qual_eval_node(&cost, (Node *) ri, root);
 
-					if (outerd->distributionExpr)
+					if (outerd->distributionExpr && BMS_EQUAL_CONSTRAINT(outerd->nodes))
 					{
 #ifdef __TBASE__
 						/*
@@ -2294,7 +2279,7 @@ not_allowed_join:
 							continue;
 						}
 					}
-					if (innerd->distributionExpr)
+					if (innerd->distributionExpr && BMS_EQUAL_CONSTRAINT(innerd->nodes))
 					{
 #ifdef __TBASE__
 						/* For UPDATE/DELETE, make sure inner rel does not need to distribute */
@@ -2453,26 +2438,14 @@ not_allowed_join:
             /* If we redistribute both parts do join on all nodes ... */
             if (new_inner_key && new_outer_key)
             {
+				if (bms_is_empty(constrainNodes))
+				{
                 int i;
                 for (i = 0; i < NumDataNodes; i++)
                     nodes = bms_add_member(nodes, i);
 
 #ifdef __TBASE__
-				/*
-				 * We end up here that we don't have replication table and whether
-				 * 1. we have no shard table at both sides OR
-				 * 2. we have shard table but spread in same node set
-				 * so check distribution type and decide what's next.
-				 */
-				if (innerd->distributionType == LOCATOR_TYPE_SHARD ||
-					outerd->distributionType == LOCATOR_TYPE_SHARD)
-				{
-					/* must be same node set, just copy */
-					Assert(bms_equal(innerd->nodes, innerd->nodes));
-					nodes = bms_copy(outerd->nodes);
-				}
-				/* check if we can distribute by shard */
-				else if (OidIsValid(group))
+					if (OidIsValid(group))
 				{
 					int      node_index;
 					int32	 dn_num;
@@ -2527,6 +2500,13 @@ not_allowed_join:
 				}
 #endif
             }
+				else
+				{
+					nodes = bms_copy(constrainNodes);
+					replicate_inner = false;
+					replicate_outer = false;
+				}
+			}
             /*
              * ... if we do only one of them redistribute it on the same nodes
              * as other.
@@ -7426,5 +7406,22 @@ path_count_datanodes(Path *path)
 	}
 	
 	return 1;
+}
+
+void
+assign_constrain_nodes(List *node_list)
+{
+	MemoryContext oldctx = MemoryContextSwitchTo(TopMemoryContext);
+	ListCell *lc;
+	
+	bms_free(constrainNodes);
+	constrainNodes = NULL;
+	
+	foreach(lc, node_list)
+	{
+		constrainNodes = bms_add_member(constrainNodes, lfirst_int(lc));
+	}
+	
+	MemoryContextSwitchTo(oldctx);
 }
 #endif

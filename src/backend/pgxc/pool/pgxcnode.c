@@ -70,6 +70,7 @@
 #include "catalog/pg_authid.h"
 #endif
 #ifdef __TBASE__
+#include "pgxc/groupmgr.h"
 #include "postmaster/postmaster.h"
 #endif
 
@@ -398,6 +399,16 @@ InitMultinodeExecutor(bool is_force)
     slavedatanode_count = 0;
     PGXCNodeId = 0;
 
+	if (IS_PGXC_DATANODE)
+	{
+		if (PGXCGroupNodeList != NIL)
+		{
+			list_free(PGXCGroupNodeList);
+			PGXCGroupNodeList = NIL;
+		}
+		PGXCGroupNodeList = GetGroupNodeList(GetMyGroupOid());
+	}
+	
     MemoryContextSwitchTo(oldcontext);
 
 	PGXCSessionId[0] = '\0';
@@ -2231,7 +2242,7 @@ pgxc_node_send_plan(PGXCNodeHandle * handle, const char *statement,
 int
 pgxc_node_send_bind(PGXCNodeHandle * handle, const char *portal,
 					const char *statement, int paramlen, const char *params,
-					int epqctxlen, const char *epqctx)
+					int epqctxlen, const char *epqctx, StringInfo shardmap)
 {
     int            pnameLen;
     int            stmtLen;
@@ -2240,6 +2251,7 @@ pgxc_node_send_bind(PGXCNodeHandle * handle, const char *portal,
     int         paramOutLen;
 	int         epqCtxLen;
     int            msgLen;
+	int         shardMapLen;
 
     /* Invalid connection state, return error */
     if (handle->state != DN_CONNECTION_STATE_IDLE)
@@ -2257,8 +2269,11 @@ pgxc_node_send_bind(PGXCNodeHandle * handle, const char *portal,
     paramOutLen = 2;
 	/* size of epq context, 2 if not epq */
 	epqCtxLen = epqctxlen ? epqctxlen : 2;
-    /* size + pnameLen + stmtLen + parameters */
-	msgLen = 4 + pnameLen + stmtLen + paramCodeLen + paramValueLen + paramOutLen + epqCtxLen;
+	/* size of shard map information */
+	shardMapLen = shardmap ? shardmap->len + 1 : 1;
+	/* size + pnameLen + stmtLen + parameters + epqctx + shardmap */
+	msgLen = 4 + pnameLen + stmtLen + paramCodeLen + paramValueLen +
+	         paramOutLen + epqCtxLen + shardMapLen;
 
     /* msgType + msgLen */
     if (ensure_out_buffer_capacity(handle->outEnd + 1 + msgLen, handle) != 0)
@@ -2316,6 +2331,15 @@ pgxc_node_send_bind(PGXCNodeHandle * handle, const char *portal,
 		handle->outBuffer[handle->outEnd++] = 0;
 		handle->outBuffer[handle->outEnd++] = 0;
 	}
+
+	/* shard map info */
+	if (shardmap && shardMapLen > 1)
+	{
+		memcpy(handle->outBuffer + handle->outEnd, shardmap->data, shardMapLen);
+		handle->outEnd += shardMapLen;
+	}
+	else
+		handle->outBuffer[handle->outEnd++] = '\0';
 
     handle->in_extended_query = true;
      return 0;
@@ -2609,7 +2633,7 @@ pgxc_node_send_query_extended(PGXCNodeHandle *handle, const char *query,
     if (query)
         if (pgxc_node_send_parse(handle, statement, query, num_params, param_types))
             return EOF;
-	if (pgxc_node_send_bind(handle, portal, statement, paramlen, params, 0, NULL))
+	if (pgxc_node_send_bind(handle, portal, statement, paramlen, params, 0, NULL, NULL))
         return EOF;
     if (send_describe)
         if (pgxc_node_send_describe(handle, false, portal))

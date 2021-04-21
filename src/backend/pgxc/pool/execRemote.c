@@ -60,12 +60,13 @@
 #include "catalog/pgxc_class.h"
 #ifdef __TBASE__
 #include "commands/explain_dist.h"
-#include "pgxc/squeue.h"
 #include "executor/execParallel.h"
-#include "postmaster/postmaster.h"
 #include "executor/nodeModifyTable.h"
-#include "utils/syscache.h"
 #include "nodes/print.h"
+#include "optimizer/pathnode.h"
+#include "pgxc/squeue.h"
+#include "postmaster/postmaster.h"
+#include "utils/syscache.h"
 #endif
 /*
  * We do not want it too long, when query is terminating abnormally we just
@@ -10941,6 +10942,9 @@ primary_mode_phase_two:
                  OidIsValid(primary_data_node) &&
                  combiner->conn_count > 1 && !g_UseDataPump);
         char cursor[NAMEDATALEN];
+#ifdef __TBASE__
+		StringInfo shardmap = NULL;
+#endif
 
         if (plan->cursor)
         {
@@ -11000,6 +11004,26 @@ primary_mode_phase_two:
 		if (estate->es_epqTuple != NULL)
 			epqctxlen = encode_epqcontext(&combiner->ss.ps, &epqctxdata);
 
+#ifdef __TBASE__
+		/*
+		 * consider whether to distribute shard map info
+		 * we do that when:
+		 *  1. this is a DN node
+		 *  2. plan distribution is by shard
+		 *  3. target of distribution is not in our group
+		 */
+		if (IS_PGXC_DATANODE && node->execNodes != NIL &&
+		    plan->distributionType == LOCATOR_TYPE_SHARD)
+		{
+			ListCell *cell;
+			
+			foreach(cell, node->execNodes)
+			{
+				if (!list_member_int(PGXCGroupNodeList, lfirst_int(cell)))
+					shardmap = SerializeShardmap();
+			}
+		}
+#endif
         /*
          * The subplan being rescanned, need to restore connections and
          * re-bind the portal
@@ -11039,7 +11063,7 @@ primary_mode_phase_two:
 
                 /* rebind */
                 pgxc_node_send_bind(conn, combiner->cursor, combiner->cursor,
-									paramlen, paramdata, epqctxlen, epqctxdata);
+									paramlen, paramdata, epqctxlen, epqctxdata, shardmap);
                 if (enable_statistic)
                 {
                     elog(LOG, "Bind Message:pid:%d,remote_pid:%d,remote_ip:%s,remote_port:%d,fd:%d,cursor:%s",
@@ -11128,7 +11152,7 @@ primary_mode_phase_two:
 
                 /* bind */
 				pgxc_node_send_bind(conn, cursor, cursor, paramlen, paramdata,
-				                    epqctxlen, epqctxdata);
+				                    epqctxlen, epqctxdata, shardmap);
 
                 if (enable_statistic)
                 {

@@ -2225,6 +2225,7 @@ exec_bind_message(StringInfo input_message)
     int column_index;
     int index;
     char ***data_list = NULL;
+	const char *shard_map;
     MemoryContext old_top;
 #endif
 
@@ -2756,6 +2757,8 @@ exec_bind_message(StringInfo input_message)
             rformats[i] = pq_getmsgint(input_message, 2);
     }
 
+	InvalidRemoteShardmap();
+	
 	/* Get epq context, only datanodes need them */
 	if (IsConnFromCoord() || IsConnFromDatanode())
 	{
@@ -2779,6 +2782,11 @@ exec_bind_message(StringInfo input_message)
                 portal->epqContext->nodeid[i] = pq_getmsgint(input_message, 4);
             }
         }
+		
+		/* Get shard map info */
+		shard_map = pq_getmsgstring(input_message);
+		if (shard_map[0] != '\0')
+			DeserializeShardmap(shard_map);
 	}
 	
     pq_getmsgend(input_message);
