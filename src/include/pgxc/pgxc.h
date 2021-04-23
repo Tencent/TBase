@@ -105,6 +105,9 @@ extern uint32    PGXCNodeIdentifier;
 extern char *PGXCClusterName;
 extern char *PGXCMainClusterName;
 extern char *PGXCDefaultClusterName;
+#ifdef __TBASE__
+extern char PGXCSessionId[NAMEDATALEN];
+#endif
 
 
 extern Datum xc_lockForBackupKey1;

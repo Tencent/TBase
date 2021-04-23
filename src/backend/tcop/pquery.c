@@ -54,6 +54,10 @@
 #ifdef __TBASE__
 bool     paramPassDown = false;
 #endif
+
+/* Hooks for plugins to get control in PortalStart */
+PortalStart_hook_type PortalStart_hook = NULL;
+
 /*
  * ActivePortal is the currently executing Portal (the most closely nested,
  * if there are several).
@@ -1138,6 +1142,9 @@ PortalStart(Portal portal, ParamListInfo params,
                 portal->tupDesc = NULL;
                 break;
         }
+		
+		if (PortalStart_hook)
+			PortalStart_hook(portal);
     }
     PG_CATCH();
     {

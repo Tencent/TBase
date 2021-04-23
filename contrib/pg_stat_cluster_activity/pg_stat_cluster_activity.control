@@ -1,0 +1,5 @@
+# pg_stat_cluster_activity extension
+comment = 'track execution statistics in whole cluster scope'
+default_version = '1.0'
+module_pathname = '$libdir/pg_stat_cluster_activity'
+relocatable = true

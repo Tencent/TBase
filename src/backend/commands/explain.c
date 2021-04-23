@@ -3870,6 +3870,7 @@ ExplainRemoteQuery(RemoteQuery *plan, PlanState *planstate, List *ancestors, Exp
 {// #lizard forgives
     ExecNodes    *en = plan->exec_nodes;
     /* add names of the nodes if they exist */
+
     if (en && es->nodes)
     {
         StringInfo node_names = makeStringInfo();
@@ -3913,6 +3914,14 @@ ExplainRemoteQuery(RemoteQuery *plan, PlanState *planstate, List *ancestors, Exp
             ExplainPropertyText("Node/s", node_names->data, es);
         }
     }
+
+	/*
+	 * if required, skip executing remote query, this
+	 * is happened when a backend report planstate it
+	 * processing, shouldn't execute it again.
+	 */
+	if (es->skip_remote_query)
+		return;
 
     if (en && en->en_expr)
         show_expression((Node *)en->en_expr, "Node expr", planstate, ancestors,

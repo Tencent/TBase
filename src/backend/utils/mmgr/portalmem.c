@@ -96,6 +96,9 @@ do { \
         elog(WARNING, "trying to delete portal name that does not exist"); \
 } while(0)
 
+/* Hooks for plugins to get control in PortalDrop */
+PortalDrop_hook_type PortalDrop_hook = NULL;
+
 static MemoryContext PortalMemory = NULL;
 
 
@@ -564,6 +567,9 @@ PortalDrop(Portal portal, bool isTopCommit)
                 (errcode(ERRCODE_INVALID_CURSOR_STATE),
                  errmsg("cannot drop active portal \"%s\"", portal->name)));
 
+	if (PortalDrop_hook)
+		PortalDrop_hook(portal);
+	
     /*
      * Allow portalcmds.c to clean up the state it knows about, in particular
      * shutting down the executor if still active.  This step potentially runs

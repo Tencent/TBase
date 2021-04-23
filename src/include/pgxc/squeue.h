@@ -2,13 +2,13 @@
  *
  * barrier.h
  *
- *      Definitions for the shared queue handling
+ *	  Definitions for the shared queue handling
  *
  *
  * Copyright (c) 2012-2014, TransLattice, Inc.
  *
  * IDENTIFICATION
- *      $$
+ *	  $$
  *
  *-------------------------------------------------------------------------
  */
@@ -74,24 +74,24 @@ extern void SharedQueueAcquire(const char *sqname, int ncons, bool parallelSend,
 extern void SharedQueueAcquire(const char *sqname, int ncons);
 #endif
 extern SharedQueue SharedQueueBind(const char *sqname, List *consNodes,
-                                   List *distNodes, int *myindex, int *consMap
+								   List *distNodes, int *myindex, int *consMap
 #ifdef __TBASE__
-                                   ,
-                                    DataPumpSender *sender
+								   ,
+									DataPumpSender *sender
 #endif
-                                    );
+									);
 extern void SharedQueueUnBind(SharedQueue squeue, bool failed);
 extern void SharedQueueRelease(const char *sqname);
 extern void SharedQueuesCleanup(int code, Datum arg);
 
-extern int    SharedQueueFinish(SharedQueue squeue, TupleDesc tupDesc,
-                  Tuplestorestate **tuplestore);
+extern int	SharedQueueFinish(SharedQueue squeue, TupleDesc tupDesc,
+				  Tuplestorestate **tuplestore);
 
 extern void SharedQueueWrite(SharedQueue squeue, int consumerIdx,
-                 TupleTableSlot *slot, Tuplestorestate **tuplestore,
-                 MemoryContext tmpcxt);
+				 TupleTableSlot *slot, Tuplestorestate **tuplestore,
+				 MemoryContext tmpcxt);
 extern bool SharedQueueRead(SharedQueue squeue, int consumerIdx,
-                TupleTableSlot *slot, bool canwait);
+				TupleTableSlot *slot, bool canwait);
 extern void SharedQueueDisconnectConsumer(const char *sqname);
 extern void SharedQueueReset(SharedQueue squeue, int consumerIdx);
 extern void SharedQueueResetNotConnected(SharedQueue squeue);
@@ -100,35 +100,35 @@ extern bool SharedQueueWaitOnProducerLatch(SharedQueue squeue, long timeout);
 #ifdef __TBASE__
 typedef enum 
 { 
-    DataPumpOK                               = 0,
-    DataPumpSndError_no_socket             = -1, 
-    DataPumpSndError_no_space              = -2, 
-    DataPumpSndError_io_error                = -3,
-    DataPumpSndError_node_error            = -4,
-    DataPumpSndError_bad_status             = -5,
-    DataPumpSndError_unreachable_node      = -6,
-    DataPumpConvert_error                    = -7
+	DataPumpOK						       = 0,
+	DataPumpSndError_no_socket             = -1, 
+	DataPumpSndError_no_space              = -2, 
+	DataPumpSndError_io_error 	           = -3,
+	DataPumpSndError_node_error            = -4,
+	DataPumpSndError_bad_status      	   = -5,
+	DataPumpSndError_unreachable_node      = -6,
+	DataPumpConvert_error             	   = -7
 }DataPumpSndError;
 
 #define  DATAPUMP_UNREACHABLE_NODE_FD     (-2)
 
 typedef enum
 {
-    ConvertRunning,
-    ConvertListenError,
-    ConvertAcceptError,
-    ConvertRecvNodeidError,
-    ConvertRecvNodeindexError,
-    ConvertRecvSockfdError,
-    ConvertSetSockfdError,
-    ConvertExit
+	ConvertRunning,
+	ConvertListenError,
+	ConvertAcceptError,
+	ConvertRecvNodeidError,
+	ConvertRecvNodeindexError,
+	ConvertRecvSockfdError,
+	ConvertSetSockfdError,
+	ConvertExit
 }ConvertStatus;
 
 typedef enum 
 {
-    Squeue_Consumer,
-    Squeue_Producer,
-    Squeue_None
+	Squeue_Consumer,
+	Squeue_Producer,
+	Squeue_None
 } SqueueRole;
 
 extern bool IsSqueueProducer(void);
@@ -196,15 +196,15 @@ extern void RemoteSubplanSigusr2Handler(SIGNAL_ARGS);
 #ifdef __TBASE__
 enum MT_thr_detach 
 { 
-    MT_THR_JOINABLE, 
-    MT_THR_DETACHED 
+	MT_THR_JOINABLE, 
+	MT_THR_DETACHED 
 };
 
 typedef struct
 {
-    int             m_cnt;
-    pthread_mutex_t m_mutex;
-    pthread_cond_t  m_cond;
+	int             m_cnt;
+	pthread_mutex_t m_mutex;
+	pthread_cond_t  m_cond;
 }ThreadSema;
 
 extern void ThreadSemaInit(ThreadSema *sema, int32 init);
@@ -214,11 +214,11 @@ extern void ThreadSemaUp(ThreadSema *sema);
 
 typedef struct 
 {
-    void                 **m_List; /*循环队列数组*/
-    uint32               m_Length; /*队列队列长度*/
-    slock_t              m_lock;   /*保护下面的两个变量*/
-    volatile uint32      m_Head;   /*队列头部，数据插入往头部插入，头部加一等于尾则队列满*/
-    volatile uint32      m_Tail;   /*队列尾部，尾部等于头部，则队列为空*/
+	void                 **m_List; /*循环队列数组*/
+	uint32               m_Length; /*队列队列长度*/
+	slock_t              m_lock;   /*保护下面的两个变量*/
+	volatile uint32      m_Head;   /*队列头部，数据插入往头部插入，头部加一等于尾则队列满*/
+	volatile uint32      m_Tail;   /*队列尾部，尾部等于头部，则队列为空*/
 }PGPipe;
 extern PGPipe* CreatePipe(uint32 size);
 extern void    DestoryPipe(PGPipe *pPipe);
@@ -226,10 +226,11 @@ extern void    *PipeGet(PGPipe *pPipe);
 extern int     PipePut(PGPipe *pPipe, void *p);
 extern bool    PipeIsFull(PGPipe *pPipe);
 extern bool    IsEmpty(PGPipe *pPipe);
-extern int        PipeLength(PGPipe *pPipe);
+extern int 	   PipeLength(PGPipe *pPipe);
 
 extern int32 CreateThread(void *(*f) (void *), void *arg, int32 mode);
 
+extern const char *SqueueName(SharedQueue sq);
 
 #endif
 

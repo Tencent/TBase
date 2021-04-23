@@ -3444,6 +3444,13 @@ pgxc_node_begin(int conn_count, PGXCNodeHandle **connections,
         if (connections[i]->state == DN_CONNECTION_STATE_QUERY)
             BufferConnection(connections[i]);
 
+		/* Send global session id */
+		if (pgxc_node_send_sessionid(connections[i]))
+		{
+			elog(WARNING, "pgxc_node_begin sending session id failed");
+			return EOF;
+		}
+
         /* Send GXID and check for errors */
         if (pgxc_node_send_gxid(connections[i], gxid))
         {
@@ -6229,6 +6236,8 @@ get_exec_connections_all_dn(bool is_global_session)
 /*
  * Get Node connections depending on the connection type:
  * Datanodes Only, Coordinators only or both types
+ * If exec_nodes is NIL and exec_type is EXEC_ON_ALL_NODES
+ * connect to all nodes except myself
  */
 static PGXCNodeAllHandles *
 get_exec_connections(RemoteQueryState *planstate,
@@ -6303,9 +6312,9 @@ get_exec_connections(RemoteQueryState *planstate,
 			{
 				estate = ExecInitExpr(exec_nodes->en_expr,
                                              (PlanState *) planstate);
-			/* For explain, no need to execute expr. */
-			if (planstate->eflags != EXEC_FLAG_EXPLAIN_ONLY)
-				partvalue = ExecEvalExpr(estate,
+			    /* For explain, no need to execute expr. */
+			    if (planstate->eflags != EXEC_FLAG_EXPLAIN_ONLY)
+			    	partvalue = ExecEvalExpr(estate,
                                            planstate->combiner.ss.ps.ps_ExprContext,
                                            &isnull);
 			}
@@ -6447,6 +6456,12 @@ get_exec_connections(RemoteQueryState *planstate,
             co_conn_count = 0;
     }
     
+	if ((list_length(nodelist) == 0 && exec_type == EXEC_ON_ALL_NODES))
+	{
+		nodelist = GetAllDataNodes();
+		dn_conn_count = NumDataNodes;
+	}
+	
 #ifdef __TBASE__
     if (IsParallelWorker())
     {
@@ -8933,6 +8948,19 @@ ExecRemoteQuery(PlanState *pstate)
             need_global_snapshot = true;
 #endif
         }
+		else if (step->exec_type == EXEC_ON_ALL_NODES)
+		{
+			total_conn_count = regular_conn_count =
+				pgxc_connections->dn_conn_count + pgxc_connections->co_conn_count;
+			
+			connections = palloc(mul_size(total_conn_count, sizeof(PGXCNodeHandle *)));
+			memcpy(connections, pgxc_connections->datanode_handles,
+			       pgxc_connections->dn_conn_count * sizeof(PGXCNodeHandle *));
+			memcpy(connections + pgxc_connections->dn_conn_count, pgxc_connections->coord_handles,
+			       pgxc_connections->co_conn_count * sizeof(PGXCNodeHandle *));
+			
+			need_global_snapshot = g_set_global_snapshot;
+		}
 
 #ifdef __TBASE__
         /* set snapshot as needed */

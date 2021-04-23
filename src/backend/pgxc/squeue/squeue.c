@@ -9443,3 +9443,9 @@ int PipeLength(PGPipe *pPipe)
 }
 
 #endif
+
+const char *
+SqueueName(SharedQueue sq)
+{
+	return sq->sq_key;
+}

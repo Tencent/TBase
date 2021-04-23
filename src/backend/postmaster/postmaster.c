@@ -466,6 +466,9 @@ char            *PGXCClusterName = NULL;
 char            *PGXCMainClusterName = NULL;
 bool        IsPGXCMainCluster = false;
 int            PGXCNodeId = 0;
+#ifdef __TBASE__
+char             PGXCSessionId[NAMEDATALEN];
+#endif
 /*
  * When a particular node starts up, store the node identifier in this variable
  * so that we dont have to calculate it OR do a search in cache any where else

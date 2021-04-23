@@ -54,7 +54,8 @@ SUBDIRS = \
                 unaccent        \
                 vacuumlo        \
                 stormstats		\
-				tbase_pooler_stat
+				tbase_pooler_stat \
+                pg_stat_cluster_activity
 
 ifeq ($(with_openssl),yes)
 SUBDIRS += sslinfo

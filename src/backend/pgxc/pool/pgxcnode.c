@@ -378,6 +378,8 @@ InitMultinodeExecutor(bool is_force)
 
     MemoryContextSwitchTo(oldcontext);
 
+	PGXCSessionId[0] = '\0';
+	
     if (IS_PGXC_COORDINATOR)
     {
         for (count = 0; count < NumCoords; count++)
@@ -386,6 +388,8 @@ InitMultinodeExecutor(bool is_force)
                        get_pgxc_nodename(co_handles[count].nodeoid)) == 0)
                 PGXCNodeId = count + 1;
         }
+		
+		sprintf(PGXCSessionId, "%s_%d_%ld", PGXCNodeName, MyProcPid, GetCurrentTimestamp());
     }
     else /* DataNode */
     {
@@ -410,7 +414,8 @@ InitMultinodeExecutor(bool is_force)
     
 }
 
-Oid get_nodeoid_from_nodeid(int nodeid, char node_type)
+Oid
+get_nodeoid_from_nodeid(int nodeid, char node_type)
 {
     if (PGXC_NODE_COORDINATOR == node_type)
     {
@@ -524,7 +529,8 @@ PGXCNodeConnect(char *connstr)
     return (NODE_CONNECTION *) conn;
 }
 
-int PGXCNodePing(const char *connstr)
+int
+PGXCNodePing(const char *connstr)
 {
     if (connstr[0])
     {
@@ -943,8 +949,9 @@ retry:
 }
 
 
-void pgxc_print_pending_data(PGXCNodeHandle *handle, bool reset)
-{// #lizard forgives
+void
+pgxc_print_pending_data(PGXCNodeHandle *handle, bool reset)
+{
     char       *msg;
     int32       ret;
     //DNConnectionState estate = 0;
@@ -1517,8 +1524,9 @@ release_handles(bool force)
 /*
  * Check whether there bad connections to remote nodes when abort transactions.
  */
-bool validate_handles(void)
-{// #lizard forgives
+bool
+validate_handles(void)
+{
     int            i;    
     int            ret;
     
@@ -2462,7 +2470,8 @@ pgxc_node_send_sync(PGXCNodeHandle * handle)
 /*
  * Send logical apply message down to the Datanode
  */
-int pgxc_node_send_apply(PGXCNodeHandle * handle, char * buf, int len, bool ignore_pk_conflict)
+int
+pgxc_node_send_apply(PGXCNodeHandle * handle, char * buf, int len, bool ignore_pk_conflict)
 {
     int    msgLen = 0;
 
@@ -3340,28 +3349,58 @@ pgxc_node_send_coord_info(PGXCNodeHandle * handle, int coord_pid, TransactionId 
 	return 0;
 }
 
-inline void pgxc_set_coordinator_proc_pid(int proc_pid)
+void
+pgxc_set_coordinator_proc_pid(int proc_pid)
 {
 	pgxc_coordinator_proc_pid = (IS_PGXC_COORDINATOR ? MyProcPid : proc_pid);
 }
 
-inline void pgxc_set_coordinator_proc_vxid(TransactionId proc_vxid)
+void
+pgxc_set_coordinator_proc_vxid(TransactionId proc_vxid)
 {
 	TransactionId lxid = (MyProc != NULL ? MyProc->lxid : InvalidTransactionId);
 
 	pgxc_coordinator_proc_vxid = (IS_PGXC_COORDINATOR ? lxid : proc_vxid);
 }
 
-inline int pgxc_get_coordinator_proc_pid(void)
+int
+pgxc_get_coordinator_proc_pid(void)
 {
 	return (IS_PGXC_COORDINATOR ? MyProcPid : pgxc_coordinator_proc_pid);
 }
 
-inline TransactionId pgxc_get_coordinator_proc_vxid(void)
+TransactionId
+pgxc_get_coordinator_proc_vxid(void)
 {
 	TransactionId lxid = (MyProc != NULL ? MyProc->lxid : InvalidTransactionId);
 
 	return (IS_PGXC_COORDINATOR ? lxid : pgxc_coordinator_proc_vxid);
+}
+
+int
+pgxc_node_send_sessionid(PGXCNodeHandle * handle)
+{
+	int	msgLen = 0;
+	
+	/* size + sessionid_str + '\0' */
+	msgLen = 4 + strlen(PGXCSessionId) + 1;
+	
+	/* msgType + msgLen */
+	if (ensure_out_buffer_capacity(handle->outEnd + 1 + msgLen, handle) != 0)
+	{
+		add_error_message(handle, "pgxc_node_send_sessionid out of memory");
+		return EOF;
+	}
+	
+	handle->outBuffer[handle->outEnd++] = 'o';		/* session id */
+	
+	msgLen = htonl(msgLen);
+	memcpy(handle->outBuffer + handle->outEnd, &msgLen, 4);
+	handle->outEnd += 4;
+	
+	memcpy(handle->outBuffer + handle->outEnd, PGXCSessionId, strlen(PGXCSessionId) + 1);
+	handle->outEnd += strlen(PGXCSessionId) + 1;
+	return 0;
 }
 #endif
 
@@ -3416,8 +3455,9 @@ add_error_message(PGXCNodeHandle *handle, const char *message)
     }
 }
 #ifdef __TBASE__
-void add_error_message_from_combiner(PGXCNodeHandle *handle, void *combiner_input)
-{// #lizard forgives
+void
+add_error_message_from_combiner(PGXCNodeHandle *handle, void *combiner_input)
+{
     ResponseCombiner *combiner;
 
     combiner = (ResponseCombiner*)combiner_input;
@@ -4205,8 +4245,8 @@ pfree_pgxc_all_handles(PGXCNodeAllHandles *pgxc_handles)
 }
 
 /* Do translation for non-main cluster */
-
-Oid PGXCGetLocalNodeOid(Oid nodeoid)
+Oid
+PGXCGetLocalNodeOid(Oid nodeoid)
 {
     
     if(false == IsPGXCMainCluster)
@@ -4224,7 +4264,8 @@ Oid PGXCGetLocalNodeOid(Oid nodeoid)
     return nodeoid;
 }
 
-Oid PGXCGetMainNodeOid(Oid nodeoid)
+Oid
+PGXCGetMainNodeOid(Oid nodeoid)
 {
 
     if(false == IsPGXCMainCluster)
@@ -4420,7 +4461,9 @@ paramlist_delete_param(List *param_list, const char *name)
 
        return param_list;
 }
-static ParamEntry * paramlist_get_paramentry(List *param_list, const char *name)
+
+static ParamEntry *
+paramlist_get_paramentry(List *param_list, const char *name)
 {
     ListCell   *cur_item;
 
@@ -4439,7 +4482,9 @@ static ParamEntry * paramlist_get_paramentry(List *param_list, const char *name)
 
     return NULL;
 }
-static ParamEntry * paramentry_copy(ParamEntry * src_entry)
+
+static ParamEntry *
+paramentry_copy(ParamEntry * src_entry)
 {
     ParamEntry *dst_entry = NULL;
     if (src_entry)
@@ -5432,7 +5477,8 @@ PGXCNodeSendSetQuery(NODE_CONNECTION *conn, const char *sql_command, char *errms
     return error ? -1 : 0;
 }
 
-bool node_ready_for_query(PGXCNodeHandle *conn) 
+bool
+node_ready_for_query(PGXCNodeHandle *conn) 
 {
     return ('Z' == (conn)->last_command);
 }
@@ -5611,7 +5657,8 @@ void PGXCGetCoordOidOthers(Oid **nodelist)
 
 }
 
-void PGXCGetAllDnOid(Oid *nodelist)
+void
+PGXCGetAllDnOid(Oid *nodelist)
 {
     Oid     node_oid;
     int     i;
@@ -5663,4 +5710,40 @@ is_ddl_leader_cn(char *first_cn)
 }
 #endif
 
+/*
+ * SerializeSessionId
+ *		Dumps the serialized session id onto the memory location at 
+ *		start_address for parallel workers
+ */
+void
+SerializeSessionId(Size maxsize, char *start_address)
+{
+	
+	if(PGXCSessionId[0] == '\0')
+	{
+		*(int *) start_address = 0;
+	}
+	else
+	{
+		int len = strlen(PGXCSessionId) + 1;
+		
+		*(int *) start_address = len;
+		memcpy(start_address + sizeof(int), PGXCSessionId, len);
+	}
+}
+
+/*
+ * StartParallelWorkerSessionId
+ *		Reads the serialized session id and set it on parallel workers
+ */
+void
+StartParallelWorkerSessionId(char *address)
+{
+	char *sidspace = address + sizeof(int);
+	
+	if (*(int *) address == 0) /* len */
+		PGXCSessionId[0] = '\0';
+	else
+		strncpy((char *) PGXCSessionId, sidspace, NAMEDATALEN);
+}
 #endif

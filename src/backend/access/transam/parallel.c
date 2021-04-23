@@ -69,6 +69,7 @@
 #define PARALLEL_KEY_GLOBALXID                UINT64CONST(0xFFFFFFFFFFFF0010)
 #endif
 #define PARALLEL_KEY_ENTRYPOINT                UINT64CONST(0xFFFFFFFFFFFF0009)
+#define PARALLEL_KEY_SESSIONID              UINT64CONST(0xFFFFFFFFFFFF0011)
 
 
 
@@ -205,6 +206,7 @@ InitializeParallelDSM(ParallelContext *pcxt)
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
     Size        gxidlen = 0;
 #endif
+	Size        sidlen = 0;
     Size        segsize = 0;
     int            i;
     FixedParallelState *fps;
@@ -241,8 +243,10 @@ InitializeParallelDSM(ParallelContext *pcxt)
         gxidlen = EstimateGlobalXidSpace();
         shm_toc_estimate_chunk(&pcxt->estimator, gxidlen);
 #endif
+		sidlen = PGXCSessionId[0] == '\0' ? 0 : strlen(PGXCSessionId) + 1;
+		shm_toc_estimate_chunk(&pcxt->estimator, sidlen);
         /* If you add more chunks here, you probably need to add keys. */
-        shm_toc_estimate_keys(&pcxt->estimator, 7);
+		shm_toc_estimate_keys(&pcxt->estimator, 8);
 
         /* Estimate space need for error queues. */
         StaticAssertStmt(BUFFERALIGN(PARALLEL_ERROR_QUEUE_SIZE) ==
@@ -312,6 +316,7 @@ InitializeParallelDSM(ParallelContext *pcxt)
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
         char       *gxidspace;
 #endif
+		char       *sidspace;
         char       *error_queue_space;
         char       *entrypointstate;
         Size        lnamelen;
@@ -351,6 +356,10 @@ InitializeParallelDSM(ParallelContext *pcxt)
         SerializeGlobalXid(gxidlen, gxidspace);
         shm_toc_insert(pcxt->toc, PARALLEL_KEY_GLOBALXID, gxidspace);
 #endif
+		/* global session id */
+		sidspace = shm_toc_allocate(pcxt->toc, sidlen);
+		SerializeSessionId(sidlen, sidspace);
+		shm_toc_insert(pcxt->toc, PARALLEL_KEY_SESSIONID, sidspace);
 
         /* Allocate space for worker information. */
         pcxt->worker = palloc0(sizeof(ParallelWorkerInfo) * pcxt->nworkers);
@@ -982,6 +991,7 @@ ParallelWorkerMain(Datum main_arg)
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
     char        *gxidspace;
 #endif
+	char       *sidspace;
     StringInfoData msgbuf;
 
     /* Set flag to indicate that we're initializing a parallel worker. */
@@ -1115,6 +1125,10 @@ ParallelWorkerMain(Datum main_arg)
     StartParallelWorkerGlobalXid(gxidspace);
 #endif
 
+	/* Restore session id */
+	sidspace = shm_toc_lookup(toc, PARALLEL_KEY_SESSIONID, false);
+	StartParallelWorkerSessionId(sidspace);
+	
     /* Restore combo CID state. */
     combocidspace = shm_toc_lookup(toc, PARALLEL_KEY_COMBO_CID, false);
     RestoreComboCIDState(combocidspace);

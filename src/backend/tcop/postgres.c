@@ -655,6 +655,7 @@ SocketBackend(StringInfo inBuf)
 #ifdef __TBASE__
         case 'N':
 		case 'U':				/* coord info: coord_pid and top_xid */
+		case 'o':               /* global session id */
 #endif
         case 'M':                /* Command ID */
         case 'g':                /* GXID */
@@ -2838,6 +2839,8 @@ exec_execute_message(const char *portal_name, long max_rows)
     bool        execute_is_fetch;
     bool        was_logged = false;
     char        msec_str[32];
+	int         instrument;
+	QueryDesc  *desc;
 
     /* Adjust destination to tell printtup.c what to do */
     dest = whereToSendOutput;
@@ -3005,6 +3008,9 @@ exec_execute_message(const char *portal_name, long max_rows)
         portal->cplan->stmt_list = portal->cplan->stmt_list_backup;
         portal->cplan->stmt_list_backup = NULL;
     }
+	
+	desc = PortalGetQueryDesc(portal);
+	instrument = portal->up_instrument;
 #endif
 
 #ifdef __AUDIT__
@@ -3033,13 +3039,12 @@ exec_execute_message(const char *portal_name, long max_rows)
             CommandCounterIncrement();
         }
 
-		
 #ifdef __TBASE__
-		if (portal->up_instrument &&
-		    portal->queryDesc &&
-		    portal->queryDesc->myindex == -1)
+		if (instrument &&
+		    desc != NULL &&
+		    desc->myindex == -1)
 		{
-			SendLocalInstr(portal->queryDesc->planstate);
+			SendLocalInstr(desc->planstate);
 		}
 #endif
         /* Send appropriate CommandComplete to client */
@@ -5726,6 +5731,13 @@ PostgresMain(int argc, char *argv[],
 					pgxc_set_coordinator_proc_pid(coord_pid);
 					pgxc_set_coordinator_proc_vxid(coord_vxid);
 					elog(DEBUG5, "Received coord_pid: %d, coord_vxid: %u", coord_pid, coord_vxid);
+				}
+				break;
+			case 'o':       /* session id */
+				{
+					const char *sessionid = pq_getmsgstring(&input_message);
+					pq_getmsgend(&input_message);
+					strncpy((char *) PGXCSessionId, sessionid, NAMEDATALEN);
 				}
 				break;
 #endif
