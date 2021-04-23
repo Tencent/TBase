@@ -1050,6 +1050,8 @@ do_status(void)
             exit(1);
         }
 
+        if (gtm_conn)
+            disconnect_gtm(gtm_conn);
         return ;
     }
         
