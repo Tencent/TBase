@@ -435,7 +435,7 @@ break;
         {
             int len = 0;
             int count = 0;
-
+            memset(&result->gr_resdata.grd_gts, 0, sizeof(result->gr_resdata.grd_gts));
 
             if (gtmpqGetnchar((char *) &result->gr_resdata.grd_gts.node_status,
                               sizeof(int), conn))
@@ -713,14 +713,6 @@ result->gr_status = GTM_RESULT_ERROR;
             int data_len = 0;
             char *data_buf = NULL;
 
-            /* free result of last call */
-            if (result->grd_storage_data.len && result->grd_storage_data.data)
-            {
-                free(result->grd_storage_data.data);
-                result->grd_storage_data.data = NULL;
-                result->grd_storage_data.len = 0;
-            }
-
 #ifdef __XLOG__
             /* get xlog start pos and timeline */
             if (gtmpqGetInt64((int64 *)&result->grd_storage_data.start_pos, conn))
@@ -897,13 +889,6 @@ result->gr_status = GTM_RESULT_ERROR;
 
 		case MSG_LIST_GTM_STORE_SEQ_RESULT:    /* List  gtm running sequence info */
 		{
-			if (conn->result->grd_store_seq.count && conn->result->grd_store_seq.seqs)
-			{
-				free(conn->result->grd_store_seq.seqs);
-				conn->result->grd_store_seq.seqs = NULL;
-				conn->result->grd_store_seq.count = 0;
-			}
-
 			if (gtmpqGetInt(&conn->result->grd_store_seq.count,
 							sizeof(int32), conn))
 			{
@@ -927,13 +912,6 @@ result->gr_status = GTM_RESULT_ERROR;
 
 		case MSG_LIST_GTM_TXN_STORE_RESULT:    /* List  gtm running sequence info */
 		{
-			if (conn->result->grd_store_txn.count && conn->result->grd_store_txn.txns)
-			{
-				free(conn->result->grd_store_txn.txns);
-				conn->result->grd_store_txn.txns = NULL;
-				conn->result->grd_store_txn.count = 0;
-			}
-
 			if (gtmpqGetInt(&conn->result->grd_store_txn.count,
 							sizeof(int32), conn))
 			{
@@ -959,13 +937,6 @@ result->gr_status = GTM_RESULT_ERROR;
 
 		case MSG_CHECK_GTM_SEQ_STORE_RESULT:    /* Check gtm sequence valid info */
 		{
-			if (conn->result->grd_store_check_seq.count && conn->result->grd_store_check_seq.seqs)
-			{
-				free(conn->result->grd_store_check_seq.seqs);
-				conn->result->grd_store_check_seq.seqs = NULL;
-				conn->result->grd_store_check_seq.count = 0;
-			}
-
 			if (gtmpqGetInt(&conn->result->grd_store_check_seq.count,
 							sizeof(int32), conn))
 			{
@@ -990,13 +961,6 @@ result->gr_status = GTM_RESULT_ERROR;
 
 		case MSG_CHECK_GTM_TXN_STORE_RESULT:    /* Check gtm transaction usage info */
 		{
-			if (conn->result->grd_store_check_txn.count && conn->result->grd_store_check_txn.txns)
-			{
-				free(conn->result->grd_store_check_txn.txns);
-				conn->result->grd_store_check_txn.txns = NULL;
-				conn->result->grd_store_check_txn.count = 0;
-			}
-
 			if (gtmpqGetInt(&conn->result->grd_store_check_txn.count,
 							sizeof(int32), conn))
 			{
@@ -1167,7 +1131,7 @@ result->gr_status = GTM_RESULT_ERROR;
             }
             if (result->gr_resdata.grd_txn_get_gid_data.nodelen != 0)
             {
-                /* Do necessary allocation */
+				/* Do necessary allocation, free outside */
                 result->gr_resdata.grd_txn_get_gid_data.nodestring =
                         (char *) malloc(sizeof(char *) * result->gr_resdata.grd_txn_get_gid_data.nodelen + 1);
                 if (result->gr_resdata.grd_txn_get_gid_data.nodestring == NULL)
@@ -1268,6 +1232,8 @@ result->gr_status = GTM_RESULT_ERROR;
             char *buf = NULL;
             int   buf_size = 8192;
 
+            memset(result->gr_resdata.grd_node_list.nodeinfo, 0, sizeof(result->gr_resdata.grd_node_list.nodeinfo));
+
             if (gtmpqGetInt(&result->gr_resdata.grd_node_list.num_node, sizeof(int32), conn))
             {
                 result->gr_status = GTM_RESULT_ERROR;
@@ -1286,6 +1252,7 @@ result->gr_status = GTM_RESULT_ERROR;
 			{
 				int size;
 				GTM_PGXCNodeInfo *data = (GTM_PGXCNodeInfo *) malloc(sizeof(GTM_PGXCNodeInfo));
+                memset(data, 0, sizeof(GTM_PGXCNodeInfo));
 
 				if (gtmpqGetInt(&size, sizeof(int32), conn))
 				{
@@ -1316,6 +1283,26 @@ result->gr_status = GTM_RESULT_ERROR;
 				if (!gtm_deserialize_pgxcnodeinfo(data, buf, size, &conn->errorMessage))
 				{
 					result->gr_status = GTM_RESULT_ERROR;
+                    if (data->nodename)
+                    {
+                        genFree(data->nodename);
+                    }
+                    if (data->proxyname)
+                    {
+                        genFree(data->proxyname);
+                    }
+                    if (data->ipaddress)
+                    {
+                        genFree(data->ipaddress);
+                    }
+                    if (data->datafolder)
+                    {
+                        genFree(data->datafolder);
+                    }
+                    if (data->sessions)
+                    {
+                        genFree(data->sessions);
+                    }
 					free(data);
 					break;
 				}
@@ -1392,6 +1379,8 @@ result->gr_status = GTM_RESULT_ERROR;
             int offset     = 0;
             int pack_size  = 0;
             int i          = 0;
+            result->gr_resdata.grd_xlog_data.length = 0;
+            result->gr_resdata.grd_xlog_data.xlog_data = NULL;
 
             if (gtmpqGetInt64((int64 *)&result->gr_resdata.grd_xlog_data.flush, conn))
             {
@@ -1497,17 +1486,14 @@ gtmpqReadSeqKey(GTM_SequenceKey seqkey, GTM_Conn *conn)
     return 0;
 }
 
+/*
+ * release the one-time-applied memory. if the memory design is reused,
+ * please release it last in freeGTM_Conn
+ */
 void
-gtmpqFreeResultData(GTM_Result *result, GTM_PGXCNodeType remote_type)
-{// #lizard forgives
-    /*
-     * If we are running as a GTM proxy, we don't have anything to do. This may
-     * change though as we add more message types below and some of them may
-     * need cleanup even at the proxy level
-     */
-    if (remote_type == GTM_NODE_GTM_PROXY)
-        return;
-
+gtmpqFreeResultResource(GTM_Result *result)
+{
+    int i = 0;
     switch (result->gr_type)
     {
         case SEQUENCE_INIT_RESULT:
@@ -1546,8 +1532,165 @@ gtmpqFreeResultData(GTM_Result *result, GTM_PGXCNodeType remote_type)
              * again shortly
              */
             break;
+        case NODE_UNREGISTER_RESULT:
+        case NODE_REGISTER_RESULT:
+            if (result->gr_resdata.grd_node.node_name)
+            {
+                free(result->gr_resdata.grd_node.node_name);
+                result->gr_resdata.grd_node.node_name = NULL;
+            }
+            break;
+        case NODE_LIST_RESULT:
+            if (result->gr_resdata.grd_node_list.num_node)
+            {
+                for (i = 0; i < result->gr_resdata.grd_node_list.num_node; i++)
+                {
+                    if (result->gr_resdata.grd_node_list.nodeinfo[i])
+                    {
+                        GTM_PGXCNodeInfo *data = result->gr_resdata.grd_node_list.nodeinfo[i];
+                        if (data->nodename)
+                        {
+                            genFree(data->nodename);
+                            data->nodename = NULL;
+                        }
+                        if (data->proxyname)
+                        {
+                            genFree(data->proxyname);
+                            data->proxyname = NULL;
+                        }
+                        if (data->ipaddress)
+                        {
+                            genFree(data->ipaddress);
+                            data->ipaddress = NULL;
+                        }
+                        if (data->datafolder)
+                        {
+                            genFree(data->datafolder);
+                            data->datafolder = NULL;
+                        }
+                        if (data->sessions)
+                        {
+                            genFree(data->sessions);
+                            data->sessions = NULL;
+                        }
+                        free(result->gr_resdata.grd_node_list.nodeinfo[i]);
+                        result->gr_resdata.grd_node_list.nodeinfo[i] = NULL;
+                    }
+                }
+                result->gr_resdata.grd_node_list.num_node = 0;
+            }
+            break;
+#ifdef __XLOG__
+        case MSG_REPLICATION_CONTENT:
+            if (result->gr_resdata.grd_xlog_data.length && result->gr_resdata.grd_xlog_data.xlog_data)
+            {
+                free(result->gr_resdata.grd_xlog_data.xlog_data);
+                result->gr_resdata.grd_xlog_data.xlog_data = NULL;
+                result->gr_resdata.grd_xlog_data.length = 0;
+            }
+            break;
+#endif
+#ifdef __TBASE__
+        case TXN_CHECK_GTM_STATUS_RESULT:
+            if (result->gr_resdata.grd_gts.standby_count > 0 &&
+                result->gr_resdata.grd_gts.standby_count <= GTM_MAX_WALSENDER)
+            {
+                if (result->gr_resdata.grd_gts.slave_is_sync)
+                {
+                    free(result->gr_resdata.grd_gts.slave_is_sync);
+                    result->gr_resdata.grd_gts.slave_is_sync = NULL;
+                }
 
+                if (result->gr_resdata.grd_gts.slave_timestamp)
+                {
+                    free(result->gr_resdata.grd_gts.slave_timestamp);
+                    result->gr_resdata.grd_gts.slave_timestamp = NULL;
+                }
+
+                if (result->gr_resdata.grd_gts.slave_flush_ptr)
+                {
+                    free(result->gr_resdata.grd_gts.slave_flush_ptr);
+                    result->gr_resdata.grd_gts.slave_flush_ptr = NULL;
+                }
+
+                for (i = 0; i < result->gr_resdata.grd_gts.standby_count; i++)
+                {
+                    if (result->gr_resdata.grd_gts.application_name[i])
+                    {
+                        free(result->gr_resdata.grd_gts.application_name[i]);
+                        result->gr_resdata.grd_gts.application_name[i] = NULL;
+                    }
+                }
+
+                result->gr_resdata.grd_gts.standby_count = 0;
+            }
+            break;
+        case MSG_GET_GTM_ERRORLOG_RESULT:
+            if (result->grd_errlog.len && result->grd_errlog.errlog)
+            {
+                free(result->grd_errlog.errlog);
+                result->grd_errlog.errlog = NULL;
+                result->grd_errlog.len = 0;
+            }
+            break;
+        case STORAGE_TRANSFER_RESULT:
+            /* free result of last call */
+            if (result->grd_storage_data.len && result->grd_storage_data.data)
+            {
+                free(result->grd_storage_data.data);
+                result->grd_storage_data.data = NULL;
+                result->grd_storage_data.len = 0;
+            }
+            break;
+        case MSG_LIST_GTM_STORE_SEQ_RESULT:
+            if (result->grd_store_seq.count && result->grd_store_seq.seqs)
+            {
+                free(result->grd_store_seq.seqs);
+                result->grd_store_seq.seqs = NULL;
+                result->grd_store_seq.count  = 0;
+            }
+            break;
+        case MSG_LIST_GTM_TXN_STORE_RESULT:
+            if (result->grd_store_txn.count && result->grd_store_txn.txns)
+            {
+                free(result->grd_store_txn.txns);
+                result->grd_store_txn.txns = NULL;
+                result->grd_store_txn.count = 0;
+            }
+            break;
+        case MSG_CHECK_GTM_SEQ_STORE_RESULT:
+            if (result->grd_store_check_seq.count && result->grd_store_check_seq.seqs)
+            {
+                free(result->grd_store_check_seq.seqs);
+                result->grd_store_check_seq.seqs = NULL;
+                result->grd_store_check_seq.count = 0;
+            }
+            break;
+        case MSG_CHECK_GTM_TXN_STORE_RESULT:
+            if (result->grd_store_check_txn.count && result->grd_store_check_txn.txns)
+            {
+                free(result->grd_store_check_txn.txns);
+                result->grd_store_check_txn.txns = NULL;
+                result->grd_store_check_txn.count = 0;
+            }
+            break;
+#endif
         default:
             break;
     }
+}
+
+void
+gtmpqFreeResultData(GTM_Result *result, GTM_PGXCNodeType remote_type)
+{
+
+    /*
+	 * If we are running as a GTM proxy, we don't have anything to do. This may
+	 * change though as we add more message types below and some of them may
+	 * need cleanup even at the proxy level
+	 */
+	if (remote_type == GTM_NODE_GTM_PROXY)
+		return;
+
+    gtmpqFreeResultResource(result);
 }
