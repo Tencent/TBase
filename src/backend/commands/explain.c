@@ -1956,7 +1956,10 @@ ExplainNode(PlanState *planstate, List *ancestors,
     {
         case T_ModifyTable:
 #ifdef __TBASE__
-            if(((ModifyTable *) plan)->haspartparent)
+			/* compatible with make_modifytable */
+			if (((ModifyTable *) plan)->haspartparent &&
+			    (((ModifyTable *) plan)->operation == CMD_UPDATE ||
+			     ((ModifyTable *) plan)->operation == CMD_DELETE))
             {
                 ExplainMemberNodes(((ModifyTable *) plan)->partplans,
                                ((ModifyTableState *) planstate)->partplans,
