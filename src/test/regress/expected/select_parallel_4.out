@@ -360,6 +360,25 @@ EXPLAIN (analyze, timing off, summary off, costs off) SELECT * FROM tenk1;
    Node/s: datanode_1, datanode_2
 (2 rows)
 
+-- make sure identifier was set in workers
+CREATE TABLE t_worker_identifier (a int);
+INSERT INTO t_worker_identifier values(1);
+EXPLAIN (costs off) SELECT xc_node_id != 0 FROM t_worker_identifier;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Remote Fast Query Execution
+   Node/s: datanode_1, datanode_2
+   ->  Gather
+         Workers Planned: 3
+         ->  Parallel Seq Scan on t_worker_identifier
+(5 rows)
+
+SELECT xc_node_id != 0 FROM t_worker_identifier;
+ ?column? 
+----------
+ t
+(1 row)
+
 -- provoke error in worker
 select stringu1::int2 from tenk1 where unique1 = 1;
 ERROR:  invalid input syntax for integer: "BAAAAA"

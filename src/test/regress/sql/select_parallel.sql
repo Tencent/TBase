@@ -136,6 +136,12 @@ EXPLAIN (timing off, summary off, costs off) SELECT * FROM tenk1;
 
 EXPLAIN (analyze, timing off, summary off, costs off) SELECT * FROM tenk1;
 
+-- make sure identifier was set in workers
+CREATE TABLE t_worker_identifier (a int);
+INSERT INTO t_worker_identifier values(1);
+EXPLAIN (costs off) SELECT xc_node_id != 0 FROM t_worker_identifier;
+SELECT xc_node_id != 0 FROM t_worker_identifier;
+
 -- provoke error in worker
 select stringu1::int2 from tenk1 where unique1 = 1;
 

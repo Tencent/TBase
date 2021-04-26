@@ -38,7 +38,10 @@
 #include "utils/resowner.h"
 #include "utils/snapmgr.h"
 #ifdef __TBASE__
+#include "catalog/pg_collation.h"
 #include "pgxc/squeue.h"
+#include "utils/formatting.h"
+#include "utils/lsyscache.h"
 #endif
 
 /*
@@ -1102,6 +1105,14 @@ ParallelWorkerMain(Datum main_arg)
     StartTransactionCommand();
     /* Initialize XL executor. This must be done inside a transaction block. */
     InitMultinodeExecutor(false);
+	/* set PGXCNodeIdentifier for workers */
+	if (PGXCNodeIdentifier == 0)
+	{
+		char *node_name;
+		node_name = str_tolower(PGXCNodeName, strlen(PGXCNodeName), DEFAULT_COLLATION_OID);
+		PGXCNodeIdentifier = get_pgxc_node_id(get_pgxc_nodeoid(node_name));
+		pfree(node_name);
+	}
     CommitTransactionCommand();
 
     /*
