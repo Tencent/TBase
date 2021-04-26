@@ -528,7 +528,7 @@ pull_up_or_sublinks_qual_recurse(PlannerInfo *root, Node *node, Node **jtlink, N
 		}
 		else
 		{
-			BoolExpr *expr = (BoolExpr *)(*or_clause);
+			BoolExpr *expr = (BoolExpr *)(*orquals);
 			if (expr->boolop == OR_EXPR)
 			{
 				*orquals = (Node *)make_andclause(list_make2(*orquals,
