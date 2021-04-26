@@ -3029,7 +3029,7 @@ get_or_exist_subquery_targetlist(PlannerInfo *root, Node *node, List **targetLis
 		}
 		if (list_length(new_args) == 1)
 		{
-			return (Node *)list_head(new_args);
+			return (Node *)linitial(new_args);
 		}
 		else if (list_length(new_args) == 0)
 		{
@@ -3044,7 +3044,7 @@ get_or_exist_subquery_targetlist(PlannerInfo *root, Node *node, List **targetLis
 		Var *var;
 
 		vars = pull_vars_of_level(node, 0);
-
+		/* only support upper_var = local_var */
 		Assert(list_length(vars) == 1);
         
 		*targetList = lappend(*targetList, lfirst(vars->head));
@@ -3584,17 +3584,27 @@ check_or_exist_qual_pullupable(PlannerInfo *root, Node *node)
 	}
 	else
 	{
-		List *vars = pull_vars_of_level(node, 1);
-		if (vars == NIL)
+		bool result = false;
+
+		if (pull_vars_of_level(node, 1) == NIL)
 			return true;
+		/* If upper_var, only support upper_var = local_var */
+		if (pull_vars_of_level(node, 0) == NIL)
+			return false;
 
 		if (IsA(node, OpExpr))
 		{
 			HeapTuple opertup;
 			Form_pg_operator operform;
 			char *oprname;
-
 			OpExpr *expr = (OpExpr *)node;
+
+			if (list_length(expr->args) != 2 ||
+				!IsA(linitial(expr->args), Var) ||
+				!IsA(llast(expr->args), Var))
+			{
+				return false;
+			}
 
 			opertup = SearchSysCache1(OPEROID, ObjectIdGetDatum(expr->opno));
 			if (!HeapTupleIsValid(opertup))
@@ -3602,12 +3612,11 @@ check_or_exist_qual_pullupable(PlannerInfo *root, Node *node)
 				
 			operform = (Form_pg_operator)GETSTRUCT(opertup);
 			oprname = NameStr(operform->oprname);
-
+			/* only support simple equal */
+			result = (strcmp(oprname, "=") == 0);
 			ReleaseSysCache(opertup);
-			if (strcmp(oprname, "=") == 0 && list_length(expr->args) == 2)
-				return true;
 		}
-		return false;
+		return result;
 	}
 	return true;
 }
@@ -3625,6 +3634,9 @@ bool check_or_exist_sublink_pullupable(PlannerInfo *root, Node *node)
 	if (subselect->cteList)
 		return false;
 		
+	if (subselect->hasSubLinks)
+		return false;
+
 	if (!simplify_EXISTS_query(root, subselect))
 		return false;
 		

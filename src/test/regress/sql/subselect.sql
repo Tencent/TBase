@@ -904,3 +904,100 @@ drop table notin_t2;
 drop function explain_sq_limit();
 
 drop table sq_limit;
+
+-- pull up or sublinks
+set enable_pullup_subquery to on;
+create table coltest(
+ c1 int,
+ c2 bigint,
+ c3 int2,
+ c4 bool,
+ c5 name, 
+ c6 float4,
+ c7 float8,
+ c9 numeric,
+ c10 text,
+ c11 char(100),
+ c12 varchar,
+ c13 money,
+ c14 date,
+ c15 timestamp,
+ c16 timestamp with time zone,
+ c17 time,
+ c18 time with time zone,
+ c19 interval,
+ c20 abstime,  
+ c21 reltime,
+ c22 tinterval,
+ c23 box,
+ c24 line,
+ c25 path,
+ c26 point,
+ c27 lseg,
+ c28 polygon,
+ c29 circle,
+ c30 inet,
+ c31 macaddr
+);
+explain (costs off)
+select subq_2.c3 as c0
+from coltest as subq_2
+where
+  (EXISTS (
+    select subq_2.c5 as c3, sample_2.c9 as c2
+    from public.coltest as sample_2
+    where subq_2.c6 = sample_2.c6))
+  or
+  (EXISTS (
+    select ref_2.c3 as c2
+    from public.coltest as sample_3
+         left join coltest as ref_2 on (true)
+    where (EXISTS (
+        select sample_3.c1 as c1, ref_3.c11 as c7
+        from public.coltest as ref_3
+        where ref_3.c6 = sample_3.c6))))
+;
+explain (costs off)
+select subq_2.c3 as c0
+from coltest as subq_2
+where
+  (EXISTS (
+    select subq_2.c5 as c3, sample_2.c9 as c2
+    from public.coltest as sample_2
+    where case when subq_2.c6 is NULL then sample_2.c14 else cast(null as date) end
+           = sample_2.c14))
+  or
+  (EXISTS (
+    select sample_3.c3 as c2
+    from public.coltest as sample_3
+    where subq_2.c6 = sample_3.c6))
+;
+explain (costs off)
+select subq_2.c3 as c0
+from coltest as subq_2
+where
+  (EXISTS (
+    select subq_2.c5 as c3, sample_2.c9 as c2
+    from public.coltest as sample_2
+    where subq_2.c6 = sample_2.c6 and subq_2.c10='a'))
+  or
+  (EXISTS (
+    select sample_3.c3 as c2
+    from public.coltest as sample_3
+    where subq_2.c6 = sample_3.c6))
+;
+explain (costs off)
+select subq_2.c3 as c0
+from coltest as subq_2
+where
+  (EXISTS (
+    select subq_2.c5 as c3, sample_2.c9 as c2
+    from public.coltest as sample_2
+    where subq_2.c6 = sample_2.c6 and sample_2.c10='a'))
+  or
+  (EXISTS (
+    select sample_3.c3 as c2
+    from public.coltest as sample_3
+    where subq_2.c6 = sample_3.c6))
+;
+drop table coltest;
