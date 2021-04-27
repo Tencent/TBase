@@ -676,6 +676,10 @@ PortalStart(Portal portal, ParamListInfo params,
         {
 #ifdef XCP
             case PORTAL_DISTRIBUTED:
+			{
+				int  i;
+				bool paramNeedPassDown = false;
+				
                 /* No special ability is needed */
                 eflags = 0;
                 /* Must set snapshot before starting executor. */
@@ -726,9 +730,18 @@ PortalStart(Portal portal, ParamListInfo params,
 				 * is not supported in SharedQueue mode. Force to do it traditionally.
                  */
 #ifdef __TBASE__
-				if ((!paramPassDown && queryDesc->plannedstmt->nParamRemote > 0 &&
-				     queryDesc->plannedstmt->remoteparams[queryDesc->plannedstmt->nParamRemote-1].paramkind == PARAM_EXEC) ||
-				    queryDesc->epqContext != NULL)
+                for (i = 0; i < queryDesc->plannedstmt->nParamRemote; i++)
+                {
+                        RemoteParam *rparam = &queryDesc->plannedstmt->remoteparams[i];
+                        if (rparam->paramkind == PARAM_EXEC &&
+                            rparam->paramused != REMOTE_PARAM_INITPLAN) /* if it's from initplan, still work with shared queue */
+                        {
+                                paramNeedPassDown = true;
+                                break;
+                        }
+                }
+
+                if ((!paramPassDown && paramNeedPassDown) || queryDesc->epqContext != NULL)   
 #else
                 if (queryDesc->plannedstmt->nParamRemote > 0 &&
                         queryDesc->plannedstmt->remoteparams[queryDesc->plannedstmt->nParamRemote-1].paramkind == PARAM_EXEC)
@@ -737,7 +750,6 @@ PortalStart(Portal portal, ParamListInfo params,
                     int        *consMap;
                     int         len;
                     ListCell   *lc;
-                    int         i;
                     Locator       *locator;
                     Oid            keytype;
                     DestReceiver *dest;
@@ -983,6 +995,7 @@ PortalStart(Portal portal, ParamListInfo params,
                 portal->portalPos = 0;
 
                 PopActiveSnapshot();
+			}
                 break;
 #endif
 

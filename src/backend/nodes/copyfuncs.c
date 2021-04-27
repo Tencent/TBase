@@ -1420,6 +1420,7 @@ _copyRemoteSubplan(const RemoteSubplan *from)
     COPY_SCALAR_FIELD(unique);
 #ifdef __TBASE__
     COPY_SCALAR_FIELD(parallelWorkerSendTuple);
+	COPY_BITMAPSET_FIELD(initPlanParams);
 #endif
     return newnode;
 }

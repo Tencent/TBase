@@ -403,6 +403,7 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
         top_plan = (Plan *) make_remotesubplan(root, top_plan, NULL,
                                                root->distribution,
                                                root->sort_pathkeys);
+        SS_remote_attach_initplans(root, top_plan);
         remote_subplan_depth--;
     }
 #endif

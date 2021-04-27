@@ -1697,6 +1697,7 @@ _outRemoteSubplan(StringInfo str, const RemoteSubplan *node)
     WRITE_STRING_FIELD(cursor);
     WRITE_INT_FIELD(unique);
     WRITE_BOOL_FIELD(parallelWorkerSendTuple);
+	WRITE_BITMAPSET_FIELD(initPlanParams);
 
 #ifdef __TBASE__
     if (IS_PGXC_COORDINATOR && !g_set_global_snapshot)

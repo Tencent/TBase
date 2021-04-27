@@ -10208,12 +10208,13 @@ ExecInitRemoteSubplan(RemoteSubplan *node, EState *estate, int eflags)
                      */
                     if (OidIsValid(param->ptype))
                     {
-                        rstmt.remoteparams[paramno].paramused = 1;
+						rstmt.remoteparams[paramno].paramused =
+							bms_is_member(i, node->initPlanParams) ? REMOTE_PARAM_INITPLAN : REMOTE_PARAM_SUBPLAN;
                         rstmt.remoteparams[paramno].paramtype = param->ptype;
                     }
                     else
                     {
-                        rstmt.remoteparams[paramno].paramused = 0;
+						rstmt.remoteparams[paramno].paramused = REMOTE_PARAM_UNUSED;
                         rstmt.remoteparams[paramno].paramtype = INT4OID;
                     }
 
@@ -10237,7 +10238,8 @@ ExecInitRemoteSubplan(RemoteSubplan *node, EState *estate, int eflags)
                     rstmt.remoteparams[paramno].paramkind = PARAM_EXEC;
                     rstmt.remoteparams[paramno].paramid = i;
                     rstmt.remoteparams[paramno].paramtype = prmdata->ptype;
-                    rstmt.remoteparams[paramno].paramused = 1;
+					rstmt.remoteparams[paramno].paramused =
+						bms_is_member(i, node->initPlanParams) ? REMOTE_PARAM_INITPLAN : REMOTE_PARAM_SUBPLAN;
                     /* Will scan plan tree to find out data type of the param */
                     if (prmdata->ptype == InvalidOid)
                         defineParams = bms_add_member(defineParams, i);

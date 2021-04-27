@@ -3776,6 +3776,7 @@ _readRemoteSubplan(void)
     READ_STRING_FIELD(cursor);
     READ_INT_FIELD(unique);
     READ_BOOL_FIELD(parallelWorkerSendTuple);
+	READ_BITMAPSET_FIELD(initPlanParams);
 
     READ_DONE();
 }

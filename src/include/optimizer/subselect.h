@@ -120,6 +120,7 @@ extern Param *assign_nestloop_param_placeholdervar(PlannerInfo *root,
                                      PlaceHolderVar *phv);
 extern int    SS_assign_special_param(PlannerInfo *root);
 
+extern void SS_remote_attach_initplans(PlannerInfo *root, Plan *plan);
 #ifdef __TBASE__
 extern bool has_correlation_in_funcexpr_rte(List *rtable);
 #endif

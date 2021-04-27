@@ -88,6 +88,16 @@ typedef enum
     REMOTE_COPY_TUPLESTORE    /* Store data in tuplestore */
 } RemoteCopyType;
 
+/*
+ * Type of remote param from init-plan or subplan
+ */
+typedef enum
+{
+	REMOTE_PARAM_UNUSED,
+	REMOTE_PARAM_INITPLAN,
+	REMOTE_PARAM_SUBPLAN
+} RemoteParamType;
+
 /* Combines results of INSERT statements using multiple values */
 typedef struct CombineTag
 {

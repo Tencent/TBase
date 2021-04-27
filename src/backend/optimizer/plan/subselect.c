@@ -5598,3 +5598,88 @@ SS_make_initplan_from_plan(PlannerInfo *root,
     /* Set costs of SubPlan using info from the plan tree */
     cost_subplan(subroot, node, plan);
 }
+/*
+ * SS_remote_attach_initplans
+ *
+ * recursively look into a plantree, find any RemoteSubplan and
+ * attach params id that generated from init-plan of this query.
+ */
+void
+SS_remote_attach_initplans(PlannerInfo *root, Plan *plan)
+{
+	ListCell   *lc;
+	
+	if (plan == NULL)
+		return;
+	
+	if (IsA(plan, RemoteSubplan))
+	{
+		ListCell *plan_lc, *param_lc;
+		RemoteSubplan *rsplan = (RemoteSubplan *) plan;
+		Assert(rsplan->initPlanParams == NULL);
+		foreach(plan_lc, root->init_plans)
+		{
+			SubPlan *initplan = (SubPlan *) lfirst(plan_lc);
+			foreach(param_lc, initplan->setParam)
+			{
+				rsplan->initPlanParams = 
+					bms_add_member(rsplan->initPlanParams, lfirst_int(param_lc));
+			}
+		}
+	}
+	
+	switch (nodeTag(plan))
+	{
+		case T_SubqueryScan:
+		{
+			SubqueryScan *sscan = (SubqueryScan *) plan;
+			RelOptInfo *rel;
+			
+			rel = find_base_rel(root, sscan->scan.scanrelid);
+			SS_remote_attach_initplans(rel->subroot, sscan->subplan);
+		}
+			break;
+		case T_CustomScan:
+		{
+			foreach(lc, ((CustomScan *) plan)->custom_plans)
+				SS_remote_attach_initplans(root, (Plan *) lfirst(lc));
+		}
+			break;
+		case T_ModifyTable:
+		{
+			foreach(lc, ((ModifyTable *) plan)->plans)
+				SS_remote_attach_initplans(root, (Plan *) lfirst(lc));
+		}
+			break;
+		case T_Append:
+		{
+			foreach(lc, ((Append *) plan)->appendplans)
+				SS_remote_attach_initplans(root, (Plan *) lfirst(lc));
+		}
+			break;
+		case T_MergeAppend:
+		{
+			foreach(lc, ((MergeAppend *) plan)->mergeplans)
+				SS_remote_attach_initplans(root, (Plan *) lfirst(lc));
+		}
+			break;
+		case T_BitmapAnd:
+		{
+			foreach(lc, ((BitmapAnd *) plan)->bitmapplans)
+				SS_remote_attach_initplans(root, (Plan *) lfirst(lc));
+		}
+			break;
+		case T_BitmapOr:
+		{
+			foreach(lc, ((BitmapOr *) plan)->bitmapplans)
+				SS_remote_attach_initplans(root, (Plan *) lfirst(lc));
+		}
+			break;
+		default:
+			break;
+	}
+	
+	/* Process left and right child plans, if any */
+	SS_remote_attach_initplans(root, plan->lefttree);
+	SS_remote_attach_initplans(root, plan->righttree);
+}
