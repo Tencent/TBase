@@ -297,7 +297,7 @@ inline bool  is_ddl_leader_cn(char *leader_cn);
 extern int pgxc_node_send_sessionid(PGXCNodeHandle * handle);
 extern void SerializeSessionId(Size maxsize, char *start_address);
 extern void StartParallelWorkerSessionId(char *address);
-void CheckInvalidateRemoteHandles(void);
+extern bool is_pgxc_handles_init(void);
 #endif
 
 #ifdef __AUDIT__

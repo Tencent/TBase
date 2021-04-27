@@ -5860,6 +5860,12 @@ is_ddl_leader_cn(char *first_cn)
 
     return strcmp(first_cn, PGXCNodeName) == 0;
 }
+
+inline bool
+is_pgxc_handles_init()
+{
+	return (dn_handles != NULL && co_handles != NULL);
+}
 #endif
 
 /*
