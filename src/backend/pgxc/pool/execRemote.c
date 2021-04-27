@@ -7623,6 +7623,11 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
     struct rusage        start_r;
     struct timeval        start_t;
 
+	if (!is_pgxc_handles_init())
+	{
+		return true;
+	}
+
     clean_nodes = (PGXCNodeHandle**)palloc(sizeof(PGXCNodeHandle*) * (NumCoords + NumDataNodes));
     cancel_dn_list = (int*)palloc(sizeof(int) * NumDataNodes);
     cancel_co_list = (int*)palloc(sizeof(int) * NumCoords);
@@ -12859,8 +12864,14 @@ void SetCurrentHandlesReadonly(void)
 {
     int i = 0;
     PGXCNodeHandle        *conn     = NULL;
-    PGXCNodeAllHandles *handles = get_current_handles();
+	PGXCNodeAllHandles *handles = NULL;
     
+	if (!is_pgxc_handles_init())
+	{
+		return;
+	}
+
+	handles = get_current_handles();
     
     for (i = 0; i < handles->dn_conn_count; i++)
     {
