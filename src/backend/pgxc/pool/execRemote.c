@@ -12915,7 +12915,11 @@ SubTranscation_PreCommit_Remote(void)
 												  ALLOCSET_DEFAULT_SIZES);
 	old = MemoryContextSwitchTo(temp);
     /* Only local coord can send down commit_subtxn when exec plpgsql */
+#ifdef _PG_ORCL_
+	if (InPlpgsqlFunc())
+#else
     if (InPlpgsqlFunc() && IS_PGXC_LOCAL_COORDINATOR)
+#endif
     {
         pgxc_node_remote_commit(TXN_TYPE_CommitSubTxn, false);
     }
