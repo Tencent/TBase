@@ -2689,6 +2689,45 @@ static struct config_bool ConfigureNamesBool[] =
     },
 #endif
 
+#ifdef __TWO_PHASE_TRANS__
+	{
+		{"enable_2pc_file_cache", PGC_POSTMASTER, CUSTOM_OPTIONS,
+			gettext_noop("Enable 2PC cache."),
+			NULL
+		},
+		&enable_2pc_file_cache,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_2pc_file_check", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("Enable 2PC file check."),
+			NULL
+		},
+		&enable_2pc_file_check,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_2pc_entry_key_check", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("Enable 2PC entry key check."),
+			NULL
+		},
+		&enable_2pc_entry_key_check,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"enable_2pc_entry_trace", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("Enable 2PC entry trace."),
+			NULL
+		},
+		&enable_2pc_entry_trace,
+		false,
+		NULL, NULL, NULL
+	},
+#endif
+
 #ifdef __TBASE__
 	{
 		{"enable_lock_account", PGC_SUSET, CUSTOM_OPTIONS,
@@ -4743,6 +4782,33 @@ static struct config_int ConfigureNamesInt[] =
         4096, 64, MAX_KILOBYTES,
         NULL, NULL, NULL
     },
+
+#ifdef __TWO_PHASE_TRANS__
+	{
+		{"record_2pc_cache_size", PGC_POSTMASTER, CUSTOM_OPTIONS,
+			gettext_noop("2PC info cache size."),
+		},
+		&record_2pc_cache_size,
+		50000, 100, INT_MAX,
+		NULL, NULL, NULL
+	},
+	{
+		{"record_2pc_entry_size", PGC_POSTMASTER, CUSTOM_OPTIONS,
+			gettext_noop("2PC info cache entry size."),
+		},
+		&record_2pc_entry_size,
+		2048, 1200, INT_MAX,
+		NULL, NULL, NULL
+	},
+	{
+		{"record_2pc_partitions", PGC_POSTMASTER, CUSTOM_OPTIONS,
+			gettext_noop("2PC info cache partition number."),
+		},
+		&record_2pc_partitions,
+		32, 1, INT_MAX,
+		NULL, NULL, NULL
+	},
+#endif
 
 #ifdef __TBASE__
     {

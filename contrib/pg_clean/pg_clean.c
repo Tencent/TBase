@@ -303,6 +303,8 @@ void getTxnInfoOnOtherNodes(txn_info *txn);
 int Get2PCXidByGid(Oid node_oid, char * gid, uint32 * transactionid);
 int Get2PCFile(Oid node_oid, char * gid, uint32 * transactionid);
 
+char *get2PCInfo(const char *tid);
+
 void getTxnStatus(txn_info * txn, int node_idx);
 void recover2PCForDatabaseAll(void);
 void recover2PCForDatabase(database_info * db_info);
@@ -1615,23 +1617,28 @@ void getTxnStatus(txn_info *txn, int node_idx)
 	DropTupleTableSlots(&result);
 }
 
-Datum pgxc_get_2pc_file(PG_FUNCTION_ARGS);
-PG_FUNCTION_INFO_V1(pgxc_get_2pc_file);
-Datum pgxc_get_2pc_file(PG_FUNCTION_ARGS)
+char *get2PCInfo(const char *tid)
 {
-    char *tid;
-    char path[MAXPGPATH];
-    File fd;
-    int ret;
-    char *result;
-	text *t_result = NULL;
+    char *result = NULL;
+    char *info = NULL;
+    int size = 0;
+    File fd = -1;
+    int ret = -1;
     struct stat filestate;
-    off_t fileSize;
+    char path[MAXPGPATH];
     
-    tid = text_to_cstring(PG_GETARG_TEXT_P(0));
+    info = get_2pc_info_from_cache(tid);
+    if (NULL != info)
+    {
+        size = strlen(info);
+        result = (char *)palloc0(size + 1);
+        memcpy(result, info, size);
+        return result;
+    }
 
-    snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", tid);
+    elog(LOG, "try to get 2pc info from disk, tid: %s", tid);
     
+    snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", tid);
     if(access(path, F_OK) == 0)
     {
     	if(stat(path, &filestate) == -1)
@@ -1641,39 +1648,56 @@ Datum pgxc_get_2pc_file(PG_FUNCTION_ARGS)
     			errmsg("could not get status of file \"%s\"", path)));
     	}
         
-    	fileSize = filestate.st_size;
+        size = filestate.st_size;
 
-        if (0 == fileSize) 
+        if (0 == size) 
         {
-            PG_RETURN_NULL();
+            return NULL;
         }
 
-        result = (char *)palloc0(fileSize + 1);
+        result = (char *)palloc0(size + 1);
 
         fd = PathNameOpenFile(path, O_RDONLY, S_IRUSR | S_IWUSR);
     	if (fd < 0)
     	{   
+            pfree(result);
     		ereport(ERROR,
     			(errcode_for_file_access(),
     			errmsg("could not open file \"%s\" for read", path)));
     	} 
 
-    	ret = FileRead(fd, result, fileSize, WAIT_EVENT_BUFFILE_READ);
-
-    	if(ret != fileSize)
+        ret = FileRead(fd, result, size, WAIT_EVENT_BUFFILE_READ);
+        if(ret != size)
     	{
+            pfree(result);
     		ereport(ERROR,
     			(errcode_for_file_access(),
     			errmsg("could not read file \"%s\"", path)));
     	}
 
         FileClose(fd);
-		if (result)
+        return result;
+    }
+
+    return NULL;
+}
+
+Datum pgxc_get_2pc_file(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(pgxc_get_2pc_file);
+Datum pgxc_get_2pc_file(PG_FUNCTION_ARGS)
+{
+    char *tid = NULL;
+    char *result = NULL;
+    text *t_result = NULL;
+
+    tid = text_to_cstring(PG_GETARG_TEXT_P(0));
+    result = get2PCInfo(tid);
+    if (NULL != result)
 		{
 			t_result = cstring_to_text(result);
+        pfree(result);
 			return PointerGetDatum(t_result);
 		}
-    }
     PG_RETURN_NULL();
 }
 
@@ -1682,63 +1706,26 @@ Datum pgxc_get_2pc_nodes(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(pgxc_get_2pc_nodes);
 Datum pgxc_get_2pc_nodes(PG_FUNCTION_ARGS)
 {
-    char *tid;
-    char path[MAXPGPATH];
-    File fd;
-    int ret;
-    char *result;
-	char *nodename;
+    char *tid = NULL;
+    char *result = NULL;
+    char *nodename = NULL;
 	text *t_result = NULL;
-    struct stat filestate;
-    off_t fileSize;
     
     tid = text_to_cstring(PG_GETARG_TEXT_P(0));
-
-    snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", tid);
-    
-    if(access(path, F_OK) == 0)
-    {
-    	if(stat(path, &filestate) == -1)
-    	{
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not get status of file \"%s\"", path)));
-    	}
-        
-    	fileSize = filestate.st_size;
-
-        result = (char *)palloc0(fileSize + 1);
-
-        fd = PathNameOpenFile(path, O_RDONLY, S_IRUSR | S_IWUSR);
-    	if (fd < 0)
-    	{   
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not open file \"%s\" for read", path)));
-    	} 
-
-    	ret = FileRead(fd, result, fileSize, WAIT_EVENT_BUFFILE_READ);
-
-    	if(ret != fileSize)
-    	{
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not read file \"%s\"", path)));
-    	}
-
-        FileClose(fd);
-		if (result)
+    result = get2PCInfo(tid);
+    if (NULL != result)
 		{
 			nodename = strstr(result, GET_NODE);
-			if (nodename)
+        if (NULL != nodename)
 			{
 				nodename += strlen(GET_NODE);
 				nodename = strtok(nodename, "\n");
 				t_result = cstring_to_text(nodename);
+            pfree(result);
 				return PointerGetDatum(t_result);
 			}
 		}
-    }
+
     PG_RETURN_NULL();
 }
 
@@ -1746,61 +1733,24 @@ Datum pgxc_get_2pc_startnode(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(pgxc_get_2pc_startnode);
 Datum pgxc_get_2pc_startnode(PG_FUNCTION_ARGS)
 {
-    char *tid;
-    char path[MAXPGPATH];
-    File fd;
-    int ret;
-    char *result;
-	char *nodename;
+    char *tid = NULL;
+    char *result = NULL;
+    char *nodename = NULL;
 	text *t_result = NULL;
-    struct stat filestate;
-    off_t fileSize;
     
     tid = text_to_cstring(PG_GETARG_TEXT_P(0));
-
-    snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", tid);
-    
-    if(access(path, F_OK) == 0)
-    {
-    	if(stat(path, &filestate) == -1)
-    	{
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not get status of file \"%s\"", path)));
-    	}
-        
-    	fileSize = filestate.st_size;
-
-        result = (char *)palloc0(fileSize + 1);
-
-        fd = PathNameOpenFile(path, O_RDONLY, S_IRUSR | S_IWUSR);
-    	if (fd < 0)
-    	{   
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not open file \"%s\" for read", path)));
-    	} 
-
-    	ret = FileRead(fd, result, fileSize, WAIT_EVENT_BUFFILE_READ);
-
-    	if(ret != fileSize)
-    	{
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not read file \"%s\"", path)));
-    	}
-
-        FileClose(fd);
-		if (result)
+    result = get2PCInfo(tid);
+    if (NULL != result)
 		{
 			nodename = strstr(result, GET_START_NODE);
-			if (nodename)
+        if (NULL != nodename)
 			{
 				nodename += strlen(GET_START_NODE);
 				nodename = strtok(nodename, "\n");
 				t_result = cstring_to_text(nodename);
+            pfree(result);
 				return PointerGetDatum(t_result);
-			}
+
 		}
     }
     PG_RETURN_NULL();
@@ -1810,63 +1760,25 @@ Datum pgxc_get_2pc_startxid(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(pgxc_get_2pc_startxid);
 Datum pgxc_get_2pc_startxid(PG_FUNCTION_ARGS)
 {
-    char *tid;
-    char path[MAXPGPATH];
-    File fd;
-    int ret;
-    char *result;
-	char *startxid;
+    char *tid = NULL;
+    char *result = NULL;
+    char *startxid = NULL;
 	text *t_result = NULL;
-    struct stat filestate;
-    off_t fileSize;
     
     tid = text_to_cstring(PG_GETARG_TEXT_P(0));
-
-    snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", tid);
-    
-    if(access(path, F_OK) == 0)
-    {
-    	if(stat(path, &filestate) == -1)
-    	{
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not get status of file \"%s\"", path)));
-    	}
-        
-    	fileSize = filestate.st_size;
-
-        result = (char *)palloc0(fileSize + 1);
-
-        fd = PathNameOpenFile(path, O_RDONLY, S_IRUSR | S_IWUSR);
-    	if (fd < 0)
-    	{   
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not open file \"%s\" for read", path)));
-    	} 
-
-    	ret = FileRead(fd, result, fileSize, WAIT_EVENT_BUFFILE_READ);
-
-    	if(ret != fileSize)
-    	{
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not read file \"%s\"", path)));
-    	}
-
-        FileClose(fd);
-		if (result)
+    result = get2PCInfo(tid);
+    if (NULL != result)
 		{
 			startxid = strstr(result, GET_START_XID);
-			if (startxid)
+        if (NULL != startxid)
 			{
 				startxid += strlen(GET_START_XID);
 				startxid = strtok(startxid, "\n");
 				t_result = cstring_to_text(startxid);
+            pfree(result);
 				return PointerGetDatum(t_result);
 			}
 		}
-    }
     PG_RETURN_NULL();
 }
 
@@ -1875,63 +1787,25 @@ Datum pgxc_get_2pc_commit_timestamp(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(pgxc_get_2pc_commit_timestamp);
 Datum pgxc_get_2pc_commit_timestamp(PG_FUNCTION_ARGS)
 {
-    char *tid;
-    char path[MAXPGPATH];
-    File fd;
-    int ret;
-    char *result;
-	char *commit_timestamp;
+    char *tid = NULL;
+    char *result = NULL;
+    char *commit_timestamp = NULL;
 	text *t_result = NULL;
-    struct stat filestate;
-    off_t fileSize;
     
     tid = text_to_cstring(PG_GETARG_TEXT_P(0));
-
-    snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", tid);
-    
-    if(access(path, F_OK) == 0)
-    {
-    	if(stat(path, &filestate) == -1)
-    	{
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not get status of file \"%s\"", path)));
-    	}
-        
-    	fileSize = filestate.st_size;
-
-        result = (char *)palloc0(fileSize + 1);
-
-        fd = PathNameOpenFile(path, O_RDONLY, S_IRUSR | S_IWUSR);
-    	if (fd < 0)
-    	{   
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not open file \"%s\" for read", path)));
-    	} 
-
-    	ret = FileRead(fd, result, fileSize, WAIT_EVENT_BUFFILE_READ);
-
-    	if(ret != fileSize)
-    	{
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not read file \"%s\"", path)));
-    	}
-
-        FileClose(fd);
-		if (result)
+    result = get2PCInfo(tid);
+    if (NULL != result)
 		{
 			commit_timestamp = strstr(result, GET_COMMIT_TIMESTAMP);
-			if (commit_timestamp)
+        if (NULL != commit_timestamp)
 			{
 				commit_timestamp += strlen(GET_COMMIT_TIMESTAMP);
 				commit_timestamp = strtok(commit_timestamp, "\n");
 				t_result = cstring_to_text(commit_timestamp);
+            pfree(result);
 				return PointerGetDatum(t_result);
 			}
 		}
-    }
     PG_RETURN_NULL();
 }
 
@@ -1941,61 +1815,24 @@ Datum pgxc_get_2pc_xid(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(pgxc_get_2pc_xid);
 Datum pgxc_get_2pc_xid(PG_FUNCTION_ARGS)
 {
-    char *tid;
-    char path[MAXPGPATH];
-    File fd;
-    int ret;
+    char *tid = NULL;
+    char *result = NULL;
+    char *str_xid = NULL;
     GlobalTransactionId xid;
-	char *result;
-	char *str_xid;
-    struct stat filestate;
-    off_t fileSize;
     
     tid = text_to_cstring(PG_GETARG_TEXT_P(0));
-
-    snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", tid);
-    
-    if(access(path, F_OK) == 0)
+    result = get2PCInfo(tid);
+    if (NULL != result)
     {
-    	if(stat(path, &filestate) == -1)
-    	{
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not get status of file \"%s\"", path)));
-    	}
-        
-    	fileSize = filestate.st_size;
-		result = (char *)palloc0(fileSize + 1);
-		
-        fd = PathNameOpenFile(path, O_RDONLY, S_IRUSR | S_IWUSR);
-    	if (fd < 0)
-    	{   
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not open file \"%s\" for read", path)));
-    	} 
-		
-
-    	ret = FileRead(fd, result, fileSize, WAIT_EVENT_BUFFILE_READ);
-
-    	if(ret != fileSize)
-    	{
-    		ereport(ERROR,
-    			(errcode_for_file_access(),
-    			errmsg("could not read file \"%s\"", path)));
-    	}
-
-        FileClose(fd);
-		
 		str_xid = strstr(result, GET_XID);
-		if (str_xid)
+        if (NULL != str_xid)
 		{
 			str_xid += strlen(GET_XID);
 			str_xid = strtok(str_xid, "\n");
 			xid = strtoul(str_xid, NULL, 10);
+            pfree(result);
 			PG_RETURN_UINT32(xid);
 		}
-		
     }
     PG_RETURN_NULL();
 }
@@ -2004,15 +1841,9 @@ Datum pgxc_remove_2pc_records(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(pgxc_remove_2pc_records);
 Datum pgxc_remove_2pc_records(PG_FUNCTION_ARGS)
 {
-#define SLEEP_COUNT 1000
-    char *tid               = NULL;
-
-    tid = text_to_cstring(PG_GETARG_TEXT_P(0));
-
+    char *tid = text_to_cstring(PG_GETARG_TEXT_P(0));
 	remove_2pc_records(tid, true);
-
     pfree(tid);
-    
     PG_RETURN_BOOL(true);
 }
 
@@ -2181,10 +2012,26 @@ Datum pgxc_get_record_list(PG_FUNCTION_ARGS)
     char *recordList = NULL;
 	text *t_recordList = NULL;
 
+    /* get from hash table */
+    recordList = get_2pc_list_from_cache(&count);
+    if (count >= MAXIMUM_OUTPUT_FILE)
+    {
+        Assert(NULL != recordList);
+        t_recordList = cstring_to_text(recordList);
+        return PointerGetDatum(t_recordList);
+    }
+
+    /* get from disk */
 	if(!(dir = opendir(TWOPHASE_RECORD_DIR)))
 	{
+        if(NULL == recordList)
+        {
 		PG_RETURN_NULL();
 	}
+
+        t_recordList = cstring_to_text(recordList);
+        return PointerGetDatum(t_recordList);
+    }
 
     while((ptr = readdir(dir)) != NULL)
     {
@@ -2193,7 +2040,9 @@ Datum pgxc_get_record_list(PG_FUNCTION_ARGS)
             continue;
         }       
         if (count >= MAXIMUM_OUTPUT_FILE)
+        {
             break;
+        }
         
         if(!recordList)
         {

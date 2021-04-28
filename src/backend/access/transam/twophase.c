@@ -130,12 +130,13 @@
 #define TWOPHASE_DIR "pg_twophase"
 
 #define TWOPHASE_RECORD_DIR "pg_2pc"
+
+#define GET_2PC_FILE_PATH(path, tid) \
+    snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", tid)
+
 int  transaction_threshold = 200000;
-#define GET_START_XID "startxid:"
-#define GET_COMMIT_TIMESTAMP "global_commit_timestamp:"
+
 #define GET_START_NODE "startnode:"
-#define GET_NODE "nodes:"
-#define GET_XID "xid:"
 
 /* GUC variable, can't be changed after startup */
 #ifdef PGXC
@@ -147,6 +148,38 @@ int            max_prepared_xacts = 0;
 bool        enable_2pc_recovery_info = true;
 #endif
 
+#ifdef __TWO_PHASE_TRANS__
+static HTAB *record_2pc_cache = NULL;
+
+bool enable_2pc_file_cache = true;
+bool enable_2pc_file_check = true;
+bool enable_2pc_entry_key_check = true;
+bool enable_2pc_entry_trace = false;
+
+int record_2pc_cache_size = 50000;
+int record_2pc_entry_size = 2048;
+int record_2pc_partitions = 32;
+
+#define MAX_OUTPUT_FILE 1000
+
+#define MAX_TID_SIZE        MAXPGPATH
+#define MAX_2PC_INFO_SIZE   (record_2pc_entry_size - MAX_TID_SIZE)
+#define DFLT_2PC_INFO_SIZE  1024  /* default size */
+
+/* hash table entry for 2pc record */
+typedef struct Cache2pcInfo
+{
+	char key[MAX_TID_SIZE];        /* hash key: tid */
+	char info[DFLT_2PC_INFO_SIZE];
+
+} Cache2pcInfo;
+
+inline void
+check_entry_key(const char *tid, const char *key, const char *func);
+
+void
+check_2pc_file(const char *tid, const char *info, const char *func);
+#endif
 
 static GlobalTransaction
 LookupGXact(const char *gid, Oid user);
@@ -2107,6 +2140,12 @@ FinishPreparedTransaction(const char *gid, bool isCommit)
     {
         remove_2pc_records(gid, false);
     }
+    else
+    {
+        /* rename 2pc file when rollback on the current node */
+        rename_2pc_records(gid, 0);
+    }
+
     ClearLocalTwoPhaseState();
     
     if (isCommit) 
@@ -2263,6 +2302,17 @@ CheckPointTwoPhase(XLogRecPtr redo_horizon)
     int            i;
     int            serialized_xacts = 0;
 
+#ifdef __TWO_PHASE_TRANS__
+	File fd = -1;
+	int ret = 0;
+	int size = 0;
+	Cache2pcInfo *entry = NULL;
+	bool found = false;
+	char path[MAXPGPATH];
+#endif
+
+	elog(LOG, "[CheckPointTwoPhase] checkpoint: "UINT64_FORMAT, redo_horizon);
+
     if (max_prepared_xacts <= 0)
         return;                    /* nothing to do */
 
@@ -2300,16 +2350,166 @@ CheckPointTwoPhase(XLogRecPtr redo_horizon)
             char       *buf;
             int            len;
 
+			/* save to pg_twophase */
             XlogReadTwoPhaseData(gxact->prepare_start_lsn, &buf, &len);
             RecreateTwoPhaseFile(gxact->xid, buf, len);
+			pfree(buf);
+
+#ifdef __TWO_PHASE_TRANS__
+			/* save to pg_2pc */
+			if (NULL != record_2pc_cache)
+			{
+				Assert(strlen(gxact->gid) < MAX_TID_SIZE);
+				entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
+					gxact->gid, HASH_FIND, &found);
+				if (found)
+				{
+					/* save to file */
+					Assert(NULL != entry);
+					check_entry_key(gxact->gid, entry->key, "CheckPointTwoPhase");
+					check_2pc_file(gxact->gid, entry->info, "CheckPointTwoPhase");
+
+					elog(LOG, "[CheckPointTwoPhase] %s is found "
+						"in hash table", gxact->gid);
+
+					size = strlen(entry->info);
+
+					memset(path, 0, MAXPGPATH);
+					GET_2PC_FILE_PATH(path, gxact->gid);
+
+					fd = open(path, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+					if (fd < 0)
+					{
+						elog(ERROR, "[CheckPointTwoPhase] could not create file %s, "
+							"errMsg: %s", path, strerror(errno));
+					}
+
+					ret = write(fd, entry->info, size);
+					if(ret != size)
+					{
+						close(fd);
+						elog(ERROR, "[CheckPointTwoPhase] could not write file %s, "
+							"errMsg: %s, ret: %d, info: %s",
+							path, strerror(errno), ret, entry->info);
+					}
+					close(fd);
+
+					/* remove from hash table */
+					entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
+						gxact->gid, HASH_REMOVE, &found);
+					if (!found)
+					{
+						elog(WARNING, "[CheckPointTwoPhase] %s is not found "
+							"in hash table when remove it", gxact->gid);
+					}
+					else if (enable_2pc_entry_trace)
+					{
+						elog(LOG, "[CheckPointTwoPhase] %s is removed "
+							"from hash table", gxact->gid);
+					}
+				}
+				else
+				{
+					elog(LOG, "[CheckPointTwoPhase] %s is not found "
+						"in hash table", gxact->gid);
+				}
+			}
+#endif
+
             gxact->ondisk = true;
             gxact->prepare_start_lsn = InvalidXLogRecPtr;
             gxact->prepare_end_lsn = InvalidXLogRecPtr;
-            pfree(buf);
             serialized_xacts++;
         }
     }
     LWLockRelease(TwoPhaseStateLock);
+
+#ifdef __TWO_PHASE_TRANS__
+	/* start node maybe no in prepared xacts */
+	if (IS_PGXC_COORDINATOR && NULL != record_2pc_cache)
+	{
+		HASH_SEQ_STATUS seq;
+		Cache2pcInfo *entry = NULL;
+		char *start_node = NULL;
+		char info[MAX_2PC_INFO_SIZE];
+
+		hash_seq_init(&seq, record_2pc_cache);
+		while ((entry = hash_seq_search(&seq)) != NULL)
+		{
+			Assert(NULL != entry);
+			check_2pc_file(entry->key, entry->info, "CheckPointTwoPhase");
+
+			elog(LOG, "[CheckPointTwoPhase] key %s is found "
+				"in hash table", entry->key);
+
+			if (IsXidImplicit(entry->key))
+			{
+				memset(info, 0, MAX_2PC_INFO_SIZE);
+				memcpy(info, entry->info, strlen(entry->info));
+
+				start_node = strstr(info, GET_START_NODE);
+				if (NULL != start_node)
+				{
+					start_node += strlen(GET_START_NODE);
+					start_node = strtok(start_node, "\n");
+
+					if (0 != strcmp(start_node, PGXCNodeName))
+					{
+						elog(LOG, "[CheckPointTwoPhase] %s start node is not %s",
+							entry->key, PGXCNodeName);
+						continue;
+					}
+					else
+					{
+						elog(LOG, "[CheckPointTwoPhase] %s start node is %s",
+							entry->key, PGXCNodeName);
+					}
+				}
+				else
+				{
+					elog(WARNING, "[CheckPointTwoPhase] %s get start node failed, "
+						"info: %s", entry->key, entry->info);
+				}
+			}
+
+			size = strlen(entry->info);
+
+			memset(path, 0, MAXPGPATH);
+			GET_2PC_FILE_PATH(path, entry->key);
+
+			fd = open(path, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+			if (fd < 0)
+			{
+				elog(ERROR, "[CheckPointTwoPhase] could not create file %s, "
+					"errMsg: %s", path, strerror(errno));
+			}
+
+			ret = write(fd, entry->info, size);
+			if(ret != size)
+			{
+				close(fd);
+				elog(ERROR, "[CheckPointTwoPhase] could not write file %s, "
+					"errMsg: %s, ret: %d, info: %s",
+					path, strerror(errno), ret, entry->info);
+			}
+			close(fd);
+
+			/* remove from hash table */
+			entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
+				entry->key, HASH_REMOVE, &found);
+			if (!found)
+			{
+				elog(WARNING, "[CheckPointTwoPhase] %s is not found "
+					"in hash table when remove it", entry->key);
+			}
+			else if (enable_2pc_entry_trace)
+			{
+				elog(LOG, "[CheckPointTwoPhase] %s is removed "
+					"from hash table", entry->key);
+			}
+		}
+	}
+#endif
 
     /*
      * Flush unconditionally the parent directory to make any information
@@ -3146,6 +3346,117 @@ PrepareRedoRemove(TransactionId xid, bool giveWarning)
 }
 
 #ifdef __TWO_PHASE_TRANS__
+/*
+ * Check the entry key in the hash table is same with tid.
+ */
+inline void check_entry_key(const char *tid, const char *key, const char *func)
+{
+	if (!enable_2pc_entry_key_check)
+	{
+		return;
+	}
+
+	if (0 != strcmp(tid, key))
+	{
+		elog(PANIC, "[%s] %s get wrong key: %s", func, tid, key);
+	}
+}
+
+/*
+ * Check whether the 2pc file is exist when it is saved in the hash table.
+ */
+void check_2pc_file(const char *tid, const char *info, const char *func)
+{
+	if (enable_2pc_file_check)
+	{
+		int size = 0;
+		struct stat filestate;
+		char path[MAXPGPATH];
+		Cache2pcInfo *entry = NULL;
+		bool found = false;
+
+		Assert (NULL != tid);
+		Assert (NULL != info);
+		Assert (NULL != func);
+
+		GET_2PC_FILE_PATH(path, tid);
+		if (0 != access(path, F_OK))
+		{
+			return;
+		}
+
+		elog(LOG, "[check_2pc_file][%s] node(%s) found file %s",
+			func, PGXCNodeName, path);
+
+		if(stat(path, &filestate) == -1)
+		{
+			elog(ERROR, "[check_2pc_file][%s] could not get status of file %s",
+				func, path);
+		}
+
+		size = filestate.st_size;
+
+		if (0 != size)
+		{
+			int ret = 0;
+			File fd = -1;
+			char result[size + 1];
+
+			fd = PathNameOpenFile(path, O_RDONLY, S_IRUSR | S_IWUSR);
+			if (fd < 0)
+			{
+				elog(ERROR, "[check_2pc_file][%s] could not open file %s for read",
+					func, path);
+			}
+
+			memset(result, 0, size +1);
+			ret = FileRead(fd, result, size, WAIT_EVENT_BUFFILE_READ);
+			if(ret != size)
+			{
+				FileClose(fd);
+				elog(ERROR, "[check_2pc_file][%s] read %s error, ret: %d, size: %d",
+					func, path, ret, size);
+			}
+			FileClose(fd);
+
+			if (0 != strcmp(result, info))
+			{
+				elog(LOG, "[check_2pc_file][%s] file %s result: %s, info: %s",
+					func, path, result, info);
+			}
+		}
+		else
+		{
+			elog(LOG, "[check_2pc_file][%s] get empty file %s, info: %s",
+				func, path, info);
+		}
+
+		if (NULL == record_2pc_cache)
+		{
+			elog(LOG, "[check_2pc_file][%s] record_2pc_cache is NULL, "
+				"tid: %s, info: %s", func, tid, info);
+			return;
+		}
+
+		entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
+			tid, HASH_FIND, &found);
+		if (!found)
+		{
+			elog(LOG, "[check_2pc_file][%s] %s is not found "
+				"in hash table, info: %s", func, tid, info);
+			return;
+		}
+
+		Assert (NULL != entry);
+
+		if (0 != strcmp(entry->info, info))
+		{
+			elog(LOG, "[check_2pc_file][%s] %s info change from '%s' to '%s'",
+				func, tid, info, entry->info);
+		}
+	}
+}
+
 void record_2pc_redo_remove_gid_xid(TransactionId xid)
 {
     int i;
@@ -3190,6 +3501,8 @@ void record_2pc_involved_nodes_xid(const char * tid,
     char path[MAXPGPATH];
     off_t fileSize;
     char *result = NULL;
+	Cache2pcInfo *entry = NULL;
+	bool found = false;
 #ifdef __TWO_PHASE_TESTS__
     XLogRecPtr xlogrec = 0;
 #endif
@@ -3199,31 +3512,65 @@ void record_2pc_involved_nodes_xid(const char * tid,
         return ;
     }
 
-    if (enable_distri_print)
+	if (enable_distri_print || enable_2pc_entry_trace)
     {
-        elog(LOG, "record twophase txn gid: %s, startnode: %s, participants: %s", tid, startnode, nodestring);
+		elog(LOG, "[record_2pc_involved_nodes_xid] record %s, "
+			"startnode: %s, participants: %s",
+			tid, startnode, nodestring);
     }
 
     if (NULL == tid || '\0' == tid[0])
     {
-        elog(ERROR, "record twophase txn GID is empty");
+		elog(ERROR, "[record_2pc_involved_nodes_xid] gid is empty");
     }
 
     if (NULL == startnode || '\0' == startnode[0])
     {
-        elog(PANIC, "record twophase txn gid: %s, startnode is empty", tid);
+		elog(PANIC, "[record_2pc_involved_nodes_xid] %s startnode is empty", tid);
     }
     if (NULL == nodestring || '\0' == nodestring[0])
     {
-        elog(PANIC, "record twophase txn gid: %s, participants is empty", tid);
+		elog(PANIC, "[record_2pc_involved_nodes_xid] %s participants is empty", tid);
     }
     
-    /* the 2pc dir is already created in initdb */
-    snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", tid);
+	initStringInfo(&content);
+	appendStringInfo(&content, "startnode:%s\n", startnode);
+	appendStringInfo(&content, "startxid:%u\n", startxid);
+	appendStringInfo(&content, "nodes:%s\n", nodestring);
+	appendStringInfo(&content, "xid:%u\n", xid);
+	size = content.len;
+
+	Assert(size == strlen(content.data));
 
     /* if in_pg_clean, then check whether the file exists */
     if (g_twophase_state.in_pg_clean)
     {
+		/* if tid already exists, check content and return */
+		if (NULL != record_2pc_cache)
+		{
+			Assert(strlen(tid) < MAX_TID_SIZE);
+			entry = (Cache2pcInfo *)hash_search(record_2pc_cache, tid, HASH_FIND, &found);
+			if (found)
+			{
+				Assert(NULL != entry);
+				check_entry_key(tid, entry->key, "record_2pc_involved_nodes_xid");
+				check_2pc_file(tid, entry->info, "record_2pc_involved_nodes_xid");
+
+				if (strncmp(entry->info, content.data, size) != 0)
+				{
+					elog(ERROR, "[record_2pc_involved_nodes_xid] pg_clean attemp to "
+						"write %s info conflict, content: %s, info: %s",
+						tid, content.data, entry->info);
+				}
+
+				resetStringInfo(&content);
+				pfree(content.data);
+				return;
+			}
+		}
+
+		GET_2PC_FILE_PATH(path, tid);
+
         /* if file already exists, check content and return */
         if (stat(path, &fst) >= 0)
         {
@@ -3235,40 +3582,111 @@ void record_2pc_involved_nodes_xid(const char * tid,
             {   
                 ereport(ERROR,
                     (errcode_for_file_access(),
-                    errmsg("could not open file \"%s\" for read", path)));
+					errmsg("[record_2pc_involved_nodes_xid] could not "
+						"open file %s for read", path)));
             } 
             ret = FileRead(fd, result, fileSize, WAIT_EVENT_BUFFILE_READ);
             if(ret != fileSize)
             {
+				FileClose(fd);
                 ereport(ERROR,
                     (errcode_for_file_access(),
-                    errmsg("could not read file \"%s\"", path)));
+					errmsg("[record_2pc_involved_nodes_xid] could not "
+						"read file %s, ret: %d", path, ret)));
             }
-            
             FileClose(fd);
-            if (result)
+
+			Assert(NULL != result);
+
+			if (strncmp(result, content.data, size) != 0)
             {
-                initStringInfo(&content);
-                appendStringInfo(&content, "startnode:%s\n", startnode);
-                appendStringInfo(&content, "startxid:%u\n", startxid);
-                appendStringInfo(&content, "nodes:%s\n", nodestring);
-                appendStringInfo(&content, "xid:%u\n", xid);
-                if (strncmp(result, content.data, content.len) != 0)
-                {
-                    elog(ERROR, "pg_clean attemp to write 2pc file conflict with file '%s', "
-                                                        "attemp to write startnode: %s, startxid: %u, "
-                                                        "nodestring: %s, xid: %u", tid, startnode, startxid, nodestring, xid);
-                }
-                else
-                {
-                    resetStringInfo(&content);
-                    pfree(content.data);
-                    return;
-                }
+				elog(ERROR, "[record_2pc_involved_nodes_xid] pg_clean attemp to "
+					"write %s info conflict, content: %s, info: %s",
+					tid, content.data, result);
             }
+
+			pfree(result);
+
+            resetStringInfo(&content);
+            pfree(content.data);
+            return;
         }
     }
     
+	if (!RecoveryInProgress())
+	{
+		XLogBeginInsert();
+		XLogRegisterData((char *)tid, strlen(tid) + 1);
+		XLogRegisterData((char *)startnode, strlen(startnode) + 1);
+		XLogRegisterData((char *)&startxid, sizeof(GlobalTransactionId) + 1);
+		XLogRegisterData((char *)nodestring, strlen(nodestring) + 1);
+		XLogRegisterData((char *)&xid, sizeof(GlobalTransactionId) + 1);
+#ifdef __TWO_PHASE_TESTS__
+		xlogrec = 
+#endif
+		XLogInsert(RM_XLOG_ID, XLOG_CREATE_2PC_FILE);
+#ifdef __TWO_PHASE_TESTS__
+		if (PART_PREPARE_AFTER_RECORD_2PC == twophase_exception_case && 
+			g_twophase_state.is_start_node)
+		{
+			XLogFlush(xlogrec);
+			run_pg_clean = 1;
+			complish = true;
+			elog(STOP, "[record_2pc_involved_nodes_xid] twophase exception: "
+				"simulate kill start node after record 2pc file");
+		}
+#endif
+	}
+
+	if (NULL != record_2pc_cache && size < MAX_2PC_INFO_SIZE)
+	{
+		Assert(strlen(tid) < MAX_TID_SIZE);
+		entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
+			tid, HASH_ENTER_NULL, &found);
+		if (NULL != entry)
+		{
+			check_entry_key(tid, entry->key, "record_2pc_involved_nodes_xid");
+			check_2pc_file(tid, entry->info, "record_2pc_involved_nodes_xid");
+
+			if (found)
+			{
+				if (RecoveryInProgress())
+				{
+					elog(LOG, "[record_2pc_involved_nodes_xid] %s is found "
+						"in hash table in recovery mode", tid);
+				}
+				else
+				{
+					elog(LOG, "[record_2pc_involved_nodes_xid] %s is found "
+						"in hash table", tid);
+				}
+			}
+			else if (enable_2pc_entry_trace)
+			{
+				elog(LOG, "[record_2pc_involved_nodes_xid] %s is added "
+					"to hash table", tid);
+			}
+
+			memset(entry->info, 0, MAX_2PC_INFO_SIZE);
+			memcpy(entry->info, content.data, size);
+
+			resetStringInfo(&content);
+			pfree(content.data);
+			return;
+		}
+		else
+		{
+			elog(LOG, "[record_2pc_involved_nodes_xid] %s entry is NULL", tid);
+		}
+	}
+	else if (NULL != record_2pc_cache)
+	{
+		elog(LOG, "[record_2pc_involved_nodes_xid] %s size: %d, "
+			"max info size: %d", tid, size, MAX_2PC_INFO_SIZE);
+	}
+
+	GET_2PC_FILE_PATH(path, tid);
+
     /*
      * we open 2pc file under the following two different situations:
      * a. if in recovery mode, 
@@ -3287,49 +3705,23 @@ void record_2pc_involved_nodes_xid(const char * tid,
     }
     if (fd < 0)
     {   
-        elog(ERROR, "could not create 2pc file \"%s\", errMsg:%s", path, strerror(errno));
+		elog(ERROR, "[record_2pc_involved_nodes_xid] could not create file %s, "
+			"errMsg: %s", path, strerror(errno));
         return;
     }
 
-    initStringInfo(&content);
-    appendStringInfo(&content, "startnode:%s\n", startnode);
-    appendStringInfo(&content, "startxid:%u\n", startxid);
-    appendStringInfo(&content, "nodes:%s\n", nodestring);
-    appendStringInfo(&content, "xid:%u\n", xid);
-    size = strlen(content.data);
     ret = FileWrite(fd, content.data, size, WAIT_EVENT_BUFFILE_WRITE);
     if(ret != size)
     {
-        elog(ERROR, "could not write 2pc file \"%s\", errMsg:%s", path, strerror(errno));
+		FileClose(fd);
+		elog(ERROR, "[record_2pc_involved_nodes_xid] could not write file %s, "
+			"errMsg: %s, ret: %d, content: %s",
+			path, strerror(errno), ret, content.data);
     }
-    resetStringInfo(&content);
-    pfree(content.data);
     FileClose(fd);
     
-    if (!RecoveryInProgress())
-    {
-        XLogBeginInsert();
-        XLogRegisterData((char *)tid, strlen(tid)+1);
-        XLogRegisterData((char *)startnode, strlen(startnode)+1);
-        XLogRegisterData((char *)&startxid, sizeof(GlobalTransactionId) + 1);
-        XLogRegisterData((char *)nodestring, strlen(nodestring)+1);
-        XLogRegisterData((char *)&xid, sizeof(GlobalTransactionId) + 1);
-#ifdef __TWO_PHASE_TESTS__
-        xlogrec = 
-#endif
-        XLogInsert(RM_XLOG_ID, XLOG_CREATE_2PC_FILE);
-#ifdef __TWO_PHASE_TESTS__
-        if (PART_PREPARE_AFTER_RECORD_2PC == twophase_exception_case && 
-            g_twophase_state.is_start_node)
-        {
-            XLogFlush(xlogrec);
-            run_pg_clean = 1;
-            complish = true;
-            elog(STOP, "twophase exception: simulate kill start node after record 2pc file");
-        }
-#endif
-    }
-
+	resetStringInfo(&content);
+	pfree(content.data);
 }
 
 /* record commit timestamp in 2pc file while twophase trans failed in commit phase in the current node */
@@ -3338,10 +3730,13 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
     char path[MAXPGPATH];
     char file_content[2048];
     StringInfoData content;
-    File fd;
-    int ret;
-    int size;
+	File fd = -1;
+	int ret = 0;
+	int size = 0;
+	int new_size = 0;
     XLogRecPtr xlogrec = 0;
+	Cache2pcInfo *entry = NULL;
+	bool found = false;
 #if 0    
     int i;
     GlobalTransaction gxact = NULL;
@@ -3352,30 +3747,146 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
     	return ;
     }
 
-    if (enable_distri_print)
+	if (enable_distri_print || enable_2pc_entry_trace)
     {
-        elog(LOG, "record twophase txn gid: %s, commit_timestamp: %ld", tid, commit_timestamp);
+		elog(LOG, "[record_2pc_commit_timestamp] %s commit_timestamp: "
+			INT64_FORMAT, tid, commit_timestamp);
     }
     Assert(tid[0] != '\0');
     if (InvalidGlobalTimestamp == commit_timestamp && 
         (TWO_PHASE_COMMITTING == g_twophase_state.state || 
         TWO_PHASE_COMMIT_END == g_twophase_state.state))
     {
-        elog(ERROR, "can not commit transaction'%s' on node '%s' with InvalidGlobalTimestamp", tid, PGXCNodeName);
+		elog(ERROR, "[record_2pc_commit_timestamp] could not commit "
+			"transaction '%s' on node '%s' with InvalidGlobalTimestamp",
+			tid, PGXCNodeName);
     }
 
+	if (!RecoveryInProgress())
+	{
+		XLogBeginInsert();
+		XLogRegisterData((char *)tid, strlen(tid) + 1);
+		XLogRegisterData((char *)&commit_timestamp, sizeof(GlobalTimestamp) + 1);
+		xlogrec = XLogInsert(RM_XLOG_ID, XLOG_RECORD_2PC_TIMESTAMP);
+		/* only start node need to flush and sync XLOG_RECORD_2PC_TIMESTAMP */
+		if (IS_PGXC_LOCAL_COORDINATOR)
+		{
+			XLogFlush(xlogrec);
+			SyncRepWaitForLSN(xlogrec, false);
+		}
+	}
         
-    /* the 2pc dir is already created in initdb */
-    snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", tid);
+	initStringInfo(&content);
+	appendStringInfo(&content, "global_commit_timestamp:"INT64_FORMAT"\n",
+		commit_timestamp);
+	size = strlen(content.data);
 
-    /* the 2pc file exists already */ 
-    fd = open(path, O_RDWR | O_APPEND, S_IRUSR | S_IWUSR);//PathNameOpenFile(path, O_RDWR | O_APPEND, S_IRUSR | S_IWUSR);
+	if (NULL != record_2pc_cache)
+	{
+		Assert(strlen(tid) < MAX_TID_SIZE);
+		entry = (Cache2pcInfo *)hash_search(record_2pc_cache, tid, HASH_FIND, &found);
+		if (found)
+		{
+			Assert(NULL != entry);
+			check_entry_key(tid, entry->key, "record_2pc_commit_timestamp");
+			check_2pc_file(tid, entry->info, "record_2pc_commit_timestamp");
+
+			if (RecoveryInProgress())
+			{
+				elog(LOG, "[record_2pc_commit_timestamp] %s is found "
+					"in hash table in recovery mode", tid);
+			}
+			else if (enable_2pc_entry_trace)
+			{
+				elog(LOG, "[record_2pc_commit_timestamp] %s is found "
+					"in hash table", tid);
+			}
+
+			new_size = size + strlen(entry->info);
+
+			if (new_size >= MAX_2PC_INFO_SIZE)
+			{
+				/* save to file */
+				elog(LOG, "[record_2pc_commit_timestamp] %s new size(%d) "
+					"overflow(%d)", tid, new_size, MAX_2PC_INFO_SIZE);
+
+				GET_2PC_FILE_PATH(path, tid);
+
+				fd = open(path, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
     if (fd < 0)
     {   
-        if (enable_distri_print)
+					if (RecoveryInProgress())
+					{
+						elog(LOG, "[record_2pc_commit_timestamp] could not "
+							"append timestamp in file %s, errMsg: %s",
+							path, strerror(errno));
+					}
+					else
         {
-            elog(LOG, "cannot open 2pc file %s", tid);
+						elog(ERROR, "[record_2pc_commit_timestamp] could not "
+							"append timestamp in file %s, errMsg: %s",
+							path, strerror(errno));
+					}
+					return;
         }
+
+				ret = write(fd, entry->info, strlen(entry->info));
+				if(ret != new_size)
+				{
+					close(fd);
+					elog(ERROR, "[record_2pc_commit_timestamp] could not write "
+						"file %s, errMsg: %s, ret: %d, info: %s",
+						path, strerror(errno), ret, entry->info);
+				}
+				ret = write(fd, content.data, size);
+				if(ret != new_size)
+				{
+					close(fd);
+					elog(ERROR, "[record_2pc_commit_timestamp] could not write "
+						"file %s, errMsg: %s, ret: %d, info: %s",
+						path, strerror(errno), ret, content.data);
+				}
+				close(fd);
+
+				/* remove from hash table */
+				entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
+					tid, HASH_REMOVE, &found);
+				if (!found)
+				{
+					elog(WARNING, "[record_2pc_commit_timestamp] %s is not found"
+						"in hash table when remove it", tid);
+				}
+				else if (enable_2pc_entry_trace)
+				{
+					elog(LOG, "[record_2pc_commit_timestamp] %s is removed "
+						"from hash table", entry->key);
+				}
+
+				resetStringInfo(&content);
+				pfree(content.data);
+				return;
+			}
+
+			/* save to hash table */
+			memcpy(entry->info + strlen(entry->info), content.data, size);
+
+			resetStringInfo(&content);
+			pfree(content.data);
+			return;
+		}
+		else
+		{
+			elog(LOG, "[record_2pc_commit_timestamp] %s is not found "
+				"in hash table", tid);
+		}
+	}
+
+	GET_2PC_FILE_PATH(path, tid);
+
+	/* the 2pc file exists already */
+	fd = open(path, O_RDWR | O_APPEND, S_IRUSR | S_IWUSR);
+	if (fd < 0)
+	{
         if (RecoveryInProgress())
         {
 #if 0            
@@ -3388,89 +3899,222 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
                 }
                 if (0 == strcmp(gxact->gid, tid))
                 {
-                    elog(ERROR, "in record_2pc_commit_timestamp could not append timestamp in 2pc file \"%s\", errMsg:%s", path, strerror(errno));
+					elog(ERROR, "[record_2pc_commit_timestamp] could not "
+						"append timestamp in file %s, errMsg: %s",
+						path, strerror(errno));
                 }
             }
 #endif            
-            elog(LOG, "in record_2pc_commit_timestamp could not append timestamp in 2pc file \"%s\", errMsg:%s", path, strerror(errno));
+			elog(LOG, "[record_2pc_commit_timestamp] could not open file %s, "
+				"errMsg: %s", path, strerror(errno));
         }
         else
         {
-            elog(ERROR, "in record_2pc_commit_timestamp could not append timestamp in 2pc file \"%s\", errMsg:%s", path, strerror(errno));
+			elog(ERROR, "[record_2pc_commit_timestamp] could not open file %s, "
+				"errMsg: %s", path, strerror(errno));
         }
         return;
     }
 
-    if (!RecoveryInProgress())
-    {
-        XLogBeginInsert();
-        XLogRegisterData((char *)tid, strlen(tid)+1);
-        XLogRegisterData((char *)&commit_timestamp, sizeof(GlobalTimestamp));
-        xlogrec = XLogInsert(RM_XLOG_ID, XLOG_RECORD_2PC_TIMESTAMP);
-        /* only start node need to flush and sync XLOG_RECORD_2PC_TIMESTAMP */
-        if (IS_PGXC_LOCAL_COORDINATOR)
-        {
-            XLogFlush(xlogrec);
-            SyncRepWaitForLSN(xlogrec, false);
-        }
-    }
-
     if (enable_distri_print)
     {
-        (void) read(fd, file_content, 2048);//FileRead(fd, file_content, 2048, WAIT_EVENT_BUFFILE_READ);
-        elog(LOG, "before append 2pc file: %s, file_content: %s", tid, file_content);
+		memset(file_content, 0, 2048);
+		ret = read(fd, file_content, 2048);
+		elog(LOG, "[record_2pc_commit_timestamp] before append file: %s, "
+			"file_content: %s, content.data: %s, ret: %d",
+			path, file_content, content.data, ret);
     }
 
-    initStringInfo(&content);
-    appendStringInfo(&content, "global_commit_timestamp:"INT64_FORMAT"\n", commit_timestamp);
-    size = strlen(content.data);
-    if (enable_distri_print)
-    {
-        elog(LOG, "before append 2pc file: %s, content.data: %s", tid, content.data);
-    }
     ret = write(fd, content.data, size);
     if(ret != size)
     {
-        if (enable_distri_print)
-        {
-            elog(LOG, "cannot append timestamp to 2pc file %s", tid);
-        }
-        elog(ERROR, "in could not write 2pc file \"%s\", errMsg:%s", path, strerror(errno));
+		close(fd);
+		elog(ERROR, "[record_2pc_commit_timestamp] could not write file %s, "
+			"errMsg: %s", path, strerror(errno));
     }
+
     if (enable_distri_print)
     {
         memset(file_content, 0, 2048);
         lseek(fd, 0, SEEK_SET);
         ret = read(fd, file_content, 2048);
-        elog(LOG, "after append 2pc file: %s, file_content: %s, ret = %d", tid, file_content, ret);
+		elog(LOG, "[record_2pc_commit_timestamp] after append file: %s, "
+			"file_content: %s, ret: %d", tid, file_content, ret);
     }
+
+	close(fd);
+
     resetStringInfo(&content);
     pfree(content.data);
-    close(fd);
 }
 
 void remove_2pc_records(const char * tid, bool record_in_xlog)
 {
     char path[MAXPGPATH];    
+	Cache2pcInfo *entry = NULL;
+	bool found = false;
 
     if (!enable_2pc_recovery_info)
     {
     	return ;
     }
 
-    snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", tid);
+	if (enable_distri_print || enable_2pc_entry_trace)
+	{
+		elog(LOG, "[remove_2pc_records] %s record_in_xlog: %d",
+			tid, record_in_xlog);
+	}
 
-    /* no need to check file exists. since when it do not exists , unlink won't success */
     if (!RecoveryInProgress() && record_in_xlog)
     {
+		char *type = "remove";
         XLogBeginInsert();
         XLogRegisterData((char *)tid, strlen(tid)+1);
+		XLogRegisterData((char *)type, strlen(type) + 1);
         XLogInsert(RM_XLOG_ID, XLOG_CLEAN_2PC_FILE);
     }
+
+	if (NULL != record_2pc_cache)
+	{
+		Assert(strlen(tid) < MAX_TID_SIZE);
+		if (enable_2pc_entry_key_check)
+		{
+			entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
+				tid, HASH_FIND, &found);
+			if (found)
+			{
+				Assert(NULL != entry);
+				check_entry_key(tid, entry->key, "remove_2pc_records");
+				check_2pc_file(tid, entry->info, "remove_2pc_records");
+			}
+		}
+		entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
+			tid, HASH_REMOVE, &found);
+		if (found)
+		{
+			Assert(NULL != entry);
+			if (enable_2pc_entry_trace)
+			{
+				elog(LOG, "[remove_2pc_records] %s is removed "
+					"from hash table", tid);
+			}
+			return;
+		}
+	}
+
+	GET_2PC_FILE_PATH(path, tid);
+
+	/*
+		* no need to check file exists.
+		* since when it do not exists, unlink won't success.
+	*/
     if (0 != unlink(path))
     {
-        elog(LOG, "node: %s fail to remove 2pc file: %s", PGXCNodeName, tid);
+		elog(LOG, "[remove_2pc_records] could not unlink file %s, "
+			"errMsg: %s", path, strerror(errno));
     }
+}
+
+void rename_2pc_records(const char *tid, TimestampTz timestamp)
+{
+	char path[MAXPGPATH];
+	char new_path[MAXPGPATH];
+	Cache2pcInfo *entry = NULL;
+	bool found = false;
+	File fd = 0;
+	int ret = 0;
+
+	if (!enable_2pc_recovery_info)
+	{
+		return;
+	}
+
+	if (enable_distri_print || enable_2pc_entry_trace)
+	{
+		elog(LOG, "[rename_2pc_records] %s timestamp: "
+			INT64_FORMAT, tid, timestamp);
+	}
+
+	if (0 == timestamp)
+	{
+		timestamp = GetCurrentTimestamp();
+	}
+
+	if (!RecoveryInProgress())
+	{
+		char *type = "rename";
+		XLogBeginInsert();
+		XLogRegisterData((char *)tid, strlen(tid) + 1);
+		XLogRegisterData((char *)type, strlen(type) + 1);
+		XLogRegisterData((char *)&timestamp, sizeof(TimestampTz) + 1);
+		XLogInsert(RM_XLOG_ID, XLOG_CLEAN_2PC_FILE);
+	}
+
+	GET_2PC_FILE_PATH(path, tid);
+	snprintf(new_path, MAXPGPATH, "%s." INT64_FORMAT ".rollback", path, timestamp);
+
+	if (NULL != record_2pc_cache)
+	{
+		Assert(strlen(tid) < MAX_TID_SIZE);
+		entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
+			tid, HASH_FIND, &found);
+		if (found)
+		{
+			Assert(NULL != entry);
+			check_entry_key(tid, entry->key, "rename_2pc_records");
+			check_2pc_file(tid, entry->info, "rename_2pc_records");
+
+			fd = PathNameOpenFile(new_path, O_RDWR | O_CREAT | O_EXCL,
+				S_IRUSR | S_IWUSR);
+			if (fd < 0)
+			{
+				elog(ERROR, "[rename_2pc_records] could not create file %s, "
+					"errMsg: %s", new_path, strerror(errno));
+			}
+
+			ret = FileWrite(fd, entry->info, strlen(entry->info),
+				WAIT_EVENT_BUFFILE_WRITE);
+			if(ret != strlen(entry->info))
+			{
+				FileClose(fd);
+				elog(ERROR, "[rename_2pc_records] could not write file %s, "
+					"errMsg: %s, ret: %d, info: %s",
+					path, strerror(errno), ret, entry->info);
+			}
+			FileClose(fd);
+
+			entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
+				tid, HASH_REMOVE, &found);
+			if (!found)
+			{
+				elog(ERROR, "[rename_2pc_records] %s is not found "
+					"in hash table when remove it", tid);
+			}
+			else if (enable_2pc_entry_trace)
+			{
+				elog(LOG, "[rename_2pc_records] %s is removed "
+					"from hash table", tid);
+			}
+			return;
+		}
+	}
+
+	if (0 != access(path, F_OK))
+	{
+		elog(LOG, "[rename_2pc_records] could not access file %s, "
+			"errMsg: %s", path, strerror(errno));
+		return;
+	}
+	if (0 != link(path, new_path))
+	{
+		elog(ERROR, "[rename_2pc_records] could not link file %s to %s, "
+			"errMsg: %s", path, new_path, strerror(errno));
+	}
+	if (0 != unlink(path))
+	{
+		elog(WARNING, "[rename_2pc_records] could not unlink file %s, "
+			"errMsg: %s", path, strerror(errno));
+	}
 }
 
 void record_2pc_readonly(const char *gid)
@@ -3479,18 +4123,18 @@ void record_2pc_readonly(const char *gid)
     int ret = 0;
     char path[MAXPGPATH];
     char content[10] = "readonly";
+	Cache2pcInfo *entry = NULL;
+	bool found = false;
         
     if(!enable_2pc_recovery_info)
     {
     	return ;
     }
         
-    if (enable_distri_print)
+	if (enable_distri_print || enable_2pc_entry_trace)
     {
-        elog(LOG, "record readonly twophase txn gid: %s", gid);
+		elog(LOG, "[record_2pc_readonly] %s is readonly", gid);
     }
-    /* the 2pc dir is already created in initdb */
-    snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", gid);
 
     if (!RecoveryInProgress())
     {
@@ -3500,6 +4144,45 @@ void record_2pc_readonly(const char *gid)
         XLogInsert(RM_XLOG_ID, XLOG_CREATE_2PC_FILE);
     }
 
+	if (NULL != record_2pc_cache)
+	{
+		Assert(strlen(gid) < MAX_TID_SIZE);
+		entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
+			gid, HASH_ENTER_NULL, &found);
+		if (NULL != entry)
+		{
+			check_entry_key(gid, entry->key, "record_2pc_readonly");
+			check_2pc_file(gid, entry->info, "record_2pc_readonly");
+
+			if (found)
+			{
+				if (RecoveryInProgress())
+				{
+					elog(LOG, "[record_2pc_readonly] %s is found "
+						"in hash table in recovery mode", gid);
+				}
+				else
+				{
+					elog(LOG, "[record_2pc_readonly] %s is found "
+						"in hash table", gid);
+				}
+			}
+			else if (enable_2pc_entry_trace)
+			{
+				elog(LOG, "[record_2pc_readonly] %s is added "
+					"to hash table", gid);
+			}
+			memcpy(entry->info, content, strlen(content));
+			return;
+		}
+		else
+		{
+			elog(LOG, "[record_2pc_readonly] %s entry is NULL", gid);
+		}
+	}
+
+	/* the 2pc dir is already created in initdb */
+	GET_2PC_FILE_PATH(path, gid);
 
     /*
      * we open 2pc file under the following two different situations:
@@ -3507,7 +4190,8 @@ void record_2pc_readonly(const char *gid)
      *  the existed 2pc file can be trucated and reused.
      * b. if not under recovery progress, 
      *  we not allowed the implicit trans gid existed, 
-     *  since the xid in startnode should not be truncate if the twophase trans is part commit or part abort.
+		*  since the xid in startnode should not be truncate if the 
+		*  twophase trans is part commit or part abort.
      */
     if (RecoveryInProgress())
     {
@@ -3519,18 +4203,142 @@ void record_2pc_readonly(const char *gid)
     }
     if (fd < 0)
     {   
-        elog(ERROR, "could not create readonly 2pc file \"%s\", errMsg:%s", path, strerror(errno));
+		elog(ERROR, "[record_2pc_readonly] could not create file %s, "
+			"errMsg: %s", path, strerror(errno));
         return;
     }
 
     ret = FileWrite(fd, content, strlen(content), WAIT_EVENT_BUFFILE_WRITE);
     if(ret != strlen(content))
     {
-        elog(ERROR, "could not write 2pc file \"%s\", errMsg:%s", path, strerror(errno));
+		FileClose(fd);
+		elog(ERROR, "[record_2pc_readonly] could not write file %s, "
+			"errMsg: %s, ret: %d, content: %s",
+			path, strerror(errno), ret, content);
     }
     FileClose(fd);
+}
     
+/*
+ * Get 2pc info from hash table.
+ */
+char *get_2pc_info_from_cache(const char *tid)
+{
+	Cache2pcInfo *entry = NULL;
+	bool found = false;
+	if (NULL != record_2pc_cache)
+	{
+		Assert(strlen(tid) < MAX_TID_SIZE);
+		entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
+			tid, HASH_FIND, &found);
+		if (found)
+		{
+			Assert(NULL != entry);
+
+			check_entry_key(tid, entry->key, "get_2pc_info_from_cache");
+
+			if (enable_2pc_entry_trace)
+			{
+				elog(LOG, "[get_2pc_info_from_cache] %s is found "
+					"in hast table, key: %s, info: %s",
+					tid, entry->key, entry->info);
+}
+
+			return entry->info;
+		}
+
+		if (enable_2pc_entry_trace)
+		{
+			elog(LOG, "[get_2pc_info_from_cache] %s is not found "
+				"in hast table", tid);
+		}
+	}
+	return NULL;
+}
+
+/*
+ * Get 2pc list from hash table.
+ */
+char *get_2pc_list_from_cache(int *count)
+{
+	HASH_SEQ_STATUS seq;
+	Cache2pcInfo *entry = NULL;
+	char *recordList = NULL;
+
+	if (NULL == record_2pc_cache)
+	{
+		return NULL;
+	}
+
+	hash_seq_init(&seq, record_2pc_cache);
+	while ((entry = hash_seq_search(&seq)) != NULL)
+	{
+		Assert(NULL != entry);
+		check_2pc_file(entry->key, entry->info, "get_2pc_list_from_cache");
+
+		if (NULL != count && *count >= MAX_OUTPUT_FILE)
+		{
+			break;
+		}
+
+		if(NULL == recordList)
+		{
+			recordList = (char *)palloc0(strlen(entry->key) + 1);
+			sprintf(recordList, "%s", entry->key);
+		}
+		else
+		{
+			recordList = (char *) repalloc(recordList,
+				strlen(entry->key) + strlen(recordList) + 2);
+			sprintf(recordList, "%s,%s", recordList, entry->key);
+		}
+		if (NULL != count)
+		{
+			(*count)++;
+		}
+	}
+
+	return recordList;
+}
+
+/*
+ * Initialize 2pc info cache using shared memory hash table.
+ */
+void
+Record2pcCacheInit(void)
+{
+	HASHCTL info;
+	int flags = 0;
+
+	if (!enable_2pc_file_cache)
+	{
+		record_2pc_cache = NULL;
+		return;
+	}
+
+	info.keysize = MAX_TID_SIZE;
+	info.entrysize = record_2pc_entry_size;
+	info.num_partitions = record_2pc_partitions;
+
+	flags = HASH_ELEM | HASH_PARTITION;
+
+	record_2pc_cache = ShmemInitHash("Record 2pc Cache",
+		record_2pc_cache_size/4, record_2pc_cache_size,
+		&info, flags);
+}
+
+/*
+ * Return 2pc info cache size.
+ */
+Size
+Record2pcCacheSize(void)
+{
+	long cache_size = 0;
+	if (enable_2pc_file_cache)
+	{
+		cache_size = (long)record_2pc_cache_size * record_2pc_entry_size;
+	}
+	return cache_size;
 }
 
 #endif
-

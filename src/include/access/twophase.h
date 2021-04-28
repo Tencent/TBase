@@ -96,6 +96,17 @@ extern int  transaction_threshold;
 extern bool enable_2pc_recovery_info;
 #endif
 
+#ifdef __TWO_PHASE_TRANS__
+extern bool enable_2pc_file_cache;
+extern bool enable_2pc_file_check;
+extern bool enable_2pc_entry_key_check;
+extern bool enable_2pc_entry_trace;
+
+extern int record_2pc_cache_size;
+extern int record_2pc_entry_size;
+extern int record_2pc_partitions;
+#endif
+
 extern Size TwoPhaseShmemSize(void);
 extern void TwoPhaseShmemInit(void);
 
@@ -143,7 +154,14 @@ extern void record_2pc_involved_nodes_xid(const char * tid,
                                         GlobalTransactionId xid);
 extern void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timestamp);
 extern void remove_2pc_records(const char *tid, bool record_in_xlog);
+extern void rename_2pc_records(const char *tid, TimestampTz timestamp);
 extern void record_2pc_readonly(const char *gid);
+
+extern char *get_2pc_info_from_cache(const char *tid);
+extern char *get_2pc_list_from_cache(int *count);
+
+extern void Record2pcCacheInit(void);
+extern Size Record2pcCacheSize(void);
 #endif
 
 #endif                            /* TWOPHASE_H */

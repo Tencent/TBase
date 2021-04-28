@@ -10171,15 +10171,27 @@ xlog_redo(XLogReaderState *record)
 #ifdef __TWO_PHASE_TRANS__
     else if (info == XLOG_CLEAN_2PC_FILE)
     {
-        char *gid;
+		char *pos = NULL;
+		char *gid = NULL;
+		char *type = NULL;
+		TimestampTz timestamp = 0;
         gid = XLogRecGetData(record);
+		type = gid + strlen(gid) + 1;
+		pos = type + strlen(type) + 1;
+		memcpy(&timestamp, pos, sizeof(TimestampTz));
+		if (0 == strcmp(type, "rename"))
+		{
+			rename_2pc_records(gid, timestamp);
+		}
+		else
+		{
         remove_2pc_records(gid, false);
     }
+	}
     else if (info == XLOG_CREATE_2PC_FILE)
     {
         TransactionId xid;
         TransactionId startxid;
-        GlobalTimestamp commit_timestamp = 0;
         char *gid; 
         char *startnode;
         char *nodestring;
@@ -10199,19 +10211,15 @@ xlog_redo(XLogReaderState *record)
         {
             startnode = temp;
             memcpy(&startxid, pos, sizeof(TransactionId));
-            pos = pos + sizeof(TransactionId) ;
+            pos = pos + sizeof(TransactionId) + 1;
             nodestring = pos;
             pos = pos + strlen(nodestring) + 1;
             memcpy(&xid, pos, sizeof(TransactionId));
-            pos = pos + sizeof(TransactionId) ;
-            if (IsXidImplicit(gid))
-            {
-                memcpy(&commit_timestamp, pos, sizeof(GlobalTimestamp));
-            }
             if (enable_distri_print)
             {
-                elog(LOG, "xlog redo 2pc file name: '%s', startnode: %s, startxid: %u, nodestring: %s, "
-                                       "xid: %u, commit_timestamp:"INT64_FORMAT, gid, startnode, startxid, nodestring, xid, commit_timestamp);
+                elog(LOG, "xlog redo 2pc file name: '%s', startnode: %s, "
+                    "startxid: %u, nodestring: %s, xid: %u",
+                    gid, startnode, startxid, nodestring, xid);
             }
 #ifdef __TWO_PHASE_TESTS__            
             if (FILE_XLOG_EXISTED == twophase_exception_case)
