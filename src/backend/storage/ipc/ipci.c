@@ -306,6 +306,9 @@ CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         size = add_size(size, PubStatDataShmemSize(g_PubStatHashSize, g_PubTableStatHashSize));
         size = add_size(size, SubStatDataShmemSize(g_SubStatHashSize, g_SubTableStatHashSize));
 #endif
+#ifdef __TWO_PHASE_TRANS__
+		size = add_size(size, Record2pcCacheSize());
+#endif
 #ifdef __COLD_HOT__
         size = add_size(size, DualWriteTableSize()); 
 #endif
@@ -480,6 +483,10 @@ CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 #ifdef __STORAGE_SCALABLE__
     InitPubStatData(g_PubStatHashSize, g_PubTableStatHashSize);
     InitSubStatData(g_SubStatHashSize, g_SubTableStatHashSize);
+#endif
+
+#ifdef __TWO_PHASE_TRANS__
+	Record2pcCacheInit();
 #endif
 
 #ifdef __COLD_HOT__
