@@ -746,3 +746,58 @@ create table boolspart_t partition of boolspart for values in (true);
 create table boolspart_f partition of boolspart for values in (false);
 \d+ boolspart
 drop table boolspart;
+
+drop function if exists create_multi_tables1(integer, varchar);
+CREATE OR REPLACE FUNCTION create_multi_tables1(table_num_in integer, table_sql varchar) RETURNS void
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE
+AS $BODY$
+declare
+    v_idx integer := 0;
+    v_strTable varchar :='';
+    v_strSql varchar :='';
+begin
+    while v_idx < table_num_in loop
+        v_idx = v_idx+1;
+        v_strTable = CONCAT('simple_metadata_query_', v_idx);
+        v_strSql = table_sql||' '||v_strTable||'(c1 bigint, c31 smallserial);';
+        RAISE NOTICE 'create %', v_strTable;
+        BEGIN
+            EXECUTE v_strSql;
+            EXCEPTION when others then
+            raise notice 'ERROR: (%)', SQLERRM;
+        end;
+    end loop;
+
+    RAISE NOTICE 'finished .....';
+end
+$BODY$;
+
+drop function if exists del_multi_table1(varchar);
+CREATE FUNCTION del_multi_table1(table_sql varchar) RETURNS void AS $$
+DECLARE
+    tmp VARCHAR(512);
+DECLARE names CURSOR FOR
+    select tablename from pg_tables where tablename like 'simple_metadata_query_%';
+BEGIN
+  FOR stmt IN names LOOP
+    tmp := table_sql||' '|| quote_ident(stmt.tablename) || ' CASCADE;';
+    RAISE NOTICE '%', tmp;
+    BEGIN
+        EXECUTE tmp;
+        EXCEPTION when others then
+        raise notice 'ERROR: (%)', SQLERRM;
+    end;
+  END LOOP;
+  RAISE NOTICE 'finished .....';
+END
+$$ LANGUAGE plpgsql VOLATILE COST 100;
+
+CREATE TABLE simple_metadata_query_3(c1 int, c31 smallserial);
+SELECT create_multi_tables1(5, 'create table');
+SELECT del_multi_table1('drop table if exists');
+
+DROP FUNCTION create_multi_tables1;
+DROP FUNCTION del_multi_table1;
+

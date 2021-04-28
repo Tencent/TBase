@@ -949,3 +949,78 @@ Distribute By: HASH(a)
 Location Nodes: ALL DATANODES
 
 drop table boolspart;
+drop function if exists create_multi_tables1(integer, varchar);
+NOTICE:  function create_multi_tables1(pg_catalog.int4,pg_catalog.varchar) does not exist, skipping
+CREATE OR REPLACE FUNCTION create_multi_tables1(table_num_in integer, table_sql varchar) RETURNS void
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE
+AS $BODY$
+declare
+    v_idx integer := 0;
+    v_strTable varchar :='';
+    v_strSql varchar :='';
+begin
+    while v_idx < table_num_in loop
+        v_idx = v_idx+1;
+        v_strTable = CONCAT('simple_metadata_query_', v_idx);
+        v_strSql = table_sql||' '||v_strTable||'(c1 bigint, c31 smallserial);';
+        RAISE NOTICE 'create %', v_strTable;
+        BEGIN
+            EXECUTE v_strSql;
+            EXCEPTION when others then
+            raise notice 'ERROR: (%)', SQLERRM;
+        end;
+    end loop;
+
+    RAISE NOTICE 'finished .....';
+end
+$BODY$;
+drop function if exists del_multi_table1(varchar);
+NOTICE:  function del_multi_table1(pg_catalog.varchar) does not exist, skipping
+CREATE FUNCTION del_multi_table1(table_sql varchar) RETURNS void AS $$
+DECLARE
+    tmp VARCHAR(512);
+DECLARE names CURSOR FOR
+    select tablename from pg_tables where tablename like 'simple_metadata_query_%';
+BEGIN
+  FOR stmt IN names LOOP
+    tmp := table_sql||' '|| quote_ident(stmt.tablename) || ' CASCADE;';
+    RAISE NOTICE '%', tmp;
+    BEGIN
+        EXECUTE tmp;
+        EXCEPTION when others then
+        raise notice 'ERROR: (%)', SQLERRM;
+    end;
+  END LOOP;
+  RAISE NOTICE 'finished .....';
+END
+$$ LANGUAGE plpgsql VOLATILE COST 100;
+CREATE TABLE simple_metadata_query_3(c1 int, c31 smallserial);
+SELECT create_multi_tables1(5, 'create table');
+NOTICE:  create simple_metadata_query_1
+NOTICE:  create simple_metadata_query_2
+NOTICE:  create simple_metadata_query_3
+NOTICE:  ERROR: (relation "simple_metadata_query_3" already exists)
+NOTICE:  create simple_metadata_query_4
+NOTICE:  create simple_metadata_query_5
+NOTICE:  finished .....
+ create_multi_tables1 
+----------------------
+ 
+(1 row)
+
+SELECT del_multi_table1('drop table if exists');
+NOTICE:  drop table if exists simple_metadata_query_1 CASCADE;
+NOTICE:  drop table if exists simple_metadata_query_2 CASCADE;
+NOTICE:  drop table if exists simple_metadata_query_3 CASCADE;
+NOTICE:  drop table if exists simple_metadata_query_4 CASCADE;
+NOTICE:  drop table if exists simple_metadata_query_5 CASCADE;
+NOTICE:  finished .....
+ del_multi_table1 
+------------------
+ 
+(1 row)
+
+DROP FUNCTION create_multi_tables1;
+DROP FUNCTION del_multi_table1;

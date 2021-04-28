@@ -6095,6 +6095,20 @@ CommitSubTransaction(void)
         s->parallelModeLevel = 0;
     }
 
+#ifdef __TBASE__
+	if (s->curTransactionOwner)
+	{
+		TransactionId xid = GetCurrentTransactionIdIfAny();
+
+		if (TransactionIdIsValid(xid))
+		{
+			CheckGTMConnection();
+		}
+
+		FinishSeqOp(true);
+	}
+#endif
+
     /* Do the actual "commit", such as it is */
     s->state = TRANS_COMMIT;
 
