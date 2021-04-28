@@ -468,6 +468,31 @@ get_sortgrouplist_exprs(List *sgClauses, List *targetList)
     return result;
 }
 
+/*
+ * get_distinct_agg_sortgroupclause
+ *		Given a pathtarget , acquire distinct clause
+ *		for aggref with distinct.
+ * Notice: only one distinct agg clause with one col
+ * 		is allowed.
+ */
+Aggref *
+get_optimize_distinct_agg(PathTarget *pathtarget)
+{
+	ListCell *lc = NULL;
+
+	foreach (lc, pathtarget->exprs)
+	{
+		Aggref *aggref = (Aggref *)lfirst(lc);
+
+		if (IsA(aggref, Aggref) && aggref->aggdistinct != NIL)
+		{
+			Assert(list_length(aggref->aggdistinct) == 1);
+			return aggref;
+		}
+	}
+
+	return NULL;
+}
 
 /*****************************************************************************
  *        Functions to extract data from a list of SortGroupClauses

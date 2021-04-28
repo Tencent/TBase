@@ -1047,6 +1047,7 @@ _copyAgg(const Agg *from)
 #ifdef __TBASE__
 	COPY_SCALAR_FIELD(entrySize);
 	COPY_SCALAR_FIELD(hybrid);
+	COPY_SCALAR_FIELD(noDistinct);
 #endif
 
     return newnode;

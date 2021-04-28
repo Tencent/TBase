@@ -1330,6 +1330,7 @@ _outAgg(StringInfo str, const Agg *node)
 #ifdef __TBASE__
 	WRITE_UINT_FIELD(entrySize);
 	WRITE_BOOL_FIELD(hybrid);
+	WRITE_BOOL_FIELD(noDistinct);
 #endif
 }
 
@@ -3317,6 +3318,7 @@ _outAggPath(StringInfo str, const AggPath *node)
 #ifdef __TBASE__
 	WRITE_UINT_FIELD(entrySize);
 	WRITE_BOOL_FIELD(hybrid);
+	WRITE_BOOL_FIELD(noDistinct);
 #endif
 }
 

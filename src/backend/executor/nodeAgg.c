@@ -4624,6 +4624,7 @@ build_pertrans_for_aggref(AggStatePerTrans pertrans,
     int            numDistinctCols;
     int            naggs;
     int            i;
+	Agg         *agg = (Agg *)aggstate->ss.ps.plan;
 
     /* Begin filling in the pertrans data */
     pertrans->aggref = aggref;
@@ -4785,11 +4786,13 @@ build_pertrans_for_aggref(AggStatePerTrans pertrans,
      * have a list of SortGroupClause nodes; fish out the data in them and
      * stick them into arrays.  We ignore ORDER BY for an ordered-set agg,
      * however; the agg's transfn and finalfn are responsible for that.
+     * Distributed distinct agg does not need distinct in second phase.
      *
      * Note that by construction, if there is a DISTINCT clause then the ORDER
      * BY clause is a prefix of it (see transformDistinctClause).
      */
-    if (AGGKIND_IS_ORDERED_SET(aggref->aggkind))
+	if (AGGKIND_IS_ORDERED_SET(aggref->aggkind)
+	    || agg->noDistinct)
     {
         sortlist = NIL;
         numSortCols = numDistinctCols = 0;
@@ -4819,12 +4822,6 @@ build_pertrans_for_aggref(AggStatePerTrans pertrans,
         pertrans->sortdesc = ExecTypeFromTL(aggref->args, false);
         pertrans->sortslot = ExecInitExtraTupleSlot(estate);
         ExecSetSlotDescriptor(pertrans->sortslot, pertrans->sortdesc);
-
-        /*
-         * We don't implement DISTINCT or ORDER BY aggs in the HASHED case
-         * (yet)
-         */
-        Assert(aggstate->aggstrategy != AGG_HASHED && aggstate->aggstrategy != AGG_MIXED);
 
         /* If we have only one input, we need its len/byval info. */
         if (numInputs == 1)
@@ -4869,7 +4866,8 @@ build_pertrans_for_aggref(AggStatePerTrans pertrans,
         Assert(i == numSortCols);
     }
 
-    if (aggref->aggdistinct)
+	/* Distributed distinct agg does not need distinct in second phase. */
+	if (aggref->aggdistinct && !agg->noDistinct)
     {
         Assert(numArguments > 0);
 

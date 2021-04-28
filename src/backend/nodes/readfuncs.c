@@ -3279,6 +3279,7 @@ _readAgg(void)
 #ifdef __TBASE__
 	READ_UINT_FIELD(entrySize);
 	READ_BOOL_FIELD(hybrid);
+	READ_BOOL_FIELD(noDistinct);
 #endif
 
     READ_DONE();

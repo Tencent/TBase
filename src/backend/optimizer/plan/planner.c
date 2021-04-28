@@ -79,6 +79,7 @@ create_upper_paths_hook_type create_upper_paths_hook = NULL;
 
 #ifdef __TBASE__
 bool olap_optimizer = false;
+bool enable_distinct_optimizer;
 #endif
 
 /* Expression kind codes for preprocess_expression */
@@ -208,7 +209,7 @@ static PathTarget *make_sort_input_target(PlannerInfo *root,
 					   PathTarget *final_target,
 					   bool *have_postponed_srfs);
 static bool grouping_distribution_match(PlannerInfo *root, Query *parse,
-                      Path *path, List *clauses);
+					  Path *path, List *clauses, List *targetList);
 static bool groupingsets_distribution_match(PlannerInfo *root, Query *parse,
                       Path *path);
 static Path *adjust_path_distribution(PlannerInfo *root, Query *parse,
@@ -239,6 +240,9 @@ static bool can_parallel_agg(PlannerInfo *root, RelOptInfo *input_rel,
                 RelOptInfo *grouped_rel, const AggClauseCosts *agg_costs);
 #ifdef __TBASE__
 static Path *adjust_modifytable_subpath(PlannerInfo *root, Query *parse, Path *path);
+static bool can_distinct_agg_optimize(PlannerInfo *root, RelOptInfo *input_rel,
+                                      RelOptInfo *grouped_rel, PathTarget *pathtarget,
+                                      const AggClauseCosts *agg_costs);
 #endif
 
 /*****************************************************************************
@@ -4170,6 +4174,7 @@ create_ordinary_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
    bool        can_sort;
    bool        try_parallel_aggregation;
     bool		try_distributed_aggregation;
+	bool		try_distributed_distinct_agg_optimize;
 	PathTarget *partial_grouping_target = NULL;
 
 	ListCell   *lc;
@@ -4241,6 +4246,7 @@ create_ordinary_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
     {
         /* Not even parallel-safe. */
         try_distributed_aggregation = false;
+		try_distributed_distinct_agg_optimize = false;
     }
     else if (!parse->hasAggs && parse->groupClause == NIL)
     {
@@ -4249,25 +4255,43 @@ create_ordinary_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
          * some aggregates or a grouping clause.
          */
         try_distributed_aggregation = false;
+		try_distributed_distinct_agg_optimize = false;
     }
     else if (parse->groupingSets)
     {
         /* We don't know how to do grouping sets in parallel. */
         try_distributed_aggregation = false;
+		try_distributed_distinct_agg_optimize = false;
     }
-    else if (agg_costs->hasNonPartial || agg_costs->hasNonSerial)
+	else if (agg_costs->hasNonSerial)
+	{
+		/* Insufficient support for partial mode. */
+		try_distributed_aggregation = false;
+		try_distributed_distinct_agg_optimize = false;
+	}
+	else if (agg_costs->hasNonPartial)
     {
         /* Insufficient support for partial mode. */
         try_distributed_aggregation = false;
+        /* Ignore by distint agg optimize */
+		try_distributed_distinct_agg_optimize = true;
     }
     else
     {
         /* Everything looks good. */
         try_distributed_aggregation = true;
+		try_distributed_distinct_agg_optimize = true;
     }
 
     /* Whenever parallel aggregation is allowed, distributed should be too. */
     Assert(!(try_parallel_aggregation && !try_distributed_aggregation));
+
+	if (try_distributed_distinct_agg_optimize &&
+	    !can_distinct_agg_optimize(root, input_rel, grouped_rel,
+	                               target ,agg_costs))
+	{
+		try_distributed_distinct_agg_optimize = false;
+	}
 
     /*
      * Before generating paths for grouped_rel, we first generate any possible
@@ -4383,7 +4407,7 @@ create_ordinary_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
 	 * we know the per-node groupings won't overlap. But here we need to be
 	 * more careful.
 	 */
-	if (try_distributed_aggregation)
+	if (try_distributed_aggregation || try_distributed_distinct_agg_optimize)
 	{
 		partial_grouping_target = make_partial_grouping_target(root, target,
 				                                               (Node *) parse->havingQual);
@@ -4415,7 +4439,10 @@ create_ordinary_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
 								 AGGSPLIT_FINAL_DESERIAL,
 								 &agg_final_costs);
 		}
+	}
 
+	if (try_distributed_aggregation)
+	{
 		/* Build final XL grouping paths */
     if (can_sort)
     {
@@ -4761,6 +4788,57 @@ create_ordinary_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
 			}
         }
     }
+
+	if (try_distributed_distinct_agg_optimize)
+	{
+		List *groupExprs = NIL;
+		Aggref *agg = get_optimize_distinct_agg(target);
+
+		groupExprs = get_sortgrouplist_exprs(agg->aggdistinct, agg->args);
+
+		dNumPartialGroups = estimate_num_groups(root, groupExprs, cheapest_path->rows,
+		                                        NULL);
+
+		foreach (lc, input_rel->pathlist)
+		{
+			Path *path = (Path *)lfirst(lc);
+
+			/* check if we need redistribute */
+			if (!grouping_distribution_match(root, parse, path, agg->aggdistinct, agg->args))
+			{
+				path = create_redistribute_distinct_agg_path(root, parse, path, agg);
+			}
+
+			path = (Path *)create_agg_path(root,
+			                               grouped_rel,
+			                               path,
+			                               partial_grouping_target,
+			                               AGG_HASHED,
+			                               AGGSPLIT_INITIAL_SERIAL,
+			                               parse->groupClause,
+			                               NULL,
+			                               &agg_partial_costs,
+			                               dNumPartialGroups);
+			/* partial is not parallel safe */
+			path->parallel_safe = false;
+
+			path = create_remotesubplan_path(root, path, NULL);
+
+			path = (Path *)create_agg_path(root,
+			                               grouped_rel,
+			                               path,
+			                               target,
+			                               AGG_HASHED,
+			                               AGGSPLIT_FINAL_DESERIAL,
+			                               parse->groupClause,
+			                               NULL,
+			                               &agg_final_costs,
+			                               1);
+			((AggPath *)path)->noDistinct = true;
+
+			add_path(grouped_rel, path);
+		}
+	}
 
 	/* Give a helpful error if we failed to find any implementation */
 	if (grouped_rel->pathlist == NIL)
@@ -5443,7 +5521,7 @@ create_distinct_paths(PlannerInfo *root,
 				 * FIXME This could probably benefit from pushing a UNIQUE
 				 * to the remote side, and only doing a merge locally.
                          */
-				if (!grouping_distribution_match(root, parse, path, parse->distinctClause))
+				if (!grouping_distribution_match(root, parse, path, parse->distinctClause, parse->targetList))
 					path = create_remotesubplan_path(root, path, NULL);
 
 				add_path(distinct_rel, (Path *)
@@ -5474,7 +5552,7 @@ create_distinct_paths(PlannerInfo *root,
                                                              -1.0);
 
 		/* In case of grouping / distribution mismatch, inject remote scan. */
-		if (!grouping_distribution_match(root, parse, path, parse->distinctClause))
+		if (!grouping_distribution_match(root, parse, path, parse->distinctClause, parse->targetList))
 			path = create_remotesubplan_path(root, path, NULL);
 
 		add_path(distinct_rel, (Path *)
@@ -5520,7 +5598,7 @@ create_distinct_paths(PlannerInfo *root,
 		Path *input_path = cheapest_input_path;
 
 		/* If needed, inject RemoteSubplan redistributing the data. */
-		if (!grouping_distribution_match(root, parse, input_path, parse->distinctClause))
+		if (!grouping_distribution_match(root, parse, input_path, parse->distinctClause, parse->targetList))
 			input_path = create_remotesubplan_path(root, input_path, NULL);
 
 		/* XXX Maybe we can make this a 2-phase aggregate too? */
@@ -6784,7 +6862,7 @@ plan_cluster_use_sort(Oid tableOid, Oid indexOid)
  */
 static bool
 grouping_distribution_match(PlannerInfo *root, Query *parse, Path *path,
-							List *clauses)
+							List *clauses, List *targetList)
 {
     int            i;
 	bool	matches_key = false;
@@ -6792,7 +6870,7 @@ grouping_distribution_match(PlannerInfo *root, Query *parse, Path *path,
 
 	int numGroupCols = list_length(clauses);
 	AttrNumber *groupColIdx = extract_grouping_cols(clauses,
-													parse->targetList);
+													targetList);
 
 #ifdef __COLD_HOT__
 	if (has_cold_hot_table)
@@ -6826,7 +6904,7 @@ grouping_distribution_match(PlannerInfo *root, Query *parse, Path *path,
      */
 	for (i = 0; i < numGroupCols; i++)
     {
-		TargetEntry *te = (TargetEntry *)list_nth(parse->targetList,
+		TargetEntry *te = (TargetEntry *)list_nth(targetList,
 												  groupColIdx[i]-1);
 
 		if (equal(te->expr, distribution->distributionExpr))
@@ -8248,6 +8326,61 @@ adjust_path_distribution(PlannerInfo *root, Query *parse, Path *path)
     return path;
 }
 
+#ifdef __TBASE__
+/*
+ * can_distinct_agg_optimize
+ *		Check if distinct app is workable.
+ */
+static bool
+can_distinct_agg_optimize(PlannerInfo *root, RelOptInfo *input_rel,
+                          RelOptInfo *grouped_rel, PathTarget *pathtarget,
+                          const AggClauseCosts *agg_costs)
+{
+	ListCell *lc = NULL;
+	Query  *parse = NULL;
+	bool meet_distint_agg_clause = false;
+
+	parse = root->parse;
+
+    /* It's no use for 2phase agg on datanode */
+	if (!grouped_rel->consider_parallel || input_rel->partial_pathlist == NIL ||
+	    !agg_costs->hasOnlyDistinct || agg_costs->hasNonSerial || agg_costs->hasOrder ||
+	    parse->groupClause || parse->groupingSets || parse->havingQual ||
+	    parse->distinctClause || has_cold_hot_table || !olap_optimizer || !enable_distinct_optimizer ||
+	    IS_PGXC_DATANODE)
+	{
+		return false;
+	}
+
+	foreach (lc, pathtarget->exprs)
+	{
+		Aggref *aggref = (Aggref *)lfirst(lc);
+
+		if (IsA(aggref, Aggref) && aggref->aggdistinct != NIL)
+		{
+			/* only one distinct agg is allowed */
+			if(meet_distint_agg_clause)
+				return false;
+
+			if (list_length(aggref->aggdistinct) != 1 ||
+				list_length(aggref->args) != 1)
+			{
+				return false;	
+			}
+
+			/* currently we only support hash agg */
+			if (!grouping_is_hashable(aggref->aggdistinct))
+			{
+				return false;
+			}
+			meet_distint_agg_clause = true;
+		}
+	}
+
+	return meet_distint_agg_clause;
+}
+#endif
+
 static bool
 can_push_down_grouping(PlannerInfo *root, Query *parse, Path *path)
 {
@@ -8269,7 +8402,7 @@ can_push_down_grouping(PlannerInfo *root, Query *parse, Path *path)
     if (parse->groupingSets)
         return groupingsets_distribution_match(root, parse, path);
 
-    return grouping_distribution_match(root, parse, path, parse->groupClause);
+	return grouping_distribution_match(root, parse, path, parse->groupClause, parse->targetList);
 }
 
 static bool

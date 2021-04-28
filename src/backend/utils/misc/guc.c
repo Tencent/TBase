@@ -201,6 +201,7 @@ extern bool    PlpgsqlDebugPrint;
 /* used for get total size of session */
 static int32 g_TotalMemorySize = 0;
 extern bool    enable_parallel_ddl;
+extern bool    enable_distinct_optimizer;
 #endif
 static int    GUC_check_errcode_value;
 
@@ -2787,6 +2788,20 @@ static struct config_bool ConfigureNamesBool[] =
 	},
 
 #endif
+	{
+		{"enable_distinct_optimizer", PGC_SUSET, CUSTOM_OPTIONS,
+			 gettext_noop("push down distinct to datanodes."),
+			 NULL
+		},
+		&enable_distinct_optimizer
+		,
+#ifdef _PG_REGRESS_
+		true,
+#else
+		false,
+#endif
+		NULL, NULL, NULL
+	},
 
     /* End-of-list marker */
     {

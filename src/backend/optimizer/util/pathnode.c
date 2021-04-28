@@ -3058,6 +3058,92 @@ get_num_connections(int numnodes, int nRemotePlans)
 
     return num_connections;
 }
+
+/*
+ * redistribute local grouping results among datanodes for 
+ * distinct aggs like count(distinct a) or avg(distinct a)...
+ *
+ * Tips: we do not check the agg column's type, directly use that
+ * as hash column, but some data types are not supported as hash column now,
+ * maybe some errors.
+ */
+Path *
+create_redistribute_distinct_agg_path(PlannerInfo *root, Query *parse, Path *path, Aggref *agg)
+{
+	PathTarget *pathtarget = path->pathtarget;
+	TargetEntry *te    = NULL;
+	Bitmapset   *nodes = NULL;
+	Oid group;
+	int i;
+
+	te = get_sortgroupclause_tle((SortGroupClause *)linitial(agg->aggdistinct),
+								 agg->args);
+
+	if(te == NULL)
+	{
+		elog(ERROR, "Distinct aggref not found in pathtarget.");
+	}
+
+	if (list_length(groupOids) > 1)
+	{
+		groupOids = NULL;
+		elog(ERROR, "Tables from different groups should not be invloved in one Query.");
+	}
+
+	if (groupOids)
+	{
+		group = linitial_oid(groupOids);
+	}
+	else
+	{
+		group = InvalidOid;
+	}
+
+	if (group == InvalidOid)
+	{
+		for (i = 0; i < NumDataNodes; i++)
+			nodes = bms_add_member(nodes, i);
+
+		/*
+		 * FIXING ME! check hash column's data type to satisfity hash locator func
+		 */
+		path = redistribute_path(root,
+								 path,
+								 NULL,
+								 LOCATOR_TYPE_HASH,
+								 (Node *)te->expr,
+								 nodes,
+								 NULL);
+	}
+	else
+	{
+		ListCell *cell;
+		List *nodelist = GetGroupNodeList(group);
+
+		foreach (cell, nodelist)
+		{
+			int nodeid = lfirst_int(cell);
+
+			nodes = bms_add_member(nodes, nodeid);
+		}
+		/*
+		 * FIXING ME! check hash column's data type to satisfity hash locator func
+		 */
+		path = redistribute_path(root,
+								 path,
+								 NULL,
+								 LOCATOR_TYPE_SHARD,
+								 (Node *)te->expr,
+								 nodes,
+								 NULL);
+	}
+
+	path->pathkeys = NULL;
+	path->pathtarget = pathtarget;
+
+	return path;
+}
+
 /*
   * redistribute local grouping results among datanodes, then
   * get the final grouping results. seems more efficient...

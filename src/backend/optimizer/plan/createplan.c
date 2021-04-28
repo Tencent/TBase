@@ -2331,6 +2331,8 @@ create_agg_plan(PlannerInfo *root, AggPath *best_path)
 			}
 		}
 	}
+
+	plan->noDistinct = best_path->noDistinct;
 #endif
 
     return plan;
@@ -6513,7 +6515,9 @@ make_remotesubplan(PlannerInfo *root,
                         {
                             Agg *node = (Agg *)lefttree;
 
-                            if (node->aggsplit == AGGSPLIT_INITIAL_SERIAL)
+                            /* do not parallel if it's not safe */
+							if (node->aggsplit == AGGSPLIT_INITIAL_SERIAL
+							    && lefttree->parallel_safe)
                             {
                                 switch(node->aggstrategy)
                                 {
@@ -7999,6 +8003,7 @@ make_agg(List *tlist, List *qual,
 #ifdef __TBASE__
 	node->hybrid = false;
 	node->entrySize = 0;
+	node->noDistinct = false;
 #endif
     plan->qual = qual;
     plan->targetlist = tlist;

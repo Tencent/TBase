@@ -365,6 +365,9 @@ extern RelOptInfo *build_child_join_rel(PlannerInfo *root,
 #ifdef __TBASE__
 extern Path *create_redistribute_grouping_path(PlannerInfo *root, 
                                                 Query *parse, Path *path);
+extern Path *create_redistribute_distinct_agg_path(PlannerInfo *root,
+												   Query *parse, Path *path,
+												   Aggref *agg);
 extern void contains_remotesubplan(Path *path, int *number, bool *redistribute);
 
 extern int replication_level;

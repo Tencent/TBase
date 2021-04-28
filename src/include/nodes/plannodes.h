@@ -855,6 +855,7 @@ typedef struct Agg
 #ifdef __TBASE__
 	uint32     entrySize;
 	bool       hybrid;
+	bool       noDistinct;      /* no need of distinct related initialization */
 #endif
 } Agg;
 

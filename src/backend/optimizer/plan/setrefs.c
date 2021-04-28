@@ -1877,7 +1877,6 @@ convert_combining_aggrefs(Node *node, void *context)
 
         /* Assert we've not chosen to partial-ize any unsupported cases */
         Assert(orig_agg->aggorder == NIL);
-        Assert(orig_agg->aggdistinct == NIL);
 
         /*
          * Since aggregate calls can't be nested, we needn't recurse into the

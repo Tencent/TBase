@@ -91,6 +91,7 @@ select name, setting from pg_settings where name like 'enable%';
  enable_crypt_parellel_debug       | off
  enable_data_mask                  | on
  enable_datanode_row_triggers      | off
+ enable_distinct_optimizer             | on
  enable_distri_debug               | off
  enable_distri_debug_print         | off
  enable_distri_visibility_print    | off
@@ -135,7 +136,7 @@ select name, setting from pg_settings where name like 'enable%';
  enable_transparent_crypt          | on
  enable_user_authority_force_check | off
  enable_xlog_mprotect              | on
-(62 rows)
+(63 rows)
 
 -- Test that the pg_timezone_names and pg_timezone_abbrevs views are
 -- more-or-less working.  We can't test their contents in any great detail

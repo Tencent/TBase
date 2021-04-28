@@ -1710,6 +1710,7 @@ typedef struct AggPath
 #ifdef __TBASE__
 	uint32      entrySize;
 	bool        hybrid;
+	bool        noDistinct;     /* no need of distinct related initialization */
 #endif
 } AggPath;
 
