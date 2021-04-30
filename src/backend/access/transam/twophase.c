@@ -136,6 +136,8 @@
 
 int  transaction_threshold = 200000;
 
+#define FILE_CONTENT_SIZE 2048
+
 #define GET_START_NODE "startnode:"
 
 /* GUC variable, can't be changed after startup */
@@ -3726,7 +3728,7 @@ void record_2pc_involved_nodes_xid(const char * tid,
 void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timestamp)
 {// #lizard forgives
     char path[MAXPGPATH];
-    char file_content[2048];
+	char file_content[FILE_CONTENT_SIZE];
     StringInfoData content;
 	File fd = -1;
 	int ret = 0;
@@ -3819,41 +3821,42 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 
 				GET_2PC_FILE_PATH(path, tid);
 
-				fd = open(path, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
-    if (fd < 0)
-    {   
 					if (RecoveryInProgress())
 					{
-						elog(LOG, "[record_2pc_commit_timestamp] could not "
-							"append timestamp in file %s, errMsg: %s",
-							path, strerror(errno));
+				fd = PathNameOpenFile(path, O_RDWR | O_TRUNC | O_CREAT,
+					S_IRUSR | S_IWUSR);
 					}
 					else
         {
+				fd = PathNameOpenFile(path, O_RDWR | O_CREAT | O_EXCL,
+					S_IRUSR | S_IWUSR);
+			}
+			if (fd < 0)
+			{
 						elog(ERROR, "[record_2pc_commit_timestamp] could not "
 							"append timestamp in file %s, errMsg: %s",
 							path, strerror(errno));
 					}
-					return;
-        }
 
-				ret = write(fd, entry->info, strlen(entry->info));
-				if(ret != new_size)
+			ret = FileWrite(fd, entry->info, strlen(entry->info),
+				WAIT_EVENT_BUFFILE_WRITE);
+			if(ret != strlen(entry->info))
 				{
-					close(fd);
+				FileClose(fd);
 					elog(ERROR, "[record_2pc_commit_timestamp] could not write "
 						"file %s, errMsg: %s, ret: %d, info: %s",
 						path, strerror(errno), ret, entry->info);
 				}
-				ret = write(fd, content.data, size);
-				if(ret != new_size)
+			ret = FileWrite(fd, content.data, size,
+				WAIT_EVENT_BUFFILE_WRITE);
+			if(ret != size)
 				{
-					close(fd);
+				FileClose(fd);
 					elog(ERROR, "[record_2pc_commit_timestamp] could not write "
 						"file %s, errMsg: %s, ret: %d, info: %s",
 						path, strerror(errno), ret, content.data);
 				}
-				close(fd);
+			FileClose(fd);
 
 				/* remove from hash table */
 				entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
@@ -3883,7 +3886,7 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 	GET_2PC_FILE_PATH(path, tid);
 
 	/* the 2pc file exists already */
-	fd = open(path, O_RDWR | O_APPEND, S_IRUSR | S_IWUSR);
+	fd = PathNameOpenFile(path, O_RDWR | O_APPEND, S_IRUSR | S_IWUSR);
 	if (fd < 0)
 	{
         if (RecoveryInProgress())
@@ -3917,31 +3920,32 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 
     if (enable_distri_print)
     {
-		memset(file_content, 0, 2048);
-		ret = read(fd, file_content, 2048);
+		memset(file_content, 0, FILE_CONTENT_SIZE);
+		ret = FileRead(fd, file_content, FILE_CONTENT_SIZE, WAIT_EVENT_BUFFILE_READ);
 		elog(LOG, "[record_2pc_commit_timestamp] before append file: %s, "
 			"file_content: %s, content.data: %s, ret: %d",
 			path, file_content, content.data, ret);
     }
 
-    ret = write(fd, content.data, size);
+	ret = FileWrite(fd, content.data, size, WAIT_EVENT_BUFFILE_WRITE);
     if(ret != size)
     {
-		close(fd);
+		FileClose(fd);
 		elog(ERROR, "[record_2pc_commit_timestamp] could not write file %s, "
 			"errMsg: %s", path, strerror(errno));
     }
 
     if (enable_distri_print)
     {
-        memset(file_content, 0, 2048);
-        lseek(fd, 0, SEEK_SET);
-        ret = read(fd, file_content, 2048);
+		memset(file_content, 0, FILE_CONTENT_SIZE);
+		FileSeek(fd, 0, SEEK_SET);
+		ret = FileRead(fd, file_content, FILE_CONTENT_SIZE, WAIT_EVENT_BUFFILE_READ);
 		elog(LOG, "[record_2pc_commit_timestamp] after append file: %s, "
-			"file_content: %s, ret: %d", tid, file_content, ret);
+			"file_content: %s, ret: %d", 
+			path, file_content, ret);
     }
 
-	close(fd);
+	FileClose(fd);
 
     resetStringInfo(&content);
     pfree(content.data);
@@ -4063,8 +4067,16 @@ void rename_2pc_records(const char *tid, TimestampTz timestamp)
 			check_entry_key(tid, entry->key, "rename_2pc_records");
 			check_2pc_file(tid, entry->info, "rename_2pc_records");
 
+			if (RecoveryInProgress())
+			{
+				fd = PathNameOpenFile(new_path, O_RDWR | O_TRUNC | O_CREAT,
+					S_IRUSR | S_IWUSR);
+			}
+			else
+			{
 			fd = PathNameOpenFile(new_path, O_RDWR | O_CREAT | O_EXCL,
 				S_IRUSR | S_IWUSR);
+			}
 			if (fd < 0)
 			{
 				elog(ERROR, "[rename_2pc_records] could not create file %s, "
