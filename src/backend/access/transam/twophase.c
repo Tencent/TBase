@@ -3539,7 +3539,6 @@ void record_2pc_involved_nodes_xid(const char * tid,
 	appendStringInfo(&content, "nodes:%s\n", nodestring);
 	appendStringInfo(&content, "xid:%u\n", xid);
 	size = content.len;
-
 	Assert(size == strlen(content.data));
 
     /* if in_pg_clean, then check whether the file exists */
@@ -3667,8 +3666,7 @@ void record_2pc_involved_nodes_xid(const char * tid,
 					"to hash table", tid);
 			}
 
-			memset(entry->info, 0, MAX_2PC_INFO_SIZE);
-			memcpy(entry->info, content.data, size);
+			memcpy(entry->info, content.data, size + 1);
 
 			resetStringInfo(&content);
 			pfree(content.data);
@@ -3779,7 +3777,8 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 	initStringInfo(&content);
 	appendStringInfo(&content, "global_commit_timestamp:"INT64_FORMAT"\n",
 		commit_timestamp);
-	size = strlen(content.data);
+	size = content.len;
+	Assert(size == strlen(content.data));
 
 	if (NULL != record_2pc_cache)
 	{
@@ -3804,8 +3803,16 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 
 			new_size = size + strlen(entry->info);
 
-			if (new_size >= MAX_2PC_INFO_SIZE)
+			if (new_size < MAX_2PC_INFO_SIZE)
 			{
+				/* save to hash table */
+				memcpy(entry->info + strlen(entry->info), content.data, size + 1);
+
+				resetStringInfo(&content);
+				pfree(content.data);
+				return;
+			}
+
 				/* save to file */
 				elog(LOG, "[record_2pc_commit_timestamp] %s new size(%d) "
 					"overflow(%d)", tid, new_size, MAX_2PC_INFO_SIZE);
@@ -3866,14 +3873,6 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 				pfree(content.data);
 				return;
 			}
-
-			/* save to hash table */
-			memcpy(entry->info + strlen(entry->info), content.data, size);
-
-			resetStringInfo(&content);
-			pfree(content.data);
-			return;
-		}
 		else
 		{
 			elog(LOG, "[record_2pc_commit_timestamp] %s is not found "
@@ -4147,6 +4146,7 @@ void record_2pc_readonly(const char *gid)
 	if (NULL != record_2pc_cache)
 	{
 		Assert(strlen(gid) < MAX_TID_SIZE);
+		Assert(strlen(content) < MAX_2PC_INFO_SIZE);
 		entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
 			gid, HASH_ENTER_NULL, &found);
 		if (NULL != entry)
@@ -4172,7 +4172,7 @@ void record_2pc_readonly(const char *gid)
 				elog(LOG, "[record_2pc_readonly] %s is added "
 					"to hash table", gid);
 			}
-			memcpy(entry->info, content, strlen(content));
+			memcpy(entry->info, content, strlen(content) + 1);
 			return;
 		}
 		else
