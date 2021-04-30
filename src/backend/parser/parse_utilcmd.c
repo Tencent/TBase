@@ -86,6 +86,7 @@
 #ifdef __TBASE__
 #include "utils/fmgroids.h"
 #include "catalog/pgxc_class.h"
+#include "utils/inval.h"
 #endif
 
 #ifdef XCP
@@ -200,6 +201,8 @@ static Const *transformPartitionBoundValue(ParseState *pstate, A_Const *con,
 
 #ifdef __TBASE__
 static void transformPartitionBy(ParseState *pstate, ColumnDef *partcol, PartitionBy *partitionby);
+static char * ChooseSerialName(const char *relname, const char *colname,
+									const char *label, Oid namespaceid);
 #endif
 /*
  * transformCreateStmt -
@@ -722,6 +725,52 @@ transformCreateStmt(CreateStmt *stmt, const char *queryString)
     return result;
 }
 
+#ifdef __TBASE__
+/*
+ * Check relation exists before choose sequence name, if
+ * the relation already exists, no need to create sequence
+ * and relation.
+ */
+static char *
+ChooseSerialName(const char *relname, const char *colname,
+					const char *label, Oid namespaceid)
+{
+	int		pass = 0;
+	char	modlabel[NAMEDATALEN];
+	char	*sqname;
+	Oid		seqoid;
+
+	/* try the unmodified label first */
+	StrNCpy(modlabel, label, sizeof(modlabel));
+
+	for (;;)
+	{
+		sqname = makeObjectName(relname, colname, modlabel);
+
+		AcceptInvalidationMessages();
+		seqoid = get_relname_relid(sqname, namespaceid);
+		if (OidIsValid(seqoid))
+		{
+			Relation rel = heap_open(seqoid, AccessShareLock);
+			if (OidIsValid(get_relname_relid(relname, namespaceid)))
+			{
+				heap_close(rel, AccessShareLock);
+				elog(ERROR, "relation \"%s\" already exists", relname);
+			}
+			heap_close(rel, AccessShareLock);
+
+			/* found a conflict, so try a new name component */
+			pfree(sqname);
+			snprintf(modlabel, sizeof(modlabel), "%s%d", label, ++pass);
+		}
+		else
+			break;
+	}
+
+	return sqname;
+}
+#endif
+
 /*
  * generateSerialExtraStmts
  *        Generate CREATE SEQUENCE and ALTER SEQUENCE ... OWNED BY statements
@@ -801,6 +850,14 @@ generateSerialExtraStmts(CreateStmtContext *cxt, ColumnDef *column,
             RangeVarAdjustRelationPersistence(cxt->relation, snamespaceid);
         }
         snamespace = get_namespace_name(snamespaceid);
+#ifdef __TBASE__
+		if (strcmp("CREATE TABLE", cxt->stmtType) == 0)
+			sname = ChooseSerialName(cxt->relation->relname,
+									column->colname,
+									"seq",
+									snamespaceid);
+		else
+#endif
         sname = ChooseRelationName(cxt->relation->relname,
                                    column->colname,
                                    "seq",
