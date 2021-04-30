@@ -1155,7 +1155,7 @@ TRANSFORM_VALUELISTS:
                 {
                     Node *node = (Node *)lfirst(cell);
 					if (!IsA(node, Param) &&
-					    !pgxc_is_expr_shippable(node, NULL))
+					    !pgxc_is_expr_shippable((Expr*)node, NULL))
                     {
                         qry->isMultiValues = false;
                         break;

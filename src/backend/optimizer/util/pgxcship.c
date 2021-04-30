@@ -158,6 +158,7 @@ static ExecNodes* pgxc_is_group_subquery_shippable(Query *query, Shippability_co
 static void pgxc_is_rte_subquery_shippable(Node *node, Shippability_context *sc_context);
 static bool pgxc_is_simple_subquery(Query *subquery);
 static bool pgxc_FQS_check_subquery_const(Query *query);
+static ExecNodes *make_FQS_single_node();
 #endif
 /*
  * Set the given reason in Shippability_context indicating why the query can not be
@@ -1878,6 +1879,9 @@ pgxc_query_contains_only_pg_catalog(List *rtable)
     return true;
 }
 
+/*
+ * Construct ExecNodes for single datanode to fqs
+ */
 static ExecNodes *
 make_FQS_single_node()
 {
