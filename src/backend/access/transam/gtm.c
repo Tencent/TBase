@@ -84,7 +84,8 @@ typedef struct
 List *g_CreateSeqList = NULL;
 List *g_DropSeqList   = NULL;
 List *g_AlterSeqList  = NULL;
-#define GTM_SEQ_POSTFIX "_$TBASE$_"
+/* constant postfix for sequence to avoid same name */
+#define GTM_SEQ_POSTFIX "_$TBASE$_sequence_temp_54312678712612"
 static void CheckConnection(void);
 static void ResetGTMConnection(void);
 static int GetGTMStoreStatus(GTMStorageStatus *header);
@@ -156,7 +157,7 @@ void RegisterSeqDrop(char *name, int32 type)
     if (GTM_SEQ_FULL_NAME == type)
     {
         /* Here we can only add postfix for the temp sequence, or drop database will fail. */
-        snprintf(temp, GTM_NAME_LEN, "%s_%d_%zu"GTM_SEQ_POSTFIX, name, MyProcPid, tp.tv_usec);
+	    snprintf(temp, GTM_NAME_LEN, "%s"GTM_SEQ_POSTFIX, name);
         if (RenameSequenceGTM((char *)name, temp))
         {
             elog(ERROR, "Deletion of sequences on database %s failed when backup old seq", name);
