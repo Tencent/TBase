@@ -633,6 +633,8 @@ int GTM_SeqAlter(GTM_SequenceKey seqkey,
     int32 ret = 0;
 #endif
     GTM_SeqInfo *seqinfo = seq_find_seqinfo(seqkey);
+    GTM_SequenceKeyData     newseqkey;
+    char        *seqkey_copy;
 
 #ifdef __TBASE__    
     if (NULL ==seqinfo)
@@ -644,10 +646,29 @@ int GTM_SeqAlter(GTM_SequenceKey seqkey,
 
     if (seqinfo == NULL)
     {
-        ereport(LOG,
+        /* Find seqinfo by using GTM_SEQ_POSTFIX seqkey when can not find by seqkey*/
+        seqkey_copy = palloc(sizeof(char) * (seqkey->gsk_keylen + strlen(GTM_SEQ_POSTFIX)));
+        memcpy(seqkey_copy, seqkey->gsk_key, seqkey->gsk_keylen);
+        newseqkey.gsk_keylen = seqkey->gsk_keylen + strlen(GTM_SEQ_POSTFIX);
+        newseqkey.gsk_type = seqkey->gsk_type;
+        newseqkey.gsk_key = strcat(seqkey_copy, GTM_SEQ_POSTFIX);
+
+        seqinfo = seq_find_seqinfo(&newseqkey);
+#ifdef __TBASE__
+        if (NULL == seqinfo)
+        {
+            GTM_FormSeqOfStore(&newseqkey);
+            seqinfo = seq_find_seqinfo(&newseqkey);
+        }
+#endif
+        if (NULL == seqinfo)
+        {
+            ereport(ERROR,
                 (EINVAL,
                  errmsg("The sequence with the given key does not exist")));
         return EINVAL;
+    }
+        GTM_SeqRename(&newseqkey, seqkey, InvalidGlobalTransactionId);
     }
 
     GTM_RWLockAcquire(&seqinfo->gs_lock, GTM_LOCKMODE_WRITE);
@@ -979,6 +1000,7 @@ GTM_SeqRename(GTM_SequenceKey seqkey, GTM_SequenceKey newseqkey,
     int32 ret = 0;
 #endif
     GTM_SeqInfo *seqinfo = NULL;
+    GTM_SeqInfo *newseqinfo = NULL;
     int errcode = 0;
     MemoryContext oldContext;
     GTM_SeqAlteredInfo *alterinfo;
@@ -995,10 +1017,27 @@ GTM_SeqRename(GTM_SequenceKey seqkey, GTM_SequenceKey newseqkey,
     /* replace old key by new key */
     if (seqinfo == NULL)
     {
+        newseqinfo = seq_find_seqinfo(newseqkey);
+#ifdef __TBASE__
+        if (NULL == seqinfo)
+        {
+            GTM_FormSeqOfStore(newseqkey);
+            newseqinfo = seq_find_seqinfo(newseqkey);
+        }
+#endif
+
+        if(newseqinfo == NULL)
+        {
         ereport(LOG,
                 (EINVAL,
                  errmsg("Sequence with the key:%s does not exist", seqkey->gsk_key)));
         return EINVAL;
+    }
+        ereport(LOG,
+                    (EEXIST,
+                            errmsg("Sequence with the key:%s has been renamed to %s", seqkey->gsk_key, newseqkey->gsk_key)));
+        seq_release_seqinfo(newseqinfo);
+        return 0;
     }
 
     oldContext = MemoryContextSwitchTo(TopMostMemoryContext);
@@ -1044,6 +1083,8 @@ GTM_SeqGetCurrent(GTM_SequenceKey seqkey, char *coord_name,
     GTM_SeqInfo *seqinfo = NULL;
     int            i;
     bool        found = false;
+    GTM_SequenceKeyData     newseqkey;
+    char        *seqkey_copy = NULL;
 
     seqinfo = seq_find_seqinfo(seqkey);
 #ifdef __TBASE__
@@ -1059,11 +1100,30 @@ GTM_SeqGetCurrent(GTM_SequenceKey seqkey, char *coord_name,
 
     if (seqinfo == NULL)
     {
+        /* Find seqinfo by using GTM_SEQ_POSTFIX seqkey when can not find by seqkey*/
+        seqkey_copy = palloc(sizeof(char) * (seqkey->gsk_keylen + strlen(GTM_SEQ_POSTFIX)));
+        memcpy(seqkey_copy, seqkey->gsk_key, seqkey->gsk_keylen);
+        newseqkey.gsk_keylen = seqkey->gsk_keylen + strlen(GTM_SEQ_POSTFIX);
+        newseqkey.gsk_type = seqkey->gsk_type;
+        newseqkey.gsk_key = strcat(seqkey_copy, GTM_SEQ_POSTFIX);
+
+        seqinfo = seq_find_seqinfo(&newseqkey);
+#ifdef __TBASE__
+        if (NULL == seqinfo)
+        {
+            GTM_FormSeqOfStore(&newseqkey);
+            seqinfo = seq_find_seqinfo(&newseqkey);
+        }
+#endif
+        if (NULL == seqinfo)
+        {
         ereport(ERROR,
                 (EINVAL,
                  errmsg("sequence \"%s\" does not exist", seqkey->gsk_key)));
         return;
     }
+        GTM_SeqRename(&newseqkey, seqkey, InvalidGlobalTransactionId);
+	}
 
     GTM_RWLockAcquire(&seqinfo->gs_lock, GTM_LOCKMODE_READ);
 
@@ -1167,6 +1227,8 @@ GTM_SeqSetVal(GTM_SequenceKey seqkey, char *coord_name,
     int32 ret = 0;
     GTM_SeqInfo *seqinfo = seq_find_seqinfo(seqkey);
 #endif
+    GTM_SequenceKeyData     newseqkey;
+    char        *seqkey_copy;
     
 #ifdef __TBASE__    
     if (NULL ==seqinfo)
@@ -1178,11 +1240,28 @@ GTM_SeqSetVal(GTM_SequenceKey seqkey, char *coord_name,
 
     if (seqinfo == NULL)
     {
+        /* Find seqinfo by using GTM_SEQ_POSTFIX seqkey when can not find by seqkey*/
+        seqkey_copy = palloc(sizeof(char) * (seqkey->gsk_keylen + strlen(GTM_SEQ_POSTFIX)));
+        memcpy(seqkey_copy, seqkey->gsk_key, seqkey->gsk_keylen);
+        newseqkey.gsk_keylen = seqkey->gsk_keylen + strlen(GTM_SEQ_POSTFIX);
+        newseqkey.gsk_type = seqkey->gsk_type;
+        newseqkey.gsk_key = strcat(seqkey_copy, GTM_SEQ_POSTFIX);
+        seqinfo = seq_find_seqinfo(&newseqkey);
+#ifdef __TBASE__
+        if (NULL == seqinfo)
+        {
+            GTM_FormSeqOfStore(&newseqkey);
+            seqinfo = seq_find_seqinfo(&newseqkey);
+        }
+#endif
+        if (NULL == seqinfo)
+        {
         ereport(LOG,
                 (EINVAL,
                  errmsg("The sequence with the given key does not exist")));
-
         return EINVAL;
+    }
+        GTM_SeqRename(&newseqkey, seqkey, InvalidGlobalTransactionId);
     }
 
     GTM_RWLockAcquire(&seqinfo->gs_lock, GTM_LOCKMODE_WRITE);
@@ -1240,6 +1319,8 @@ GTM_SeqGetNext(GTM_SequenceKey seqkey, char *coord_name,
     char         buf[100] = {0};
     GTM_Sequence used_count = 0;
 #endif
+    GTM_SequenceKeyData     newseqkey;
+    char        *seqkey_copy;
 
     GTM_SeqInfo *seqinfo = seq_find_seqinfo(seqkey);
 #ifdef __TBASE__
@@ -1252,10 +1333,29 @@ GTM_SeqGetNext(GTM_SequenceKey seqkey, char *coord_name,
 
     if (seqinfo == NULL)
     {
+        /* Find seqinfo by using GTM_SEQ_POSTFIX seqkey when can not find by seqkey*/
+        seqkey_copy = palloc(sizeof(char) * (seqkey->gsk_keylen + strlen(GTM_SEQ_POSTFIX)));
+        memcpy(seqkey_copy, seqkey->gsk_key, seqkey->gsk_keylen);
+        newseqkey.gsk_keylen = seqkey->gsk_keylen + strlen(GTM_SEQ_POSTFIX);
+        newseqkey.gsk_type = seqkey->gsk_type;
+        newseqkey.gsk_key = strcat(seqkey_copy, GTM_SEQ_POSTFIX);
+
+        seqinfo = seq_find_seqinfo(&newseqkey);
+#ifdef __TBASE__
+        if (NULL == seqinfo)
+        {
+            GTM_FormSeqOfStore(&newseqkey);
+            seqinfo = seq_find_seqinfo(&newseqkey);
+        }
+#endif
+        if (NULL == seqinfo)
+        {
         ereport(LOG,
                 (EINVAL,
                  errmsg("The sequence with the given key does not exist")));
         return EINVAL;
+    }
+        GTM_SeqRename(&newseqkey, seqkey, InvalidGlobalTransactionId);
     }
     
     GTM_RWLockAcquire(&seqinfo->gs_lock, GTM_LOCKMODE_WRITE);
@@ -1515,6 +1615,8 @@ GTM_SeqReset(GTM_SequenceKey seqkey)
 #ifdef __TBASE__
     int32         ret = 0;
 #endif
+    GTM_SequenceKeyData     newseqkey;
+    char        *seqkey_copy;
 
     GTM_SeqInfo *seqinfo = seq_find_seqinfo(seqkey);
 #ifdef __TBASE__    
@@ -1527,10 +1629,29 @@ GTM_SeqReset(GTM_SequenceKey seqkey)
 
     if (seqinfo == NULL)
     {
+        /* Find seqinfo by using GTM_SEQ_POSTFIX seqkey when can not find by seqkey*/
+        seqkey_copy = palloc(sizeof(char) * (seqkey->gsk_keylen + strlen(GTM_SEQ_POSTFIX)));
+        memcpy(seqkey_copy, seqkey->gsk_key, seqkey->gsk_keylen);
+        newseqkey.gsk_keylen = seqkey->gsk_keylen + strlen(GTM_SEQ_POSTFIX);
+        newseqkey.gsk_type = seqkey->gsk_type;
+        newseqkey.gsk_key = strcat(seqkey_copy, GTM_SEQ_POSTFIX);
+
+        seqinfo = seq_find_seqinfo(&newseqkey);
+#ifdef __TBASE__
+        if (NULL == seqinfo)
+        {
+            GTM_FormSeqOfStore(&newseqkey);
+            seqinfo = seq_find_seqinfo(&newseqkey);
+        }
+#endif
+        if (NULL == seqinfo)
+        {
         ereport(LOG,
                 (EINVAL,
                  errmsg("The sequence with the given key does not exist")));
         return EINVAL;
+    }
+        GTM_SeqRename(&newseqkey, seqkey, InvalidGlobalTransactionId);
     }
 
     GTM_RWLockAcquire(&seqinfo->gs_lock, GTM_LOCKMODE_WRITE);
@@ -1597,6 +1718,7 @@ ProcessSequenceInitCommand(Port *myport, StringInfo message, bool is_backup)
     MemoryContext oldContext;
     const char *data;
     GlobalTransactionId gxid;
+	char postfix[100];
 
     if (Recovery_IsStandby())
     {
@@ -1611,6 +1733,14 @@ ProcessSequenceInitCommand(Port *myport, StringInfo message, bool is_backup)
      */
     seqkey.gsk_keylen = pq_getmsgint(message, sizeof (seqkey.gsk_keylen));
     seqkey.gsk_key = (char *)pq_getmsgbytes(message, seqkey.gsk_keylen);
+
+    /* Check whether the seqkey contains GTM_SEQ_POSTFIX */
+    if (seqkey.gsk_keylen > strlen(GTM_SEQ_POSTFIX))
+    {
+        strncpy(postfix, seqkey.gsk_key + (seqkey.gsk_keylen - strlen(GTM_SEQ_POSTFIX) - 1), strlen(GTM_SEQ_POSTFIX));
+        if (!strcmp(postfix, GTM_SEQ_POSTFIX))
+            elog(ERROR, "postfix of sequence key can not be _$TBASE$_sequence_temp_54312678712612.");
+    }
 
     /*
      * Read various sequence parameters
