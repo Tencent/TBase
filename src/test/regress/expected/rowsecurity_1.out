@@ -1577,43 +1577,47 @@ WHERE t2.a = 3 and t3.a = 2 AND f_leak(t2.b) AND f_leak(t3.b);
  Remote Subquery Scan on all (datanode_2)
    ->  Update on t2
          ->  Nested Loop
+               ->  Seq Scan on t2
+                     Filter: ((a = 3) AND ((a % 2) = 1) AND f_leak(b))
+               ->  Materialize
                      ->  Remote Subquery Scan on all (datanode_1)
                            ->  Seq Scan on t3
                                  Filter: ((a = 2) AND f_leak(b))
-               ->  Seq Scan on t2
-                     Filter: ((a = 3) AND ((a % 2) = 1) AND f_leak(b))
-(8 rows)
+(9 rows)
 
 UPDATE t2 SET b=t2.b FROM t3
 WHERE t2.a = 3 and t3.a = 2 AND f_leak(t2.b) AND f_leak(t3.b);
 EXPLAIN (COSTS OFF) UPDATE t1 SET b=t1.b FROM t2
 WHERE t1.a = 3 and t2.a = 3 AND f_leak(t1.b) AND f_leak(t2.b);
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_2)
    ->  Update on t1
          Update on t1
          Update on t2 t2_1
          Update on t3
          ->  Nested Loop
-               ->  Remote Subquery Scan on all (datanode_2)
-                     ->  Seq Scan on t2
-                           Filter: ((a = 3) AND ((a % 2) = 1) AND f_leak(b))
                ->  Seq Scan on t1
                      Filter: ((a = 3) AND ((a % 2) = 0) AND f_leak(b))
+               ->  Materialize
+                     ->  Remote Subquery Scan on all (datanode_2)
+                           ->  Seq Scan on t2
+                                 Filter: ((a = 3) AND ((a % 2) = 1) AND f_leak(b))
          ->  Nested Loop
-               ->  Remote Subquery Scan on all (datanode_2)
-                     ->  Seq Scan on t2
-                           Filter: ((a = 3) AND ((a % 2) = 1) AND f_leak(b))
                ->  Seq Scan on t2 t2_1
                      Filter: ((a = 3) AND ((a % 2) = 0) AND f_leak(b))
+               ->  Materialize
+                     ->  Remote Subquery Scan on all (datanode_2)
+                           ->  Seq Scan on t2
+                                 Filter: ((a = 3) AND ((a % 2) = 1) AND f_leak(b))
          ->  Nested Loop
-               ->  Remote Subquery Scan on all (datanode_2)
-                     ->  Seq Scan on t2
-                           Filter: ((a = 3) AND ((a % 2) = 1) AND f_leak(b))
                ->  Seq Scan on t3
                      Filter: ((a = 3) AND ((a % 2) = 0) AND f_leak(b))
-(23 rows)
+               ->  Materialize
+                     ->  Remote Subquery Scan on all (datanode_2)
+                           ->  Seq Scan on t2
+                                 Filter: ((a = 3) AND ((a % 2) = 1) AND f_leak(b))
+(26 rows)
 
 UPDATE t1 SET b=t1.b FROM t2
 WHERE t1.a = 3 and t2.a = 3 AND f_leak(t1.b) AND f_leak(t2.b);
@@ -1643,18 +1647,19 @@ WHERE t1.a = 3 and t2.a = 3 AND f_leak(t1.b) AND f_leak(t2.b);
 EXPLAIN (COSTS OFF) UPDATE t2 t2_1 SET b = t2_2.b FROM t2 t2_2
 WHERE t2_1.a = 3 AND t2_2.a = t2_1.a AND t2_2.b = t2_1.b
 AND f_leak(t2_1.b) AND f_leak(t2_2.b) RETURNING *, t2_1, t2_2;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_2)
    ->  Update on t2 t2_1
          ->  Nested Loop
                Join Filter: (t2_1.b = t2_2.b)
-               ->  Remote Subquery Scan on all (datanode_2)
-                     ->  Seq Scan on t2 t2_2
-                           Filter: ((a = 3) AND ((a % 2) = 1) AND f_leak(b))
                ->  Seq Scan on t2 t2_1
                      Filter: ((a = 3) AND ((a % 2) = 1) AND f_leak(b))
-(9 rows)
+               ->  Materialize
+                     ->  Remote Subquery Scan on all (datanode_2)
+                           ->  Seq Scan on t2 t2_2
+                                 Filter: ((a = 3) AND ((a % 2) = 1) AND f_leak(b))
+(10 rows)
 
 UPDATE t2 t2_1 SET b = t2_2.b FROM t2 t2_2
 WHERE t2_1.a = 3 AND t2_2.a = t2_1.a AND t2_2.b = t2_1.b
@@ -2060,15 +2065,15 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test2;
 
 PREPARE plancache_test3 AS WITH q AS MATERIALIZED (SELECT * FROM z2) SELECT * FROM q,z1 WHERE f_leak(z1.b);
 EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
-                           QUERY PLAN                            
+                         QUERY PLAN                          
 -------------------------------------------------------------
  Nested Loop
    CTE q
      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
            ->  Seq Scan on z2
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               ->  Seq Scan on z1
-                     Filter: (((a % 2) = 0) AND f_leak(b))
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+         ->  Seq Scan on z1
+               Filter: (((a % 2) = 0) AND f_leak(b))
    ->  Materialize
          ->  CTE Scan on q
 (9 rows)
@@ -2112,15 +2117,15 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test2;
 (9 rows)
 
 EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
-                           QUERY PLAN                            
+                         QUERY PLAN                          
 -------------------------------------------------------------
  Nested Loop
    CTE q
      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
            ->  Seq Scan on z2
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               ->  Seq Scan on z1
-                     Filter: (((a % 2) = 0) AND f_leak(b))
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+         ->  Seq Scan on z1
+               Filter: (((a % 2) = 0) AND f_leak(b))
    ->  Materialize
          ->  CTE Scan on q
 (9 rows)
@@ -2164,15 +2169,15 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test2;
 (9 rows)
 
 EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
-                           QUERY PLAN                            
+                         QUERY PLAN                          
 -------------------------------------------------------------
  Nested Loop
    CTE q
      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
            ->  Seq Scan on z2
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               ->  Seq Scan on z1
-                     Filter: (((a % 2) = 1) AND f_leak(b))
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+         ->  Seq Scan on z1
+               Filter: (((a % 2) = 1) AND f_leak(b))
    ->  Materialize
          ->  CTE Scan on q
 (9 rows)
@@ -2216,15 +2221,15 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test2;
 (9 rows)
 
 EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
-                           QUERY PLAN                            
+                         QUERY PLAN                          
 -------------------------------------------------------------
  Nested Loop
    CTE q
      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
            ->  Seq Scan on z2
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               ->  Seq Scan on z1
-                     Filter: (((a % 2) = 1) AND f_leak(b))
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+         ->  Seq Scan on z1
+               Filter: (((a % 2) = 1) AND f_leak(b))
    ->  Materialize
          ->  CTE Scan on q
 (9 rows)

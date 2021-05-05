@@ -1876,20 +1876,23 @@ where exists(select * from tenk1 b
              where a.twothousand = b.twothousand and a.fivethous <> b.fivethous)
       and i4.f1 = a.tenthous;
                                  QUERY PLAN                                  
------------------------------------------------------------------------------
+-----------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
-   ->  Hash Join
-         Hash Cond: (a.tenthous = i4.f1)
          ->  Hash Semi Join
                Hash Cond: (a.twothousand = b.twothousand)
                Join Filter: (a.fivethous <> b.fivethous)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               Distribute results by H: twothousand
+               ->  Hash Join
+                     Hash Cond: (a.tenthous = i4.f1)
                ->  Seq Scan on tenk1 a
                ->  Hash
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                           ->  Seq Scan on tenk1 b
+                           ->  Seq Scan on int4_tbl i4
          ->  Hash
-               ->  Seq Scan on int4_tbl i4
-(12 rows)
+                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: twothousand
+                           ->  Seq Scan on tenk1 b
+(15 rows)
 
 --
 -- More complicated constructs
@@ -4718,17 +4721,17 @@ explain (num_nodes off, nodes off, costs off)
   select count(*) from tenk1 a,
     tenk1 b join lateral (values(a.unique1)) ss(x) on b.unique2 = ss.x;
                             QUERY PLAN                            
-------------------------------------------------------------------
+------------------------------------------------------------
  Finalize Aggregate
    ->  Remote Subquery Scan on all
          ->  Partial Aggregate
                ->  Hash Join
-                     Hash Cond: (a.unique1 = b.unique2)
-                     ->  Seq Scan on tenk1 a
-                     ->  Hash
+                     Hash Cond: (b.unique2 = a.unique1)
                            ->  Remote Subquery Scan on all
                                  Distribute results by H: unique2
                                  ->  Seq Scan on tenk1 b
+                     ->  Hash
+                           ->  Seq Scan on tenk1 a
 (10 rows)
 
 select count(*) from tenk1 a,
@@ -6614,17 +6617,17 @@ explain select t3.b from nestloop_suppression1 t1, nestloop_suppression2 t2, nes
 	where t1.b=2 and t1.c=3 and t1.d like 'char%' and t1.a=t2.a and t3.b>t2.a;
                                                           QUERY PLAN                                                          
 ------------------------------------------------------------------------------------------------------------------------------
- Nested Loop  (cost=200.16..401.93 rows=33 width=4)
+ Nested Loop  (cost=200.16..402.39 rows=33 width=4)
    Join Filter: (t3.b > t2.a)
-   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.16..280.68 rows=1 width=4)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.16..280.69 rows=1 width=4)
          ->  Nested Loop  (cost=0.16..180.68 rows=1 width=4)
                Join Filter: (t1.a = t2.a)
                ->  Index Scan using idx_nestloop_suppression1_b on nestloop_suppression1 t1  (cost=0.16..8.18 rows=1 width=4)
                      Index Cond: (b = 2)
                      Filter: (((d)::text ~~ 'char%'::text) AND (c = 3))
                ->  Seq Scan on nestloop_suppression2 t2  (cost=0.00..110.00 rows=5000 width=4)
-   ->  Materialize  (cost=100.00..120.62 rows=50 width=4)
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..120.50 rows=50 width=4)
+   ->  Materialize  (cost=100.00..121.08 rows=50 width=4)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..120.95 rows=50 width=4)
                ->  Seq Scan on nestloop_suppression3 t3  (cost=0.00..20.50 rows=50 width=4)
 (12 rows)
 
@@ -6633,7 +6636,7 @@ explain select t3.b from nestloop_suppression1 t1, nestloop_suppression2 t2, nes
 	where t1.b=2 and t1.c=3 and t1.d like 'char%' and t1.a=t2.a and t3.b>t2.a;
                                                              QUERY PLAN                                                             
 ------------------------------------------------------------------------------------------------------------------------------------
- Nested Loop  (cost=200.16..414.44 rows=33 width=4)
+ Nested Loop  (cost=200.16..414.89 rows=33 width=4)
    Join Filter: (t3.b > t2.a)
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.16..293.19 rows=1 width=4)
          ->  Nested Loop  (cost=0.16..193.19 rows=1 width=4)
@@ -6643,8 +6646,8 @@ explain select t3.b from nestloop_suppression1 t1, nestloop_suppression2 t2, nes
                      ->  Index Scan using idx_nestloop_suppression1_b on nestloop_suppression1 t1  (cost=0.16..8.18 rows=1 width=4)
                            Index Cond: (b = 2)
                            Filter: (((d)::text ~~ 'char%'::text) AND (c = 3))
-   ->  Materialize  (cost=100.00..120.62 rows=50 width=4)
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..120.50 rows=50 width=4)
+   ->  Materialize  (cost=100.00..121.08 rows=50 width=4)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..120.95 rows=50 width=4)
                ->  Seq Scan on nestloop_suppression3 t3  (cost=0.00..20.50 rows=50 width=4)
 (13 rows)
 

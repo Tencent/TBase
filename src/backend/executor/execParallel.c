@@ -1325,11 +1325,11 @@ ExecParallelInitializeWorker(PlanState *planstate, ParallelWorkerContext *pwcxt)
 				planstate_tree_walker(planstate, ExecInitializeWorkerRemoteInstr, pwcxt);
 			}
             if (planstate->plan->parallel_aware)        
-				ExecRemoteSubPlanInitializeDSMWorker((RemoteSubplanState *)planstate, pwcxt);
+				ExecRemoteSubPlanInitDSMWorker((RemoteSubplanState *)planstate, pwcxt);
 			break;
 		case T_HashJoinState:
 			if (planstate->plan->parallel_aware)
-				ExecParallelHashJoinInitializeWorker((HashJoinState *) planstate, pwcxt);
+				ExecParallelHashJoinInitWorker((HashJoinState *) planstate, pwcxt);
                 break;
             case T_AggState:
 			    if (planstate->plan->parallel_aware)

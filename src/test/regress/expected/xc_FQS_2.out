@@ -1641,13 +1641,13 @@ select * from subquery_fqs t join (select 1 id, 'gd' a, 2 c from dual union sele
 explain select * from subquery_fqs t1 where t1.id = 1 and t1.c IN (select c from subquery_fqs t2 where t2.id=1);
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..121.06 rows=1 width=40)
-   ->  Nested Loop Semi Join  (cost=100.00..121.06 rows=1 width=40)
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..121.16 rows=1 width=40)
+   ->  Nested Loop Semi Join  (cost=100.00..121.16 rows=1 width=40)
          Join Filter: (t1.c = t2.c)
          ->  Seq Scan on subquery_fqs t1  (cost=0.00..10.50 rows=2 width=40)
                Filter: (id = 1)
-         ->  Materialize  (cost=100.00..110.51 rows=2 width=4)
-               ->  Remote Subquery Scan on all (datanode_1)  (cost=100.00..110.50 rows=2 width=4)
+         ->  Materialize  (cost=100.00..110.55 rows=4 width=4)
+               ->  Remote Subquery Scan on all (datanode_1)  (cost=100.00..110.53 rows=4 width=4)
                      ->  Seq Scan on subquery_fqs t2  (cost=0.00..10.50 rows=2 width=4)
                            Filter: (id = 1)
 (9 rows)

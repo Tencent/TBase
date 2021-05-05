@@ -2160,6 +2160,25 @@ IsDistributedColumn(AttrNumber attr, RelationLocInfo *relation_loc_info)
 
     return result;
 }
+
+/*
+ * Calculate the tuple replication times based on replication type and number
+ * of target nodes.
+ */
+int
+calcDistReplications(char distributionType, Bitmapset *nodes)
+{
+	if (!nodes)
+		return 1;
+
+	if (IsLocatorReplicated(distributionType) ||
+		IsLocatorNone(distributionType))
+	{
+		return  bms_num_members(nodes);
+	}
+
+	return 1;
+}
 #endif
 
 void *

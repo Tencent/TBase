@@ -249,6 +249,7 @@ extern bool IsTypeDistributable(Oid col_type);
 extern char getLocatorDisType(Locator *self);
 extern bool prefer_olap;
 extern bool IsDistributedColumn(AttrNumber attr, RelationLocInfo *relation_loc_info);
+extern int calcDistReplications(char distributionType, Bitmapset *nodes);
 #endif
 
 #ifdef _MLS_

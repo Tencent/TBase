@@ -659,8 +659,8 @@ EXPLAIN
  SELECT count(*) FROM subset WHERE b = 'prefix_1' and c = 1;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- Finalize Aggregate  (cost=177.51..177.52 rows=1 width=8)
-   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=177.50..177.51 rows=1 width=8)
+ Finalize Aggregate  (cost=177.52..177.53 rows=1 width=8)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=177.50..177.52 rows=1 width=8)
          ->  Partial Aggregate  (cost=77.50..77.51 rows=1 width=8)
                ->  Seq Scan on subset  (cost=0.00..77.50 rows=1 width=0)
                      Filter: ((b = 'prefix_1'::text) AND (c = 1))
@@ -680,8 +680,8 @@ EXPLAIN
  SELECT count(*) FROM subset WHERE b = 'prefix_1' and c = 1;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- Finalize Aggregate  (cost=177.51..177.52 rows=1 width=8)
-   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=177.50..177.51 rows=1 width=8)
+ Finalize Aggregate  (cost=177.52..177.53 rows=1 width=8)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=177.50..177.52 rows=1 width=8)
          ->  Partial Aggregate  (cost=77.50..77.51 rows=1 width=8)
                ->  Seq Scan on subset  (cost=0.00..77.50 rows=50 width=0)
                      Filter: ((b = 'prefix_1'::text) AND (c = 1))
@@ -698,8 +698,8 @@ EXPLAIN
  SELECT count(*) FROM subset WHERE b like '%_1' and c = 1;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- Finalize Aggregate  (cost=177.51..177.52 rows=1 width=8)
-   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=177.50..177.51 rows=1 width=8)
+ Finalize Aggregate  (cost=177.52..177.53 rows=1 width=8)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=177.50..177.52 rows=1 width=8)
          ->  Partial Aggregate  (cost=77.50..77.51 rows=1 width=8)
                ->  Seq Scan on subset  (cost=0.00..77.50 rows=5 width=0)
                      Filter: ((b ~~ '%_1'::text) AND (c = 1))
@@ -722,8 +722,8 @@ EXPLAIN
  SELECT count(*) FROM subset WHERE b like '%_1' and c = 1;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- Finalize Aggregate  (cost=177.51..177.52 rows=1 width=8)
-   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=177.50..177.51 rows=1 width=8)
+ Finalize Aggregate  (cost=177.52..177.53 rows=1 width=8)
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=177.50..177.52 rows=1 width=8)
          ->  Partial Aggregate  (cost=77.50..77.51 rows=1 width=8)
                ->  Seq Scan on subset  (cost=0.00..77.50 rows=50 width=0)
                      Filter: ((b ~~ '%_1'::text) AND (c = 1))

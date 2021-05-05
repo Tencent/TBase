@@ -1404,47 +1404,6 @@ retry_pools:
     }
 }
 
-#ifdef __TBASE__
-/*
- * implementation for create_remotesubplan_path, besides regular creation of remote subplan,
- * we need it when redistributing join rel.
- */
-static Path *
-create_remotesubplan_path_internal(PlannerInfo *root, Path *subpath,
-                                   Distribution *distribution, RelOptInfo *rel,
-                                   ParamPathInfo *param_info, List *pathkeys,
-                                   PathTarget *pathtarget, int replication,
-                                   Cost additional_startup_cost,
-                                   Cost additional_total_cost)
-{
-	RemoteSubPath   *pathnode;
-	
-	//if (IsA(subpath, GatherPath))
-		//reset_cost_gather((GatherPath *) subpath);
-	
-	pathnode = makeNode(RemoteSubPath);
-	pathnode->path.pathtype = T_RemoteSubplan;
-	pathnode->path.parent = rel;
-	pathnode->path.param_info = param_info;
-	pathnode->path.pathkeys = pathkeys;
-	pathnode->subpath = subpath;
-	pathnode->path.distribution = (Distribution *) copyObject(distribution);
-	
-	/* We don't want to run subplains in parallel workers */
-	pathnode->path.parallel_aware = false;
-	pathnode->path.parallel_safe = false;
-	
-	pathnode->path.pathtarget = pathtarget;
-
-	cost_remote_subplan((Path *) pathnode, subpath->startup_cost + additional_startup_cost,
-	                    subpath->total_cost + additional_total_cost, subpath->rows,
-	                    rel->reltarget->width, replication, subpath->parallel_workers);
-	
-	return (Path *) pathnode;
-}
-#endif
-
-
 /*
  * create_remotesubplan_path
  *    Redistribute the data to match the distribution.
@@ -1458,15 +1417,8 @@ create_remotesubplan_path(PlannerInfo *root, Path *subpath,
 {
     RelOptInfo       *rel = subpath->parent;
     RemoteSubPath  *pathnode;
-    Distribution   *subdistribution = subpath->distribution;
+	Distribution   *subDist = subpath->distribution;
 
-#ifdef __TBASE__
-	return create_remotesubplan_path_internal(root, subpath, distribution,
-	                                          rel, subpath->param_info,
-	                                          subpath->pathkeys, subpath->pathtarget,
-	                                          (subdistribution && IsLocatorReplicated(subdistribution->distributionType)) ?
-	                                          bms_num_members(subdistribution->nodes) : 1, 0, 0);
-#else
     pathnode = makeNode(RemoteSubPath);
     pathnode->path.pathtype = T_RemoteSubplan;
     pathnode->path.parent = rel;
@@ -1483,11 +1435,9 @@ create_remotesubplan_path(PlannerInfo *root, Path *subpath,
 
     cost_remote_subplan((Path *) pathnode, subpath->startup_cost,
                         subpath->total_cost, subpath->rows, rel->reltarget->width,
-                        (subdistribution && IsLocatorReplicated(subdistribution->distributionType)) ?
-                        bms_num_members(subdistribution->nodes) : 1);
+						subDist ? calcDistReplications(subDist->distributionType, subDist->nodes) : 1);
 
     return (Path *) pathnode;
-#endif
 }
 
 /*
@@ -1506,13 +1456,6 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
     Distribution   *distribution = NULL;
     RelOptInfo       *rel = subpath->parent;
     RemoteSubPath  *pathnode;
-#ifdef __TBASE__
-	int				num_replication;
-
-	/* IsLocatorNone() also indicates we are replicating through input nodes */
-	num_replication = (IsLocatorReplicated(distributionType) ||
-				IsLocatorNone(distributionType)) ? bms_num_members(nodes) : 1;
-#endif
 
      if (distributionType != LOCATOR_TYPE_NONE)
     {
@@ -1530,20 +1473,6 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
     if (IsA(subpath, MaterialPath))
     {
         MaterialPath *mpath = (MaterialPath *) subpath;
-#ifdef __TBASE__
-		if (IsA(mpath->subpath, RemoteSubPath))
-		{
-			pathnode = (RemoteSubPath *) mpath->subpath;
-			pathnode->path.distribution = (Distribution *) copyObject(distribution);
-		}
-		else
-		{
-			pathnode = (RemoteSubPath *) create_remotesubplan_path_internal(root, mpath->subpath,
-			                                                                distribution, rel, subpath->param_info,
-			                                                                subpath->pathkeys, rel->reltarget,
-			                                                                num_replication, 0, 0);
-		}
-#else
         /* If subpath is already a RemoteSubPath, just replace distribution */
         if (IsA(mpath->subpath, RemoteSubPath))
         {
@@ -1569,11 +1498,13 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
         subpath = pathnode->subpath;
         pathnode->path.distribution = distribution;
         /* (re)calculate costs */
-        cost_remote_subplan((Path *) pathnode, subpath->startup_cost,
-                            subpath->total_cost, subpath->rows, rel->reltarget->width,
-                            IsLocatorReplicated(distributionType) ?
-                                    bms_num_members(nodes) : 1);
-#endif
+		cost_remote_subplan((Path *) pathnode,
+							subpath->startup_cost,
+							subpath->total_cost,
+							subpath->rows,
+							rel->reltarget->width,
+							calcDistReplications(distributionType, nodes));
+
 		mpath->path.distribution = (Distribution *) copyObject(distribution);
         mpath->subpath = (Path *) pathnode;
         cost_material(&mpath->path,
@@ -1587,7 +1518,7 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
     {
         Cost    input_startup_cost = 0;
         Cost    input_total_cost = 0;
-#ifndef __TBASE__
+
         pathnode = makeNode(RemoteSubPath);
         pathnode->path.pathtype = T_RemoteSubplan;
         pathnode->path.parent = rel;
@@ -1595,7 +1526,7 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
         pathnode->path.param_info = subpath->param_info;
         pathnode->path.pathkeys = pathkeys ? pathkeys : subpath->pathkeys;
         pathnode->path.distribution = distribution;
-#endif
+
         /*
          * If we need to insert a Sort node, add it here, so that it gets
          * pushed down to the remote node.
@@ -1628,14 +1559,6 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
             input_startup_cost += sort_path.startup_cost;
             input_total_cost += sort_path.total_cost;
         }
-#ifdef __TBASE__
-		pathnode = (RemoteSubPath *) create_remotesubplan_path_internal(root, subpath,
-		                                                                distribution, rel, subpath->param_info,
-		                                                                pathkeys ? pathkeys : subpath->pathkeys, 
-		                                                                rel->reltarget, num_replication,
-		                                                                input_startup_cost - subpath->startup_cost,
-		                                                                input_total_cost - subpath->total_cost);
-#else
         pathnode->subpath = subpath;
 
         /* We don't want to run subplains in parallel workers */
@@ -1643,10 +1566,11 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
         pathnode->path.parallel_safe = false;
 
         cost_remote_subplan((Path *) pathnode,
-                            input_startup_cost, input_total_cost,
-                            subpath->rows, rel->reltarget->width,
-							num_replication);
-#endif
+							input_startup_cost,
+							input_total_cost,
+							subpath->rows,
+							rel->reltarget->width,
+							calcDistReplications(distributionType, nodes));
         return (Path *) pathnode;
     }
 }

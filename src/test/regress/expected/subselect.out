@@ -1712,11 +1712,11 @@ select a.a,(select b.a from tbl_b b where b.a = a.a limit 1) q from tbl_a a orde
 explain select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);
                                                 QUERY PLAN                                                
 ---------------------------------------------------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=120.19..136.36 rows=112 width=8)
-   ->  Hash Semi Join  (cost=120.19..136.36 rows=112 width=8)
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=120.19..145.13 rows=112 width=8)
+   ->  Hash Semi Join  (cost=120.19..145.13 rows=112 width=8)
          Hash Cond: (a.b = b.a)
          Join Filter: (b.b > a.b)
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..111.75 rows=675 width=8)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..120.53 rows=675 width=8)
                Distribute results by H: b
                ->  Seq Scan on tbl_a a  (cost=0.00..11.75 rows=675 width=8)
          ->  Hash  (cost=11.75..11.75 rows=675 width=8)
