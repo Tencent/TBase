@@ -316,8 +316,8 @@ start_gtm(void)
 		snprintf(gtm_startup_gts,MAXPGPATH,"-g %s",startup_gts);
 
     if (log_file != NULL)
-		len = snprintf(cmd, MAXPGPATH - 1, "\"%s\" %s%s -l %s %s &" ,
-				 gtm_app_path, gtmdata_opt, gtm_opts, log_file, gtm_startup_gts);
+		len = snprintf(cmd, MAXPGPATH - 1, "\"%s\" %s%s %s >> \"%s\" 2>&1 &" ,
+				 gtm_app_path, gtmdata_opt, gtm_opts, gtm_startup_gts, log_file);
     else
 		len = snprintf(cmd, MAXPGPATH - 1, "\"%s\" %s%s %s < \"%s\" 2>&1 &" ,
 				 gtm_app_path, gtmdata_opt, gtm_opts, gtm_startup_gts, DEVNULL);
@@ -348,14 +348,6 @@ static int RunAsDaemon(char *cmd)
         int status;
 
         case 0:
-            /*
-             * Using fileno(xxx) may encounter trivial error because xxx may
-             * have been closed at somewhere else and fileno() may fail.  
-             * Its safer to use literal file descriptor here.
-             */
-            close(0);
-            close(1);
-            close(2);
             if ((status = system(cmd)) == -1)
                 /* 
                  * Same behavior as /bin/sh could not be
