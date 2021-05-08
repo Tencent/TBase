@@ -953,35 +953,31 @@ ProcessUtilityPre(PlannedStmt *pstmt,
             break;
 
         case T_CreateFdwStmt:
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                     errmsg("Postgres-XL does not support FOREIGN DATA WRAPPER yet"),
-                     errdetail("The feature is not currently supported")));
+            exec_type = EXEC_ON_ALL_NODES;
             break;
 
         case T_AlterFdwStmt:
+            exec_type = EXEC_ON_ALL_NODES;
             break;
 
         case T_CreateForeignServerStmt:
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                     errmsg("Postgres-XL does not support SERVER yet"),
-                     errdetail("The feature is not currently supported")));
+            exec_type = EXEC_ON_ALL_NODES;
             break;
 
         case T_AlterForeignServerStmt:
+            exec_type = EXEC_ON_ALL_NODES;
             break;
 
         case T_CreateUserMappingStmt:
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                     errmsg("Postgres-XL does not support USER MAPPING yet"),
-                     errdetail("The feature is not currently supported")));
+            exec_type = EXEC_ON_ALL_NODES;
             break;
 
         case T_AlterUserMappingStmt:
         case T_DropUserMappingStmt:
+            exec_type = EXEC_ON_ALL_NODES;
+            break;
         case T_ImportForeignSchemaStmt:
+            break;
         case T_CompositeTypeStmt:    /* CREATE TYPE (composite) */
         case T_CreateEnumStmt:    /* CREATE TYPE AS ENUM */
         case T_CreateRangeStmt: /* CREATE TYPE AS RANGE */
