@@ -71,6 +71,7 @@
 #include "utils/lsyscache.h"
 #include "utils/fmgroids.h"
 #include "utils/rel.h"
+#include "utils/inval.h"
 #include "pgxc/shardmap.h"
 #include "pgxc/pgxc.h"
 #include "pgxc/pgxcnode.h"
@@ -1936,6 +1937,12 @@ void ForceRefreshShardMap(Oid groupoid)
         }
     }
     LWLockRelease(ShardMapLock);
+	
+        /*
+         * Invalidate the relcache after refresh shard map in shmem,
+         * because Relation->rd_locator_info changed.
+         */
+	CacheInvalidateRelcacheAll();
 }
 
 /*
