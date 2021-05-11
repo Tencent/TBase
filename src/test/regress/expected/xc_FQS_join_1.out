@@ -691,12 +691,12 @@ explain (verbose on, nodes off, costs off) select * from tab1_mod, tab3_mod
 -- DMLs involving JOINs are not FQSed
 explain (verbose on, nodes off, costs off) update tab1_mod set val2 = 1000 from tab2_mod 
 		where tab1_mod.val = tab2_mod.val and tab1_mod. val2 = tab2_mod.val2;
-                                                     QUERY PLAN                                                      
----------------------------------------------------------------------------------------------------------------------
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all
    ->  Update on public.tab1_mod
          ->  Merge Join
-               Output: tab1_mod.val, 1000, tab1_mod.xc_node_id, tab1_mod.ctid, tab1_mod.shardid, tab2_mod.ctid
+               Output: tab1_mod.val, 1000, tab1_mod.xc_node_id, tab1_mod.ctid, tab1_mod.shardid, tab2_mod.ctid, tab2_mod.xc_node_id
                Merge Cond: ((tab1_mod.val = tab2_mod.val) AND (tab1_mod.val2 = tab2_mod.val2))
                ->  Sort
                      Output: tab1_mod.val, tab1_mod.xc_node_id, tab1_mod.ctid, tab1_mod.shardid, tab1_mod.val2
@@ -704,25 +704,25 @@ explain (verbose on, nodes off, costs off) update tab1_mod set val2 = 1000 from 
                      ->  Seq Scan on public.tab1_mod
                            Output: tab1_mod.val, tab1_mod.xc_node_id, tab1_mod.ctid, tab1_mod.shardid, tab1_mod.val2
                ->  Materialize
-                     Output: tab2_mod.ctid, tab2_mod.val, tab2_mod.val2
+                     Output: tab2_mod.ctid, tab2_mod.xc_node_id, tab2_mod.val, tab2_mod.val2
                      ->  Remote Subquery Scan on all
-                           Output: tab2_mod.ctid, tab2_mod.val, tab2_mod.val2
+                           Output: tab2_mod.ctid, tab2_mod.xc_node_id, tab2_mod.val, tab2_mod.val2
                            Distribute results by M: val
                            ->  Sort
-                                 Output: tab2_mod.ctid, tab2_mod.val, tab2_mod.val2
+                                 Output: tab2_mod.ctid, tab2_mod.xc_node_id, tab2_mod.val, tab2_mod.val2
                                  Sort Key: tab2_mod.val, tab2_mod.val2
                                  ->  Seq Scan on public.tab2_mod
-                                       Output: tab2_mod.ctid, tab2_mod.val, tab2_mod.val2
+                                       Output: tab2_mod.ctid, tab2_mod.xc_node_id, tab2_mod.val, tab2_mod.val2
 (20 rows)
 
 explain (verbose on, nodes off, costs off) delete from tab1_mod using tab2_mod
 		where tab1_mod.val = tab2_mod.val and tab1_mod.val2 = tab2_mod.val2;
-                                                     QUERY PLAN                                                      
----------------------------------------------------------------------------------------------------------------------
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all
    ->  Delete on public.tab1_mod
          ->  Merge Join
-               Output: tab1_mod.xc_node_id, tab1_mod.ctid, tab1_mod.shardid, tab1_mod.val, tab2_mod.ctid
+               Output: tab1_mod.xc_node_id, tab1_mod.ctid, tab1_mod.shardid, tab1_mod.val, tab2_mod.ctid, tab2_mod.xc_node_id
                Merge Cond: ((tab1_mod.val = tab2_mod.val) AND (tab1_mod.val2 = tab2_mod.val2))
                ->  Sort
                      Output: tab1_mod.xc_node_id, tab1_mod.ctid, tab1_mod.shardid, tab1_mod.val, tab1_mod.val2
@@ -730,25 +730,25 @@ explain (verbose on, nodes off, costs off) delete from tab1_mod using tab2_mod
                      ->  Seq Scan on public.tab1_mod
                            Output: tab1_mod.xc_node_id, tab1_mod.ctid, tab1_mod.shardid, tab1_mod.val, tab1_mod.val2
                ->  Materialize
-                     Output: tab2_mod.ctid, tab2_mod.val, tab2_mod.val2
+                     Output: tab2_mod.ctid, tab2_mod.xc_node_id, tab2_mod.val, tab2_mod.val2
                      ->  Remote Subquery Scan on all
-                           Output: tab2_mod.ctid, tab2_mod.val, tab2_mod.val2
+                           Output: tab2_mod.ctid, tab2_mod.xc_node_id, tab2_mod.val, tab2_mod.val2
                            Distribute results by M: val
                            ->  Sort
-                                 Output: tab2_mod.ctid, tab2_mod.val, tab2_mod.val2
+                                 Output: tab2_mod.ctid, tab2_mod.xc_node_id, tab2_mod.val, tab2_mod.val2
                                  Sort Key: tab2_mod.val, tab2_mod.val2
                                  ->  Seq Scan on public.tab2_mod
-                                       Output: tab2_mod.ctid, tab2_mod.val, tab2_mod.val2
+                                       Output: tab2_mod.ctid, tab2_mod.xc_node_id, tab2_mod.val, tab2_mod.val2
 (20 rows)
 
 explain (verbose on, nodes off, costs off) update tab1_rep set val2 = 1000 from tab2_rep
 		where tab1_rep.val = tab2_rep.val and tab1_rep.val2 = tab2_rep.val2;
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on any
    ->  Update on public.tab1_rep
          ->  Merge Join
-               Output: tab1_rep.val, 1000, tab1_rep.ctid, tab1_rep.shardid, tab2_rep.ctid
+               Output: tab1_rep.val, 1000, tab1_rep.ctid, tab1_rep.shardid, tab2_rep.ctid, tab2_rep.xc_node_id
                Merge Cond: ((tab1_rep.val = tab2_rep.val) AND (tab1_rep.val2 = tab2_rep.val2))
                ->  Sort
                      Output: tab1_rep.val, tab1_rep.ctid, tab1_rep.shardid, tab1_rep.val2
@@ -756,20 +756,20 @@ explain (verbose on, nodes off, costs off) update tab1_rep set val2 = 1000 from 
                      ->  Seq Scan on public.tab1_rep
                            Output: tab1_rep.val, tab1_rep.ctid, tab1_rep.shardid, tab1_rep.val2
                ->  Sort
-                     Output: tab2_rep.ctid, tab2_rep.val, tab2_rep.val2
+                     Output: tab2_rep.ctid, tab2_rep.xc_node_id, tab2_rep.val, tab2_rep.val2
                      Sort Key: tab2_rep.val, tab2_rep.val2
                      ->  Seq Scan on public.tab2_rep
-                           Output: tab2_rep.ctid, tab2_rep.val, tab2_rep.val2
+                           Output: tab2_rep.ctid, tab2_rep.xc_node_id, tab2_rep.val, tab2_rep.val2
 (15 rows)
 
 explain (verbose on, nodes off, costs off) delete from tab1_rep using tab2_rep 
 		where tab1_rep.val = tab2_rep.val and tab1_rep.val2 = tab2_rep.val2;
-                                           QUERY PLAN                                           
-------------------------------------------------------------------------------------------------
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
  Remote Subquery Scan on any
    ->  Delete on public.tab1_rep
          ->  Merge Join
-               Output: tab1_rep.ctid, tab1_rep.shardid, tab2_rep.ctid
+               Output: tab1_rep.ctid, tab1_rep.shardid, tab2_rep.ctid, tab2_rep.xc_node_id
                Merge Cond: ((tab1_rep.val = tab2_rep.val) AND (tab1_rep.val2 = tab2_rep.val2))
                ->  Sort
                      Output: tab1_rep.ctid, tab1_rep.shardid, tab1_rep.val, tab1_rep.val2
@@ -777,10 +777,10 @@ explain (verbose on, nodes off, costs off) delete from tab1_rep using tab2_rep
                      ->  Seq Scan on public.tab1_rep
                            Output: tab1_rep.ctid, tab1_rep.shardid, tab1_rep.val, tab1_rep.val2
                ->  Sort
-                     Output: tab2_rep.ctid, tab2_rep.val, tab2_rep.val2
+                     Output: tab2_rep.ctid, tab2_rep.xc_node_id, tab2_rep.val, tab2_rep.val2
                      Sort Key: tab2_rep.val, tab2_rep.val2
                      ->  Seq Scan on public.tab2_rep
-                           Output: tab2_rep.ctid, tab2_rep.val, tab2_rep.val2
+                           Output: tab2_rep.ctid, tab2_rep.xc_node_id, tab2_rep.val, tab2_rep.val2
 (15 rows)
 
 drop table tab1_rep;

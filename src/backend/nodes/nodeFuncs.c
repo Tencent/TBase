@@ -3872,3 +3872,113 @@ planstate_walk_members(List *plans, PlanState **planstates,
 
     return false;
 }
+
+/*
+ * Walk a list of SubPlans (or initPlans, which also use SubPlan nodes).
+ */
+static bool
+plantree_walk_initplans(List *plans,
+                        List *subplans,
+                        bool (*walker) (),
+                        void *context)
+{
+	ListCell   *lc;
+	
+	foreach(lc, plans)
+	{
+		Plan    *splan = list_nth_node(Plan, subplans,
+								 (lfirst_node(SubPlan, lc))->plan_id);
+		
+		if (walker(splan, context))
+			return true;
+	}
+	
+	return false;
+}
+
+/*
+ * plantree_walker --- walk plan trees
+ *
+ * The walker has already visited the current node, and so we need only
+ * recurse into any sub-nodes it has.
+ */
+bool
+plantree_walker(Plan *plan,
+                List *top_subplans,
+                bool (*walker) (),
+                void *context)
+{
+	ListCell   *lc;
+	
+	if (plan == NULL)
+		return false;
+	
+	/* initPlan-s */
+	if (plantree_walk_initplans(plan->initPlan, top_subplans, walker, context))
+		return true;
+	
+	/* lefttree */
+	if (walker(plan->lefttree, top_subplans, context))
+		return true;
+	
+	/* righttree */
+	if (walker(plan->righttree, top_subplans, context))
+		return true;
+	
+	/* special child plans */
+	switch (nodeTag(plan))
+	{
+		case T_ModifyTable:
+			foreach(lc, ((ModifyTable *) plan)->plans)
+			{
+				if (walker((Plan *) lfirst(lc), top_subplans, context))
+					return true;
+			}
+			break;
+		case T_Append:
+			foreach(lc, ((Append *) plan)->appendplans)
+			{
+				if (walker((Plan *) lfirst(lc), top_subplans, context))
+					return true;
+			}
+			break;
+		case T_MergeAppend:
+			foreach(lc, ((MergeAppend *) plan)->mergeplans)
+			{
+				if (walker((Plan *) lfirst(lc), top_subplans, context))
+					return true;
+			}
+			break;
+		case T_BitmapAnd:
+			foreach(lc, ((BitmapAnd *) plan)->bitmapplans)
+			{
+				if (walker((Plan *) lfirst(lc), top_subplans, context))
+					return true;
+			}
+			break;
+		case T_BitmapOr:
+			foreach(lc, ((BitmapOr *) plan)->bitmapplans)
+			{
+				if (walker((Plan *) lfirst(lc), top_subplans, context))
+					return true;
+			}
+			break;
+		case T_SubqueryScan:
+			{
+				if (walker(castNode(SubqueryScan, plan)->subplan, top_subplans, context))
+					return true;
+			}
+			break;
+		case T_CustomScan:
+			foreach(lc, ((CustomScan *) plan)->custom_plans)
+			{
+				if (walker((Plan *) lfirst(lc), top_subplans, context))
+					return true;
+			}
+			break;
+		default:
+			break;
+	}
+	
+	return false;
+}

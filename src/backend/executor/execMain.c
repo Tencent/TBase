@@ -84,6 +84,7 @@
 #include "pgxc/poolmgr.h"
 #endif
 #ifdef __TBASE__
+#include "optimizer/planmain.h"
 #include "pgxc/squeue.h"
 #include "utils/relfilenodemap.h"
 #endif
@@ -140,6 +141,9 @@ static void ExecPartitionCheck(ResultRelInfo *resultRelInfo,
 #ifdef _MLS_
 static int ExecCheckRTERelkindextPerms(RangeTblEntry *rte);
 #endif
+
+static bool ResetRemoteSubplanCursor(Plan *plan, List *subplans, void *context);
+static void AttachRemoteEPQContext(EState *estate, RemoteEPQContext *epq);
 
 /*
  * Note that GetUpdatedColumns() also exists in commands/trigger.c.  There does
@@ -1161,6 +1165,8 @@ InitPlan(QueryDesc *queryDesc, int eflags)
     estate->es_epqTuple = NULL;
     estate->es_epqTupleSet = NULL;
     estate->es_epqScanDone = NULL;
+	if (queryDesc->epqContext != NULL)
+		AttachRemoteEPQContext(estate, queryDesc->epqContext);
 
     /*
      * Initialize private state information for each SubPlan.  We must do this
@@ -2677,6 +2683,15 @@ ExecBuildAuxRowMark(ExecRowMark *erm, List *targetlist)
                                                        resname);
         if (!AttributeNumberIsValid(aerm->ctidAttNo))
             elog(ERROR, "could not find junk %s column", resname);
+
+#ifdef __TBASE__
+		/* we need xc_node_id combined with ctid to determine physical tuple */
+		snprintf(resname, sizeof(resname), "xc_node_id%u", erm->rowmarkId);
+		aerm->nodeidAttNo = ExecFindJunkAttributeInTlist(targetlist,
+		                                                 resname);
+		if (!AttributeNumberIsValid(aerm->nodeidAttNo))
+			elog(ERROR, "could not find junk %s column", resname);
+#endif
     }
     else
     {
@@ -3054,11 +3069,14 @@ EvalPlanQualInit(EPQState *epqstate, EState *estate,
                  Plan *subplan, List *auxrowmarks, int epqParam)
 {
     /* Mark the EPQ state inactive */
+	epqstate->parentestate = estate;
     epqstate->estate = NULL;
     epqstate->planstate = NULL;
     epqstate->origslot = NULL;
     /* ... and remember data that EvalPlanQualBegin will need */
-    epqstate->plan = subplan;
+	epqstate->plan = copyObject(subplan);
+	/* Reset cursor name of remote subplans if any */
+	ResetRemoteSubplanCursor(epqstate->plan, estate->es_plannedstmt->subplans, "epq");
     epqstate->arowMarks = auxrowmarks;
     epqstate->epqParam = epqParam;
 }
@@ -3074,7 +3092,11 @@ EvalPlanQualSetPlan(EPQState *epqstate, Plan *subplan, List *auxrowmarks)
     /* If we have a live EPQ query, shut it down */
     EvalPlanQualEnd(epqstate);
     /* And set/change the plan pointer */
-    epqstate->plan = subplan;
+	epqstate->plan = copyObject(subplan);
+	/* Reset cursor name of remote subplans if any */
+	ResetRemoteSubplanCursor(epqstate->plan,
+	                         epqstate->parentestate->es_plannedstmt->subplans,
+	                         "epq");
     /* The rowmarks depend on the plan, too */
     epqstate->arowMarks = auxrowmarks;
 }
@@ -3205,8 +3227,15 @@ EvalPlanQualFetchRowMarks(EPQState *epqstate)
             {
                 /* ordinary table, fetch the tuple */
                 Buffer        buffer;
+				uint32      xc_node_id;
 
                 tuple.t_self = *((ItemPointer) DatumGetPointer(datum));
+				
+				xc_node_id = DatumGetUInt32(ExecGetJunkAttribute(epqstate->origslot,
+				                                                 aerm->nodeidAttNo,
+				                                                 &isNull));
+				if (xc_node_id == PGXCNodeIdentifier)
+				{
                 if (!heap_fetch(erm->relation, SnapshotAny, &tuple, &buffer,
                                 false, NULL))
                     elog(ERROR, "failed to fetch tuple for EvalPlanQual recheck");
@@ -3227,6 +3256,14 @@ EvalPlanQualFetchRowMarks(EPQState *epqstate)
 #endif
                 ReleaseBuffer(buffer);
             }
+				else
+				{
+					copyTuple = (HeapTuple) palloc(HEAPTUPLESIZE);
+					copyTuple->t_self = tuple.t_self;
+				}
+				
+				copyTuple->t_xc_node_id = xc_node_id;
+			}
 
             /* store tuple */
             EvalPlanQualSetTuple(epqstate, erm->rti, copyTuple);
@@ -3510,6 +3547,7 @@ EvalPlanQualEnd(EPQState *epqstate)
 
     /* Mark EPQState idle */
     epqstate->estate = NULL;
+	epqstate->parentestate = NULL;
     epqstate->planstate = NULL;
     epqstate->origslot = NULL;
 }
@@ -3957,4 +3995,88 @@ int ExecCheckPgclassAuthority(ScanState *node, TupleTableSlot *slot)
 }
 #endif
 
+/*
+ * ResetRemoteSubplanCursor
+ *      walker to find out RemoteSubplan and re-generate a cursor for it
+ *      currently it is used in EvalPlanQual, otherwise EvalPlanQual will
+ *      use old cursor name to create a duplicate portal, which is illegal.
+ */
+static bool
+ResetRemoteSubplanCursor(Plan *plan, List *subplans, void *context)
+{
+	if (plan == NULL)
+		return false;
+	
+	if (IsA(plan, RemoteSubplan))
+	{
+		RemoteSubplan *rsp = castNode(RemoteSubplan, plan);
+		char *origin_cursor = rsp->cursor;
+		rsp->cursor = (char *) palloc(NAMEDATALEN);
+		snprintf(rsp->cursor, NAMEDATALEN, "%s_%s", origin_cursor, (const char *) context);
+	}
+	
+	return plantree_walker(plan, subplans, ResetRemoteSubplanCursor, context);
+}
 
+static void
+AttachRemoteEPQContext(EState *estate, RemoteEPQContext *epq)
+{
+	int i;
+	int rtsize = list_length(estate->es_range_table);
+	Relation relation;
+
+	estate->es_epqTuple = (HeapTuple *)
+		palloc0(rtsize * sizeof(HeapTuple));
+	estate->es_epqTupleSet = (bool *)
+		palloc0(rtsize * sizeof(bool));
+	estate->es_epqScanDone = (bool *)
+		palloc0(rtsize * sizeof(bool));
+	
+	for(i = 0; i < epq->ntuples; i++)
+	{
+		HeapTuple       copyTuple;
+		HeapTupleData   tuple;
+		Buffer          buffer;
+		int             idx = epq->rtidx[i];
+		
+		if (epq->nodeid[i] != PGXCNodeIdentifier)
+		{
+			estate->es_epqTupleSet[idx - 1] = true;
+			estate->es_epqScanDone[idx - 1] = true;
+			continue;
+		}
+		
+		relation = relation_open(getrelid(idx, estate->es_range_table), NoLock);
+		if (relation->rd_rel->relkind == RELKIND_FOREIGN_TABLE)
+			elog(ERROR, "foreign table does not support remote epq process");
+		
+		tuple.t_self = epq->tid[i];
+		if (!heap_fetch(relation, SnapshotAny, &tuple, &buffer,
+		                false, NULL))
+		{
+			elog(DEBUG1, "failed to fetch tuple for remote EvalPlanQual recheck");
+			relation_close(relation, NoLock);
+			continue;
+		}
+		
+#ifdef _MLS_
+		if (HeapTupleHeaderGetNatts(tuple.t_data) <
+		    RelationGetDescr(relation)->natts)
+		{
+			copyTuple = heap_expand_tuple(&tuple,
+			                              RelationGetDescr(relation));
+		}
+		else
+#endif
+		{
+			/* successful, copy tuple */
+			copyTuple = heap_copytuple(&tuple);
+		}
+		
+		estate->es_epqTuple[idx - 1] = copyTuple;
+		estate->es_epqTupleSet[idx - 1] = true;
+		
+		ReleaseBuffer(buffer);
+		relation_close(relation, NoLock);
+	}
+}

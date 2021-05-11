@@ -596,6 +596,9 @@ typedef struct ExecAuxRowMark
     AttrNumber    ctidAttNo;        /* resno of ctid junk attribute, if any */
     AttrNumber    toidAttNo;        /* resno of tableoid junk attribute, if any */
     AttrNumber    wholeAttNo;        /* resno of whole-row junk attribute, if any */
+#ifdef __TBASE__
+	AttrNumber	nodeidAttNo;    /* resno of xc_node_id junk attribute, if any */
+#endif
 } ExecAuxRowMark;
 
 
@@ -995,6 +998,9 @@ typedef struct EPQState
     Plan       *plan;            /* plan tree to be executed */
     List       *arowMarks;        /* ExecAuxRowMarks (non-locking only) */
     int            epqParam;        /* ID of Param to force scan node re-eval */
+#ifdef __TBASE__
+	EState	   *parentestate;   /* parant EState, more information to modify plantree if needed */
+#endif
 } EPQState;
 
 
@@ -2296,5 +2302,13 @@ typedef struct LimitState
     int64        position;        /* 1-based index of last tuple returned */
     TupleTableSlot *subSlot;    /* tuple last obtained from subplan */
 } LimitState;
+
+typedef struct RemoteEPQContext
+{
+	int              ntuples;
+	int             *rtidx;
+	ItemPointerData *tid;
+	uint32          *nodeid;
+} RemoteEPQContext;
 
 #endif                            /* EXECNODES_H */

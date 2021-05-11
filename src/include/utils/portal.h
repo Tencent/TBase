@@ -263,6 +263,9 @@ typedef struct PortalData
                                  * portal marked failed in subtransaction 
                                  * in AtSubAbort_Portals
                                  */
+	
+	/* information about EvalPlanQual, pass it to queryDesc */
+	RemoteEPQContext *epqContext;
 #endif
 }            PortalData;
 

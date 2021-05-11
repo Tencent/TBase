@@ -1796,8 +1796,8 @@ select * from x where f1 = 1;
 explain (verbose, costs off)
 with x as (select * from (select f1 from subselect_tbl for update) ss)
 select * from x where f1 = 1;
-                                QUERY PLAN                                
---------------------------------------------------------------------------
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
  CTE Scan on x
    Output: x.f1
    Filter: (x.f1 = 1)
@@ -1807,9 +1807,9 @@ select * from x where f1 = 1;
            ->  Subquery Scan on ss
                  Output: ss.f1
                  ->  LockRows
-                       Output: subselect_tbl.f1, subselect_tbl.ctid
+                       Output: subselect_tbl.f1, subselect_tbl.ctid, subselect_tbl.xc_node_id
                        ->  Seq Scan on public.subselect_tbl
-                             Output: subselect_tbl.f1, subselect_tbl.ctid
+                             Output: subselect_tbl.f1, subselect_tbl.ctid, subselect_tbl.xc_node_id
 (12 rows)
 
 -- Multiply-referenced CTEs are inlined only when requested

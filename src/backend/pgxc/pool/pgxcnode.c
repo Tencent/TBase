@@ -2145,13 +2145,15 @@ pgxc_node_send_plan(PGXCNodeHandle * handle, const char *statement,
  */
 int
 pgxc_node_send_bind(PGXCNodeHandle * handle, const char *portal,
-                    const char *statement, int paramlen, char *params)
-{// #lizard forgives
+					const char *statement, int paramlen, const char *params,
+					int epqctxlen, const char *epqctx)
+{
     int            pnameLen;
     int            stmtLen;
     int         paramCodeLen;
     int         paramValueLen;
     int         paramOutLen;
+	int         epqCtxLen;
     int            msgLen;
 
     /* Invalid connection state, return error */
@@ -2168,8 +2170,10 @@ pgxc_node_send_bind(PGXCNodeHandle * handle, const char *portal,
     paramValueLen = paramlen ? paramlen : 2;
     /* size of output parameter codes array (always empty for now) */
     paramOutLen = 2;
+	/* size of epq context, 2 if not epq */
+	epqCtxLen = epqctxlen ? epqctxlen : 2;
     /* size + pnameLen + stmtLen + parameters */
-    msgLen = 4 + pnameLen + stmtLen + paramCodeLen + paramValueLen + paramOutLen;
+	msgLen = 4 + pnameLen + stmtLen + paramCodeLen + paramValueLen + paramOutLen + epqCtxLen;
 
     /* msgType + msgLen */
     if (ensure_out_buffer_capacity(handle->outEnd + 1 + msgLen, handle) != 0)
@@ -2216,6 +2220,17 @@ pgxc_node_send_bind(PGXCNodeHandle * handle, const char *portal,
     /* output parameter codes (none) */
     handle->outBuffer[handle->outEnd++] = 0;
     handle->outBuffer[handle->outEnd++] = 0;
+	/* output epq context */
+	if (epqctxlen)
+	{
+		memcpy(handle->outBuffer + handle->outEnd, epqctx, epqctxlen);
+		handle->outEnd += epqctxlen;
+	}
+	else
+	{
+		handle->outBuffer[handle->outEnd++] = 0;
+		handle->outBuffer[handle->outEnd++] = 0;
+	}
 
     handle->in_extended_query = true;
      return 0;
@@ -2463,7 +2478,7 @@ pgxc_node_send_query_extended(PGXCNodeHandle *handle, const char *query,
     if (query)
         if (pgxc_node_send_parse(handle, statement, query, num_params, param_types))
             return EOF;
-    if (pgxc_node_send_bind(handle, portal, statement, paramlen, params))
+	if (pgxc_node_send_bind(handle, portal, statement, paramlen, params, 0, NULL))
         return EOF;
     if (send_describe)
         if (pgxc_node_send_describe(handle, false, portal))

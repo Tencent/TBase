@@ -1341,7 +1341,6 @@ GetGlobalTimestampGTM(void)
     GTM_Timestamp  latest_gts = InvalidGlobalTimestamp;
     struct rusage start_r;
     struct timeval start_t;
-    int retries = 0;
 
     if (log_gtm_stats)
         ResetUsageCommon(&start_r, &start_t);

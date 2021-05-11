@@ -117,6 +117,7 @@ typedef struct QueryDesc
 #ifdef __TBASE__
      DataPumpSender sender; /* used for locally data transfering */
     ParamExecData *es_param_exec_vals;    /* values of internal params */
+	RemoteEPQContext *epqContext; /* information about EvalPlanQual from remote */
 #endif
                                  
     int         myindex;        /* -1 if locally executed subplan is producing

@@ -1100,4 +1100,9 @@ typedef struct PlanInvalItem
     uint32        hashValue;        /* hash value of object's cache lookup key */
 } PlanInvalItem;
 
+extern bool plantree_walker(Plan *plan,
+                            List *top_subplans,
+                            bool (*walker) (),
+                            void *context);
+
 #endif                            /* PLANNODES_H */

@@ -39,6 +39,7 @@
 #endif
 
 #ifdef __TBASE__
+#include "access/xact.h"
 #include "libpq/libpq.h"
 #endif
 bool enable_multi_cluster = true;

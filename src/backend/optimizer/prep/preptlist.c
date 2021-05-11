@@ -368,6 +368,20 @@ END_restrict:
                                   pstrdup(resname),
                                   true);
             tlist = lappend(tlist, tle);
+			
+			/* Need to fetch another xc_node_id */
+			var = makeVar(rc->rti,
+			              XC_NodeIdAttributeNumber,
+			              INT4OID,
+			              -1,
+			              InvalidOid,
+			              0);
+			snprintf(resname, sizeof(resname), "xc_node_id%u", rc->rowmarkId);
+			tle = makeTargetEntry((Expr *) var,
+			                      list_length(tlist) + 1,
+			                      pstrdup(resname),
+			                      true);
+			tlist = lappend(tlist, tle);
         }
         if (rc->allMarkTypes & (1 << ROW_MARK_COPY))
         {

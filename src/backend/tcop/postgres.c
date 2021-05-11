@@ -2151,6 +2151,7 @@ exec_bind_message(StringInfo input_message)
     int16       *pformats = NULL;
     int            numParams;
     int            numRFormats;
+	int         num_epq_tuple;
     int16       *rformats = NULL;
     CachedPlanSource *psrc;
     CachedPlan *cplan;
@@ -2687,6 +2688,28 @@ exec_bind_message(StringInfo input_message)
             rformats[i] = pq_getmsgint(input_message, 2);
     }
 
+	/* Get epq context */
+	num_epq_tuple = pq_getmsgint(input_message, 2);
+	if (num_epq_tuple > 0)
+	{
+		int			i;
+		
+		portal->epqContext = palloc(sizeof(RemoteEPQContext));
+		portal->epqContext->ntuples = num_epq_tuple;
+		portal->epqContext->tid = palloc(num_epq_tuple * sizeof(ItemPointerData));
+		portal->epqContext->rtidx = palloc(num_epq_tuple * sizeof(int));
+		portal->epqContext->nodeid = palloc(num_epq_tuple * sizeof(uint32));
+		
+		for (i = 0; i < num_epq_tuple; i++)
+		{
+			portal->epqContext->rtidx[i] = pq_getmsgint(input_message, 2);
+			portal->epqContext->tid[i].ip_blkid.bi_hi = pq_getmsgint(input_message, 2);
+			portal->epqContext->tid[i].ip_blkid.bi_lo = pq_getmsgint(input_message, 2);
+			portal->epqContext->tid[i].ip_posid = pq_getmsgint(input_message, 2);
+			portal->epqContext->nodeid[i] = pq_getmsgint(input_message, 4);
+		}
+	}
+	
     pq_getmsgend(input_message);
 
     /*

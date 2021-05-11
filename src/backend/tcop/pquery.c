@@ -129,6 +129,7 @@ CreateQueryDesc(PlannedStmt *plannedstmt,
 #ifdef __TBASE__
     qd->sender = NULL;
     qd->es_param_exec_vals = NULL;
+	qd->epqContext = NULL;
 #endif
 
     /* not yet executed */
@@ -681,6 +682,13 @@ PortalStart(Portal portal, ParamListInfo params,
                                             params,
                                             NULL,
                                             0);
+
+				/*
+				 * set information about EvalPlanQual if any, they will be fill in
+				 * estate later after it been created.
+				 */
+				queryDesc->epqContext = portal->epqContext;
+				
                 /*
                  * If parent node have sent down parameters, and at least one
                  * of them is PARAM_EXEC we should avoid "single execution"
@@ -697,13 +705,13 @@ PortalStart(Portal portal, ParamListInfo params,
                  * here since queryDesc->plannedstmt->nParamExec may be used
                  * just to allocate space for them and no actual values passed.
 				 *
-				 * If distributionType is LOCATOR_TYPE_SHARD, even with parameters
-				 * PARAM_EXEC, still follow the redistribution logic, otherwise,
-				 * it may cause SharedQueue conflict in the lower layer redistribution
+				 * Also, if we are doing EvalPlanQual, we will be rescan soon, which
+				 * is not supported in SharedQueue mode. Force to do it traditionally.
                  */
 #ifdef __TBASE__
-                if (!paramPassDown && queryDesc->plannedstmt->nParamRemote > 0 &&
-						queryDesc->plannedstmt->remoteparams[queryDesc->plannedstmt->nParamRemote-1].paramkind == PARAM_EXEC)
+				if ((!paramPassDown && queryDesc->plannedstmt->nParamRemote > 0 &&
+				     queryDesc->plannedstmt->remoteparams[queryDesc->plannedstmt->nParamRemote-1].paramkind == PARAM_EXEC) ||
+				    queryDesc->epqContext != NULL)
 #else
                 if (queryDesc->plannedstmt->nParamRemote > 0 &&
                         queryDesc->plannedstmt->remoteparams[queryDesc->plannedstmt->nParamRemote-1].paramkind == PARAM_EXEC)
@@ -1012,6 +1020,12 @@ PortalStart(Portal portal, ParamListInfo params,
                                             0);
 
                 /*
+				 * set information about EvalPlanQual if any, they will be fill in
+				 * estate later after it been created.
+				 */
+				queryDesc->epqContext = portal->epqContext;
+				
+				/*
                  * If it's a scrollable cursor, executor needs to support
                  * REWIND and backwards scan, as well as whatever the caller
                  * might've asked for.

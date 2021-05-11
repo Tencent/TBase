@@ -10555,7 +10555,8 @@ append_param_data(StringInfo buf, Oid ptype, int pused, Datum value, bool isnull
 }
 
 
-static int encode_parameters(int nparams, RemoteParam *remoteparams,
+static int
+encode_parameters(int nparams, RemoteParam *remoteparams,
                              PlanState *planstate, char** result)
 {
     EState            *estate = planstate->state;
@@ -10616,6 +10617,57 @@ static int encode_parameters(int nparams, RemoteParam *remoteparams,
     return buf.len;
 }
 
+/*
+ * Encode executor context for EvalPlanQual process including:
+ * the number of epqTuples, the ctid and xc_node_id of each tuple.
+ */
+static int
+encode_epqcontext(PlanState *planstate, char **result)
+{
+	EState 		   *estate = planstate->state;
+	StringInfoData	buf;
+	uint16 			n16;
+	uint32          n32;
+	int             ntuples = list_length(estate->es_range_table);
+	int             i;
+	ExprContext	   *econtext;
+	MemoryContext 	oldcontext;
+	
+	if (planstate->ps_ExprContext == NULL)
+		ExecAssignExprContext(estate, planstate);
+	
+	econtext = planstate->ps_ExprContext;
+	oldcontext = MemoryContextSwitchTo(econtext->ecxt_per_tuple_memory);
+	
+	initStringInfo(&buf);
+	
+	/* Number of epq tuples */
+	n16 = htons(ntuples);
+	appendBinaryStringInfo(&buf, (char *) &n16, 2);
+	
+	for (i = 0; i < ntuples; i++)
+	{
+		ItemPointerData tid = estate->es_epqTuple[i]->t_self;
+		int             rtidx = i + 1;
+		
+		n16 = htons(rtidx);
+		appendBinaryStringInfo(&buf, (char *) &n16, 2);
+		n16 = htons(tid.ip_blkid.bi_hi);
+		appendBinaryStringInfo(&buf, (char *) &n16, 2);
+		n16 = htons(tid.ip_blkid.bi_lo);
+		appendBinaryStringInfo(&buf, (char *) &n16, 2);
+		n16 = htons(tid.ip_posid);
+		appendBinaryStringInfo(&buf, (char *) &n16, 2);
+		n32 = htonl(estate->es_epqTuple[i]->t_xc_node_id);
+		appendBinaryStringInfo(&buf, (char *) &n32, 4);
+	}
+	
+	/* Take data from the buffer */
+	*result = palloc(buf.len);
+	memcpy(*result, buf.data, buf.len);
+	MemoryContextSwitchTo(oldcontext);
+	return buf.len;
+}
 
 TupleTableSlot *
 ExecRemoteSubplan(PlanState *pstate)
@@ -10665,7 +10717,10 @@ primary_mode_phase_two:
     {
         int fetch = 0;
         int paramlen = 0;
+		int epqctxlen = 0;
         char *paramdata = NULL;
+		char *epqctxdata = NULL;
+		
         /*
          * Conditions when we want to execute query on the primary node first:
          * Coordinator running replicated ModifyTable on multiple nodes
@@ -10732,6 +10787,9 @@ primary_mode_phase_two:
                                          &combiner->ss.ps,
                                          &paramdata);
 
+		if (estate->es_epqTuple != NULL)
+			epqctxlen = encode_epqcontext(&combiner->ss.ps, &epqctxdata);
+
         /*
          * The subplan being rescanned, need to restore connections and
          * re-bind the portal
@@ -10771,7 +10829,7 @@ primary_mode_phase_two:
 
                 /* rebind */
                 pgxc_node_send_bind(conn, combiner->cursor, combiner->cursor,
-                                    paramlen, paramdata);
+									paramlen, paramdata, epqctxlen, epqctxdata);
                 if (enable_statistic)
                 {
                     elog(LOG, "Bind Message:pid:%d,remote_pid:%d,remote_ip:%s,remote_port:%d,fd:%d,cursor:%s",
@@ -10859,7 +10917,8 @@ primary_mode_phase_two:
                 }
 
                 /* bind */
-                pgxc_node_send_bind(conn, cursor, cursor, paramlen, paramdata);
+				pgxc_node_send_bind(conn, cursor, cursor, paramlen, paramdata,
+				                    epqctxlen, epqctxdata);
 
                 if (enable_statistic)
                 {
