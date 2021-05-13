@@ -609,59 +609,23 @@ SELECT p.proname, r.rolname
 
 -- CREATE USER MAPPING
 CREATE FOREIGN DATA WRAPPER test_wrapper;
-ERROR:  Postgres-XL does not support FOREIGN DATA WRAPPER yet
-DETAIL:  The feature is not currently supported
 CREATE SERVER sv1 FOREIGN DATA WRAPPER test_wrapper;
-ERROR:  Postgres-XL does not support SERVER yet
-DETAIL:  The feature is not currently supported
 CREATE SERVER sv2 FOREIGN DATA WRAPPER test_wrapper;
-ERROR:  Postgres-XL does not support SERVER yet
-DETAIL:  The feature is not currently supported
 CREATE SERVER sv3 FOREIGN DATA WRAPPER test_wrapper;
-ERROR:  Postgres-XL does not support SERVER yet
-DETAIL:  The feature is not currently supported
 CREATE SERVER sv4 FOREIGN DATA WRAPPER test_wrapper;
-ERROR:  Postgres-XL does not support SERVER yet
-DETAIL:  The feature is not currently supported
 CREATE SERVER sv5 FOREIGN DATA WRAPPER test_wrapper;
-ERROR:  Postgres-XL does not support SERVER yet
-DETAIL:  The feature is not currently supported
 CREATE SERVER sv6 FOREIGN DATA WRAPPER test_wrapper;
-ERROR:  Postgres-XL does not support SERVER yet
-DETAIL:  The feature is not currently supported
 CREATE SERVER sv7 FOREIGN DATA WRAPPER test_wrapper;
-ERROR:  Postgres-XL does not support SERVER yet
-DETAIL:  The feature is not currently supported
 CREATE SERVER sv8 FOREIGN DATA WRAPPER test_wrapper;
-ERROR:  Postgres-XL does not support SERVER yet
-DETAIL:  The feature is not currently supported
 CREATE SERVER sv9 FOREIGN DATA WRAPPER test_wrapper;
-ERROR:  Postgres-XL does not support SERVER yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR CURRENT_USER SERVER sv1 OPTIONS (user 'CURRENT_USER');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR "current_user" SERVER sv2 OPTIONS (user '"current_user"');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR USER SERVER sv3 OPTIONS (user 'USER');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR "user" SERVER sv4 OPTIONS (user '"USER"');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR SESSION_USER SERVER sv5 OPTIONS (user 'SESSION_USER');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR PUBLIC SERVER sv6 OPTIONS (user 'PUBLIC');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR "Public" SERVER sv7 OPTIONS (user '"Public"');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR regress_testrolx SERVER sv8 OPTIONS (user 'regress_testrolx');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR CURRENT_ROLE SERVER sv9
 	    OPTIONS (user 'CURRENT_ROLE'); -- error
 ERROR:  syntax error at or near "CURRENT_ROLE"
@@ -669,38 +633,37 @@ LINE 1: CREATE USER MAPPING FOR CURRENT_ROLE SERVER sv9
                                 ^
 CREATE USER MAPPING FOR nonexistent SERVER sv9
 	    OPTIONS (user 'nonexistent'); -- error;
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
+ERROR:  role "nonexistent" does not exist
 SELECT * FROM chkumapping();
- umname | umserver | umoptions 
---------+----------+-----------
-(0 rows)
+      umname      | umserver |         umoptions         
+------------------+----------+---------------------------
+ regress_testrol2 | sv1      | {user=CURRENT_USER}
+ current_user     | sv2      | {"user=\"current_user\""}
+ regress_testrol2 | sv3      | {user=USER}
+ user             | sv4      | {"user=\"USER\""}
+ regress_testrol1 | sv5      | {user=SESSION_USER}
+                  | sv6      | {user=PUBLIC}
+ Public           | sv7      | {"user=\"Public\""}
+ regress_testrolx | sv8      | {user=regress_testrolx}
+(8 rows)
 
 -- ALTER USER MAPPING
 ALTER USER MAPPING FOR CURRENT_USER SERVER sv1
  OPTIONS (SET user 'CURRENT_USER_alt');
-ERROR:  server "sv1" does not exist
 ALTER USER MAPPING FOR "current_user" SERVER sv2
  OPTIONS (SET user '"current_user"_alt');
-ERROR:  server "sv2" does not exist
 ALTER USER MAPPING FOR USER SERVER sv3
  OPTIONS (SET user 'USER_alt');
-ERROR:  server "sv3" does not exist
 ALTER USER MAPPING FOR "user" SERVER sv4
  OPTIONS (SET user '"user"_alt');
-ERROR:  server "sv4" does not exist
 ALTER USER MAPPING FOR SESSION_USER SERVER sv5
  OPTIONS (SET user 'SESSION_USER_alt');
-ERROR:  server "sv5" does not exist
 ALTER USER MAPPING FOR PUBLIC SERVER sv6
  OPTIONS (SET user 'public_alt');
-ERROR:  server "sv6" does not exist
 ALTER USER MAPPING FOR "Public" SERVER sv7
  OPTIONS (SET user '"Public"_alt');
-ERROR:  server "sv7" does not exist
 ALTER USER MAPPING FOR regress_testrolx SERVER sv8
  OPTIONS (SET user 'regress_testrolx_alt');
-ERROR:  server "sv8" does not exist
 ALTER USER MAPPING FOR CURRENT_ROLE SERVER sv9
  OPTIONS (SET user 'CURRENT_ROLE_alt');
 ERROR:  syntax error at or near "CURRENT_ROLE"
@@ -710,27 +673,27 @@ ALTER USER MAPPING FOR nonexistent SERVER sv9
  OPTIONS (SET user 'nonexistent_alt'); -- error
 ERROR:  role "nonexistent" does not exist
 SELECT * FROM chkumapping();
- umname | umserver | umoptions 
---------+----------+-----------
-(0 rows)
+      umname      | umserver |           umoptions           
+------------------+----------+-------------------------------
+ regress_testrol2 | sv1      | {user=CURRENT_USER_alt}
+ current_user     | sv2      | {"user=\"current_user\"_alt"}
+ regress_testrol2 | sv3      | {user=USER_alt}
+ user             | sv4      | {"user=\"user\"_alt"}
+ regress_testrol1 | sv5      | {user=SESSION_USER_alt}
+                  | sv6      | {user=public_alt}
+ Public           | sv7      | {"user=\"Public\"_alt"}
+ regress_testrolx | sv8      | {user=regress_testrolx_alt}
+(8 rows)
 
 -- DROP USER MAPPING
 DROP USER MAPPING FOR CURRENT_USER SERVER sv1;
-ERROR:  server "sv1" does not exist
 DROP USER MAPPING FOR "current_user" SERVER sv2;
-ERROR:  server "sv2" does not exist
 DROP USER MAPPING FOR USER SERVER sv3;
-ERROR:  server "sv3" does not exist
 DROP USER MAPPING FOR "user" SERVER sv4;
-ERROR:  server "sv4" does not exist
 DROP USER MAPPING FOR SESSION_USER SERVER sv5;
-ERROR:  server "sv5" does not exist
 DROP USER MAPPING FOR PUBLIC SERVER sv6;
-ERROR:  server "sv6" does not exist
 DROP USER MAPPING FOR "Public" SERVER sv7;
-ERROR:  server "sv7" does not exist
 DROP USER MAPPING FOR regress_testrolx SERVER sv8;
-ERROR:  server "sv8" does not exist
 DROP USER MAPPING FOR CURRENT_ROLE SERVER sv9; -- error
 ERROR:  syntax error at or near "CURRENT_ROLE"
 LINE 1: DROP USER MAPPING FOR CURRENT_ROLE SERVER sv9;
@@ -743,86 +706,98 @@ SELECT * FROM chkumapping();
 (0 rows)
 
 CREATE USER MAPPING FOR CURRENT_USER SERVER sv1 OPTIONS (user 'CURRENT_USER');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR "current_user" SERVER sv2 OPTIONS (user '"current_user"');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR USER SERVER sv3 OPTIONS (user 'USER');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR "user" SERVER sv4 OPTIONS (user '"USER"');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR SESSION_USER SERVER sv5 OPTIONS (user 'SESSION_USER');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR PUBLIC SERVER sv6 OPTIONS (user 'PUBLIC');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR "Public" SERVER sv7 OPTIONS (user '"Public"');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR regress_testrolx SERVER sv8 OPTIONS (user 'regress_testrolx');
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 SELECT * FROM chkumapping();
- umname | umserver | umoptions 
---------+----------+-----------
-(0 rows)
+      umname      | umserver |         umoptions         
+------------------+----------+---------------------------
+ regress_testrol2 | sv1      | {user=CURRENT_USER}
+ current_user     | sv2      | {"user=\"current_user\""}
+ regress_testrol2 | sv3      | {user=USER}
+ user             | sv4      | {"user=\"USER\""}
+ regress_testrol1 | sv5      | {user=SESSION_USER}
+                  | sv6      | {user=PUBLIC}
+ Public           | sv7      | {"user=\"Public\""}
+ regress_testrolx | sv8      | {user=regress_testrolx}
+(8 rows)
 
 -- DROP USER MAPPING IF EXISTS
 DROP USER MAPPING IF EXISTS FOR CURRENT_USER SERVER sv1;
-NOTICE:  server does not exist, skipping
 SELECT * FROM chkumapping();
- umname | umserver | umoptions 
---------+----------+-----------
-(0 rows)
+      umname      | umserver |         umoptions         
+------------------+----------+---------------------------
+ current_user     | sv2      | {"user=\"current_user\""}
+ regress_testrol2 | sv3      | {user=USER}
+ user             | sv4      | {"user=\"USER\""}
+ regress_testrol1 | sv5      | {user=SESSION_USER}
+                  | sv6      | {user=PUBLIC}
+ Public           | sv7      | {"user=\"Public\""}
+ regress_testrolx | sv8      | {user=regress_testrolx}
+(7 rows)
 
 DROP USER MAPPING IF EXISTS FOR "current_user" SERVER sv2;
-NOTICE:  server does not exist, skipping
 SELECT * FROM chkumapping();
- umname | umserver | umoptions 
---------+----------+-----------
-(0 rows)
+      umname      | umserver |        umoptions        
+------------------+----------+-------------------------
+ regress_testrol2 | sv3      | {user=USER}
+ user             | sv4      | {"user=\"USER\""}
+ regress_testrol1 | sv5      | {user=SESSION_USER}
+                  | sv6      | {user=PUBLIC}
+ Public           | sv7      | {"user=\"Public\""}
+ regress_testrolx | sv8      | {user=regress_testrolx}
+(6 rows)
 
 DROP USER MAPPING IF EXISTS FOR USER SERVER sv3;
-NOTICE:  server does not exist, skipping
 SELECT * FROM chkumapping();
- umname | umserver | umoptions 
---------+----------+-----------
-(0 rows)
+      umname      | umserver |        umoptions        
+------------------+----------+-------------------------
+ user             | sv4      | {"user=\"USER\""}
+ regress_testrol1 | sv5      | {user=SESSION_USER}
+                  | sv6      | {user=PUBLIC}
+ Public           | sv7      | {"user=\"Public\""}
+ regress_testrolx | sv8      | {user=regress_testrolx}
+(5 rows)
 
 DROP USER MAPPING IF EXISTS FOR "user" SERVER sv4;
-NOTICE:  server does not exist, skipping
 SELECT * FROM chkumapping();
- umname | umserver | umoptions 
---------+----------+-----------
-(0 rows)
+      umname      | umserver |        umoptions        
+------------------+----------+-------------------------
+ regress_testrol1 | sv5      | {user=SESSION_USER}
+                  | sv6      | {user=PUBLIC}
+ Public           | sv7      | {"user=\"Public\""}
+ regress_testrolx | sv8      | {user=regress_testrolx}
+(4 rows)
 
 DROP USER MAPPING IF EXISTS FOR SESSION_USER SERVER sv5;
-NOTICE:  server does not exist, skipping
 SELECT * FROM chkumapping();
- umname | umserver | umoptions 
---------+----------+-----------
-(0 rows)
+      umname      | umserver |        umoptions        
+------------------+----------+-------------------------
+                  | sv6      | {user=PUBLIC}
+ Public           | sv7      | {"user=\"Public\""}
+ regress_testrolx | sv8      | {user=regress_testrolx}
+(3 rows)
 
 DROP USER MAPPING IF EXISTS FOR PUBLIC SERVER sv6;
-NOTICE:  server does not exist, skipping
 SELECT * FROM chkumapping();
- umname | umserver | umoptions 
---------+----------+-----------
-(0 rows)
+      umname      | umserver |        umoptions        
+------------------+----------+-------------------------
+ Public           | sv7      | {"user=\"Public\""}
+ regress_testrolx | sv8      | {user=regress_testrolx}
+(2 rows)
 
 DROP USER MAPPING IF EXISTS FOR "Public" SERVER sv7;
-NOTICE:  server does not exist, skipping
 SELECT * FROM chkumapping();
- umname | umserver | umoptions 
---------+----------+-----------
-(0 rows)
+      umname      | umserver |        umoptions        
+------------------+----------+-------------------------
+ regress_testrolx | sv8      | {user=regress_testrolx}
+(1 row)
 
 DROP USER MAPPING IF EXISTS FOR regress_testrolx SERVER sv8;
-NOTICE:  server does not exist, skipping
 SELECT * FROM chkumapping();
  umname | umserver | umoptions 
 --------+----------+-----------

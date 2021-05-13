@@ -10,11 +10,7 @@ CREATE USER regress_addr_user;
 CREATE SCHEMA addr_nsp;
 SET search_path TO 'addr_nsp';
 CREATE FOREIGN DATA WRAPPER addr_fdw;
-ERROR:  Postgres-XL does not support FOREIGN DATA WRAPPER yet
-DETAIL:  The feature is not currently supported
 CREATE SERVER addr_fserv FOREIGN DATA WRAPPER addr_fdw;
-ERROR:  Postgres-XL does not support SERVER yet
-DETAIL:  The feature is not currently supported
 CREATE TEXT SEARCH DICTIONARY addr_ts_dict (template=simple);
 CREATE TEXT SEARCH CONFIGURATION addr_ts_conf (copy=english);
 CREATE TEXT SEARCH TEMPLATE addr_ts_temp (lexize=dsimple_lexize);
@@ -28,7 +24,6 @@ CREATE MATERIALIZED VIEW addr_nsp.genmatview AS SELECT * FROM addr_nsp.gentable;
 CREATE TYPE addr_nsp.gencomptype AS (a int);
 CREATE TYPE addr_nsp.genenum AS ENUM ('one', 'two');
 CREATE FOREIGN TABLE addr_nsp.genftable (a int) SERVER addr_fserv;
-ERROR:  server "addr_fserv" does not exist
 CREATE AGGREGATE addr_nsp.genaggr(int4) (sfunc = int4pl, stype = int4);
 CREATE DOMAIN addr_nsp.gendomain AS int4 CONSTRAINT domconstr CHECK (value > 0);
 CREATE FUNCTION addr_nsp.trig() RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN END; $$;
@@ -37,21 +32,17 @@ ERROR:  Postgres-XL does not support TRIGGER yet
 DETAIL:  The feature is not currently supported
 CREATE POLICY genpol ON addr_nsp.gentable;
 CREATE SERVER "integer" FOREIGN DATA WRAPPER addr_fdw;
-ERROR:  Postgres-XL does not support SERVER yet
-DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR regress_addr_user SERVER "integer";
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 ALTER DEFAULT PRIVILEGES FOR ROLE regress_addr_user IN SCHEMA public GRANT ALL ON TABLES TO regress_addr_user;
 ALTER DEFAULT PRIVILEGES FOR ROLE regress_addr_user REVOKE DELETE ON TABLES FROM regress_addr_user;
 CREATE TRANSFORM FOR int LANGUAGE SQL (
 	FROM SQL WITH FUNCTION varchar_transform(internal),
 	TO SQL WITH FUNCTION int4recv(internal));
 CREATE PUBLICATION addr_pub FOR TABLE addr_nsp.gentable;
-ERROR:  Postgres-XL does not support CREATE PUBLICATION
+ERROR:  COORDINATOR does not support CREATE PUBLICATION
 DETAIL:  The feature is not currently supported
 CREATE SUBSCRIPTION addr_sub CONNECTION '' PUBLICATION bar WITH (connect = false, slot_name = NONE);
-ERROR:  Postgres-XL does not support CREATE SUBSCRIPTION
+ERROR:  COORDINATOR only supports CREATE TBASE SUBSCRIPTION
 DETAIL:  The feature is not currently supported
 CREATE STATISTICS addr_nsp.gentable_stat ON a, b FROM addr_nsp.gentable;
 -- test some error cases
@@ -77,8 +68,12 @@ BEGIN
 	END LOOP;
 END;
 $$;
-ERROR:  Internal subtransactions not supported in Postgres-XL
-CONTEXT:  PL/pgSQL function inline_code_block line 8 during statement block entry
+WARNING:  error for toast table: unsupported object type "toast table"
+WARNING:  error for index column: unsupported object type "index column"
+WARNING:  error for sequence column: unsupported object type "sequence column"
+WARNING:  error for toast table column: unsupported object type "toast table column"
+WARNING:  error for view column: unsupported object type "view column"
+WARNING:  error for materialized view column: unsupported object type "materialized view column"
 -- miscellaneous other errors
 select * from pg_get_object_address('operator of access method', '{btree,integer_ops,1}', '{int4,bool}');
 ERROR:  operator 1 (int4, bool) of operator family integer_ops for access method btree does not exist
@@ -121,8 +116,198 @@ BEGIN
 	END LOOP;
 END;
 $$;
-ERROR:  Internal subtransactions not supported in Postgres-XL
-CONTEXT:  PL/pgSQL function inline_code_block line 24 during statement block entry
+WARNING:  error for table,{eins},{}: relation "eins" does not exist
+WARNING:  error for table,{eins},{integer}: relation "eins" does not exist
+WARNING:  error for table,{addr_nsp,zwei},{}: relation "addr_nsp.zwei" does not exist
+WARNING:  error for table,{addr_nsp,zwei},{integer}: relation "addr_nsp.zwei" does not exist
+WARNING:  error for table,{eins,zwei,drei},{}: cross-database references are not implemented: "eins.zwei.drei"
+WARNING:  error for table,{eins,zwei,drei},{integer}: cross-database references are not implemented: "eins.zwei.drei"
+WARNING:  error for index,{eins},{}: relation "eins" does not exist
+WARNING:  error for index,{eins},{integer}: relation "eins" does not exist
+WARNING:  error for index,{addr_nsp,zwei},{}: relation "addr_nsp.zwei" does not exist
+WARNING:  error for index,{addr_nsp,zwei},{integer}: relation "addr_nsp.zwei" does not exist
+WARNING:  error for index,{eins,zwei,drei},{}: cross-database references are not implemented: "eins.zwei.drei"
+WARNING:  error for index,{eins,zwei,drei},{integer}: cross-database references are not implemented: "eins.zwei.drei"
+WARNING:  error for sequence,{eins},{}: relation "eins" does not exist
+WARNING:  error for sequence,{eins},{integer}: relation "eins" does not exist
+WARNING:  error for sequence,{addr_nsp,zwei},{}: relation "addr_nsp.zwei" does not exist
+WARNING:  error for sequence,{addr_nsp,zwei},{integer}: relation "addr_nsp.zwei" does not exist
+WARNING:  error for sequence,{eins,zwei,drei},{}: cross-database references are not implemented: "eins.zwei.drei"
+WARNING:  error for sequence,{eins,zwei,drei},{integer}: cross-database references are not implemented: "eins.zwei.drei"
+WARNING:  error for view,{eins},{}: relation "eins" does not exist
+WARNING:  error for view,{eins},{integer}: relation "eins" does not exist
+WARNING:  error for view,{addr_nsp,zwei},{}: relation "addr_nsp.zwei" does not exist
+WARNING:  error for view,{addr_nsp,zwei},{integer}: relation "addr_nsp.zwei" does not exist
+WARNING:  error for view,{eins,zwei,drei},{}: cross-database references are not implemented: "eins.zwei.drei"
+WARNING:  error for view,{eins,zwei,drei},{integer}: cross-database references are not implemented: "eins.zwei.drei"
+WARNING:  error for materialized view,{eins},{}: relation "eins" does not exist
+WARNING:  error for materialized view,{eins},{integer}: relation "eins" does not exist
+WARNING:  error for materialized view,{addr_nsp,zwei},{}: relation "addr_nsp.zwei" does not exist
+WARNING:  error for materialized view,{addr_nsp,zwei},{integer}: relation "addr_nsp.zwei" does not exist
+WARNING:  error for materialized view,{eins,zwei,drei},{}: cross-database references are not implemented: "eins.zwei.drei"
+WARNING:  error for materialized view,{eins,zwei,drei},{integer}: cross-database references are not implemented: "eins.zwei.drei"
+WARNING:  error for foreign table,{eins},{}: relation "eins" does not exist
+WARNING:  error for foreign table,{eins},{integer}: relation "eins" does not exist
+WARNING:  error for foreign table,{addr_nsp,zwei},{}: relation "addr_nsp.zwei" does not exist
+WARNING:  error for foreign table,{addr_nsp,zwei},{integer}: relation "addr_nsp.zwei" does not exist
+WARNING:  error for foreign table,{eins,zwei,drei},{}: cross-database references are not implemented: "eins.zwei.drei"
+WARNING:  error for foreign table,{eins,zwei,drei},{integer}: cross-database references are not implemented: "eins.zwei.drei"
+WARNING:  error for table column,{eins},{}: column name must be qualified
+WARNING:  error for table column,{eins},{integer}: column name must be qualified
+WARNING:  error for table column,{addr_nsp,zwei},{}: relation "addr_nsp" does not exist
+WARNING:  error for table column,{addr_nsp,zwei},{integer}: relation "addr_nsp" does not exist
+WARNING:  error for table column,{eins,zwei,drei},{}: schema "eins" does not exist
+WARNING:  error for table column,{eins,zwei,drei},{integer}: schema "eins" does not exist
+WARNING:  error for foreign table column,{eins},{}: column name must be qualified
+WARNING:  error for foreign table column,{eins},{integer}: column name must be qualified
+WARNING:  error for foreign table column,{addr_nsp,zwei},{}: relation "addr_nsp" does not exist
+WARNING:  error for foreign table column,{addr_nsp,zwei},{integer}: relation "addr_nsp" does not exist
+WARNING:  error for foreign table column,{eins,zwei,drei},{}: schema "eins" does not exist
+WARNING:  error for foreign table column,{eins,zwei,drei},{integer}: schema "eins" does not exist
+WARNING:  error for aggregate,{eins},{}: aggregate eins(*) does not exist
+WARNING:  error for aggregate,{eins},{integer}: aggregate eins(integer) does not exist
+WARNING:  error for aggregate,{addr_nsp,zwei},{}: aggregate addr_nsp.zwei(*) does not exist
+WARNING:  error for aggregate,{addr_nsp,zwei},{integer}: aggregate addr_nsp.zwei(integer) does not exist
+WARNING:  error for aggregate,{eins,zwei,drei},{}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for aggregate,{eins,zwei,drei},{integer}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for function,{eins},{}: function eins() does not exist
+WARNING:  error for function,{eins},{integer}: function eins(integer) does not exist
+WARNING:  error for function,{addr_nsp,zwei},{}: function addr_nsp.zwei() does not exist
+WARNING:  error for function,{addr_nsp,zwei},{integer}: function addr_nsp.zwei(integer) does not exist
+WARNING:  error for function,{eins,zwei,drei},{}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for function,{eins,zwei,drei},{integer}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for type,{eins},{}: type "eins" does not exist
+WARNING:  error for type,{eins},{integer}: type "eins" does not exist
+WARNING:  error for type,{addr_nsp,zwei},{}: name list length must be exactly 1
+WARNING:  error for type,{addr_nsp,zwei},{integer}: name list length must be exactly 1
+WARNING:  error for type,{eins,zwei,drei},{}: name list length must be exactly 1
+WARNING:  error for type,{eins,zwei,drei},{integer}: name list length must be exactly 1
+WARNING:  error for cast,{eins},{}: argument list length must be exactly 1
+WARNING:  error for cast,{eins},{integer}: type "eins" does not exist
+WARNING:  error for cast,{addr_nsp,zwei},{}: name list length must be exactly 1
+WARNING:  error for cast,{addr_nsp,zwei},{integer}: name list length must be exactly 1
+WARNING:  error for cast,{eins,zwei,drei},{}: name list length must be exactly 1
+WARNING:  error for cast,{eins,zwei,drei},{integer}: name list length must be exactly 1
+WARNING:  error for table constraint,{eins},{}: must specify relation and object name
+WARNING:  error for table constraint,{eins},{integer}: must specify relation and object name
+WARNING:  error for table constraint,{addr_nsp,zwei},{}: relation "addr_nsp" does not exist
+WARNING:  error for table constraint,{addr_nsp,zwei},{integer}: relation "addr_nsp" does not exist
+WARNING:  error for table constraint,{eins,zwei,drei},{}: schema "eins" does not exist
+WARNING:  error for table constraint,{eins,zwei,drei},{integer}: schema "eins" does not exist
+WARNING:  error for domain constraint,{eins},{}: argument list length must be exactly 1
+WARNING:  error for domain constraint,{eins},{integer}: type "eins" does not exist
+WARNING:  error for domain constraint,{addr_nsp,zwei},{}: name list length must be exactly 1
+WARNING:  error for domain constraint,{addr_nsp,zwei},{integer}: name list length must be exactly 1
+WARNING:  error for domain constraint,{eins,zwei,drei},{}: name list length must be exactly 1
+WARNING:  error for domain constraint,{eins,zwei,drei},{integer}: name list length must be exactly 1
+WARNING:  error for conversion,{eins},{}: conversion "eins" does not exist
+WARNING:  error for conversion,{eins},{integer}: conversion "eins" does not exist
+WARNING:  error for conversion,{addr_nsp,zwei},{}: conversion "addr_nsp.zwei" does not exist
+WARNING:  error for conversion,{addr_nsp,zwei},{integer}: conversion "addr_nsp.zwei" does not exist
+WARNING:  error for conversion,{eins,zwei,drei},{}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for conversion,{eins,zwei,drei},{integer}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for default value,{eins},{}: column name must be qualified
+WARNING:  error for default value,{eins},{integer}: column name must be qualified
+WARNING:  error for default value,{addr_nsp,zwei},{}: relation "addr_nsp" does not exist
+WARNING:  error for default value,{addr_nsp,zwei},{integer}: relation "addr_nsp" does not exist
+WARNING:  error for default value,{eins,zwei,drei},{}: schema "eins" does not exist
+WARNING:  error for default value,{eins,zwei,drei},{integer}: schema "eins" does not exist
+WARNING:  error for operator,{eins},{}: argument list length must be exactly 2
+WARNING:  error for operator,{eins},{integer}: argument list length must be exactly 2
+WARNING:  error for operator,{addr_nsp,zwei},{}: argument list length must be exactly 2
+WARNING:  error for operator,{addr_nsp,zwei},{integer}: argument list length must be exactly 2
+WARNING:  error for operator,{eins,zwei,drei},{}: argument list length must be exactly 2
+WARNING:  error for operator,{eins,zwei,drei},{integer}: argument list length must be exactly 2
+WARNING:  error for operator class,{eins},{}: name list length must be at least 2
+WARNING:  error for operator class,{eins},{integer}: name list length must be at least 2
+WARNING:  error for operator class,{addr_nsp,zwei},{}: access method "addr_nsp" does not exist
+WARNING:  error for operator class,{addr_nsp,zwei},{integer}: access method "addr_nsp" does not exist
+WARNING:  error for operator class,{eins,zwei,drei},{}: access method "eins" does not exist
+WARNING:  error for operator class,{eins,zwei,drei},{integer}: access method "eins" does not exist
+WARNING:  error for operator family,{eins},{}: name list length must be at least 2
+WARNING:  error for operator family,{eins},{integer}: name list length must be at least 2
+WARNING:  error for operator family,{addr_nsp,zwei},{}: access method "addr_nsp" does not exist
+WARNING:  error for operator family,{addr_nsp,zwei},{integer}: access method "addr_nsp" does not exist
+WARNING:  error for operator family,{eins,zwei,drei},{}: access method "eins" does not exist
+WARNING:  error for operator family,{eins,zwei,drei},{integer}: access method "eins" does not exist
+WARNING:  error for rule,{eins},{}: must specify relation and object name
+WARNING:  error for rule,{eins},{integer}: must specify relation and object name
+WARNING:  error for rule,{addr_nsp,zwei},{}: relation "addr_nsp" does not exist
+WARNING:  error for rule,{addr_nsp,zwei},{integer}: relation "addr_nsp" does not exist
+WARNING:  error for rule,{eins,zwei,drei},{}: schema "eins" does not exist
+WARNING:  error for rule,{eins,zwei,drei},{integer}: schema "eins" does not exist
+WARNING:  error for trigger,{eins},{}: must specify relation and object name
+WARNING:  error for trigger,{eins},{integer}: must specify relation and object name
+WARNING:  error for trigger,{addr_nsp,zwei},{}: relation "addr_nsp" does not exist
+WARNING:  error for trigger,{addr_nsp,zwei},{integer}: relation "addr_nsp" does not exist
+WARNING:  error for trigger,{eins,zwei,drei},{}: schema "eins" does not exist
+WARNING:  error for trigger,{eins,zwei,drei},{integer}: schema "eins" does not exist
+WARNING:  error for text search parser,{eins},{}: text search parser "eins" does not exist
+WARNING:  error for text search parser,{eins},{integer}: text search parser "eins" does not exist
+WARNING:  error for text search parser,{addr_nsp,zwei},{}: text search parser "addr_nsp.zwei" does not exist
+WARNING:  error for text search parser,{addr_nsp,zwei},{integer}: text search parser "addr_nsp.zwei" does not exist
+WARNING:  error for text search parser,{eins,zwei,drei},{}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for text search parser,{eins,zwei,drei},{integer}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for text search dictionary,{eins},{}: text search dictionary "eins" does not exist
+WARNING:  error for text search dictionary,{eins},{integer}: text search dictionary "eins" does not exist
+WARNING:  error for text search dictionary,{addr_nsp,zwei},{}: text search dictionary "addr_nsp.zwei" does not exist
+WARNING:  error for text search dictionary,{addr_nsp,zwei},{integer}: text search dictionary "addr_nsp.zwei" does not exist
+WARNING:  error for text search dictionary,{eins,zwei,drei},{}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for text search dictionary,{eins,zwei,drei},{integer}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for text search template,{eins},{}: text search template "eins" does not exist
+WARNING:  error for text search template,{eins},{integer}: text search template "eins" does not exist
+WARNING:  error for text search template,{addr_nsp,zwei},{}: text search template "addr_nsp.zwei" does not exist
+WARNING:  error for text search template,{addr_nsp,zwei},{integer}: text search template "addr_nsp.zwei" does not exist
+WARNING:  error for text search template,{eins,zwei,drei},{}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for text search template,{eins,zwei,drei},{integer}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for text search configuration,{eins},{}: text search configuration "eins" does not exist
+WARNING:  error for text search configuration,{eins},{integer}: text search configuration "eins" does not exist
+WARNING:  error for text search configuration,{addr_nsp,zwei},{}: text search configuration "addr_nsp.zwei" does not exist
+WARNING:  error for text search configuration,{addr_nsp,zwei},{integer}: text search configuration "addr_nsp.zwei" does not exist
+WARNING:  error for text search configuration,{eins,zwei,drei},{}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for text search configuration,{eins,zwei,drei},{integer}: cross-database references are not implemented: eins.zwei.drei
+WARNING:  error for policy,{eins},{}: must specify relation and object name
+WARNING:  error for policy,{eins},{integer}: must specify relation and object name
+WARNING:  error for policy,{addr_nsp,zwei},{}: relation "addr_nsp" does not exist
+WARNING:  error for policy,{addr_nsp,zwei},{integer}: relation "addr_nsp" does not exist
+WARNING:  error for policy,{eins,zwei,drei},{}: schema "eins" does not exist
+WARNING:  error for policy,{eins,zwei,drei},{integer}: schema "eins" does not exist
+WARNING:  error for user mapping,{eins},{}: argument list length must be exactly 1
+WARNING:  error for user mapping,{eins},{integer}: user mapping for user "eins" on server "integer" does not exist
+WARNING:  error for user mapping,{addr_nsp,zwei},{}: argument list length must be exactly 1
+WARNING:  error for user mapping,{addr_nsp,zwei},{integer}: user mapping for user "addr_nsp" on server "integer" does not exist
+WARNING:  error for user mapping,{eins,zwei,drei},{}: argument list length must be exactly 1
+WARNING:  error for user mapping,{eins,zwei,drei},{integer}: user mapping for user "eins" on server "integer" does not exist
+WARNING:  error for default acl,{eins},{}: argument list length must be exactly 1
+WARNING:  error for default acl,{eins},{integer}: unrecognized default ACL object type "i"
+WARNING:  error for default acl,{addr_nsp,zwei},{}: argument list length must be exactly 1
+WARNING:  error for default acl,{addr_nsp,zwei},{integer}: unrecognized default ACL object type "i"
+WARNING:  error for default acl,{eins,zwei,drei},{}: argument list length must be exactly 1
+WARNING:  error for default acl,{eins,zwei,drei},{integer}: unrecognized default ACL object type "i"
+WARNING:  error for transform,{eins},{}: argument list length must be exactly 1
+WARNING:  error for transform,{eins},{integer}: type "eins" does not exist
+WARNING:  error for transform,{addr_nsp,zwei},{}: name list length must be exactly 1
+WARNING:  error for transform,{addr_nsp,zwei},{integer}: name list length must be exactly 1
+WARNING:  error for transform,{eins,zwei,drei},{}: name list length must be exactly 1
+WARNING:  error for transform,{eins,zwei,drei},{integer}: name list length must be exactly 1
+WARNING:  error for operator of access method,{eins},{}: name list length must be at least 3
+WARNING:  error for operator of access method,{eins},{integer}: name list length must be at least 3
+WARNING:  error for operator of access method,{addr_nsp,zwei},{}: name list length must be at least 3
+WARNING:  error for operator of access method,{addr_nsp,zwei},{integer}: name list length must be at least 3
+WARNING:  error for operator of access method,{eins,zwei,drei},{}: argument list length must be exactly 2
+WARNING:  error for operator of access method,{eins,zwei,drei},{integer}: argument list length must be exactly 2
+WARNING:  error for function of access method,{eins},{}: name list length must be at least 3
+WARNING:  error for function of access method,{eins},{integer}: name list length must be at least 3
+WARNING:  error for function of access method,{addr_nsp,zwei},{}: name list length must be at least 3
+WARNING:  error for function of access method,{addr_nsp,zwei},{integer}: name list length must be at least 3
+WARNING:  error for function of access method,{eins,zwei,drei},{}: argument list length must be exactly 2
+WARNING:  error for function of access method,{eins,zwei,drei},{integer}: argument list length must be exactly 2
+WARNING:  error for publication relation,{eins},{}: argument list length must be exactly 1
+WARNING:  error for publication relation,{eins},{integer}: relation "eins" does not exist
+WARNING:  error for publication relation,{addr_nsp,zwei},{}: argument list length must be exactly 1
+WARNING:  error for publication relation,{addr_nsp,zwei},{integer}: relation "addr_nsp.zwei" does not exist
+WARNING:  error for publication relation,{eins,zwei,drei},{}: argument list length must be exactly 1
+WARNING:  error for publication relation,{eins,zwei,drei},{integer}: cross-database references are not implemented: "eins.zwei.drei"
 -- these object types cannot be qualified names
 SELECT pg_get_object_address('language', '{one}', '{}');
 ERROR:  language "one" does not exist
@@ -278,11 +463,11 @@ SELECT (pg_identify_object(addr1.classid, addr1.objid, addr1.objsubid)).*,
 ---
 \set VERBOSITY terse \\ -- suppress cascade details
 DROP FOREIGN DATA WRAPPER addr_fdw CASCADE;
-ERROR:  foreign-data wrapper "addr_fdw" does not exist
+NOTICE:  drop cascades to 4 other objects
 DROP PUBLICATION addr_pub;
 ERROR:  publication "addr_pub" does not exist
 DROP SUBSCRIPTION addr_sub;
-ERROR:  subscription "addr_sub" does not exist
+ERROR:  COORDINATOR only supports DROP TBASE SUBSCRIPTION
 DROP SCHEMA addr_nsp CASCADE;
 NOTICE:  drop cascades to 12 other objects
 DROP OWNED BY regress_addr_user;
