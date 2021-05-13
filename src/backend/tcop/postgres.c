@@ -2688,7 +2688,9 @@ exec_bind_message(StringInfo input_message)
             rformats[i] = pq_getmsgint(input_message, 2);
     }
 
-	/* Get epq context */
+	/* Get epq context, only datanodes need them */
+	if (IS_PGXC_DATANODE && (IsConnFromCoord() || IsConnFromDatanode()))
+	{
 	num_epq_tuple = pq_getmsgint(input_message, 2);
 	if (num_epq_tuple > 0)
 	{
@@ -2708,6 +2710,7 @@ exec_bind_message(StringInfo input_message)
 			portal->epqContext->tid[i].ip_posid = pq_getmsgint(input_message, 2);
 			portal->epqContext->nodeid[i] = pq_getmsgint(input_message, 4);
 		}
+	}
 	}
 	
     pq_getmsgend(input_message);
