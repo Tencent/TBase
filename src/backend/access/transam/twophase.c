@@ -168,6 +168,8 @@ int record_2pc_partitions = 32;
 #define MAX_2PC_INFO_SIZE   (record_2pc_entry_size - MAX_TID_SIZE)
 #define DFLT_2PC_INFO_SIZE  1024  /* default size */
 
+#define MAX_RETRY_TIMES     2
+
 /* hash table entry for 2pc record */
 typedef struct Cache2pcInfo
 {
@@ -178,6 +180,9 @@ typedef struct Cache2pcInfo
 
 inline void
 check_entry_key(const char *tid, const char *key, const char *func);
+
+void
+print_record_2pc_cache(const char *func);
 
 void
 check_2pc_file(const char *tid, const char *info, const char *func);
@@ -2303,6 +2308,7 @@ CheckPointTwoPhase(XLogRecPtr redo_horizon)
 {// #lizard forgives
     int            i;
     int            serialized_xacts = 0;
+	char *func = "CheckPointTwoPhase";
 
 #ifdef __TWO_PHASE_TRANS__
 	File fd = -1;
@@ -2313,7 +2319,8 @@ CheckPointTwoPhase(XLogRecPtr redo_horizon)
 	char path[MAXPGPATH];
 #endif
 
-	elog(LOG, "[CheckPointTwoPhase] checkpoint: "UINT64_FORMAT, redo_horizon);
+
+	elog(LOG, "[%s] checkpoint: "UINT64_FORMAT, func, redo_horizon);
 
     if (max_prepared_xacts <= 0)
         return;                    /* nothing to do */
@@ -2368,11 +2375,10 @@ CheckPointTwoPhase(XLogRecPtr redo_horizon)
 				{
 					/* save to file */
 					Assert(NULL != entry);
-					check_entry_key(gxact->gid, entry->key, "CheckPointTwoPhase");
-					check_2pc_file(gxact->gid, entry->info, "CheckPointTwoPhase");
+					check_entry_key(gxact->gid, entry->key, func);
+					check_2pc_file(gxact->gid, entry->info, func);
 
-					elog(LOG, "[CheckPointTwoPhase] %s is found "
-						"in hash table", gxact->gid);
+					elog(LOG, "[%s] %s is found in hash table", func, gxact->gid);
 
 					size = strlen(entry->info);
 
@@ -2382,38 +2388,54 @@ CheckPointTwoPhase(XLogRecPtr redo_horizon)
 					fd = open(path, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
 					if (fd < 0)
 					{
-						elog(ERROR, "[CheckPointTwoPhase] could not create file %s, "
-							"errMsg: %s", path, strerror(errno));
+						elog(ERROR, "[%s] could not create file %s, errMsg: %s",
+							func, path, strerror(errno));
 					}
 
 					ret = write(fd, entry->info, size);
 					if(ret != size)
 					{
 						close(fd);
-						elog(ERROR, "[CheckPointTwoPhase] could not write file %s, "
-							"errMsg: %s, ret: %d, info: %s",
-							path, strerror(errno), ret, entry->info);
+						elog(ERROR, "[%s] could not write file %s, errMsg: %s, "
+							"ret: %d, info: %s",
+							func, path, strerror(errno), ret, entry->info);
+					}
+
+					if (size != strlen(entry->info))
+					{
+						elog(LOG, "[%s] %s size change from %d to %zu, info: %s",
+							func, gxact->gid, size, strlen(entry->info), entry->info);
+
+						Assert(size < strlen(entry->info));
+						ret = write(fd, entry->info + size, strlen(entry->info) - size);
+						if(ret != strlen(entry->info) - size)
+						{
+							close(fd);
+							elog(ERROR, "[%s] could not write file %s, errMsg: %s, "
+								"ret: %d, info: %s",
+								func, path, strerror(errno), ret, entry->info);
+						}
 					}
 					close(fd);
+					fsync_fname(path, false);
 
 					/* remove from hash table */
 					entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
 						gxact->gid, HASH_REMOVE, &found);
 					if (!found)
 					{
-						elog(WARNING, "[CheckPointTwoPhase] %s is not found "
-							"in hash table when remove it", gxact->gid);
+						elog(WARNING, "[%s] %s is not found in hash table "
+							"when remove it", func, gxact->gid);
 					}
-					else if (enable_2pc_entry_trace)
+					else
 					{
-						elog(LOG, "[CheckPointTwoPhase] %s is removed "
-							"from hash table", gxact->gid);
+						elog(LOG, "[%s] %s is removed from hash table",
+							func, gxact->gid);
 					}
 				}
 				else
 				{
-					elog(LOG, "[CheckPointTwoPhase] %s is not found "
-						"in hash table", gxact->gid);
+					elog(LOG, "[%s] %s is not found in hash table", func, gxact->gid);
 				}
 			}
 #endif
@@ -2439,10 +2461,9 @@ CheckPointTwoPhase(XLogRecPtr redo_horizon)
 		while ((entry = hash_seq_search(&seq)) != NULL)
 		{
 			Assert(NULL != entry);
-			check_2pc_file(entry->key, entry->info, "CheckPointTwoPhase");
+			check_2pc_file(entry->key, entry->info, func);
 
-			elog(LOG, "[CheckPointTwoPhase] key %s is found "
-				"in hash table", entry->key);
+			elog(LOG, "[%s] key %s is found in hash table", func, entry->key);
 
 			if (IsXidImplicit(entry->key))
 			{
@@ -2457,20 +2478,20 @@ CheckPointTwoPhase(XLogRecPtr redo_horizon)
 
 					if (0 != strcmp(start_node, PGXCNodeName))
 					{
-						elog(LOG, "[CheckPointTwoPhase] %s start node is not %s",
-							entry->key, PGXCNodeName);
+						elog(LOG, "[%s] %s start node is not %s",
+							func, entry->key, PGXCNodeName);
 						continue;
 					}
 					else
 					{
-						elog(LOG, "[CheckPointTwoPhase] %s start node is %s",
-							entry->key, PGXCNodeName);
+						elog(LOG, "[%s] %s start node is %s",
+							func, entry->key, PGXCNodeName);
 					}
 				}
 				else
 				{
-					elog(WARNING, "[CheckPointTwoPhase] %s get start node failed, "
-						"info: %s", entry->key, entry->info);
+					elog(WARNING, "[%s] %s get start node failed, info: %s",
+						func, entry->key, entry->info);
 				}
 			}
 
@@ -2482,32 +2503,49 @@ CheckPointTwoPhase(XLogRecPtr redo_horizon)
 			fd = open(path, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
 			if (fd < 0)
 			{
-				elog(ERROR, "[CheckPointTwoPhase] could not create file %s, "
-					"errMsg: %s", path, strerror(errno));
+				elog(ERROR, "[%s] could not create file %s, errMsg: %s",
+					func, path, strerror(errno));
 			}
 
 			ret = write(fd, entry->info, size);
 			if(ret != size)
 			{
 				close(fd);
-				elog(ERROR, "[CheckPointTwoPhase] could not write file %s, "
-					"errMsg: %s, ret: %d, info: %s",
-					path, strerror(errno), ret, entry->info);
+				elog(ERROR, "[%s] could not write file %s, errMsg: %s, "
+					"ret: %d, info: %s",
+					func, path, strerror(errno), ret, entry->info);
+			}
+
+			if (size != strlen(entry->info))
+			{
+				elog(LOG, "[%s] %s size change from %d to %zu, info: %s",
+					func, entry->key, size, strlen(entry->info), entry->info);
+
+				Assert(size < strlen(entry->info));
+				ret = write(fd, entry->info + size, strlen(entry->info) - size);
+				if(ret != strlen(entry->info) - size)
+				{
+			close(fd);
+					elog(ERROR, "[%s] could not write file %s, errMsg: %s, "
+						"ret: %d, info: %s",
+						func, path, strerror(errno), ret, entry->info);
+				}
 			}
 			close(fd);
+			fsync_fname(path, false);
 
 			/* remove from hash table */
 			entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
 				entry->key, HASH_REMOVE, &found);
 			if (!found)
 			{
-				elog(WARNING, "[CheckPointTwoPhase] %s is not found "
-					"in hash table when remove it", entry->key);
+				elog(WARNING, "[%s] %s is not found in hash table "
+					"when remove it", func, entry->key);
 			}
-			else if (enable_2pc_entry_trace)
+			else
 			{
-				elog(LOG, "[CheckPointTwoPhase] %s is removed "
-					"from hash table", entry->key);
+				elog(LOG, "[%s] %s is removed from hash table",
+					func, entry->key);
 			}
 		}
 	}
@@ -3364,6 +3402,22 @@ inline void check_entry_key(const char *tid, const char *key, const char *func)
 	}
 }
 
+void print_record_2pc_cache(const char *func)
+{
+	if (NULL != record_2pc_cache)
+	{
+		HASH_SEQ_STATUS seq;
+		Cache2pcInfo *entry = NULL;
+
+		hash_seq_init(&seq, record_2pc_cache);
+		while ((entry = hash_seq_search(&seq)) != NULL)
+		{
+			Assert(NULL != entry);
+			elog(LOG, "[print_record_2pc_cache][%s] key: %s, info: %s",
+				func, entry->key, entry->info);
+		}
+	}
+}
 /*
  * Check whether the 2pc file is exist when it is saved in the hash table.
  */
@@ -3505,6 +3559,8 @@ void record_2pc_involved_nodes_xid(const char * tid,
     char *result = NULL;
 	Cache2pcInfo *entry = NULL;
 	bool found = false;
+	char *func = "record_2pc_involved_nodes_xid";
+
 #ifdef __TWO_PHASE_TESTS__
     XLogRecPtr xlogrec = 0;
 #endif
@@ -3516,23 +3572,22 @@ void record_2pc_involved_nodes_xid(const char * tid,
 
 	if (enable_distri_print || enable_2pc_entry_trace)
     {
-		elog(LOG, "[record_2pc_involved_nodes_xid] record %s, "
-			"startnode: %s, participants: %s",
-			tid, startnode, nodestring);
+		elog(LOG, "[%s] record %s, startnode: %s, participants: %s",
+			func, tid, startnode, nodestring);
     }
 
     if (NULL == tid || '\0' == tid[0])
     {
-		elog(ERROR, "[record_2pc_involved_nodes_xid] gid is empty");
+		elog(ERROR, "[%s] gid is empty", func);
     }
 
     if (NULL == startnode || '\0' == startnode[0])
     {
-		elog(PANIC, "[record_2pc_involved_nodes_xid] %s startnode is empty", tid);
+		elog(PANIC, "[%s] %s startnode is empty", func, tid);
     }
     if (NULL == nodestring || '\0' == nodestring[0])
     {
-		elog(PANIC, "[record_2pc_involved_nodes_xid] %s participants is empty", tid);
+		elog(PANIC, "[%s] %s participants is empty", func, tid);
     }
     
 	initStringInfo(&content);
@@ -3554,14 +3609,14 @@ void record_2pc_involved_nodes_xid(const char * tid,
 			if (found)
 			{
 				Assert(NULL != entry);
-				check_entry_key(tid, entry->key, "record_2pc_involved_nodes_xid");
-				check_2pc_file(tid, entry->info, "record_2pc_involved_nodes_xid");
+				check_entry_key(tid, entry->key, func);
+				check_2pc_file(tid, entry->info, func);
 
 				if (strncmp(entry->info, content.data, size) != 0)
 				{
-					elog(ERROR, "[record_2pc_involved_nodes_xid] pg_clean attemp to "
-						"write %s info conflict, content: %s, info: %s",
-						tid, content.data, entry->info);
+					elog(ERROR, "[%s] pg_clean attemp to write %s info conflict, "
+						"content: %s, info: %s",
+						func, tid, content.data, entry->info);
 				}
 
 				resetStringInfo(&content);
@@ -3583,8 +3638,7 @@ void record_2pc_involved_nodes_xid(const char * tid,
             {   
                 ereport(ERROR,
                     (errcode_for_file_access(),
-					errmsg("[record_2pc_involved_nodes_xid] could not "
-						"open file %s for read", path)));
+					errmsg("[%s] could not open file %s for read", func, path)));
             } 
             ret = FileRead(fd, result, fileSize, WAIT_EVENT_BUFFILE_READ);
             if(ret != fileSize)
@@ -3592,8 +3646,7 @@ void record_2pc_involved_nodes_xid(const char * tid,
 				FileClose(fd);
                 ereport(ERROR,
                     (errcode_for_file_access(),
-					errmsg("[record_2pc_involved_nodes_xid] could not "
-						"read file %s, ret: %d", path, ret)));
+					errmsg("[%s] could not read file %s, ret: %d", func, path, ret)));
             }
             FileClose(fd);
 
@@ -3601,9 +3654,9 @@ void record_2pc_involved_nodes_xid(const char * tid,
 
 			if (strncmp(result, content.data, size) != 0)
             {
-				elog(ERROR, "[record_2pc_involved_nodes_xid] pg_clean attemp to "
-					"write %s info conflict, content: %s, info: %s",
-					tid, content.data, result);
+				elog(ERROR, "[%s] pg_clean attemp to write %s info conflict, "
+					"content: %s, info: %s",
+					func, tid, content.data, result);
             }
 
 			pfree(result);
@@ -3633,8 +3686,8 @@ void record_2pc_involved_nodes_xid(const char * tid,
 			XLogFlush(xlogrec);
 			run_pg_clean = 1;
 			complish = true;
-			elog(STOP, "[record_2pc_involved_nodes_xid] twophase exception: "
-				"simulate kill start node after record 2pc file");
+			elog(STOP, "[%s] twophase exception: simulate kill start node "
+				"after record 2pc file", func);
 		}
 #endif
 	}
@@ -3646,29 +3699,28 @@ void record_2pc_involved_nodes_xid(const char * tid,
 			tid, HASH_ENTER_NULL, &found);
 		if (NULL != entry)
 		{
-			check_entry_key(tid, entry->key, "record_2pc_involved_nodes_xid");
-			check_2pc_file(tid, entry->info, "record_2pc_involved_nodes_xid");
+			check_entry_key(tid, entry->key, func);
+			check_2pc_file(tid, entry->info, func);
 
 			if (found)
 			{
 				if (RecoveryInProgress())
 				{
-					elog(LOG, "[record_2pc_involved_nodes_xid] %s is found "
-						"in hash table in recovery mode", tid);
+					elog(LOG, "[%s] %s is found in hash table in recovery mode",
+						func, tid);
 				}
 				else
 				{
-					elog(LOG, "[record_2pc_involved_nodes_xid] %s is found "
-						"in hash table", tid);
+					elog(LOG, "[%s] %s is found in hash table", func, tid);
 				}
 			}
 			else if (enable_2pc_entry_trace)
 			{
-				elog(LOG, "[record_2pc_involved_nodes_xid] %s is added "
-					"to hash table", tid);
+				elog(LOG, "[%s] %s is added to hash table", func, tid);
 			}
 
 			memcpy(entry->info, content.data, size + 1);
+			check_entry_key(tid, entry->key, func);
 
 			resetStringInfo(&content);
 			pfree(content.data);
@@ -3676,13 +3728,13 @@ void record_2pc_involved_nodes_xid(const char * tid,
 		}
 		else
 		{
-			elog(LOG, "[record_2pc_involved_nodes_xid] %s entry is NULL", tid);
+			elog(LOG, "[%s] %s entry is NULL", func, tid);
 		}
 	}
 	else if (NULL != record_2pc_cache)
 	{
-		elog(LOG, "[record_2pc_involved_nodes_xid] %s size: %d, "
-			"max info size: %d", tid, size, MAX_2PC_INFO_SIZE);
+		elog(LOG, "[%s] %s size: %d, max info size: %d",
+			func, tid, size, MAX_2PC_INFO_SIZE);
 	}
 
 	GET_2PC_FILE_PATH(path, tid);
@@ -3705,8 +3757,8 @@ void record_2pc_involved_nodes_xid(const char * tid,
     }
     if (fd < 0)
     {   
-		elog(ERROR, "[record_2pc_involved_nodes_xid] could not create file %s, "
-			"errMsg: %s", path, strerror(errno));
+		elog(ERROR, "[%s] could not create file %s, errMsg: %s",
+			func, path, strerror(errno));
         return;
     }
 
@@ -3714,9 +3766,8 @@ void record_2pc_involved_nodes_xid(const char * tid,
     if(ret != size)
     {
 		FileClose(fd);
-		elog(ERROR, "[record_2pc_involved_nodes_xid] could not write file %s, "
-			"errMsg: %s, ret: %d, content: %s",
-			path, strerror(errno), ret, content.data);
+		elog(ERROR, "[%s] could not write file %s, errMsg: %s, ret: %d, content: %s",
+			func, path, strerror(errno), ret, content.data);
     }
     FileClose(fd);
     
@@ -3734,13 +3785,11 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 	int ret = 0;
 	int size = 0;
 	int new_size = 0;
+	int retry_times = 0;
     XLogRecPtr xlogrec = 0;
 	Cache2pcInfo *entry = NULL;
 	bool found = false;
-#if 0    
-    int i;
-    GlobalTransaction gxact = NULL;
-#endif
+	char *func = "record_2pc_commit_timestamp";
     
     if (!enable_2pc_recovery_info)
     {
@@ -3749,17 +3798,16 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 
 	if (enable_distri_print || enable_2pc_entry_trace)
     {
-		elog(LOG, "[record_2pc_commit_timestamp] %s commit_timestamp: "
-			INT64_FORMAT, tid, commit_timestamp);
+		elog(LOG, "[%s] %s commit_timestamp: "INT64_FORMAT,
+			func, tid, commit_timestamp);
     }
     Assert(tid[0] != '\0');
     if (InvalidGlobalTimestamp == commit_timestamp && 
         (TWO_PHASE_COMMITTING == g_twophase_state.state || 
         TWO_PHASE_COMMIT_END == g_twophase_state.state))
     {
-		elog(ERROR, "[record_2pc_commit_timestamp] could not commit "
-			"transaction '%s' on node '%s' with InvalidGlobalTimestamp",
-			tid, PGXCNodeName);
+		elog(ERROR, "[%s] could not commit transaction '%s' on node '%s' "
+			"with InvalidGlobalTimestamp", func, tid, PGXCNodeName);
     }
 
 	if (!RecoveryInProgress())
@@ -3782,25 +3830,24 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 	size = content.len;
 	Assert(size == strlen(content.data));
 
-	if (NULL != record_2pc_cache)
+	while (NULL != record_2pc_cache && retry_times++ < MAX_RETRY_TIMES)
 	{
 		Assert(strlen(tid) < MAX_TID_SIZE);
 		entry = (Cache2pcInfo *)hash_search(record_2pc_cache, tid, HASH_FIND, &found);
 		if (found)
 		{
 			Assert(NULL != entry);
-			check_entry_key(tid, entry->key, "record_2pc_commit_timestamp");
-			check_2pc_file(tid, entry->info, "record_2pc_commit_timestamp");
+			check_entry_key(tid, entry->key, func);
+			check_2pc_file(tid, entry->info, func);
 
 			if (RecoveryInProgress())
 			{
-				elog(LOG, "[record_2pc_commit_timestamp] %s is found "
-					"in hash table in recovery mode", tid);
+				elog(LOG, "[%s] %s is found in hash table in recovery mode",
+					func, tid);
 			}
 			else if (enable_2pc_entry_trace)
 			{
-				elog(LOG, "[record_2pc_commit_timestamp] %s is found "
-					"in hash table", tid);
+				elog(LOG, "[%s] %s is found in hash table", func, tid);
 			}
 
 			new_size = size + strlen(entry->info);
@@ -3809,6 +3856,7 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 			{
 				/* save to hash table */
 				memcpy(entry->info + strlen(entry->info), content.data, size + 1);
+				check_entry_key(tid, entry->key, func);
 
 				resetStringInfo(&content);
 				pfree(content.data);
@@ -3816,8 +3864,8 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 			}
 
 				/* save to file */
-				elog(LOG, "[record_2pc_commit_timestamp] %s new size(%d) "
-					"overflow(%d)", tid, new_size, MAX_2PC_INFO_SIZE);
+			elog(LOG, "[%s] %s new size(%d) overflow(%d)",
+				func, tid, new_size, MAX_2PC_INFO_SIZE);
 
 				GET_2PC_FILE_PATH(path, tid);
 
@@ -3833,9 +3881,8 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 			}
 			if (fd < 0)
 			{
-						elog(ERROR, "[record_2pc_commit_timestamp] could not "
-							"append timestamp in file %s, errMsg: %s",
-							path, strerror(errno));
+				elog(ERROR, "[%s] could not append timestamp in file %s, errMsg: %s",
+					func, path, strerror(errno));
 					}
 
 			ret = FileWrite(fd, entry->info, strlen(entry->info),
@@ -3843,18 +3890,18 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 			if(ret != strlen(entry->info))
 				{
 				FileClose(fd);
-					elog(ERROR, "[record_2pc_commit_timestamp] could not write "
-						"file %s, errMsg: %s, ret: %d, info: %s",
-						path, strerror(errno), ret, entry->info);
+				elog(ERROR, "[%s] could not write file %s, errMsg: %s, "
+					"ret: %d, info: %s",
+					func, path, strerror(errno), ret, entry->info);
 				}
 			ret = FileWrite(fd, content.data, size,
 				WAIT_EVENT_BUFFILE_WRITE);
 			if(ret != size)
 				{
 				FileClose(fd);
-					elog(ERROR, "[record_2pc_commit_timestamp] could not write "
-						"file %s, errMsg: %s, ret: %d, info: %s",
-						path, strerror(errno), ret, content.data);
+				elog(ERROR, "[%s] could not write file %s, errMsg: %s, "
+					"ret: %d, info: %s",
+					func, path, strerror(errno), ret, content.data);
 				}
 			FileClose(fd);
 
@@ -3863,24 +3910,32 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 					tid, HASH_REMOVE, &found);
 				if (!found)
 				{
-					elog(WARNING, "[record_2pc_commit_timestamp] %s is not found"
-						"in hash table when remove it", tid);
+				elog(WARNING, "[%s] %s is not found in hash table when remove it",
+					func, tid);
 				}
 				else if (enable_2pc_entry_trace)
 				{
-					elog(LOG, "[record_2pc_commit_timestamp] %s is removed "
-						"from hash table", entry->key);
+				elog(LOG, "[%s] %s is removed from hash table", func, entry->key);
 				}
 
 				resetStringInfo(&content);
 				pfree(content.data);
 				return;
 			}
-		else
-		{
-			elog(LOG, "[record_2pc_commit_timestamp] %s is not found "
-				"in hash table", tid);
+
+		/* not found */
+		elog(LOG, "[%s] %s is not found in hash table, retry times: %d",
+			func, tid, retry_times);
+
+		Assert(NULL == entry);
+		print_record_2pc_cache(func);
+
+		pg_usleep(5000L);	/* sleep 5ms */
 		}
+
+	if (NULL != record_2pc_cache)
+	{
+		elog(LOG, "[%s] %s is not found in hash table, get from disk", func, tid);
 	}
 
 	GET_2PC_FILE_PATH(path, tid);
@@ -3892,6 +3947,8 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
         if (RecoveryInProgress())
         {
 #if 0            
+			int i;
+			GlobalTransaction gxact = NULL;
             for (i = 0; i < TwoPhaseState->numPrepXacts; i++)
             {
                 gxact = TwoPhaseState->prepXacts[i];
@@ -3901,19 +3958,18 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
                 }
                 if (0 == strcmp(gxact->gid, tid))
                 {
-					elog(ERROR, "[record_2pc_commit_timestamp] could not "
-						"append timestamp in file %s, errMsg: %s",
-						path, strerror(errno));
+					elog(ERROR, "[%s] could not append timestamp in file %s, "
+						"errMsg: %s", func, path, strerror(errno));
                 }
             }
 #endif            
-			elog(LOG, "[record_2pc_commit_timestamp] could not open file %s, "
-				"errMsg: %s", path, strerror(errno));
+			elog(LOG, "[%s] could not open file %s, errMsg: %s",
+				func, path, strerror(errno));
         }
         else
         {
-			elog(ERROR, "[record_2pc_commit_timestamp] could not open file %s, "
-				"errMsg: %s", path, strerror(errno));
+			elog(ERROR, "[%s] could not open file %s, errMsg: %s",
+				func, path, strerror(errno));
         }
         return;
     }
@@ -3922,17 +3978,16 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
     {
 		memset(file_content, 0, FILE_CONTENT_SIZE);
 		ret = FileRead(fd, file_content, FILE_CONTENT_SIZE, WAIT_EVENT_BUFFILE_READ);
-		elog(LOG, "[record_2pc_commit_timestamp] before append file: %s, "
-			"file_content: %s, content.data: %s, ret: %d",
-			path, file_content, content.data, ret);
+		elog(LOG, "[%s] before append file: %s, file_content: %s, content.data: %s, "
+			"ret: %d", func, path, file_content, content.data, ret);
     }
 
 	ret = FileWrite(fd, content.data, size, WAIT_EVENT_BUFFILE_WRITE);
     if(ret != size)
     {
 		FileClose(fd);
-		elog(ERROR, "[record_2pc_commit_timestamp] could not write file %s, "
-			"errMsg: %s", path, strerror(errno));
+		elog(ERROR, "[%s] could not write file %s, errMsg: %s",
+			func, path, strerror(errno));
     }
 
     if (enable_distri_print)
@@ -3940,9 +3995,8 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 		memset(file_content, 0, FILE_CONTENT_SIZE);
 		FileSeek(fd, 0, SEEK_SET);
 		ret = FileRead(fd, file_content, FILE_CONTENT_SIZE, WAIT_EVENT_BUFFILE_READ);
-		elog(LOG, "[record_2pc_commit_timestamp] after append file: %s, "
-			"file_content: %s, ret: %d", 
-			path, file_content, ret);
+		elog(LOG, "[%s] after append file: %s, file_content: %s, ret: %d",
+			func, path, file_content, ret);
     }
 
 	FileClose(fd);
@@ -3956,6 +4010,7 @@ void remove_2pc_records(const char * tid, bool record_in_xlog)
     char path[MAXPGPATH];    
 	Cache2pcInfo *entry = NULL;
 	bool found = false;
+	char *func = "remove_2pc_records";
 
     if (!enable_2pc_recovery_info)
     {
@@ -3964,8 +4019,7 @@ void remove_2pc_records(const char * tid, bool record_in_xlog)
 
 	if (enable_distri_print || enable_2pc_entry_trace)
 	{
-		elog(LOG, "[remove_2pc_records] %s record_in_xlog: %d",
-			tid, record_in_xlog);
+		elog(LOG, "[%s] %s record_in_xlog: %d", func, tid, record_in_xlog);
 	}
 
     if (!RecoveryInProgress() && record_in_xlog)
@@ -3987,8 +4041,8 @@ void remove_2pc_records(const char * tid, bool record_in_xlog)
 			if (found)
 			{
 				Assert(NULL != entry);
-				check_entry_key(tid, entry->key, "remove_2pc_records");
-				check_2pc_file(tid, entry->info, "remove_2pc_records");
+				check_entry_key(tid, entry->key, func);
+				check_2pc_file(tid, entry->info, func);
 			}
 		}
 		entry = (Cache2pcInfo *)hash_search(record_2pc_cache,
@@ -3998,8 +4052,7 @@ void remove_2pc_records(const char * tid, bool record_in_xlog)
 			Assert(NULL != entry);
 			if (enable_2pc_entry_trace)
 			{
-				elog(LOG, "[remove_2pc_records] %s is removed "
-					"from hash table", tid);
+				elog(LOG, "[%s] %s is removed from hash table", func, tid);
 			}
 			return;
 		}
@@ -4013,8 +4066,8 @@ void remove_2pc_records(const char * tid, bool record_in_xlog)
 	*/
     if (0 != unlink(path))
     {
-		elog(LOG, "[remove_2pc_records] could not unlink file %s, "
-			"errMsg: %s", path, strerror(errno));
+		elog(LOG, "[%s] could not unlink file %s, errMsg: %s",
+			func, path, strerror(errno));
     }
 }
 
@@ -4026,6 +4079,7 @@ void rename_2pc_records(const char *tid, TimestampTz timestamp)
 	bool found = false;
 	File fd = 0;
 	int ret = 0;
+	char *func = "rename_2pc_records";
 
 	if (!enable_2pc_recovery_info)
 	{
@@ -4034,8 +4088,7 @@ void rename_2pc_records(const char *tid, TimestampTz timestamp)
 
 	if (enable_distri_print || enable_2pc_entry_trace)
 	{
-		elog(LOG, "[rename_2pc_records] %s timestamp: "
-			INT64_FORMAT, tid, timestamp);
+		elog(LOG, "[%s] %s timestamp: "INT64_FORMAT, func, tid, timestamp);
 	}
 
 	if (0 == timestamp)
@@ -4064,8 +4117,8 @@ void rename_2pc_records(const char *tid, TimestampTz timestamp)
 		if (found)
 		{
 			Assert(NULL != entry);
-			check_entry_key(tid, entry->key, "rename_2pc_records");
-			check_2pc_file(tid, entry->info, "rename_2pc_records");
+			check_entry_key(tid, entry->key, func);
+			check_2pc_file(tid, entry->info, func);
 
 			if (RecoveryInProgress())
 			{
@@ -4079,8 +4132,8 @@ void rename_2pc_records(const char *tid, TimestampTz timestamp)
 			}
 			if (fd < 0)
 			{
-				elog(ERROR, "[rename_2pc_records] could not create file %s, "
-					"errMsg: %s", new_path, strerror(errno));
+				elog(ERROR, "[%s] could not create file %s, errMsg: %s",
+					func, new_path, strerror(errno));
 			}
 
 			ret = FileWrite(fd, entry->info, strlen(entry->info),
@@ -4088,9 +4141,9 @@ void rename_2pc_records(const char *tid, TimestampTz timestamp)
 			if(ret != strlen(entry->info))
 			{
 				FileClose(fd);
-				elog(ERROR, "[rename_2pc_records] could not write file %s, "
-					"errMsg: %s, ret: %d, info: %s",
-					path, strerror(errno), ret, entry->info);
+				elog(ERROR, "[%s] could not write file %s, errMsg: %s, "
+					"ret: %d, info: %s",
+					func, path, strerror(errno), ret, entry->info);
 			}
 			FileClose(fd);
 
@@ -4098,13 +4151,12 @@ void rename_2pc_records(const char *tid, TimestampTz timestamp)
 				tid, HASH_REMOVE, &found);
 			if (!found)
 			{
-				elog(ERROR, "[rename_2pc_records] %s is not found "
-					"in hash table when remove it", tid);
+				elog(ERROR, "[%s] %s is not found in hash table when remove it",
+					func, tid);
 			}
 			else if (enable_2pc_entry_trace)
 			{
-				elog(LOG, "[rename_2pc_records] %s is removed "
-					"from hash table", tid);
+				elog(LOG, "[%s] %s is removed from hash table", func, tid);
 			}
 			return;
 		}
@@ -4112,19 +4164,19 @@ void rename_2pc_records(const char *tid, TimestampTz timestamp)
 
 	if (0 != access(path, F_OK))
 	{
-		elog(LOG, "[rename_2pc_records] could not access file %s, "
-			"errMsg: %s", path, strerror(errno));
+		elog(LOG, "[%s] could not access file %s, errMsg: %s",
+			func, path, strerror(errno));
 		return;
 	}
 	if (0 != link(path, new_path))
 	{
-		elog(ERROR, "[rename_2pc_records] could not link file %s to %s, "
-			"errMsg: %s", path, new_path, strerror(errno));
+		elog(ERROR, "[%s] could not link file %s to %s, errMsg: %s",
+			func, path, new_path, strerror(errno));
 	}
 	if (0 != unlink(path))
 	{
-		elog(WARNING, "[rename_2pc_records] could not unlink file %s, "
-			"errMsg: %s", path, strerror(errno));
+		elog(WARNING, "[%s] could not unlink file %s, errMsg: %s",
+			func, path, strerror(errno));
 	}
 }
 
@@ -4136,6 +4188,7 @@ void record_2pc_readonly(const char *gid)
     char content[10] = "readonly";
 	Cache2pcInfo *entry = NULL;
 	bool found = false;
+	char *func = "record_2pc_readonly";
         
     if(!enable_2pc_recovery_info)
     {
@@ -4144,7 +4197,7 @@ void record_2pc_readonly(const char *gid)
         
 	if (enable_distri_print || enable_2pc_entry_trace)
     {
-		elog(LOG, "[record_2pc_readonly] %s is readonly", gid);
+		elog(LOG, "[%s] %s is readonly", func, gid);
     }
 
     if (!RecoveryInProgress())
@@ -4163,33 +4216,34 @@ void record_2pc_readonly(const char *gid)
 			gid, HASH_ENTER_NULL, &found);
 		if (NULL != entry)
 		{
-			check_entry_key(gid, entry->key, "record_2pc_readonly");
-			check_2pc_file(gid, entry->info, "record_2pc_readonly");
+			check_entry_key(gid, entry->key, func);
+			check_2pc_file(gid, entry->info, func);
 
 			if (found)
 			{
 				if (RecoveryInProgress())
 				{
-					elog(LOG, "[record_2pc_readonly] %s is found "
-						"in hash table in recovery mode", gid);
+					elog(LOG, "[%s] %s is found in hash table in recovery mode",
+						func, gid);
 				}
 				else
 				{
-					elog(LOG, "[record_2pc_readonly] %s is found "
-						"in hash table", gid);
+					elog(LOG, "[%s] %s is found in hash table", func, gid);
 				}
 			}
 			else if (enable_2pc_entry_trace)
 			{
-				elog(LOG, "[record_2pc_readonly] %s is added "
-					"to hash table", gid);
+				elog(LOG, "[%s] %s is added to hash table", func, gid);
 			}
+
 			memcpy(entry->info, content, strlen(content) + 1);
+			check_entry_key(gid, entry->key, func);
+
 			return;
 		}
 		else
 		{
-			elog(LOG, "[record_2pc_readonly] %s entry is NULL", gid);
+			elog(LOG, "[%s] %s entry is NULL", func, gid);
 		}
 	}
 
@@ -4215,8 +4269,8 @@ void record_2pc_readonly(const char *gid)
     }
     if (fd < 0)
     {   
-		elog(ERROR, "[record_2pc_readonly] could not create file %s, "
-			"errMsg: %s", path, strerror(errno));
+		elog(ERROR, "[%s] could not create file %s, errMsg: %s",
+			func, path, strerror(errno));
         return;
     }
 
@@ -4224,9 +4278,8 @@ void record_2pc_readonly(const char *gid)
     if(ret != strlen(content))
     {
 		FileClose(fd);
-		elog(ERROR, "[record_2pc_readonly] could not write file %s, "
-			"errMsg: %s, ret: %d, content: %s",
-			path, strerror(errno), ret, content);
+		elog(ERROR, "[%s] could not write file %s, errMsg: %s, ret: %d, content: %s",
+			func, path, strerror(errno), ret, content);
     }
     FileClose(fd);
 }
@@ -4238,6 +4291,8 @@ char *get_2pc_info_from_cache(const char *tid)
 {
 	Cache2pcInfo *entry = NULL;
 	bool found = false;
+	char *func = "get_2pc_info_from_cache";
+
 	if (NULL != record_2pc_cache)
 	{
 		Assert(strlen(tid) < MAX_TID_SIZE);
@@ -4247,13 +4302,12 @@ char *get_2pc_info_from_cache(const char *tid)
 		{
 			Assert(NULL != entry);
 
-			check_entry_key(tid, entry->key, "get_2pc_info_from_cache");
+			check_entry_key(tid, entry->key, func);
 
 			if (enable_2pc_entry_trace)
 			{
-				elog(LOG, "[get_2pc_info_from_cache] %s is found "
-					"in hast table, key: %s, info: %s",
-					tid, entry->key, entry->info);
+				elog(LOG, "[%s] %s is found in hast table, key: %s, info: %s",
+					func, tid, entry->key, entry->info);
 }
 
 			return entry->info;
@@ -4261,8 +4315,7 @@ char *get_2pc_info_from_cache(const char *tid)
 
 		if (enable_2pc_entry_trace)
 		{
-			elog(LOG, "[get_2pc_info_from_cache] %s is not found "
-				"in hast table", tid);
+			elog(LOG, "[%s] %s is not found in hast table", func, tid);
 		}
 	}
 	return NULL;
@@ -4276,6 +4329,7 @@ char *get_2pc_list_from_cache(int *count)
 	HASH_SEQ_STATUS seq;
 	Cache2pcInfo *entry = NULL;
 	char *recordList = NULL;
+	char *func = "get_2pc_list_from_cache";
 
 	if (NULL == record_2pc_cache)
 	{
@@ -4286,7 +4340,7 @@ char *get_2pc_list_from_cache(int *count)
 	while ((entry = hash_seq_search(&seq)) != NULL)
 	{
 		Assert(NULL != entry);
-		check_2pc_file(entry->key, entry->info, "get_2pc_list_from_cache");
+		check_2pc_file(entry->key, entry->info, func);
 
 		if (NULL != count && *count >= MAX_OUTPUT_FILE)
 		{
@@ -4335,7 +4389,7 @@ Record2pcCacheInit(void)
 	flags = HASH_ELEM | HASH_PARTITION;
 
 	record_2pc_cache = ShmemInitHash("Record 2pc Cache",
-		record_2pc_cache_size/4, record_2pc_cache_size,
+		record_2pc_cache_size/2, record_2pc_cache_size,
 		&info, flags);
 }
 
