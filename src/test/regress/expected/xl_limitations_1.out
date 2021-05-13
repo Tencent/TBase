@@ -730,12 +730,9 @@ SELECT sum(n) FROM t;
 
 --FDWs are not supported
 CREATE FOREIGN DATA WRAPPER xl_foo; -- ERROR
-ERROR:  Postgres-XL does not support FOREIGN DATA WRAPPER yet
-DETAIL:  The feature is not currently supported
 RESET ROLE;
 CREATE FOREIGN DATA WRAPPER xl_foo VALIDATOR postgresql_fdw_validator;
-ERROR:  Postgres-XL does not support FOREIGN DATA WRAPPER yet
-DETAIL:  The feature is not currently supported
+ERROR:  foreign-data wrapper "xl_foo" already exists
 --LISTEN/NOTIFY is not supported. Looks like they are supported now. 
 --We would obviously have issues with LISTEN/NOTIFY if clients are connected to different coordinators. Need to test that manually as it is difficult via regression.
 --LISTEN notify_async1; 

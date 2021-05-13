@@ -109,14 +109,8 @@ comment on table event_trigger_fire1 is 'here is a comment';
 revoke all on table event_trigger_fire1 from public;
 drop table event_trigger_fire1;
 create foreign data wrapper useless;
-ERROR:  Postgres-XL does not support FOREIGN DATA WRAPPER yet
-DETAIL:  The feature is not currently supported
 create server useless_server foreign data wrapper useless;
-ERROR:  Postgres-XL does not support SERVER yet
-DETAIL:  The feature is not currently supported
 create user mapping for regress_evt_user server useless_server;
-ERROR:  Postgres-XL does not support USER MAPPING yet
-DETAIL:  The feature is not currently supported
 alter default privileges for role regress_evt_user
  revoke delete on tables from regress_evt_user;
 -- alter owner to non-superuser should fail
@@ -139,6 +133,7 @@ ERROR:  event trigger "regress_event_trigger" does not exist
 drop role regress_evt_user;
 ERROR:  role "regress_evt_user" cannot be dropped because some objects depend on it
 DETAIL:  owner of default privileges on new relations belonging to role regress_evt_user
+owner of user mapping for regress_evt_user on server useless_server
 -- cleanup before next test
 -- these are all OK; the second one should emit a NOTICE
 drop event trigger if exists regress_event_trigger2;
