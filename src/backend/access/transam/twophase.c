@@ -168,7 +168,7 @@ int record_2pc_partitions = 32;
 #define MAX_2PC_INFO_SIZE   (record_2pc_entry_size - MAX_TID_SIZE)
 #define DFLT_2PC_INFO_SIZE  1024  /* default size */
 
-#define MAX_RETRY_TIMES     2
+#define MAX_RETRY_TIMES     10
 
 /* hash table entry for 2pc record */
 typedef struct Cache2pcInfo
@@ -3716,7 +3716,8 @@ void record_2pc_involved_nodes_xid(const char * tid,
 			}
 			else if (enable_2pc_entry_trace)
 			{
-				elog(LOG, "[%s] %s is added to hash table", func, tid);
+				elog(LOG, "[%s] %s is added to hash table, entry: %p",
+					func, tid, entry);
 			}
 
 			memcpy(entry->info, content.data, size + 1);
@@ -3830,6 +3831,8 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 	size = content.len;
 	Assert(size == strlen(content.data));
 
+	GET_2PC_FILE_PATH(path, tid);
+
 	while (NULL != record_2pc_cache && retry_times++ < MAX_RETRY_TIMES)
 	{
 		Assert(strlen(tid) < MAX_TID_SIZE);
@@ -3930,6 +3933,12 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 		Assert(NULL == entry);
 		print_record_2pc_cache(func);
 
+		if (0 == access(path, F_OK))
+		{
+			elog(LOG, "[%s] %s found 2pc file %s", func, tid, path);
+			break;
+		}
+
 		pg_usleep(5000L);	/* sleep 5ms */
 		}
 
@@ -3937,8 +3946,6 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 	{
 		elog(LOG, "[%s] %s is not found in hash table, get from disk", func, tid);
 	}
-
-	GET_2PC_FILE_PATH(path, tid);
 
 	/* the 2pc file exists already */
 	fd = PathNameOpenFile(path, O_RDWR | O_APPEND, S_IRUSR | S_IWUSR);
@@ -3968,7 +3975,7 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
         }
         else
         {
-			elog(ERROR, "[%s] could not open file %s, errMsg: %s",
+			elog(PANIC, "[%s] could not open file %s, errMsg: %s",
 				func, path, strerror(errno));
         }
         return;
