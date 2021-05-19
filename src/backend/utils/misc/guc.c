@@ -4789,7 +4789,7 @@ static struct config_int ConfigureNamesInt[] =
 			gettext_noop("2PC info cache size."),
 		},
 		&record_2pc_cache_size,
-		4096, 1, INT_MAX,
+		4096, 32, INT_MAX,
 		NULL, NULL, NULL
 	},
 	{
