@@ -158,7 +158,7 @@ bool enable_2pc_file_check = true;
 bool enable_2pc_entry_key_check = true;
 bool enable_2pc_entry_trace = false;
 
-int record_2pc_cache_size = 50000;
+int record_2pc_cache_size = 4096;
 int record_2pc_entry_size = 2048;
 int record_2pc_partitions = 32;
 
@@ -4127,16 +4127,25 @@ void rename_2pc_records(const char *tid, TimestampTz timestamp)
 			check_entry_key(tid, entry->key, func);
 			check_2pc_file(tid, entry->info, func);
 
+			if (0 == access(new_path, F_OK))
+			{
 			if (RecoveryInProgress())
 			{
-				fd = PathNameOpenFile(new_path, O_RDWR | O_TRUNC | O_CREAT,
-					S_IRUSR | S_IWUSR);
+					elog(LOG, "[%s] file %s exist", func, new_path);
 			}
 			else
 			{
+					elog(WARNING, "[%s] file %s exist", func, new_path);
+				}
+				if (0 != unlink(new_path))
+				{
+					elog(ERROR, "[%s] could not unlink file %s, errMsg: %s",
+						func, new_path, strerror(errno));
+				}
+			}
+
 			fd = PathNameOpenFile(new_path, O_RDWR | O_CREAT | O_EXCL,
 				S_IRUSR | S_IWUSR);
-			}
 			if (fd < 0)
 			{
 				elog(ERROR, "[%s] could not create file %s, errMsg: %s",
@@ -4174,6 +4183,23 @@ void rename_2pc_records(const char *tid, TimestampTz timestamp)
 		elog(LOG, "[%s] could not access file %s, errMsg: %s",
 			func, path, strerror(errno));
 		return;
+	}
+	if (0 == access(new_path, F_OK))
+	{
+		if (RecoveryInProgress())
+		{
+			elog(LOG, "[%s] file %s exist", func, new_path);
+		}
+		else
+		{
+			elog(WARNING, "[%s] file %s exist", func, new_path);
+		}
+		if (0 != unlink(new_path))
+		{
+			elog(WARNING, "[%s] could not unlink file %s, errMsg: %s",
+				func, new_path, strerror(errno));
+			return;
+		}
 	}
 	if (0 != link(path, new_path))
 	{
@@ -4396,7 +4422,7 @@ Record2pcCacheInit(void)
 	flags = HASH_ELEM | HASH_PARTITION;
 
 	record_2pc_cache = ShmemInitHash("Record 2pc Cache",
-		record_2pc_cache_size/2, record_2pc_cache_size,
+		record_2pc_cache_size, record_2pc_cache_size,
 		&info, flags);
 }
 
@@ -4406,10 +4432,10 @@ Record2pcCacheInit(void)
 Size
 Record2pcCacheSize(void)
 {
-	long cache_size = 0;
+	Size cache_size = 0;
 	if (enable_2pc_file_cache)
 	{
-		cache_size = (long)record_2pc_cache_size * record_2pc_entry_size;
+		cache_size = hash_estimate_size(record_2pc_cache_size, record_2pc_entry_size);
 	}
 	return cache_size;
 }
