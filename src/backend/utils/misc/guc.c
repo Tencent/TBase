@@ -4789,7 +4789,7 @@ static struct config_int ConfigureNamesInt[] =
 			gettext_noop("2PC info cache size."),
 		},
 		&record_2pc_cache_size,
-		50000, 100, INT_MAX,
+		4096, 1, INT_MAX,
 		NULL, NULL, NULL
 	},
 	{
@@ -4797,7 +4797,7 @@ static struct config_int ConfigureNamesInt[] =
 			gettext_noop("2PC info cache entry size."),
 		},
 		&record_2pc_entry_size,
-		2048, 1200, INT_MAX,
+		2048, 1028, INT_MAX,
 		NULL, NULL, NULL
 	},
 	{
