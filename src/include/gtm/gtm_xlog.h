@@ -115,7 +115,8 @@ enum XLogSendResult
     Send_OK               = 1,
     Send_No_data          = 0,
     Send_Data_Not_Found   = -1,
-    Send_Error            = -2
+    Send_Error                = -2,
+    Send_XlogFile_Not_Found   = -3
 };
 
 typedef struct XLogCtlData

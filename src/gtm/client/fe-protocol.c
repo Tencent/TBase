@@ -1382,6 +1382,17 @@ result->gr_status = GTM_RESULT_ERROR;
             result->gr_resdata.grd_xlog_data.length = 0;
             result->gr_resdata.grd_xlog_data.xlog_data = NULL;
 
+            if (gtmpqGetInt(&result->gr_resdata.grd_xlog_data.status, sizeof(int), conn))
+            {
+                result->gr_status = GTM_RESULT_ERROR;
+                break;
+            }
+
+            if (result->gr_resdata.grd_xlog_data.status != Send_OK)
+            {
+                break;
+            }
+
             if (gtmpqGetInt64((int64 *)&result->gr_resdata.grd_xlog_data.flush, conn))
             {
                 result->gr_status = GTM_RESULT_ERROR;

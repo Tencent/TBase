@@ -3309,6 +3309,14 @@ reconnect:
         Assert(res->gr_status == GTM_RESULT_OK);
         Assert(res->gr_type   == MSG_REPLICATION_CONTENT);
             
+        if (res->gr_resdata.grd_xlog_data.status != Send_OK)
+        {
+            Assert(res->gr_resdata.grd_xlog_data.status == Send_XlogFile_Not_Found);
+            elog(LOG,"xlog file not found in master, exit now");
+            exit(1);
+        }
+
+        Assert(res->gr_resdata.grd_xlog_data.status == Send_OK);
         size      = res->gr_resdata.grd_xlog_data.length;
         start_pos = res->gr_resdata.grd_xlog_data.pos;
         end_pos   = start_pos + size;
