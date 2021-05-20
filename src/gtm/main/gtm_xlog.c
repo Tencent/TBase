@@ -816,7 +816,7 @@ GTM_GetReplicationResultIfAny(GTM_StandbyReplication *replication,Port *port)
     return 1;
 }
 
-static bool
+static int
 ReadXLogFileToBuffIntern(GTM_XLogSegmentBuff *buff,TimeLineID timeline,XLogSegNo segment_no)
 {
     char     path[MAXFNAMELEN];
@@ -829,7 +829,7 @@ ReadXLogFileToBuffIntern(GTM_XLogSegmentBuff *buff,TimeLineID timeline,XLogSegNo
     if(fd == -1)
     {
         elog(LOG,"Fail to open xlog %s : %s",path,strerror(errno));
-        return false;
+        return Send_Error;
     }
 
     buff->total_length = 0;
@@ -842,7 +842,7 @@ ReadXLogFileToBuffIntern(GTM_XLogSegmentBuff *buff,TimeLineID timeline,XLogSegNo
         {
             elog(LOG,"Read xlog file %s fails : %s",path,strerror(errno));
             close(fd);
-            return false;
+            return Send_Error;
         }
 
         if(bytes == 0)
@@ -857,10 +857,10 @@ ReadXLogFileToBuffIntern(GTM_XLogSegmentBuff *buff,TimeLineID timeline,XLogSegNo
     if(enalbe_gtm_xlog_debug)
         elog(LOG,"read xlog file %s with bytes %d",path,buff->total_length);
 
-    return true;
+    return Send_OK;
 }
 
-static bool
+static int
 ReadXLogFileToBuff(GTM_XLogSegmentBuff *buff,TimeLineID timeline,XLogSegNo segment_no)
 {
     char path[MAXFNAMELEN];
@@ -881,7 +881,8 @@ ReadXLogFileToBuff(GTM_XLogSegmentBuff *buff,TimeLineID timeline,XLogSegNo segme
     if(access(path,F_OK) < 0)
     {
         elog(LOG,"xlog file %s not found ,that is not support to happen.",path);
-        return false;
+        /* need to tell the standby that the required xlog is not available */
+        return Send_XlogFile_Not_Found;
     }
 
     if(enalbe_gtm_xlog_debug)
@@ -986,6 +987,7 @@ GetXLogFileSize(TimeLineID timeline,XLogSegNo segment_no)
 static int
 SendXLogDataFromFileBuff(GTM_StandbyReplication *replication,StringInfo message_buff)
 {
+    int ret = Send_OK;
     GTM_XLogSegmentBuff *local_buff      = &replication->xlog_read_buff;
     XLogSegNo            request_segment = GetSegmentNo(replication->send_ptr);
 
@@ -998,8 +1000,9 @@ SendXLogDataFromFileBuff(GTM_StandbyReplication *replication,StringInfo message_
         return Send_Data_Not_Found;
     }
 
-    if(ReadXLogFileToBuff(local_buff,replication->time_line,request_segment) == false)
-        return Send_Error;
+    ret = ReadXLogFileToBuff(local_buff,replication->time_line,request_segment);
+    if(ret != Send_OK)
+        return ret;
 
     SendXLogDataFromFileBuffInternal(replication,message_buff);
 
@@ -1070,10 +1073,10 @@ SendXLogContext(GTM_StandbyReplication *replication,Port *port)
     int bytes;
     StringInfoData out_message;
 
-    initStringInfo(&out_message);
-
     pq_beginmessage(&out_message, 'S');
     pq_sendint(&out_message, MSG_REPLICATION_CONTENT, 4);
+    /* send the processing result status to the standby */
+    pq_sendint(&out_message, Send_OK, sizeof(int));
     pq_sendint64(&out_message, GetReplicationSendRequestPtr(replication));
 
     /* request send reply */
@@ -1081,13 +1084,27 @@ SendXLogContext(GTM_StandbyReplication *replication,Port *port)
 
     bytes = SendXLogData(replication,&out_message);
 
-    if(bytes == Send_Error)
+    if (bytes == Send_XlogFile_Not_Found)
+    {
+        pfree(out_message.data);
+        out_message.data = NULL;
+        pq_beginmessage(&out_message, 'S');
+        pq_sendint(&out_message, MSG_REPLICATION_CONTENT, 4);
+        /* send the processing result status to the standby */
+        pq_sendint(&out_message, Send_XlogFile_Not_Found, sizeof(int));
+    }
+    else if(bytes == Send_Error)
         goto send_fail;
 
     pq_endmessage(port,&out_message);
 
     if(pq_flush(port))
         goto send_fail;
+
+    if (bytes == Send_XlogFile_Not_Found)
+    {
+        return false;
+    }
 
     return true;
 

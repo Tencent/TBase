@@ -75,7 +75,8 @@ typedef union GTM_ResultData
     	char*                  xlog_data;
     	int                    reply;
     	XLogRecPtr             flush;
-	} grd_xlog_data;
+        int                    status;
+    } grd_xlog_data;
 	
 #endif
 
