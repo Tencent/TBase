@@ -116,6 +116,8 @@ typedef struct
 	HASHELEMENT *curEntry;		/* current entry in bucket */
 } HASH_SEQ_STATUS;
 
+extern bool enable_hash_table_trace;
+
 /*
  * prototypes for functions in dynahash.c
  */

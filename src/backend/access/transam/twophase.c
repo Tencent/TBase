@@ -157,6 +157,7 @@ bool enable_2pc_file_cache = true;
 bool enable_2pc_file_check = true;
 bool enable_2pc_entry_key_check = true;
 bool enable_2pc_entry_trace = false;
+bool enable_2pc_hash_table_check = true;
 
 int record_2pc_cache_size = 4096;
 int record_2pc_entry_size = 2048;
@@ -168,7 +169,8 @@ int record_2pc_partitions = 32;
 #define MAX_2PC_INFO_SIZE   (record_2pc_entry_size - MAX_TID_SIZE)
 #define DFLT_2PC_INFO_SIZE  1024  /* default size */
 
-#define MAX_RETRY_TIMES     10
+#define HASH_TAB_RETRY_MAX   10
+#define HASH_TAB_RETRY_SLEEP 2000 /* sleep time: 2ms */
 
 /* hash table entry for 2pc record */
 typedef struct Cache2pcInfo
@@ -2463,10 +2465,15 @@ CheckPointTwoPhase(XLogRecPtr redo_horizon)
 			Assert(NULL != entry);
 			check_2pc_file(entry->key, entry->info, func);
 
-			elog(LOG, "[%s] key %s is found in hash table", func, entry->key);
+			elog(LOG, "[%s] %s is found in hash table seq", func, entry->key);
 
 			if (IsXidImplicit(entry->key))
 			{
+				if (0 == strlen(entry->info))
+				{
+					elog(WARNING, "[%s] %s info length is 0", func, entry->key);
+					continue;
+				}
 				memset(info, 0, MAX_2PC_INFO_SIZE);
 				memcpy(info, entry->info, strlen(entry->info));
 
@@ -2482,12 +2489,10 @@ CheckPointTwoPhase(XLogRecPtr redo_horizon)
 							func, entry->key, PGXCNodeName);
 						continue;
 					}
-					else
-					{
+
 						elog(LOG, "[%s] %s start node is %s",
 							func, entry->key, PGXCNodeName);
 					}
-				}
 				else
 				{
 					elog(WARNING, "[%s] %s get start node failed, info: %s",
@@ -3565,6 +3570,8 @@ void record_2pc_involved_nodes_xid(const char * tid,
     XLogRecPtr xlogrec = 0;
 #endif
         
+	enable_hash_table_trace = false;
+
     if (!enable_2pc_recovery_info)
     {
         return ;
@@ -3711,17 +3718,63 @@ void record_2pc_involved_nodes_xid(const char * tid,
 				}
 				else
 				{
-					elog(LOG, "[%s] %s is found in hash table", func, tid);
+					elog(LOG, "[%s] %s is added to hash table, entry: %p, "
+						"record_2pc_cache: %p, hashvalue: %u", func, tid, entry,
+						record_2pc_cache, string_hash(tid, MAX_TID_SIZE));
 				}
 			}
-			else if (enable_2pc_entry_trace)
+			else if (enable_2pc_entry_trace || enable_2pc_hash_table_check)
 			{
-				elog(LOG, "[%s] %s is added to hash table, entry: %p",
-					func, tid, entry);
+				elog(LOG, "[%s] %s is added to hash table, entry: %p, "
+					"record_2pc_cache: %p, hashvalue: %u", func, tid, entry,
+					record_2pc_cache, string_hash(tid, MAX_TID_SIZE));
 			}
 
 			memcpy(entry->info, content.data, size + 1);
 			check_entry_key(tid, entry->key, func);
+
+			if (enable_2pc_hash_table_check)
+			{
+				int retry_times = 0;
+				Cache2pcInfo *entry_debug = NULL;
+
+				GET_2PC_FILE_PATH(path, tid);
+
+				while (retry_times++ < HASH_TAB_RETRY_MAX)
+				{
+					entry_debug = (Cache2pcInfo *)hash_search(record_2pc_cache,
+						tid, HASH_FIND, &found);
+					if (found)
+					{
+						Assert(NULL != entry_debug);
+						check_entry_key(tid, entry_debug->key, func);
+						break;
+					}
+
+					/* not found */
+					elog(LOG, "[%s] %s is not found in hash table, retry times: %d",
+						func, tid, retry_times);
+
+					Assert(NULL == entry_debug);
+
+					if (0 == access(path, F_OK))
+					{
+						elog(LOG, "[%s] %s found 2pc file %s", func, tid, path);
+						break;
+					}
+
+					print_record_2pc_cache(func);
+					pg_usleep(HASH_TAB_RETRY_SLEEP);
+					enable_hash_table_trace = true;
+				}
+
+				enable_hash_table_trace = false;
+
+				if (retry_times >= HASH_TAB_RETRY_MAX)
+				{
+					elog(PANIC, "[%s] %s is not found in hash table", func, tid);
+				}
+			}
 
 			resetStringInfo(&content);
 			pfree(content.data);
@@ -3833,7 +3886,7 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 
 	GET_2PC_FILE_PATH(path, tid);
 
-	while (NULL != record_2pc_cache && retry_times++ < MAX_RETRY_TIMES)
+	while (NULL != record_2pc_cache && retry_times++ < HASH_TAB_RETRY_MAX)
 	{
 		Assert(strlen(tid) < MAX_TID_SIZE);
 		entry = (Cache2pcInfo *)hash_search(record_2pc_cache, tid, HASH_FIND, &found);
@@ -3884,7 +3937,7 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 			}
 			if (fd < 0)
 			{
-				elog(ERROR, "[%s] could not append timestamp in file %s, errMsg: %s",
+				elog(ERROR, "[%s] could not append timestamp, file %s, errMsg: %s",
 					func, path, strerror(errno));
 					}
 
@@ -3931,16 +3984,20 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 			func, tid, retry_times);
 
 		Assert(NULL == entry);
-		print_record_2pc_cache(func);
-
 		if (0 == access(path, F_OK))
 		{
 			elog(LOG, "[%s] %s found 2pc file %s", func, tid, path);
 			break;
 		}
 
-		pg_usleep(5000L);	/* sleep 5ms */
+		print_record_2pc_cache(func);
+
+		pg_usleep(HASH_TAB_RETRY_SLEEP);
+
+		enable_hash_table_trace = true;
 		}
+
+	enable_hash_table_trace = false;
 
 	if (NULL != record_2pc_cache)
 	{

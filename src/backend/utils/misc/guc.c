@@ -2726,6 +2726,15 @@ static struct config_bool ConfigureNamesBool[] =
 		false,
 		NULL, NULL, NULL
 	},
+	{
+		{"enable_2pc_hash_table_check", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("Enable 2PC hash table check."),
+			NULL
+		},
+		&enable_2pc_hash_table_check,
+		false,
+		NULL, NULL, NULL
+	},
 #endif
 
 #ifdef __TBASE__
