@@ -76,6 +76,7 @@ select name, setting from pg_settings where name like 'enable%';
  enable_2pc_entry_trace            | off
  enable_2pc_file_cache             | on
  enable_2pc_file_check             | on
+ enable_2pc_hash_table_check       | off
  enable_2pc_recovery_info          | on
  enable_audit                      | off
  enable_audit_warning              | off
@@ -141,7 +142,7 @@ select name, setting from pg_settings where name like 'enable%';
  enable_transparent_crypt          | on
  enable_user_authority_force_check | off
  enable_xlog_mprotect              | on
-(68 rows)
+(69 rows)
 
 -- Test that the pg_timezone_names and pg_timezone_abbrevs views are
 -- more-or-less working.  We can't test their contents in any great detail
