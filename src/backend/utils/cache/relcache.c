@@ -637,6 +637,7 @@ RelationBuildTupleDesc(Relation relation)
             attrdef[ndef].adnum = attnum;
             attrdef[ndef].adbin = NULL;
             ndef++;
+		}
 
 #ifdef _MLS_
             /* Likewise for a missing value */
@@ -693,7 +694,6 @@ RelationBuildTupleDesc(Relation relation)
                 }
             }
 #endif
-        }
         need--;
         if (need == 0)
             break;
