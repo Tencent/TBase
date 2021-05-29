@@ -1911,13 +1911,19 @@ ExecEndPlan(PlanState *planstate, EState *estate)
  * in different datanodes.
  */
 static void
-RewriteForSql(RemoteQuery *plan, Query *query,
+RewriteForSql(RemoteQueryState *planstate, RemoteQuery *plan,
 			  char *distribcol, bool isreplic)
 {
+	Query			*query = copyObject(plan->forDeparse);
 	ListCell		*lc_deparse = NULL;
 	TargetEntry		*entry_deparse = NULL;
 	bool			find_target = false;
 	StringInfoData	buf;
+	bool			isnull;
+	Datum			partvalue;
+	ExprState		*estate = NULL;
+
+	plan->exec_nodes->rewrite_done = false;
 
 	foreach(lc_deparse, query->targetList)
 	{
@@ -1932,7 +1938,21 @@ RewriteForSql(RemoteQuery *plan, Query *query,
 		{
 			entry_deparse->expr = (Expr *)replace_distribkey_func(
 									(Node *)entry_deparse->expr);
-			plan->exec_nodes->en_expr = entry_deparse->expr;
+
+			/*
+			 * Get expr value here to avoid executing function again
+			 * in get_exec_connections.
+			 */
+			estate = ExecInitExpr(entry_deparse->expr,
+											 (PlanState *) planstate);
+			if (planstate->eflags != EXEC_FLAG_EXPLAIN_ONLY)
+				partvalue = ExecEvalExpr(estate,
+										 planstate->combiner.ss.ps.ps_ExprContext,
+										 &isnull);
+
+			plan->exec_nodes->rewrite_value = partvalue;
+			plan->exec_nodes->isnull = isnull;
+			plan->exec_nodes->rewrite_done = true;
 			find_target = true;
 			break;
 		}
@@ -1961,9 +1981,9 @@ RewriteFuncNode(PlanState *planstate)
 {
 	RemoteQuery		*plan = (RemoteQuery *)planstate->plan;
 	ExecNodes		*exec_nodes = plan->exec_nodes;
-	Query			*query = copyObject(plan->forDeparse);
 	RelationLocInfo	*rel_loc_info = NULL;
 	char			*distribcol = NULL;
+	RemoteQueryState *node = castNode(RemoteQueryState, planstate);
 
 	if ((!exec_nodes) || (!exec_nodes->need_rewrite))
 		return;
@@ -1974,7 +1994,7 @@ RewriteFuncNode(PlanState *planstate)
 	 */
 	if (IsExecNodesReplicated(exec_nodes))
 	{
-		RewriteForSql(plan, query, NULL, true);
+		RewriteForSql(node, plan, NULL, true);
 		return;
 	}
 
@@ -1986,7 +2006,7 @@ RewriteFuncNode(PlanState *planstate)
 		return;
 
 	distribcol = GetRelationDistribColumn(rel_loc_info);
-	RewriteForSql(plan, query, distribcol, false);
+	RewriteForSql(node, plan, distribcol, false);
 }
 
 /* ----------------------------------------------------------------

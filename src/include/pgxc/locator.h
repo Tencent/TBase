@@ -114,6 +114,9 @@ typedef struct
 	bool		const_subquery; 	/* The subquery rte only got constant values */
 #endif
 	bool		need_rewrite;		/* exists func, need to be rewritted when execute plan */
+	Datum		rewrite_value;	/* function evaluate result */
+	bool		isnull;
+	bool		rewrite_done;		/* function rewritted */
 } ExecNodes;
 
 

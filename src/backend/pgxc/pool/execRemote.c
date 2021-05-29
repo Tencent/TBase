@@ -6288,18 +6288,29 @@ get_exec_connections(RemoteQueryState *planstate,
             bool isnull;
             ExecNodes *nodes;
 			Datum partvalue;
+			ExprState *estate;
 #ifdef __COLD_HOT__
             bool secisnull;
             Datum secValue;
 #endif
-            ExprState *estate = ExecInitExpr(exec_nodes->en_expr,
+			RelationLocInfo *rel_loc_info;
+			if (exec_nodes->rewrite_done)
+			{
+				partvalue = exec_nodes->rewrite_value;
+				isnull = exec_nodes->isnull;
+			}
+			else
+			{
+				estate = ExecInitExpr(exec_nodes->en_expr,
                                              (PlanState *) planstate);
 			/* For explain, no need to execute expr. */
 			if (planstate->eflags != EXEC_FLAG_EXPLAIN_ONLY)
 				partvalue = ExecEvalExpr(estate,
                                            planstate->combiner.ss.ps.ps_ExprContext,
                                            &isnull);
-            RelationLocInfo *rel_loc_info = GetRelationLocInfo(exec_nodes->en_relid);
+			}
+			
+			rel_loc_info = GetRelationLocInfo(exec_nodes->en_relid);
 
 #ifdef __COLD_HOT__
             if (exec_nodes->sec_en_expr)

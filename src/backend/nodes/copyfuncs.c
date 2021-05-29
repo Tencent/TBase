@@ -1363,6 +1363,9 @@ _copyExecNodes(const ExecNodes *from)
     COPY_SCALAR_FIELD(en_relid);
     COPY_SCALAR_FIELD(accesstype);
 	COPY_SCALAR_FIELD(need_rewrite);
+	COPY_SCALAR_FIELD(rewrite_value);
+	COPY_SCALAR_FIELD(isnull);
+	COPY_SCALAR_FIELD(rewrite_done);
 
     return newnode;
 }
