@@ -115,8 +115,6 @@
 /* Number of freelists to be used for a partitioned hash table. */
 #define NUM_FREELISTS            32
 
-bool enable_hash_table_trace = false;
-
 /* A hash bucket is a linked list of HASHELEMENTs */
 typedef HASHELEMENT *HASHBUCKET;
 
@@ -928,14 +926,8 @@ hash_search_with_hash_value(HTAB *hashp,
     long        segment_ndx;
     HASHSEGMENT segp;
     HASHBUCKET    currBucket;
-	HASHBUCKET *firstBucketPtr;
     HASHBUCKET *prevBucketPtr;
-	HASHBUCKET *prevBucketPtrCheck;
     HashCompareFunc match;
-
-	char *func = "hash_search_with_hash_value";
-	bool is_trace = (enable_hash_table_trace &&
-					0 == strcmp(hashp->tabname, "Record 2pc Cache"));
 
 #if HASH_STATISTICS
     hash_accesses++;
@@ -973,26 +965,11 @@ hash_search_with_hash_value(HTAB *hashp,
 
     segp = hashp->dir[segment_num];
 
-	if (is_trace)
-	{
-		elog(LOG, "[%s] %s hashvalue: %u, freelist_idx: %d, IS_PARTITIONED: %d, "
-			"bucket: %u, segment_num: %ld, segment_ndx %ld, segp: %p",
-			func, (char *)keyPtr, hashvalue, freelist_idx, IS_PARTITIONED(hctl),
-			bucket, segment_num, segment_ndx, segp);
-	}
-
     if (segp == NULL)
         hash_corrupted(hashp);
 
-	firstBucketPtr = &segp[segment_ndx];
-	prevBucketPtr = firstBucketPtr;
+	prevBucketPtr = &segp[segment_ndx];
     currBucket = *prevBucketPtr;
-
-	if (is_trace)
-	{
-		elog(LOG, "[%s] %s prevBucketPtr: %p, currBucket: %p",
-			func, (char *)keyPtr, prevBucketPtr, currBucket);
-	}
 
     /*
      * Follow collision chain looking for matching key
@@ -1002,19 +979,9 @@ hash_search_with_hash_value(HTAB *hashp,
 
     while (currBucket != NULL)
     {
-		if (is_trace)
-		{
-			elog(LOG, "[%s] %s currBucket: %p", func, (char *)keyPtr, currBucket);
-		}
         if (currBucket->hashvalue == hashvalue &&
             match(ELEMENTKEY(currBucket), keyPtr, keysize) == 0)
-		{
-			if (is_trace)
-			{
-				elog(LOG, "[%s] %s break currBucket: %p", func, (char *)keyPtr, currBucket);
-			}
             break;
-		}
         prevBucketPtr = &(currBucket->link);
         currBucket = *prevBucketPtr;
 #if HASH_STATISTICS
@@ -1098,30 +1065,9 @@ hash_search_with_hash_value(HTAB *hashp,
                              errmsg("out of memory")));
             }
 
-			prevBucketPtrCheck  = prevBucketPtr;
-
-			/* if partitioned, must lock freeList */
-			if (IS_PARTITIONED(hctl))
-				SpinLockAcquire(&(hctl->freeList[freelist_idx].mutex));
-
-			prevBucketPtr = firstBucketPtr;
-			while (*prevBucketPtr != NULL)
-			{
-				prevBucketPtr = &((*prevBucketPtr)->link);
-			}
-
-			if (prevBucketPtr != prevBucketPtrCheck)
-			{
-				elog(LOG, "[%s] prevBucketPtr(%p) != prevBucketPtrCheck(%p)",
-					func, prevBucketPtr, prevBucketPtrCheck);
-			}
-
             /* link into hashbucket chain */
             *prevBucketPtr = currBucket;
             currBucket->link = NULL;
-
-			if (IS_PARTITIONED(hctl))
-				SpinLockRelease(&hctl->freeList[freelist_idx].mutex);
 
             /* copy key into record */
             currBucket->hashvalue = hashvalue;
