@@ -3570,8 +3570,6 @@ void record_2pc_involved_nodes_xid(const char * tid,
     XLogRecPtr xlogrec = 0;
 #endif
         
-	enable_hash_table_trace = false;
-
     if (!enable_2pc_recovery_info)
     {
         return ;
@@ -3765,10 +3763,7 @@ void record_2pc_involved_nodes_xid(const char * tid,
 
 					print_record_2pc_cache(func);
 					pg_usleep(HASH_TAB_RETRY_SLEEP);
-					enable_hash_table_trace = true;
 				}
-
-				enable_hash_table_trace = false;
 
 				if (retry_times >= HASH_TAB_RETRY_MAX)
 				{
@@ -3993,11 +3988,7 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 		print_record_2pc_cache(func);
 
 		pg_usleep(HASH_TAB_RETRY_SLEEP);
-
-		enable_hash_table_trace = true;
 		}
-
-	enable_hash_table_trace = false;
 
 	if (NULL != record_2pc_cache)
 	{
