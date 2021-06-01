@@ -414,14 +414,70 @@ CreateTableSpace(CreateTableSpaceStmt *stmt)
 #endif                            /* HAVE_SYMLINK */
 }
 
+#ifdef __TBASE__
+bool
+PreCheckforDropTableSpace(DropTableSpaceStmt *stmt)
+{
+#ifdef HAVE_SYMLINK
+	char	   *tablespacename = stmt->tablespacename;
+	HeapScanDesc scandesc;
+	Relation	rel;
+	HeapTuple	tuple;
+	ScanKeyData entry[1];
+
+	/*
+	 * Find the target tuple
+	 */
+	rel = heap_open(TableSpaceRelationId, RowExclusiveLock);
+
+	ScanKeyInit(&entry[0],
+				Anum_pg_tablespace_spcname,
+				BTEqualStrategyNumber, F_NAMEEQ,
+				CStringGetDatum(tablespacename));
+	scandesc = heap_beginscan_catalog(rel, 1, entry);
+	tuple = heap_getnext(scandesc, ForwardScanDirection);
+
+	if (!HeapTupleIsValid(tuple))
+	{
+		if (!stmt->missing_ok)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_UNDEFINED_OBJECT),
+					 errmsg("tablespace \"%s\" does not exist",
+							tablespacename)));
+		}
+		else
+		{
+			ereport(NOTICE,
+					(errmsg("tablespace \"%s\" does not exist, skipping",
+							tablespacename)));
+			/* XXX I assume I need one or both of these next two calls */
+			heap_endscan(scandesc);
+			heap_close(rel, RowExclusiveLock);
+		}
+		return false;
+	}
+
+	heap_endscan(scandesc);
+	heap_close(rel, RowExclusiveLock);
+
+#else							/* !HAVE_SYMLINK */
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("tablespaces are not supported on this platform")));
+#endif
+	return true;
+}
+#endif
+
 /*
  * Drop a table space
  *
  * Be careful to check that the tablespace is empty.
  */
-void
-DropTableSpace(DropTableSpaceStmt *stmt)
-{// #lizard forgives
+bool
+DropTableSpace(DropTableSpaceStmt *stmt, bool missing_ok)
+{
 #ifdef HAVE_SYMLINK
     char       *tablespacename = stmt->tablespacename;
     HeapScanDesc scandesc;
@@ -444,7 +500,7 @@ DropTableSpace(DropTableSpaceStmt *stmt)
 
     if (!HeapTupleIsValid(tuple))
     {
-        if (!stmt->missing_ok)
+		if (!missing_ok)
         {
             ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -460,7 +516,7 @@ DropTableSpace(DropTableSpaceStmt *stmt)
             heap_endscan(scandesc);
             heap_close(rel, NoLock);
         }
-        return;
+		return false;
     }
 
     tablespaceoid = HeapTupleGetOid(tuple);
@@ -573,6 +629,7 @@ DropTableSpace(DropTableSpaceStmt *stmt)
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
              errmsg("tablespaces are not supported on this platform")));
 #endif                            /* HAVE_SYMLINK */
+	return true;
 }
 
 

@@ -1164,6 +1164,33 @@ get_object_address(ObjectType objtype, Node *object,
     return address;
 }
 
+#ifdef __TBASE__
+char *GetRemoveObjectName(ObjectType objtype, Node *object)
+{
+	switch (objtype)
+	{
+		case OBJECT_SCHEMA:
+			{
+				Value *strVal = (Value *)object;
+				return strVal(strVal);
+			}
+		case OBJECT_TYPE:
+			{
+				TypeName *typename = castNode(TypeName, object);
+				return TypeNameToString(typename);
+			}
+		case OBJECT_FUNCTION:
+			{
+				ObjectWithArgs *func = castNode(ObjectWithArgs, object);
+				return NameListToString(func->objname);
+			}
+		default:
+			break;
+	}
+	return NULL;
+}
+#endif
+
 /*
  * Return an ObjectAddress based on a RangeVar and an object name. The
  * name of the relation identified by the RangeVar is prepended to the

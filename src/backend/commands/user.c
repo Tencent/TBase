@@ -1073,194 +1073,323 @@ AlterRoleSet(AlterRoleSetStmt *stmt)
 }
 
 
-/*
- * DROP ROLE
- */
-void
-DropRole(DropRoleStmt *stmt)
-{// #lizard forgives
-    Relation    pg_authid_rel,
-                pg_auth_members_rel;
-    ListCell   *item;
+void DropRoleByTuple(char *role, HeapTuple tuple, Relation pg_authid_rel,
+					Relation pg_auth_members_rel)
+{
+    HeapTuple	tmp_tuple;
+    ScanKeyData scankey;
+    char       *detail;
+    char       *detail_log;
+    SysScanDesc sscan;
+    Oid            roleid;
 
-    if (!have_createrole_privilege())
+    roleid = HeapTupleGetOid(tuple);
+
+    if (roleid == GetUserId())
         ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                 errmsg("permission denied to drop role")));
+                (errcode(ERRCODE_OBJECT_IN_USE),
+                    errmsg("current user cannot be dropped")));
+    if (roleid == GetOuterUserId())
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_IN_USE),
+                    errmsg("current user cannot be dropped")));
+    if (roleid == GetSessionUserId())
+        ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_IN_USE),
+                    errmsg("session user cannot be dropped")));
 
     /*
-     * Scan the pg_authid relation to find the Oid of the role(s) to be
-     * deleted.
-     */
-    pg_authid_rel = heap_open(AuthIdRelationId, RowExclusiveLock);
-    pg_auth_members_rel = heap_open(AuthMemRelationId, RowExclusiveLock);
+    * For safety's sake, we allow createrole holders to drop ordinary
+    * roles but not superuser roles.  This is mainly to avoid the
+    * scenario where you accidentally drop the last superuser.
+    */
+    if (((Form_pg_authid) GETSTRUCT(tuple))->rolsuper &&
+        !superuser())
+        ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    errmsg("must be superuser to drop superusers")));
 
-    foreach(item, stmt->roles)
-    {
-        RoleSpec   *rolspec = lfirst(item);
-        char       *role;
-        HeapTuple    tuple,
-                    tmp_tuple;
-        ScanKeyData scankey;
-        char       *detail;
-        char       *detail_log;
-        SysScanDesc sscan;
-        Oid            roleid;
+    /* DROP hook for the role being removed */
+    InvokeObjectDropHook(AuthIdRelationId, roleid, 0);
 
-        if (rolspec->roletype != ROLESPEC_CSTRING)
-            ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                     errmsg("cannot use special role specifier in DROP ROLE")));
-        role = rolspec->rolename;
+    /*
+    * Lock the role, so nobody can add dependencies to her while we drop
+    * her.  We keep the lock until the end of transaction.
+    */
+    LockSharedObject(AuthIdRelationId, roleid, 0, AccessExclusiveLock);
 
-        tuple = SearchSysCache1(AUTHNAME, PointerGetDatum(role));
-        if (!HeapTupleIsValid(tuple))
-        {
-            if (!stmt->missing_ok)
-            {
-                ereport(ERROR,
-                        (errcode(ERRCODE_UNDEFINED_OBJECT),
-                         errmsg("role \"%s\" does not exist", role)));
-            }
-            else
-            {
-                ereport(NOTICE,
-                        (errmsg("role \"%s\" does not exist, skipping",
-                                role)));
-            }
-
-            continue;
-        }
-
-        roleid = HeapTupleGetOid(tuple);
-
-        if (roleid == GetUserId())
-            ereport(ERROR,
-                    (errcode(ERRCODE_OBJECT_IN_USE),
-                     errmsg("current user cannot be dropped")));
-        if (roleid == GetOuterUserId())
-            ereport(ERROR,
-                    (errcode(ERRCODE_OBJECT_IN_USE),
-                     errmsg("current user cannot be dropped")));
-        if (roleid == GetSessionUserId())
-            ereport(ERROR,
-                    (errcode(ERRCODE_OBJECT_IN_USE),
-                     errmsg("session user cannot be dropped")));
-
-        /*
-         * For safety's sake, we allow createrole holders to drop ordinary
-         * roles but not superuser roles.  This is mainly to avoid the
-         * scenario where you accidentally drop the last superuser.
-         */
-        if (((Form_pg_authid) GETSTRUCT(tuple))->rolsuper &&
-            !superuser())
-            ereport(ERROR,
-                    (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                     errmsg("must be superuser to drop superusers")));
-
-        /* DROP hook for the role being removed */
-        InvokeObjectDropHook(AuthIdRelationId, roleid, 0);
-
-        /*
-         * Lock the role, so nobody can add dependencies to her while we drop
-         * her.  We keep the lock until the end of transaction.
-         */
-        LockSharedObject(AuthIdRelationId, roleid, 0, AccessExclusiveLock);
-
-        /* Check for pg_shdepend entries depending on this role */
-        if (checkSharedDependencies(AuthIdRelationId, roleid,
-                                    &detail, &detail_log))
-            ereport(ERROR,
-                    (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
-                     errmsg("role \"%s\" cannot be dropped because some objects depend on it",
-                            role),
-                     errdetail_internal("%s", detail),
-                     errdetail_log("%s", detail_log)));
+    /* Check for pg_shdepend entries depending on this role */
+    if (checkSharedDependencies(AuthIdRelationId, roleid,
+                                &detail, &detail_log))
+        ereport(ERROR,
+                (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
+                    errmsg("role \"%s\" cannot be dropped because some objects depend on it",
+                        role),
+                    errdetail_internal("%s", detail),
+                    errdetail_log("%s", detail_log)));
 
 #ifdef _MLS_
-        if (true == mls_check_role_permission(roleid) ||
-                true == cls_check_user_has_policy(roleid))
-        {
-            elog(ERROR, "could not drop role:%s, cause this role has mls poilcy bound", 
-                            role);
-        }
-#endif
-        /*
-         * Remove the role from the pg_authid table
-         */
-        CatalogTupleDelete(pg_authid_rel, &tuple->t_self);
-
-        ReleaseSysCache(tuple);
-
-        /*
-         * Remove role from the pg_auth_members table.  We have to remove all
-         * tuples that show it as either a role or a member.
-         *
-         * XXX what about grantor entries?    Maybe we should do one heap scan.
-         */
-        ScanKeyInit(&scankey,
-                    Anum_pg_auth_members_roleid,
-                    BTEqualStrategyNumber, F_OIDEQ,
-                    ObjectIdGetDatum(roleid));
-
-        sscan = systable_beginscan(pg_auth_members_rel, AuthMemRoleMemIndexId,
-                                   true, NULL, 1, &scankey);
-
-        while (HeapTupleIsValid(tmp_tuple = systable_getnext(sscan)))
-        {
-            CatalogTupleDelete(pg_auth_members_rel, &tmp_tuple->t_self);
-        }
-
-        systable_endscan(sscan);
-
-        ScanKeyInit(&scankey,
-                    Anum_pg_auth_members_member,
-                    BTEqualStrategyNumber, F_OIDEQ,
-                    ObjectIdGetDatum(roleid));
-
-        sscan = systable_beginscan(pg_auth_members_rel, AuthMemMemRoleIndexId,
-                                   true, NULL, 1, &scankey);
-
-        while (HeapTupleIsValid(tmp_tuple = systable_getnext(sscan)))
-        {
-            CatalogTupleDelete(pg_auth_members_rel, &tmp_tuple->t_self);
-        }
-
-        systable_endscan(sscan);
-
-        /*
-         * Remove any comments or security labels on this role.
-         */
-        DeleteSharedComments(roleid, AuthIdRelationId);
-        DeleteSharedSecurityLabel(roleid, AuthIdRelationId);
-
-        /*
-         * Remove settings for this role.
-         */
-        DropSetting(InvalidOid, roleid);
-
-        /*
-         * Advance command counter so that later iterations of this loop will
-         * see the changes already made.  This is essential if, for example,
-         * we are trying to drop both a role and one of its direct members ---
-         * we'll get an error if we try to delete the linking pg_auth_members
-         * tuple twice.  (We do not need a CCI between the two delete loops
-         * above, because it's not allowed for a role to directly contain
-         * itself.)
-         */
-        CommandCounterIncrement();
-
-        if (POOL_CONN_RELEASE_SUCCESS != PoolManagerClosePooledConnections(NULL, role))
-        {
-            elog(ERROR, "failed to close pooled connection for role:%s", role);
-        }
+    if (true == mls_check_role_permission(roleid) ||
+            true == cls_check_user_has_policy(roleid))
+    {
+        elog(ERROR, "could not drop role:%s, cause this role has mls poilcy bound", 
+                        role);
     }
+#endif
+    /*
+    * Remove the role from the pg_authid table
+    */
+    CatalogTupleDelete(pg_authid_rel, &tuple->t_self);
+
+    ReleaseSysCache(tuple);
+
+    /*
+    * Remove role from the pg_auth_members table.  We have to remove all
+    * tuples that show it as either a role or a member.
+    *
+    * XXX what about grantor entries?    Maybe we should do one heap scan.
+    */
+    ScanKeyInit(&scankey,
+                Anum_pg_auth_members_roleid,
+                BTEqualStrategyNumber, F_OIDEQ,
+                ObjectIdGetDatum(roleid));
+
+    sscan = systable_beginscan(pg_auth_members_rel, AuthMemRoleMemIndexId,
+                                true, NULL, 1, &scankey);
+
+    while (HeapTupleIsValid(tmp_tuple = systable_getnext(sscan)))
+    {
+        CatalogTupleDelete(pg_auth_members_rel, &tmp_tuple->t_self);
+    }
+
+    systable_endscan(sscan);
+
+    ScanKeyInit(&scankey,
+                Anum_pg_auth_members_member,
+                BTEqualStrategyNumber, F_OIDEQ,
+                ObjectIdGetDatum(roleid));
+
+    sscan = systable_beginscan(pg_auth_members_rel, AuthMemMemRoleIndexId,
+                                true, NULL, 1, &scankey);
+
+    while (HeapTupleIsValid(tmp_tuple = systable_getnext(sscan)))
+    {
+        CatalogTupleDelete(pg_auth_members_rel, &tmp_tuple->t_self);
+    }
+
+    systable_endscan(sscan);
+
+    /*
+    * Remove any comments or security labels on this role.
+    */
+    DeleteSharedComments(roleid, AuthIdRelationId);
+    DeleteSharedSecurityLabel(roleid, AuthIdRelationId);
+
+    /*
+    * Remove settings for this role.
+    */
+    DropSetting(InvalidOid, roleid);
+
+    /*
+    * Advance command counter so that later iterations of this loop will
+    * see the changes already made.  This is essential if, for example,
+    * we are trying to drop both a role and one of its direct members ---
+    * we'll get an error if we try to delete the linking pg_auth_members
+    * tuple twice.  (We do not need a CCI between the two delete loops
+    * above, because it's not allowed for a role to directly contain
+    * itself.)
+    */
+    CommandCounterIncrement();
+
+    if (POOL_CONN_RELEASE_SUCCESS != PoolManagerClosePooledConnections(NULL, role))
+    {
+        elog(ERROR, "failed to close pooled connection for role:%s", role);
+    }
+}
+
+#ifdef __TBASE__
+bool PreCheckDropRole(DropRoleStmt *stmt, char *query_string,
+						List **exist_roles)
+{
+	Relation	pg_authid_rel,
+				pg_auth_members_rel;
+	ListCell   *item;
+	bool		need_drop = false;
+	bool        querystring_omit = false;
+
+	if (!have_createrole_privilege())
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+				 errmsg("permission denied to drop role")));
+
+	pg_authid_rel = heap_open(AuthIdRelationId, RowExclusiveLock);
+	pg_auth_members_rel = heap_open(AuthMemRelationId, RowExclusiveLock);
+
+	foreach(item, stmt->roles)
+	{
+		RoleSpec   *rolspec = lfirst(item);
+		char	   *role;
+		HeapTuple	tuple;
+
+		if (rolspec->roletype != ROLESPEC_CSTRING)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("cannot use special role specifier in DROP ROLE")));
+		role = rolspec->rolename;
+
+		tuple = SearchSysCache1(AUTHNAME, PointerGetDatum(role));
+		if (!HeapTupleIsValid(tuple))
+		{
+			if (!stmt->missing_ok)
+			{
+				ereport(ERROR,
+						(errcode(ERRCODE_UNDEFINED_OBJECT),
+						 errmsg("role \"%s\" does not exist", role)));
+			}
+			else
+			{
+				ereport(NOTICE,
+						(errmsg("role \"%s\" does not exist, skipping",
+								role)));
+			}
+
+			if (query_string)
+			{
+				if (!querystring_omit)
+				{
+					OmitqueryStringSpace(query_string);
+					querystring_omit = true;
+				}
+				RemoveObjnameInQueryString(query_string, role);
+			}
+
+			continue;
+		}
+		ReleaseSysCache(tuple);
+		*exist_roles = lappend(*exist_roles, role);
+		need_drop = true;
+	}
+	heap_close(pg_auth_members_rel, RowExclusiveLock);
+	heap_close(pg_authid_rel, RowExclusiveLock);
+	return need_drop;
+}
+
+void DropRoleParallelMode(List *role_list)
+{
+	Relation	pg_authid_rel,
+				pg_auth_members_rel;
+	ListCell   *item;
+
+	/*
+	 * Scan the pg_authid relation to find the Oid of the role(s) to be
+	 * deleted.
+	 */
+	pg_authid_rel = heap_open(AuthIdRelationId, RowExclusiveLock);
+	pg_auth_members_rel = heap_open(AuthMemRelationId, RowExclusiveLock);
+
+	foreach(item, role_list)
+	{
+		char	   *role;
+		HeapTuple	tuple;
+
+		role = lfirst(item);
+		/* tuple will be release by DropRoleByTuple below */
+		tuple = SearchSysCache1(AUTHNAME, PointerGetDatum(role));
+		if (!HeapTupleIsValid(tuple))
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_UNDEFINED_OBJECT),
+					errmsg("Precheck role \"%s\" existed, but now does not exist", role)));
+		}
+		DropRoleByTuple(role, tuple, pg_authid_rel, pg_auth_members_rel);
+	}
 
     /*
      * Now we can clean up; but keep locks until commit.
      */
     heap_close(pg_auth_members_rel, NoLock);
     heap_close(pg_authid_rel, NoLock);
+}
+
+#endif
+
+/*
+ * DROP ROLE
+ */
+bool
+DropRole(DropRoleStmt *stmt, bool missing_ok, char *query_string)
+{
+	Relation	pg_authid_rel,
+				pg_auth_members_rel;
+	ListCell   *item;
+	bool        querystring_omit = false;
+	bool		need_drop = false;
+
+	if (!have_createrole_privilege())
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+				 errmsg("permission denied to drop role")));
+
+	/*
+	 * Scan the pg_authid relation to find the Oid of the role(s) to be
+	 * deleted.
+	 */
+	pg_authid_rel = heap_open(AuthIdRelationId, RowExclusiveLock);
+	pg_auth_members_rel = heap_open(AuthMemRelationId, RowExclusiveLock);
+
+	foreach(item, stmt->roles)
+	{
+		RoleSpec   *rolspec = lfirst(item);
+		HeapTuple	tuple;
+		char		*role;
+
+		if (rolspec->roletype != ROLESPEC_CSTRING)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("cannot use special role specifier in DROP ROLE")));
+		role = rolspec->rolename;
+
+		tuple = SearchSysCache1(AUTHNAME, PointerGetDatum(role));
+		if (!HeapTupleIsValid(tuple))
+		{
+			if (!missing_ok)
+			{
+				ereport(ERROR,
+						(errcode(ERRCODE_UNDEFINED_OBJECT),
+						 errmsg("role \"%s\" does not exist", role)));
+			}
+			else
+			{
+				ereport(NOTICE,
+						(errmsg("role \"%s\" does not exist, skipping",
+								role)));
+			}
+
+			if (query_string)
+			{
+				if (!querystring_omit)
+				{
+					OmitqueryStringSpace(query_string);
+					querystring_omit = true;
+				}
+				RemoveObjnameInQueryString(query_string, role);
+			}
+
+			continue;
+		}
+
+		DropRoleByTuple(role, tuple, pg_authid_rel, pg_auth_members_rel);
+
+		need_drop = true;
+	}
+
+	/*
+	 * Now we can clean up; but keep locks until commit.
+	 */
+	heap_close(pg_auth_members_rel, NoLock);
+	heap_close(pg_authid_rel, NoLock);
+
+	return need_drop;
 }
 
 /*

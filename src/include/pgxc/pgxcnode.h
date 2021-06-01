@@ -292,12 +292,15 @@ void pgxc_set_coordinator_proc_pid(int proc_pid);
 int pgxc_get_coordinator_proc_pid(void);
 void pgxc_set_coordinator_proc_vxid(TransactionId proc_vxid);
 TransactionId pgxc_get_coordinator_proc_vxid(void);
-inline char* find_ddl_leader_cn(void);
+PGXCNodeHandle* find_ddl_leader_cn(void);
 inline bool  is_ddl_leader_cn(char *leader_cn);
+void CheckInvalidateRemoteHandles(void);
 extern int pgxc_node_send_sessionid(PGXCNodeHandle * handle);
 extern void SerializeSessionId(Size maxsize, char *start_address);
 extern void StartParallelWorkerSessionId(char *address);
 extern bool is_pgxc_handles_init(void);
+void delete_leadercn_handle(PGXCNodeAllHandles *pgxc_connections,
+						PGXCNodeHandle* leader_cn_handle);
 #endif
 
 #ifdef __AUDIT__

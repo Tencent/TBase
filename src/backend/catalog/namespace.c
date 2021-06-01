@@ -385,7 +385,9 @@ RangeVarGetRelidExtended(const RangeVar *relation, LOCKMODE lockmode,
         if (!OidIsValid(relId))
             AcceptInvalidationMessages();
         else if (!nowait)
+		{
             LockRelationOid(relId, lockmode);
+		}
         else if (!ConditionalLockRelationOid(relId, lockmode))
         {
             if (relation->schemaname)

@@ -29,13 +29,15 @@
 #include "utils/syscache.h"
 #ifdef __TBASE__
 #include "utils/rel.h"
+#include "catalog/catalog.h"
+#include "storage/lmgr.h"
 #endif
 #ifdef _MLS_
 #include "utils/mls.h"
 #endif
 
 static void does_not_exist_skipping(ObjectType objtype,
-                        Node *object);
+						Node *object, bool missing_ok);
 static bool owningrel_does_not_exist_skipping(List *object,
                                   const char **msg, char **name);
 static bool schema_does_not_exist_skipping(List *object,
@@ -43,25 +45,19 @@ static bool schema_does_not_exist_skipping(List *object,
 static bool type_in_list_does_not_exist_skipping(List *typenames,
                                      const char **msg, char **name);
 
-
 /*
- * Drop one or more objects.
- *
- * We don't currently handle all object types here.  Relations, for example,
- * require special handling, because (for example) indexes have additional
- * locking requirements.
- *
- * We look up all the objects first, and then delete them in a single
- * performMultipleDeletions() call.  This avoids unnecessary DROP RESTRICT
- * errors if there are dependencies between them.
+ * Check object exists or not before remove.
  */
-void
-RemoveObjects(DropStmt *stmt)
-{// #lizard forgives
+ObjectAddresses* PreCheckforRemoveObjects(DropStmt *stmt, bool missing_ok,
+										bool *need_drop, char *query_string,
+										bool need_unlock)
+{
     ObjectAddresses *objects;
     ListCell   *cell1;
+	bool        querystring_omit = false;
 
     objects = new_object_addresses();
+	*need_drop = false;
 
     foreach(cell1, stmt->objects)
     {
@@ -84,8 +80,23 @@ RemoveObjects(DropStmt *stmt)
          */
         if (!OidIsValid(address.objectId))
         {
+			char *relation_name = NULL;
             Assert(stmt->missing_ok);
-            does_not_exist_skipping(stmt->removeType, object);
+
+			does_not_exist_skipping(stmt->removeType, object, missing_ok);
+
+#ifdef __TBASE__
+			if (query_string)
+			{
+				if (!querystring_omit)
+				{
+					OmitqueryStringSpace(query_string);
+					querystring_omit = true;
+				}
+				relation_name = GetRemoveObjectName(stmt->removeType, object);
+				RemoveObjnameInQueryString(query_string, relation_name);
+			}
+#endif
             continue;
         }
 
@@ -150,9 +161,36 @@ RemoveObjects(DropStmt *stmt)
             }
         }
 #endif
+		*need_drop = true;
+		if (need_unlock)
+		{
+			if (IsSharedRelation(address.classId))
+            	UnlockSharedObject(address.classId, address.objectId, 0, AccessExclusiveLock);
+			else
+				UnlockDatabaseObject(address.classId, address.objectId, 0, AccessExclusiveLock);
+		}
+	}
+	return objects;
+}
 
+/*
+ * Drop one or more objects.
+ *
+ * We don't currently handle all object types here.  Relations, for example,
+ * require special handling, because (for example) indexes have additional
+ * locking requirements.
+ *
+ * We look up all the objects first, and then delete them in a single
+ * performMultipleDeletions() call.  This avoids unnecessary DROP RESTRICT
+ * errors if there are dependencies between them.
+ */
+void
+RemoveObjects(DropStmt *stmt, bool missing_ok, bool *need_drop, char *query_string)
+{
+	ObjectAddresses *objects;
         
-    }
+	objects = PreCheckforRemoveObjects(stmt, missing_ok, need_drop,
+										query_string, false);
 
     /* Here we really delete them. */
     performMultipleDeletions(objects, stmt->behavior, 0);
@@ -276,16 +314,24 @@ type_in_list_does_not_exist_skipping(List *typenames, const char **msg,
  * get_object_address() in RemoveObjects would have thrown an ERROR.
  */
 static void
-does_not_exist_skipping(ObjectType objtype, Node *object)
-{// #lizard forgives
+does_not_exist_skipping(ObjectType objtype, Node *object, bool missing_ok)
+{
     const char *msg = NULL;
     char       *name = NULL;
     char       *args = NULL;
+	char	   *missmsg = "skipping";
+	int			elevel = NOTICE;
+
+	if (!missing_ok)
+	{
+		missmsg = "can not skip in parallel ddl mode";
+		elevel = ERROR;
+	}
 
     switch (objtype)
     {
         case OBJECT_ACCESS_METHOD:
-            msg = gettext_noop("access method \"%s\" does not exist, skipping");
+			msg = gettext_noop("access method \"%s\" does not exist, %s");
             name = strVal((Value *) object);
             break;
         case OBJECT_TYPE:
@@ -295,7 +341,7 @@ does_not_exist_skipping(ObjectType objtype, Node *object)
 
                 if (!schema_does_not_exist_skipping(typ->names, &msg, &name))
                 {
-                    msg = gettext_noop("type \"%s\" does not exist, skipping");
+					msg = gettext_noop("type \"%s\" does not exist, %s");
                     name = TypeNameToString(typ);
                 }
             }
@@ -303,58 +349,58 @@ does_not_exist_skipping(ObjectType objtype, Node *object)
         case OBJECT_COLLATION:
             if (!schema_does_not_exist_skipping(castNode(List, object), &msg, &name))
             {
-                msg = gettext_noop("collation \"%s\" does not exist, skipping");
+				msg = gettext_noop("collation \"%s\" does not exist, %s");
                 name = NameListToString(castNode(List, object));
             }
             break;
         case OBJECT_CONVERSION:
             if (!schema_does_not_exist_skipping(castNode(List, object), &msg, &name))
             {
-                msg = gettext_noop("conversion \"%s\" does not exist, skipping");
+				msg = gettext_noop("conversion \"%s\" does not exist, %s");
                 name = NameListToString(castNode(List, object));
             }
             break;
         case OBJECT_SCHEMA:
-            msg = gettext_noop("schema \"%s\" does not exist, skipping");
+			msg = gettext_noop("schema \"%s\" does not exist, %s");
             name = strVal((Value *) object);
             break;
         case OBJECT_STATISTIC_EXT:
             if (!schema_does_not_exist_skipping(castNode(List, object), &msg, &name))
             {
-                msg = gettext_noop("statistics object \"%s\" does not exist, skipping");
+				msg = gettext_noop("statistics object \"%s\" does not exist, %s");
                 name = NameListToString(castNode(List, object));
             }
             break;
         case OBJECT_TSPARSER:
             if (!schema_does_not_exist_skipping(castNode(List, object), &msg, &name))
             {
-                msg = gettext_noop("text search parser \"%s\" does not exist, skipping");
+				msg = gettext_noop("text search parser \"%s\" does not exist, %s");
                 name = NameListToString(castNode(List, object));
             }
             break;
         case OBJECT_TSDICTIONARY:
             if (!schema_does_not_exist_skipping(castNode(List, object), &msg, &name))
             {
-                msg = gettext_noop("text search dictionary \"%s\" does not exist, skipping");
+				msg = gettext_noop("text search dictionary \"%s\" does not exist, %s");
                 name = NameListToString(castNode(List, object));
             }
             break;
         case OBJECT_TSTEMPLATE:
             if (!schema_does_not_exist_skipping(castNode(List, object), &msg, &name))
             {
-                msg = gettext_noop("text search template \"%s\" does not exist, skipping");
+				msg = gettext_noop("text search template \"%s\" does not exist, %s");
                 name = NameListToString(castNode(List, object));
             }
             break;
         case OBJECT_TSCONFIGURATION:
             if (!schema_does_not_exist_skipping(castNode(List, object), &msg, &name))
             {
-                msg = gettext_noop("text search configuration \"%s\" does not exist, skipping");
+				msg = gettext_noop("text search configuration \"%s\" does not exist, %s");
                 name = NameListToString(castNode(List, object));
             }
             break;
         case OBJECT_EXTENSION:
-            msg = gettext_noop("extension \"%s\" does not exist, skipping");
+			msg = gettext_noop("extension \"%s\" does not exist, %s");
             name = strVal((Value *) object);
             break;
         case OBJECT_FUNCTION:
@@ -364,7 +410,7 @@ does_not_exist_skipping(ObjectType objtype, Node *object)
                 if (!schema_does_not_exist_skipping(owa->objname, &msg, &name) &&
                     !type_in_list_does_not_exist_skipping(owa->objargs, &msg, &name))
                 {
-                    msg = gettext_noop("function %s(%s) does not exist, skipping");
+					msg = gettext_noop("function %s(%s) does not exist, %s");
                     name = NameListToString(owa->objname);
                     args = TypeNameListToString(owa->objargs);
                 }
@@ -377,7 +423,7 @@ does_not_exist_skipping(ObjectType objtype, Node *object)
                 if (!schema_does_not_exist_skipping(owa->objname, &msg, &name) &&
                     !type_in_list_does_not_exist_skipping(owa->objargs, &msg, &name))
                 {
-                    msg = gettext_noop("aggregate %s(%s) does not exist, skipping");
+					msg = gettext_noop("aggregate %s(%s) does not exist, %s");
                     name = NameListToString(owa->objname);
                     args = TypeNameListToString(owa->objargs);
                 }
@@ -390,13 +436,13 @@ does_not_exist_skipping(ObjectType objtype, Node *object)
                 if (!schema_does_not_exist_skipping(owa->objname, &msg, &name) &&
                     !type_in_list_does_not_exist_skipping(owa->objargs, &msg, &name))
                 {
-                    msg = gettext_noop("operator %s does not exist, skipping");
+					msg = gettext_noop("operator %s does not exist, %s");
                     name = NameListToString(owa->objname);
                 }
                 break;
             }
         case OBJECT_LANGUAGE:
-            msg = gettext_noop("language \"%s\" does not exist, skipping");
+			msg = gettext_noop("language \"%s\" does not exist, %s");
             name = strVal((Value *) object);
             break;
         case OBJECT_CAST:
@@ -405,7 +451,7 @@ does_not_exist_skipping(ObjectType objtype, Node *object)
                     !type_in_list_does_not_exist_skipping(list_make1(lsecond(castNode(List, object))), &msg, &name))
                 {
                     /* XXX quote or no quote? */
-                    msg = gettext_noop("cast from type %s to type %s does not exist, skipping");
+					msg = gettext_noop("cast from type %s to type %s does not exist, %s");
                     name = TypeNameToString(linitial_node(TypeName, castNode(List, object)));
                     args = TypeNameToString(lsecond_node(TypeName, castNode(List, object)));
                 }
@@ -414,7 +460,7 @@ does_not_exist_skipping(ObjectType objtype, Node *object)
         case OBJECT_TRANSFORM:
             if (!type_in_list_does_not_exist_skipping(list_make1(linitial(castNode(List, object))), &msg, &name))
             {
-                msg = gettext_noop("transform for type %s language \"%s\" does not exist, skipping");
+				msg = gettext_noop("transform for type %s language \"%s\" does not exist, %s");
                 name = TypeNameToString(linitial_node(TypeName, castNode(List, object)));
                 args = strVal(lsecond(castNode(List, object)));
             }
@@ -422,7 +468,7 @@ does_not_exist_skipping(ObjectType objtype, Node *object)
         case OBJECT_TRIGGER:
             if (!owningrel_does_not_exist_skipping(castNode(List, object), &msg, &name))
             {
-                msg = gettext_noop("trigger \"%s\" for relation \"%s\" does not exist, skipping");
+				msg = gettext_noop("trigger \"%s\" for relation \"%s\" does not exist, %s");
                 name = strVal(llast(castNode(List, object)));
                 args = NameListToString(list_truncate(list_copy(castNode(List, object)),
                                                       list_length(castNode(List, object)) - 1));
@@ -431,31 +477,31 @@ does_not_exist_skipping(ObjectType objtype, Node *object)
         case OBJECT_POLICY:
             if (!owningrel_does_not_exist_skipping(castNode(List, object), &msg, &name))
             {
-                msg = gettext_noop("policy \"%s\" for relation \"%s\" does not exist, skipping");
+				msg = gettext_noop("policy \"%s\" for relation \"%s\" does not exist, %s");
                 name = strVal(llast(castNode(List, object)));
                 args = NameListToString(list_truncate(list_copy(castNode(List, object)),
                                                       list_length(castNode(List, object)) - 1));
             }
             break;
         case OBJECT_EVENT_TRIGGER:
-            msg = gettext_noop("event trigger \"%s\" does not exist, skipping");
+			msg = gettext_noop("event trigger \"%s\" does not exist, %s");
             name = strVal((Value *) object);
             break;
         case OBJECT_RULE:
             if (!owningrel_does_not_exist_skipping(castNode(List, object), &msg, &name))
             {
-                msg = gettext_noop("rule \"%s\" for relation \"%s\" does not exist, skipping");
+				msg = gettext_noop("rule \"%s\" for relation \"%s\" does not exist, %s");
                 name = strVal(llast(castNode(List, object)));
                 args = NameListToString(list_truncate(list_copy(castNode(List, object)),
                                                       list_length(castNode(List, object)) - 1));
             }
             break;
         case OBJECT_FDW:
-            msg = gettext_noop("foreign-data wrapper \"%s\" does not exist, skipping");
+			msg = gettext_noop("foreign-data wrapper \"%s\" does not exist, %s");
             name = strVal((Value *) object);
             break;
         case OBJECT_FOREIGN_SERVER:
-            msg = gettext_noop("server \"%s\" does not exist, skipping");
+			msg = gettext_noop("server \"%s\" does not exist, %s");
             name = strVal((Value *) object);
             break;
         case OBJECT_OPCLASS:
@@ -464,7 +510,7 @@ does_not_exist_skipping(ObjectType objtype, Node *object)
 
                 if (!schema_does_not_exist_skipping(opcname, &msg, &name))
                 {
-                    msg = gettext_noop("operator class \"%s\" does not exist for access method \"%s\", skipping");
+					msg = gettext_noop("operator class \"%s\" does not exist for access method \"%s\", %s");
                     name = NameListToString(opcname);
                     args = strVal(linitial(castNode(List, object)));
                 }
@@ -476,14 +522,14 @@ does_not_exist_skipping(ObjectType objtype, Node *object)
 
                 if (!schema_does_not_exist_skipping(opfname, &msg, &name))
                 {
-                    msg = gettext_noop("operator family \"%s\" does not exist for access method \"%s\", skipping");
+					msg = gettext_noop("operator family \"%s\" does not exist for access method \"%s\", %s");
                     name = NameListToString(opfname);
                     args = strVal(linitial(castNode(List, object)));
                 }
             }
             break;
         case OBJECT_PUBLICATION:
-            msg = gettext_noop("publication \"%s\" does not exist, skipping");
+			msg = gettext_noop("publication \"%s\" does not exist, %s");
             name = strVal((Value *) object);
             break;
         default:
@@ -492,7 +538,7 @@ does_not_exist_skipping(ObjectType objtype, Node *object)
     }
 
     if (!args)
-        ereport(NOTICE, (errmsg(msg, name)));
+		ereport(elevel, (errmsg(msg, name, missmsg)));
     else
-        ereport(NOTICE, (errmsg(msg, name, args)));
+		ereport(elevel, (errmsg(msg, name, args, missmsg)));
 }

@@ -2701,6 +2701,7 @@ pgxc_node_send_query_internal(PGXCNodeHandle * handle, const char *query,
 {
     int            strLen;
     int            msgLen;
+
     /*
      * Its appropriate to send ROLLBACK commands on a failed connection, but
      * for everything else we expect the connection to be in a sane state
@@ -5829,22 +5830,21 @@ PGXCGetAllDnOid(Oid *nodelist)
 /*
  * Return the name of ascii-minimized coordinator as ddl leader cn
  */
-inline char*
+PGXCNodeHandle*
 find_ddl_leader_cn(void)
 {
     int i = 0;
-    char* result = NULL;
+    char			*name = NULL;
+	PGXCNodeHandle	*result = NULL;
 
     for (i = 0; i < NumCoords; i++)
     {
-        if(result == NULL || strcmp(co_handles[i].nodename, result) < 0)
+        if(name == NULL || strcmp(co_handles[i].nodename, name) < 0)
         {
-            result = co_handles[i].nodename;
+            name = co_handles[i].nodename;
+			result = &co_handles[i];
         }
     }
-
-    if(result)
-        result = pstrdup(result);
 
     return result;
 }
@@ -5865,6 +5865,34 @@ inline bool
 is_pgxc_handles_init()
 {
 	return (dn_handles != NULL && co_handles != NULL);
+}
+
+/*
+ * Remove leader_cn_handle from pgxc_connections
+ */
+void
+delete_leadercn_handle(PGXCNodeAllHandles *pgxc_connections,
+							PGXCNodeHandle* leader_cn_handle)
+{
+	int co_conn_count = 0;
+	int i = 0;
+
+	if (!pgxc_connections || !leader_cn_handle)
+		return;
+
+	co_conn_count = pgxc_connections->co_conn_count;
+	for (i = 0; i < co_conn_count; i++)
+	{
+		if (pgxc_connections->coord_handles[i] == leader_cn_handle)
+		{
+			if (i+1 < co_conn_count)
+				pgxc_connections->coord_handles[i] = pgxc_connections->coord_handles[i+1];
+			else
+				pgxc_connections->coord_handles[i] = NULL;
+			pgxc_connections->co_conn_count--;
+			break;
+		}
+	}
 }
 #endif
 

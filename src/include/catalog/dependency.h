@@ -281,6 +281,18 @@ extern void performDeletion(const ObjectAddress *object,
 extern void performMultipleDeletions(const ObjectAddresses *objects,
                          DropBehavior behavior, int flags);
 
+#ifdef __TBASE__
+extern void RemoveRelationsParallelMode(DropStmt *drop,
+										ObjectAddresses* objects,
+										List *heap_list);
+extern void RemoveObjectsParallelMode(DropStmt *stmt, ObjectAddresses *objects);
+extern void OmitqueryStringSpace(char *queryString);
+extern void RemoveObjnameInQueryString(char *queryString, char *full_name);
+extern ObjectAddresses* PreCheckforRemoveObjects(DropStmt *stmt, bool missing_ok,
+										bool *need_drop, char *query_string,
+										bool need_unlock);
+#endif
+
 #ifdef PGXC
 extern void performRename(const ObjectAddress *object,
                           const char *oldname,

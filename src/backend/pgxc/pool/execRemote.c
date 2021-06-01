@@ -123,8 +123,7 @@ static bool temp_object_included = false;
 static abort_callback_type dbcleanup_info = { NULL, NULL };
 
 static int    pgxc_node_begin(int conn_count, PGXCNodeHandle ** connections,
-                GlobalTransactionId gxid, bool need_tran_block,
-                bool readOnly, char node_type);
+				GlobalTransactionId gxid, bool need_tran_block, bool readOnly);
 
 static PGXCNodeAllHandles *get_exec_connections(RemoteQueryState *planstate,
                      ExecNodes *exec_nodes,
@@ -3424,16 +3423,14 @@ is_data_node_ready(PGXCNodeHandle * conn)
     return false;
 }
 
-
 /*
  * Send BEGIN command to the Datanodes or Coordinators and receive responses.
  * Also send the GXID for the transaction.
  */
 static int
 pgxc_node_begin(int conn_count, PGXCNodeHandle **connections,
-                GlobalTransactionId gxid, bool need_tran_block,
-                bool readOnly, char node_type)
-{// #lizard forgives
+				GlobalTransactionId gxid, bool need_tran_block, bool readOnly)
+{
 #define    SET_CMD_LENGTH 128
     int            i;
     struct timeval *timeout = NULL;
@@ -4725,7 +4722,7 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
 {
     int conn_count = 0;
 
-    if (!enable_parallel_ddl || !is_txn_has_parallel_ddl)
+    if (!is_txn_has_parallel_ddl)
     {
         /* normal cases */
         conn_count = pgxc_node_remote_commit_internal(get_current_handles(), txn_type);
@@ -5899,7 +5896,8 @@ DataNodeCopyBegin(RemoteCopyData *rcstate)
     gxid = GetCurrentTransactionId();
 
     /* Start transaction on connections where it is not started */
-    if (pgxc_node_begin(conn_count, connections, gxid, need_tran_block, false, PGXC_NODE_DATANODE))
+
+	if (pgxc_node_begin(conn_count, connections, gxid, need_tran_block, false))
     {
         ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
@@ -6719,6 +6717,211 @@ pgxc_start_command_on_connection(PGXCNodeHandle *connection,
 }
 
 /*
+ * Get snapshot and gxid for remote utility.
+ */
+void
+GetGlobInfoForRemoteUtility(RemoteQuery *node, GlobalTransactionId *gxid,
+							Snapshot *snapshot)
+{
+	bool                utility_need_transcation = true;
+
+#ifdef __TBASE__
+	/* Some DDL such as ROLLBACK, SET does not need transaction */
+	utility_need_transcation =
+			(!ExecDDLWithoutAcquireXid(node->parsetree) && !node->is_set);
+
+	if (utility_need_transcation)
+#endif		
+	{
+		elog(LOG, "[SAVEPOINT] node->sql_statement:%s", node->sql_statement);
+		*gxid = GetCurrentTransactionId();
+	}
+	
+	if (ActiveSnapshotSet())
+		*snapshot = GetActiveSnapshot();
+
+#ifdef __TBASE__	
+	if (utility_need_transcation)
+#endif
+	{
+		if (!GlobalTransactionIdIsValid(*gxid))
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Failed to get next transaction ID")));
+	}
+
+#ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
+	if(!IS_PGXC_LOCAL_COORDINATOR)
+	{
+		/* 
+		 * Distributed DDLs only dispatch from the requested coordinator, thus
+		 * we skip sending gxid to avoid cycling.
+		 *
+		 * Note: except for 'set_config_option'.
+		 */
+		*gxid = InvalidTransactionId;
+	}
+
+#endif
+}
+
+/*
+ * Send snapshot/cmdid/query to remote node.
+ */
+void
+SendTxnInfo(RemoteQuery *node, PGXCNodeHandle *conn,
+			CommandId cid, Snapshot snapshot)
+{
+	if (conn->state == DN_CONNECTION_STATE_QUERY)
+		BufferConnection(conn);
+	if (snapshot && pgxc_node_send_snapshot(conn, snapshot))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+					errmsg("Failed to send snapshot to %s", conn->nodename)));
+	}
+	if (pgxc_node_send_cmd_id(conn, cid) < 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+					errmsg("Failed to send command ID to %s", conn->nodename)));
+	}
+
+	if (pgxc_node_send_query(conn, node->sql_statement) != 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+					errmsg("Failed to send command to %s", conn->nodename)));
+	}
+}
+
+/*
+ * Check response of remote connection.
+ */
+bool
+CheckRemoteRespond(PGXCNodeHandle *conn, ResponseCombiner *combiner,
+					int *index, int *conn_count)
+{
+	int res = handle_response(conn, combiner);
+	if (res == RESPONSE_EOF)
+	{
+		(*index)++;
+	}
+	else if (res == RESPONSE_COMPLETE)
+	{
+		/* Ignore, wait for ReadyForQuery */
+		if (conn->state == DN_CONNECTION_STATE_ERROR_FATAL)
+		{
+			ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+					errmsg("Unexpected FATAL ERROR on Connection to "
+							"Datanode %s pid %d",
+						conn->nodename, conn->backend_pid)));
+		}
+	}
+	else if (res == RESPONSE_ERROR)
+	{
+		/* Ignore, wait for ReadyForQuery */
+	}
+	else if (res == RESPONSE_READY)
+	{
+		if ((*index) < --(*conn_count))
+			return true;
+	}
+	else if (res == RESPONSE_TUPDESC)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+					errmsg("Unexpected response from %s pid %d",
+						conn->nodename, conn->backend_pid)));
+	}
+	else if (res == RESPONSE_DATAROW)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+					errmsg("Unexpected response from %s pid %d",
+						conn->nodename, conn->backend_pid)));
+	}
+	return false;
+}
+
+/*
+ * Receive remote response and chek receive status.
+ */
+void RemoteReceiveAndCheck(int conn_count, PGXCNodeHandle **conns,
+							ResponseCombiner *combiner)
+{
+	/*
+     * Stop if all commands are completed or we got a data row and
+     * initialized state node for subsequent invocations
+     */
+    while (conn_count > 0)
+    {
+        int		i = 0;
+		bool	remote_ready = false;
+
+        /* Wait until one of the connections has data available */
+        if (pgxc_node_receive(conn_count,
+                              conns,
+                              NULL))
+        {
+            /*
+             * Got error
+             * TODO(Tbase): How do we check the error here?
+             */
+            break;
+        }
+
+        while (i < conn_count)
+        {
+            PGXCNodeHandle *conn = NULL;
+			if (remote_ready)
+			{
+				conns[i] = conns[conn_count];
+			}
+			conn = conns[i];
+            remote_ready = CheckRemoteRespond(conn, combiner, &i, &conn_count);
+        }
+    }
+}
+
+#ifdef __TBASE__
+/*
+ * Send ddl to leader cn, the function only be invoked
+ * in parallel ddl mode.
+ */
+void
+LeaderCnExecRemoteUtility(RemoteQuery *node,
+								PGXCNodeHandle *leader_cn_conn,
+								ResponseCombiner *combiner,
+								bool need_tran_block,
+								GlobalTransactionId gxid,
+								Snapshot snapshot,
+								CommandId cid)
+{
+	int cn_cout = 1;
+	char *init_str = PGXCNodeGetSessionParamStr();
+	if (init_str)
+	{
+		pgxc_node_set_query(leader_cn_conn, init_str);
+	}
+	
+	SetPlpgsqlTransactionBegin(leader_cn_conn);
+	if (pgxc_node_begin(cn_cout, &leader_cn_conn, gxid,
+						need_tran_block, false))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				errmsg("Could not begin transaction on leader coordinator")));
+	}
+
+	/* Send other txn related messages to leader cn */
+	SendTxnInfo(node, leader_cn_conn, cid, snapshot);
+
+	RemoteReceiveAndCheck(cn_cout, &leader_cn_conn, combiner);
+}
+
+/*
  * Execute utility statement on multiple Datanodes
  * It does approximately the same as
  *
@@ -6730,8 +6933,11 @@ pgxc_start_command_on_connection(PGXCNodeHandle *connection,
  * like allocating tuple slots.
  */
 void
+ExecRemoteUtility(RemoteQuery *node, PGXCNodeHandle *leader_cn_conn, ParallelDDLRemoteType type)
+#else
 ExecRemoteUtility(RemoteQuery *node)
-{// #lizard forgives
+#endif
+{
     RemoteQueryState *remotestate;
     ResponseCombiner *combiner;
     bool              force_autocommit = node->force_autocommit;
@@ -6739,13 +6945,12 @@ ExecRemoteUtility(RemoteQuery *node)
     GlobalTransactionId gxid = InvalidGlobalTransactionId;
     Snapshot snapshot = NULL;
     PGXCNodeAllHandles *pgxc_connections;
-    int            co_conn_count;
-    int            dn_conn_count;
+	int					co_conn_count = 0;
+	int					dn_conn_count = 0;
     bool        need_tran_block;
     ExecDirectType        exec_direct_type = node->exec_direct_type;
     int            i;
     CommandId    cid = GetCurrentCommandId(true);    
-	bool                utility_need_transcation = true;
 
     if (!force_autocommit)
         RegisterTransactionLocalNode(true);
@@ -6760,6 +6965,13 @@ ExecRemoteUtility(RemoteQuery *node)
      */
     pgxc_connections = get_exec_connections(NULL, node->exec_nodes, exec_type, 
                                             exec_direct_type != EXEC_DIRECT_UTILITY);
+
+#ifdef __TBASE__
+	if (type == EXCLUED_LEADER_DDL)
+	{
+		delete_leadercn_handle(pgxc_connections, leader_cn_conn);
+	}
+#endif
 
     dn_conn_count = pgxc_connections->dn_conn_count;
     co_conn_count = pgxc_connections->co_conn_count;
@@ -6792,56 +7004,30 @@ ExecRemoteUtility(RemoteQuery *node)
 							"transaction block")));
     }
 
-#ifdef __TBASE__    
-	/* Some DDL such as ROLLBACK, SET does not need transaction */
-	utility_need_transcation =
-			(!ExecDDLWithoutAcquireXid(node->parsetree) && !node->is_set);
-
-	if (utility_need_transcation)
-#endif        
-    {
-        elog(LOG, "[SAVEPOINT] node->sql_statement:%s", node->sql_statement);
-        gxid = GetCurrentTransactionId();
-    }
-    
-    if (ActiveSnapshotSet())
-        snapshot = GetActiveSnapshot();
+	GetGlobInfoForRemoteUtility(node, &gxid, &snapshot);
 
 #ifdef __TBASE__    
-	if (utility_need_transcation)
-#endif
+	if (type == ONLY_LEADER_DDL)
     {
-        if (!GlobalTransactionIdIsValid(gxid))
-             ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("Failed to get next transaction ID")));
+		LeaderCnExecRemoteUtility(node, leader_cn_conn, combiner,
+									need_tran_block, gxid, snapshot, cid);
+		pfree_pgxc_all_handles(pgxc_connections);
+		pgxc_node_report_error(combiner);
+		return;
     }
-
-#ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-    if(!IS_PGXC_LOCAL_COORDINATOR)
+	else
     {
-		/* 
-		 * Distributed DDLs only dispatch from the requested coordinator, thus
-		 * we skip sending gxid to avoid cycling.
-		 *
-		 * Note: except for 'set_config_option'.
-		 */
-        gxid = InvalidTransactionId;
-    }
-
-#endif
-
-#ifdef __TBASE__
-	/* Set node begin transaction in plpgsql function for CN/DN */
-	for (i = 0; i < dn_conn_count; i++)
-    {
-        SetPlpgsqlTransactionBegin(pgxc_connections->datanode_handles[i]);
-    }  
-    
-	for (i = 0; i < co_conn_count; i++)
-	{
-		SetPlpgsqlTransactionBegin(pgxc_connections->coord_handles[i]);
-	}     
+        /* Set node begin transaction in plpgsql function for CN/DN */
+        for (i = 0; i < dn_conn_count; i++)
+        {
+            SetPlpgsqlTransactionBegin(pgxc_connections->datanode_handles[i]);
+        }  
+        
+        for (i = 0; i < co_conn_count; i++)
+        {
+            SetPlpgsqlTransactionBegin(pgxc_connections->coord_handles[i]);
+        }     
+	}
 #endif 
 
     /*
@@ -6858,8 +7044,7 @@ ExecRemoteUtility(RemoteQuery *node)
                         pgxc_connections->coord_handles,
                         gxid,
                         need_tran_block,
-                        false,
-                        PGXC_NODE_COORDINATOR))
+                        false))
     {
         ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
@@ -6870,209 +7055,24 @@ ExecRemoteUtility(RemoteQuery *node)
     for (i = 0; i < co_conn_count; i++)
     {
         PGXCNodeHandle *conn = pgxc_connections->coord_handles[i];
-
-        if (snapshot && pgxc_node_send_snapshot(conn, snapshot))
-        {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                            errmsg("Failed to send command to coordinators")));
-        }
-        if (pgxc_node_send_cmd_id(conn, cid) < 0)
-        {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                            errmsg("Failed to send command ID to Datanodes")));
-        }
-
-        if (pgxc_node_send_query(conn, node->sql_statement) != 0)
-        {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                            errmsg("Failed to send command to coordinators")));
-        }
+		SendTxnInfo(node, conn, cid, snapshot);
     }
 
     /*
      * Stop if all commands are completed or we got a data row and
      * initialized state node for subsequent invocations
      */
-    while (co_conn_count > 0)
-    {
-        int i = 0;
-
-        /* Wait until one of the connections has data available */
-        if (pgxc_node_receive(co_conn_count,
+	RemoteReceiveAndCheck(co_conn_count, 
                               pgxc_connections->coord_handles,
-                              NULL))
-        {
-            /*
-             * Got error
-             * TODO(Tbase): How do we check the error here?
-             */
-            break;
-        }
+							combiner);
 
-        while (i < co_conn_count)
-        {
-            PGXCNodeHandle *conn = pgxc_connections->coord_handles[i];
-            int 			res = handle_response(conn, combiner);
-
-            if (res == RESPONSE_EOF)
+#ifdef __TBASE__
+	if (LOCAL_PARALLEL_DDL && combiner && combiner->errorMessage)
             {
-                i++;
-            }
-            else if (res == RESPONSE_COMPLETE)
-            {
-                /* Ignore, wait for ReadyForQuery */
-                if (conn->state == DN_CONNECTION_STATE_ERROR_FATAL)
-                {
-                    ereport(ERROR,
-                            (errcode(ERRCODE_INTERNAL_ERROR),
-                                    errmsg("Unexpected FATAL ERROR on Connection to "
-                                           "Coordinator %s pid %d",
-                                           pgxc_connections->coord_handles[i]->nodename,
-                                           pgxc_connections->coord_handles[i]->backend_pid)));
-                }
-            }
-            else if (res == RESPONSE_ERROR)
-            {
-                /* Ignore, wait for ReadyForQuery */
-            }
-            else if (res == RESPONSE_READY)
-            {
-                if (i < --co_conn_count)
-                    pgxc_connections->coord_handles[i] =
-                            pgxc_connections->coord_handles[co_conn_count];
-            }
-            else if (res == RESPONSE_TUPDESC)
-            {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INTERNAL_ERROR),
-                                errmsg("Unexpected response from coordinator")));
-            }
-            else if (res == RESPONSE_DATAROW)
-            {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INTERNAL_ERROR),
-                                errmsg("Unexpected response from coordinator")));
-            }
-        }
+		pfree_pgxc_all_handles(pgxc_connections);
+		pgxc_node_report_error(combiner);
     }
-
-    /*
-	 * DDL will firstly be executed on coordinators then datanodes
-	 * which will avoid deadlocks in cluster.
-	 * Let us assume that user sql and ddl hold conflict locks,
-	 * then there will be two situations:
-	 * 1. The coordinator is not locked, user sql will see datanodes with no lock.
-	 * 2. The coordinator is locked, user sql will wait for ddl to complete.
-     *
-     * Send BEGIN control command to all coordinator nodes
-     */
-    if (pgxc_node_begin(co_conn_count,
-                        pgxc_connections->coord_handles,
-                        gxid,
-                        need_tran_block,
-                        false,
-                        PGXC_NODE_COORDINATOR))
-    {
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                        errmsg("Could not begin transaction on coordinators")));
-    }
-
-    /* Send other txn related messages to coordinator nodes */
-    for (i = 0; i < co_conn_count; i++)
-    {
-        PGXCNodeHandle *conn = pgxc_connections->coord_handles[i];
-
-        if (snapshot && pgxc_node_send_snapshot(conn, snapshot))
-        {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                            errmsg("Failed to send command to coordinators")));
-        }
-        if (pgxc_node_send_cmd_id(conn, cid) < 0)
-        {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                            errmsg("Failed to send command ID to Datanodes")));
-        }
-
-        if (pgxc_node_send_query(conn, node->sql_statement) != 0)
-        {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                            errmsg("Failed to send command to coordinators")));
-        }
-    }
-
-    /*
-     * Stop if all commands are completed or we got a data row and
-     * initialized state node for subsequent invocations
-     */
-    while (co_conn_count > 0)
-    {
-        int i = 0;
-
-        /* Wait until one of the connections has data available */
-        if (pgxc_node_receive(co_conn_count,
-                              pgxc_connections->coord_handles,
-                              NULL))
-        {
-            /*
-             * Got error
-             * TODO(Tbase): How do we check the error here?
-             */
-            break;
-        }
-
-        while (i < co_conn_count)
-        {
-            PGXCNodeHandle *conn = pgxc_connections->coord_handles[i];
-            int 			res = handle_response(conn, combiner);
-
-            if (res == RESPONSE_EOF)
-            {
-                i++;
-            }
-            else if (res == RESPONSE_COMPLETE)
-            {
-                /* Ignore, wait for ReadyForQuery */
-                if (conn->state == DN_CONNECTION_STATE_ERROR_FATAL)
-                {
-                    ereport(ERROR,
-                            (errcode(ERRCODE_INTERNAL_ERROR),
-                                    errmsg("Unexpected FATAL ERROR on Connection to "
-                                           "Coordinator %s pid %d",
-                                           pgxc_connections->coord_handles[i]->nodename,
-                                           pgxc_connections->coord_handles[i]->backend_pid)));
-                }
-            }
-            else if (res == RESPONSE_ERROR)
-            {
-                /* Ignore, wait for ReadyForQuery */
-            }
-            else if (res == RESPONSE_READY)
-            {
-                if (i < --co_conn_count)
-                    pgxc_connections->coord_handles[i] =
-                            pgxc_connections->coord_handles[co_conn_count];
-            }
-            else if (res == RESPONSE_TUPDESC)
-            {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INTERNAL_ERROR),
-                                errmsg("Unexpected response from coordinator")));
-            }
-            else if (res == RESPONSE_DATAROW)
-            {
-                ereport(ERROR,
-                        (errcode(ERRCODE_INTERNAL_ERROR),
-                                errmsg("Unexpected response from coordinator")));
-            }
-        }
-    }
+#endif
 
 	/*
 	 * Send BEGIN control command to all data nodes
@@ -7081,8 +7081,7 @@ ExecRemoteUtility(RemoteQuery *node)
 						pgxc_connections->datanode_handles,
 						gxid,
 						need_tran_block,
-						false,
-						PGXC_NODE_DATANODE))
+						false))	
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
@@ -7093,98 +7092,12 @@ ExecRemoteUtility(RemoteQuery *node)
 	for (i = 0; i < dn_conn_count; i++)
 	{
 		PGXCNodeHandle *conn = pgxc_connections->datanode_handles[i];
-
-		if (conn->state == DN_CONNECTION_STATE_QUERY)
-			BufferConnection(conn);
-		if (snapshot && pgxc_node_send_snapshot(conn, snapshot))
-		{
-			ereport(ERROR,
-					(errcode(ERRCODE_INTERNAL_ERROR),
-					 errmsg("Failed to send snapshot to Datanodes")));
-		}
-		if (pgxc_node_send_cmd_id(conn, cid) < 0)
-		{
-			ereport(ERROR,
-					(errcode(ERRCODE_INTERNAL_ERROR),
-					 errmsg("Failed to send command ID to Datanodes")));
-		}
-
-		if (pgxc_node_send_query(conn, node->sql_statement) != 0)
-		{
-			ereport(ERROR,
-					(errcode(ERRCODE_INTERNAL_ERROR),
-					 errmsg("Failed to send command to Datanodes")));
-		}
+		SendTxnInfo(node, conn, cid, snapshot);
 	}
 
-
-    /* Make the same for data nodes */
-	while (dn_conn_count > 0)
-	{
-		int i = 0;
-
-		/* Wait until one of the connections has data available */
-		if (pgxc_node_receive(dn_conn_count,
+	RemoteReceiveAndCheck(dn_conn_count, 
 							  pgxc_connections->datanode_handles,
-							  NULL))
-		{
-			/*
-			 * Got error
-			 * TODO(Tbase): How do we check the error here?
-			 */
-			break;
-		}
-
-		/*
-		 * Handle input from the data nodes. We do not expect data nodes
-		 * returning tuples when running utility command. If we got EOF, move
-		 * to the next connection, will receive more data on the next
-		 * iteration.
-		 */
-		while (i < dn_conn_count)
-		{
-			PGXCNodeHandle *conn = pgxc_connections->datanode_handles[i];
-			int res = handle_response(conn, combiner);
-			if (res == RESPONSE_EOF)
-			{
-				i++;
-			}
-			else if (res == RESPONSE_COMPLETE)
-			{
-				/* Ignore, wait for ReadyForQuery */
-				if (conn->state == DN_CONNECTION_STATE_ERROR_FATAL)
-				{
-					ereport(ERROR,
-						(errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("Unexpected FATAL ERROR on Connection to "
-								 "Datanode %s pid %d",
-								conn->nodename, conn->backend_pid)));
-				}
-			}
-			else if (res == RESPONSE_ERROR)
-			{
-				/* Ignore, wait for ReadyForQuery */
-			}
-			else if (res == RESPONSE_READY)
-			{
-				if (i < --dn_conn_count)
-					pgxc_connections->datanode_handles[i] =
-						pgxc_connections->datanode_handles[dn_conn_count];
-			}
-			else if (res == RESPONSE_TUPDESC)
-			{
-				ereport(ERROR,
-						(errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("Unexpected response from Datanode")));
-			}
-			else if (res == RESPONSE_DATAROW)
-			{
-				ereport(ERROR,
-						(errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("Unexpected response from Datanode")));
-			}
-		}
-	}
+							combiner);
 
 	/*
 	 * We have processed all responses from nodes and if we have error message
@@ -9086,7 +8999,7 @@ ExecRemoteQuery(PlanState *pstate)
 			combiner->current_conn = 0;
 #endif
 			if (pgxc_node_begin(1, &primaryconnection, gxid, need_tran_block,
-								step->read_only, PGXC_NODE_DATANODE))
+								step->read_only))
 				ereport(ERROR,
 						(errcode(ERRCODE_INTERNAL_ERROR),
 						 errmsg("Could not begin transaction on data node:%s.",
@@ -9155,8 +9068,9 @@ ExecRemoteQuery(PlanState *pstate)
 #ifdef __TBASE__
 			connections[i]->recv_datarows = 0;
 #endif
+
 			if (pgxc_node_begin(1, &connections[i], gxid, need_tran_block,
-								step->read_only, PGXC_NODE_DATANODE))
+								step->read_only))
 				ereport(ERROR,
 						(errcode(ERRCODE_INTERNAL_ERROR),
 						 errmsg("Could not begin transaction on data node:%s.",
@@ -10593,8 +10507,7 @@ ExecFinishInitRemoteSubplan(RemoteSubplanState *node)
     {
         PGXCNodeHandle *connection = combiner->connections[i];
 
-		if (pgxc_node_begin(1, &connection, gxid, true,
-							is_read_only, PGXC_NODE_DATANODE))
+		if (pgxc_node_begin(1, &connection, gxid, true, is_read_only))
 			ereport(ERROR,
 					(errcode(ERRCODE_INTERNAL_ERROR),
 					 errmsg("Could not begin transaction on data node:%s.",
@@ -12641,8 +12554,7 @@ ExecRemoteDML(ModifyTableState *mtstate, ItemPointer tupleid, HeapTuple oldtuple
     {
         gxid = GetCurrentTransactionIdIfAny();
         
-        if (pgxc_node_begin(1, &connections[i], gxid, true,
-                false, PGXC_NODE_DATANODE))
+		if (pgxc_node_begin(1, &connections[i], gxid, true, false))
         {
             elog(ERROR, "Could not begin transaction on datanode in ExecRemoteDML, nodeid:%d.",
                          connections[i]->nodeid);

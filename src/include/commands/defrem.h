@@ -19,8 +19,8 @@
 #include "utils/array.h"
 
 /* commands/dropcmds.c */
-extern void RemoveObjects(DropStmt *stmt);
-
+extern void RemoveObjects(DropStmt *stmt, bool missing_ok,
+							bool *need_drop, char *query_string);
 /* commands/indexcmds.c */
 extern ObjectAddress DefineIndex(Oid relationId,
             IndexStmt *stmt,

@@ -116,6 +116,10 @@
 #include "catalog/pgxc_key_values.h"
 #endif
 
+#ifdef __TBASE__
+extern bool enable_parallel_ddl;
+#endif
+
 /* Potentially set by pg_upgrade_support functions */
 Oid            binary_upgrade_next_heap_pg_class_oid = InvalidOid;
 Oid            binary_upgrade_next_toast_pg_class_oid = InvalidOid;
@@ -2806,8 +2810,15 @@ heap_drop_with_catalog(Oid relid)
      * shared-cache-inval notice that will make them update their index lists.
      */
     tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-	if (!HeapTupleIsValid(tuple))
-		elog(ERROR, "cache lookup failed for relation %u", relid);
+
+#ifdef __TBASE__
+	if (enable_parallel_ddl && tuple == NULL)
+	{
+		elog(WARNING, "The tuple may have been dropped by parallel ddl");
+		return;
+	}
+#endif	
+
     if (((Form_pg_class) GETSTRUCT(tuple))->relispartition)
     {
         parentOid = get_partition_parent(relid);
