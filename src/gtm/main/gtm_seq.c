@@ -457,6 +457,10 @@ GTM_SeqOpen(GTM_SequenceKey seqkey,
         ereport(LOG,
                 (EEXIST,
                  errmsg("GTM_SeqOpen Sequence with key:%s found in hashtab", seqkey->gsk_key)));
+		/*
+		 * Release sequence, otherwise the sequence will be busy when be dropped.
+		 */
+		seq_release_seqinfo(seqinfo);
         return EEXIST;
     }
 
@@ -467,6 +471,10 @@ GTM_SeqOpen(GTM_SequenceKey seqkey,
         ereport(LOG,
                 (EEXIST,
                  errmsg("GTM_SeqOpen Sequence with key:%s found in store", seqkey->gsk_key)));
+		/*
+		 * Release sequence, otherwise the sequence will be busy when be dropped.
+		 */
+		seq_release_seqinfo(seqinfo);
         return EEXIST;
     }
 #endif
