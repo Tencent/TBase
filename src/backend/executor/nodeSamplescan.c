@@ -128,9 +128,24 @@ InitScanRelation(SampleScanState *node, EState *estate, int eflags)
      * get the relation object id from the relid'th entry in the range table,
      * open that relation and acquire appropriate lock on it.
      */
+#ifdef __TBASE__
+	/* if interval partition, scan child table instead */
+	if(((SeqScan *) node->ss.ps.plan)->ispartchild)
+	{
+		currentRelation = ExecOpenScanRelationPartition(estate,
+		                                                ((SeqScan *) node->ss.ps.plan)->scanrelid,
+		                                                eflags,
+		                                                ((SeqScan *) node->ss.ps.plan)->childidx);
+	}
+	else
+	{
+#endif
     currentRelation = ExecOpenScanRelation(estate,
                                            ((SampleScan *) node->ss.ps.plan)->scan.scanrelid,
                                            eflags);
+#ifdef __TBASE__
+	}
+#endif
 #ifdef _MLS_
     mls_check_datamask_need_passby((ScanState*)node, currentRelation->rd_id);
 #endif 

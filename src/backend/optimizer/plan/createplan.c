@@ -920,6 +920,7 @@ create_scan_plan(PlannerInfo *root, Path *best_path, int flags)
                 switch(nodeTag(child))
                 {
                     case T_SeqScan:
+					case T_SampleScan:
                         break;
                     case T_IndexScan:
                         {
