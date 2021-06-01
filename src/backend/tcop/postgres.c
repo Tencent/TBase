@@ -5195,6 +5195,7 @@ PostgresMain(int argc, char *argv[],
 #ifdef __TBASE__
 		/* Clear parallel DDL flag */
 		is_txn_has_parallel_ddl = false;
+		leader_cn_executed_ddl = false;
 #endif
 
 		/*

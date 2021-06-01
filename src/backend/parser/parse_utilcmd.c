@@ -218,7 +218,11 @@ static char * ChooseSerialName(const char *relname, const char *colname,
  * then expand those into multiple IndexStmt blocks.
  *      - thomas 1997-12-02
  */
-#ifdef XCP
+#ifdef __TBASE__
+List *
+transformCreateStmt(CreateStmt *stmt, const char *queryString,
+					bool autodistribute, Oid *nspaceid, bool existsok)
+#elif XCP
 List *
 transformCreateStmt(CreateStmt *stmt, const char *queryString,
                     bool autodistribute)
@@ -312,16 +316,36 @@ transformCreateStmt(CreateStmt *stmt, const char *queryString)
                                              &existing_relid);
     cancel_parser_errposition_callback(&pcbstate);
 
+#ifdef __TBASE__
+	if (nspaceid)
+		*nspaceid = namespaceid;
+#endif
+
     /*
      * If the relation already exists and the user specified "IF NOT EXISTS",
      * bail out with a NOTICE.
      */
     if (stmt->if_not_exists && OidIsValid(existing_relid))
     {
+		if (existsok)
+		{
         ereport(NOTICE,
                 (errcode(ERRCODE_DUPLICATE_TABLE),
                  errmsg("relation \"%s\" already exists, skipping",
                         stmt->relation->relname)));
+		}
+		else
+		{
+			/* 
+			 * In PARALLEL DDL mode, remote node emit error if relation
+			 * already exists to keep consistency with local cn.
+			 */
+			ereport(ERROR,
+				(errcode(ERRCODE_DUPLICATE_TABLE),
+				 errmsg("relation \"%s\" already exists, skipping",
+						stmt->relation->relname)));
+		}
+		
         return NIL;
     }
 
@@ -3317,6 +3341,7 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
     RangeTblEntry *rte;
 #ifdef __TBASE__
     List *createlist = NULL;
+	List *partlist = NIL;
 #endif
     /*
      * We must not scribble on the passed-in AlterTableStmt, so copy it. (This
@@ -3550,7 +3575,14 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
                         createpart->partbound = NULL;
                         createpart->partspec  = NULL;
 
+#ifdef __TBASE__
+						partlist = transformCreateStmt(createpart,
+															queryString, true,
+															NULL, true);
+						createlist = list_concat(createlist, partlist);
+#else
                         createlist = list_concat(createlist, transformCreateStmt(createpart, queryString, true));
+#endif
                     }
                 }
                 else

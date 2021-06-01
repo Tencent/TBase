@@ -26,10 +26,16 @@
 extern ObjectAddress DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 			   ObjectAddress *typaddress, const char *queryString);
 #ifdef __TBASE__
+extern ObjectAddresses* PreCheckforRemoveRelation(DropStmt* drop,
+													char* queryString,
+													bool *needDrop,
+													List **heap_list);
 extern int RemoveRelations(DropStmt *drop, char* queryString);
 #else
 extern void RemoveRelations(DropStmt *drop);
 #endif
+
+extern char GetRemoveObjectRelkind(ObjectType removeType);
 
 extern Oid	AlterTableLookupRelation(AlterTableStmt *stmt, LOCKMODE lockmode);
 

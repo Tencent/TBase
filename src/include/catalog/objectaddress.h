@@ -108,6 +108,10 @@ extern const ObjectAddress InvalidObjectAddress;
 #define ObjectAddressSet(addr, class_id, object_id) \
     ObjectAddressSubSet(addr, class_id, object_id, 0)
 
+#ifdef __TBASE__
+extern char *GetRemoveObjectName(ObjectType objtype, Node *object);
+#endif
+
 extern ObjectAddress get_object_address(ObjectType objtype, Node *object,
                    Relation *relp,
                    LOCKMODE lockmode, bool missing_ok);

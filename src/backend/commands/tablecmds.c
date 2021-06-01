@@ -158,6 +158,9 @@ typedef struct OnCommitItem
 
 static List *on_commits = NIL;
 
+#ifdef __TBASE__
+extern bool    is_txn_has_parallel_ddl;
+#endif
 
 /*
  * State information for ALTER TABLE
@@ -1406,70 +1409,6 @@ DropErrorMsgWrongType(const char *relname, char wrongkind, char rightkind)
 #ifdef __TBASE__
 
 /*
- * replace all invisible characters with ' ',
- * leave no spaces next to ',' or '.'
- */
-static void
-OmitqueryStringSpace(char *queryString)
-{
-    char *front = queryString;
-    char *last = queryString;
-    bool skip = false;
-
-    if (queryString == NULL)
-    {
-        return;
-    }
-
-    /* omit space */
-    while (scanner_isspace(*front))
-    {
-        ++front;
-    }
-
-    while ((*front) != '\0')
-    {
-        if(scanner_isspace(*front) && skip == false)
-        {
-            while(scanner_isspace(*front))
-            {
-                ++front;
-            }
-
-            if ((*front) == ',' || (*front) == '.')
-            {
-                /* no need space */
-            }
-            else if (last != queryString && (*(last - 1) == ',' || *(last - 1) == '.'))
-            {
-                /* no need space */
-            }
-            else
-            {
-                /* replace all invisible characters with ' ' */
-                *last = ' ';
-                ++last;
-                continue;
-            }
-        }
-
-        if ((*front) == '\"')
-        {
-            skip = (skip == true) ? false : true;
-            *last = *front;
-            ++front;
-        }
-        else
-        {
-            *last = *front;
-            ++front;
-        }
-        ++last;
-    }
-    *last = '\0';
-}
-
-/*
  * remove relname in query string (replace with ' ')
  */
 static void
@@ -1543,6 +1482,146 @@ RemoveRelnameInQueryString(char *queryString, RangeVar *rel)
     }
 }
 
+char GetRemoveObjectRelkind(ObjectType removeType)
+{
+	char relkind;
+	switch (removeType)
+	{
+		case OBJECT_TABLE:
+			relkind = RELKIND_RELATION;
+			break;
+
+		case OBJECT_INDEX:
+			relkind = RELKIND_INDEX;
+			break;
+
+		case OBJECT_SEQUENCE:
+			relkind = RELKIND_SEQUENCE;
+			break;
+
+		case OBJECT_VIEW:
+			relkind = RELKIND_VIEW;
+			break;
+
+		case OBJECT_MATVIEW:
+			relkind = RELKIND_MATVIEW;
+			break;
+
+		case OBJECT_FOREIGN_TABLE:
+			relkind = RELKIND_FOREIGN_TABLE;
+			break;
+
+		default:
+			elog(ERROR, "unrecognized drop object type: %d",
+				 (int)removeType);
+			relkind = 0;		/* keep compiler quiet */
+			break;
+	}
+	return relkind;
+}
+
+/*
+ * PreCheckforRemoveRelation
+ * Check before implementing DROP TABLE, DROP INDEX, DROP SEQUENCE,
+ * DROP VIEW, DROP FOREIGN TABLE, DROP MATERIALIZED VIEW, return the
+ * object of existing relations.
+ */
+ObjectAddresses* PreCheckforRemoveRelation(DropStmt* drop, char* queryString,
+											bool *needDrop, List **heap_list)
+{
+	char		relkind;
+	ListCell   *cell;
+	LOCKMODE	lockmode = AccessExclusiveLock;
+    bool        querystring_omit = false;
+	ObjectAddresses* objects = NULL;
+
+    /* DROP CONCURRENTLY uses a weaker lock, and has some restrictions */
+	if (drop->concurrent)
+	{
+		lockmode = ShareUpdateExclusiveLock;
+		Assert(drop->removeType == OBJECT_INDEX);
+		if (list_length(drop->objects) != 1)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("DROP INDEX CONCURRENTLY does not support dropping multiple objects")));
+		if (drop->behavior == DROP_CASCADE)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("DROP INDEX CONCURRENTLY does not support CASCADE")));
+	}
+
+	/*
+	 * First we identify all the relations, then we delete them in a single
+	 * performMultipleDeletions() call.  This is to avoid unwanted DROP
+	 * RESTRICT errors if one of the relations depends on another.
+	 */
+
+	/* Determine required relkind */
+	relkind = GetRemoveObjectRelkind(drop->removeType);
+	objects = new_object_addresses();
+	*needDrop = false;
+
+    foreach (cell, drop->objects) 
+	{
+		RangeVar   *rel = makeRangeVarFromNameList((List *) lfirst(cell));
+		Oid			relOid;
+		ObjectAddress obj;
+		struct DropRelationCallbackState state;
+
+		/*
+		 * These next few steps are a great deal like relation_openrv, but we
+		 * don't bother building a relcache entry since we don't need it.
+		 *
+		 * Check for shared-cache-inval messages before trying to access the
+		 * relation.  This is needed to cover the case where the name
+		 * identifies a rel that has been dropped and recreated since the
+		 * start of our transaction: if we don't flush the old syscache entry,
+		 * then we'll latch onto that entry and suffer an error later.
+		 */
+		AcceptInvalidationMessages();
+
+		/* Look up the appropriate relation using namespace search. */
+		state.relkind = relkind;
+		state.heapOid = InvalidOid;
+		state.partParentOid = InvalidOid;
+		state.concurrent = drop->concurrent;
+
+        relOid = RangeVarGetRelidExtended(rel, lockmode, true, false,
+											RangeVarCallbackForDropRelation,
+											(void*)&state);
+		/* Not there? */
+		if (!OidIsValid(relOid))
+		{
+			DropErrorMsgNonExistent(rel, relkind, drop->missing_ok);
+			if (!querystring_omit)
+            {
+                OmitqueryStringSpace(queryString);
+                querystring_omit = true;
+            }
+
+            RemoveRelnameInQueryString(queryString, rel);
+			continue;
+		}
+
+		/* OK, we're ready to delete this one */
+        obj.classId = RelationRelationId;
+        obj.objectId = relOid;
+        obj.objectSubId = 0;
+        add_exact_object_address(&obj, objects);
+		*needDrop = true;
+
+		if (OidIsValid(state.heapOid)) 
+		{
+			LOCKMODE heapLockMode = AccessExclusiveLock;
+			if (state.concurrent)
+				heapLockMode = ShareUpdateExclusiveLock;
+			UnlockRelationOid(state.heapOid, heapLockMode);
+			*heap_list = list_append_unique_oid(*heap_list, state.heapOid);
+		}
+		UnlockRelationOid(relOid, lockmode);
+    }
+	return objects;
+}
 #endif
 
 /*
@@ -1661,7 +1740,12 @@ RemoveRelations(DropStmt *drop)
         /* Not there? */
         if (!OidIsValid(relOid))
         {
-            DropErrorMsgNonExistent(rel, relkind, drop->missing_ok);
+			bool missing_ok = drop->missing_ok;
+#ifdef __TBASE__
+			if (IsConnFromCoord() && is_txn_has_parallel_ddl)
+				missing_ok = false;
+#endif
+			DropErrorMsgNonExistent(rel, relkind, missing_ok);
 #ifdef __TBASE__
 			if (!querystring_omit)
             {
@@ -1680,6 +1764,8 @@ RemoveRelations(DropStmt *drop)
             //RELKIND_INDEX == relkind)
         {
             bool report_error = false;
+
+			elog(LOG, "drop table relOid: %u", relOid);
 
             if (RELKIND_RELATION == relkind)
             {
@@ -1761,6 +1847,19 @@ RangeVarCallbackForDropRelation(const RangeVar *rel, Oid relOid, Oid oldRelOid,
      */
     if (relOid != oldRelOid && OidIsValid(state->heapOid))
     {
+#ifdef __TBASE__
+		/*
+		 * Unlock index before unlock table, or may cause deadlock
+		 * when drop index and create same index executed concurrently.
+		 */
+		if (is_txn_has_parallel_ddl && relkind == RELKIND_INDEX)
+		{
+			Assert(OidIsValid(oldRelOid));
+			UnlockRelationOid(oldRelOid, heap_lockmode);
+			elog(LOG, "Unlock index(name:oid):(%s:%u) before unlock table",
+					rel->relname, oldRelOid);
+		}
+#endif
         UnlockRelationOid(state->heapOid, heap_lockmode);
         state->heapOid = InvalidOid;
     }
@@ -1782,7 +1881,16 @@ RangeVarCallbackForDropRelation(const RangeVar *rel, Oid relOid, Oid oldRelOid,
 
     tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relOid));
     if (!HeapTupleIsValid(tuple))
+	{
+#ifdef __TBASE__
+		if (is_txn_has_parallel_ddl && !state->concurrent)
+		{
+			elog(ERROR, "Can't get valid tuple, relation %s had been invalid"
+				"by other process in parallel ddl mode", rel->relname);
+		}
+#endif
         return;                    /* concurrently dropped, so nothing to do */
+	}
     classform = (Form_pg_class) GETSTRUCT(tuple);
     is_partition = classform->relispartition;
 
@@ -1830,8 +1938,20 @@ RangeVarCallbackForDropRelation(const RangeVar *rel, Oid relOid, Oid oldRelOid,
     {
         state->heapOid = IndexGetRelation(relOid, true);
         if (OidIsValid(state->heapOid))
+		{
             LockRelationOid(state->heapOid, heap_lockmode);
     }
+#ifdef __TBASE__
+		else
+		{
+			if (is_txn_has_parallel_ddl && !state->concurrent)
+			{
+				elog(ERROR, "Can't get valid tableoid, index %s had been invalid"
+					"by other process in parallel ddl mode", rel->relname);
+			}
+		}
+#endif
+	}
 
     /*
      * Similarly, if the relation is a partition, we must acquire lock on its

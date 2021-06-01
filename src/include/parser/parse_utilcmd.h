@@ -82,13 +82,20 @@
 extern bool loose_unique_index;
 #endif
 
-#ifdef XCP
-extern bool loose_constraints;
+#ifdef __TBASE__
+extern List *transformCreateStmt(CreateStmt *stmt, const char *queryString,
+					bool autodistribute, Oid *nspaceid, bool existsok);
+#elif XCP
 extern List *transformCreateStmt(CreateStmt *stmt, const char *queryString,
                     bool autodistribute);
 #else
 extern List *transformCreateStmt(CreateStmt *stmt, const char *queryString);
 #endif
+
+#ifdef XCP
+extern bool loose_constraints;
+#endif
+
 extern List *transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
                         const char *queryString);
 extern IndexStmt *transformIndexStmt(Oid relid, IndexStmt *stmt,

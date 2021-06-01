@@ -66,6 +66,16 @@ typedef enum SortByNulls
     SORTBY_NULLS_LAST
 } SortByNulls;
 
+#ifdef __TBASE__
+typedef enum ParallelDDLRemoteType
+{
+	NON_PARALLEL_DDL,	/* non parallel ddl mode, exec_type decides */
+						/* execution nodes */
+	ONLY_LEADER_DDL,	/* only leader cn will execute ddl */
+	EXCLUED_LEADER_DDL	/* remove leader cn from execution nodes */
+} ParallelDDLRemoteType;
+#endif
+
 /*
  * Grantable rights are encoded so that we can OR them together in a bitmask.
  * The present representation of AclItem limits us to 16 distinct rights,

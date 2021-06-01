@@ -20,8 +20,14 @@
 extern void validateWithCheckOption(char *value);
 
 extern ObjectAddress DefineView(ViewStmt *stmt, const char *queryString,
-           int stmt_location, int stmt_len);
+		   int stmt_location, int stmt_len);
 
 extern void StoreViewQuery(Oid viewOid, Query *viewParse, bool replace);
 
-#endif                            /* VIEW_H */
+extern Query *MakeViewParse(ViewStmt* stmt, const char* query_string,
+									int stmt_location, int stmt_len);
+#ifdef __TBASE__
+extern bool IsViewTemp(ViewStmt* stmt, const char* query_string,
+						int stmt_location, int stmt_len, List **relation_list);
+#endif
+#endif							/* VIEW_H */

@@ -121,7 +121,13 @@ extern int64 nextval_internal(Oid relid, bool check_permissions);
 extern Datum nextval(PG_FUNCTION_ARGS);
 extern List *sequence_options(Oid relid);
 
+#ifdef __TBASE__
+extern ObjectAddress DefineSequence(ParseState *pstate, CreateSeqStmt *seq,
+								bool exists_ok);
+extern bool PrecheckDefineSequence(CreateSeqStmt *seq);
+#else
 extern ObjectAddress DefineSequence(ParseState *pstate, CreateSeqStmt *stmt);
+#endif
 extern ObjectAddress AlterSequence(ParseState *pstate, AlterSeqStmt *stmt);
 extern void DeleteSequenceTuple(Oid relid);
 extern void ResetSequence(Oid seq_relid);

@@ -28,6 +28,9 @@
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
+#ifdef __TBASE__
+#include "catalog/pg_namespace.h"
+#endif
 #include "catalog/objectaccess.h"
 #include "catalog/pg_sequence.h"
 #include "catalog/pg_type.h"
@@ -155,13 +158,69 @@ static void process_owned_by(Relation seqrel, List *owned_by, bool for_identity)
 extern bool  g_GTM_skip_catalog;
 #endif
 
+#ifdef __TBASE__
+extern bool is_txn_has_parallel_ddl;
+
+/*
+ * Check sequence exists or not
+ */
+bool PrecheckDefineSequence(CreateSeqStmt *seq)
+{
+	Oid		seqoid;
+	Oid		nspid;
+	bool	need_send = true;
+
+	if (g_GTM_skip_catalog && IS_PGXC_DATANODE)
+	{
+		ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("skip_gtm_catalog can not be true on datanode.")));
+	}
+	
+	if (!g_GTM_skip_catalog)
+	{
+		/* Unlogged sequences are not implemented -- not clear if useful. */
+		if (seq->sequence->relpersistence == RELPERSISTENCE_UNLOGGED)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("unlogged sequences are not supported")));
+
+		/*
+		 * If if_not_exists was given and a relation with the same name already
+		 * exists, bail out. (Note: we needn't check this when not if_not_exists,
+		 * because DefineRelation will complain anyway.)
+		 */
+		if (seq->if_not_exists)
+		{
+			nspid = RangeVarGetAndCheckCreationNamespace(seq->sequence, NoLock,
+															&seqoid);
+			if (OidIsValid(seqoid))
+			{
+				ereport(NOTICE,
+						(errcode(ERRCODE_DUPLICATE_TABLE),
+						 errmsg("relation \"%s\" already exists, skipping",
+								seq->sequence->relname)));
+				need_send = false;
+			}
+			UnlockDatabaseObject(NamespaceRelationId, nspid, 0,
+									AccessShareLock);
+		}
+	}
+
+	return need_send;
+}
+
 /*
  * DefineSequence
  *                Creates a new sequence relation
  */
 ObjectAddress
+DefineSequence(ParseState *pstate, CreateSeqStmt *seq, bool exists_ok)
+#else
+ObjectAddress
 DefineSequence(ParseState *pstate, CreateSeqStmt *seq)
-{// #lizard forgives
+#endif
+{
     FormData_pg_sequence seqform;
     FormData_pg_sequence_data seqdataform;
     bool        need_seq_rewrite;
@@ -214,6 +273,14 @@ DefineSequence(ParseState *pstate, CreateSeqStmt *seq)
             RangeVarGetAndCheckCreationNamespace(seq->sequence, NoLock, &seqoid);
             if (OidIsValid(seqoid))
             {
+#ifdef __TBASE__
+				if (!exists_ok)
+					ereport(ERROR,
+						(errcode(ERRCODE_DUPLICATE_TABLE),
+						 errmsg("relation \"%s\" already exists",
+								seq->sequence->relname)));
+				else
+#endif
                 ereport(NOTICE,
                         (errcode(ERRCODE_DUPLICATE_TABLE),
                          errmsg("relation \"%s\" already exists, skipping",

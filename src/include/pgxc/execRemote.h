@@ -373,7 +373,13 @@ extern void ExecFinishInitRemoteSubplan(RemoteSubplanState *node);
 extern TupleTableSlot* ExecRemoteSubplan(PlanState *pstate);
 extern void ExecEndRemoteSubplan(RemoteSubplanState *node);
 extern void ExecReScanRemoteSubplan(RemoteSubplanState *node);
+#ifdef __TBASE__
+extern void ExecRemoteUtility(RemoteQuery *node,
+								PGXCNodeHandle *leader_cn_conn,
+								ParallelDDLRemoteType type);
+#else
 extern void ExecRemoteUtility(RemoteQuery *node);
+#endif
 
 extern bool    is_data_node_ready(PGXCNodeHandle * conn);
 
@@ -439,7 +445,29 @@ extern TupleDesc create_tuple_desc(char *msg_body, size_t len);
 extern void ExecFinishRemoteSubplan(RemoteSubplanState *node);
 extern void ExecShutdownRemoteSubplan(RemoteSubplanState *node);
 extern bool SetSnapshot(EState *state);
+
+extern void ExecRemoteUtility_ParallelDDLMode(RemoteQuery *node,
+							PGXCNodeHandle *leader_cn_handle);
+extern void LeaderCnExecRemoteUtility(RemoteQuery *node,
+								PGXCNodeHandle *leader_cn_conn,
+								ResponseCombiner *combiner,
+								bool need_tran_block,
+								GlobalTransactionId gxid,
+								Snapshot snapshot,
+								CommandId cid);
 #endif
+
+extern void GetGlobInfoForRemoteUtility(RemoteQuery *node,
+										GlobalTransactionId *gxid,
+										Snapshot *snapshot);
+extern void SendTxnInfo(RemoteQuery *node, PGXCNodeHandle *conn,
+						CommandId cid, Snapshot snapshot);
+extern bool CheckRemoteRespond(PGXCNodeHandle *conn,
+								ResponseCombiner *combiner,
+								int *index, int *conn_count);
+extern void RemoteReceiveAndCheck(int conn_count,
+									PGXCNodeHandle **conns,
+									ResponseCombiner *combiner);
 
 #ifdef __SUBSCRIPTION__
 extern void pgxc_node_report_error(ResponseCombiner *combiner);

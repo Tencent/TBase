@@ -416,26 +416,18 @@ UpdateRangeTableOfViewParse(Oid viewOid, Query *viewParse)
 
     return viewParse;
 }
-
 /*
- * DefineView
- *        Execute a CREATE VIEW command.
+ * MakeViewParse
+ * Run parse analysis to convert the raw parse tree to a Query.  Note this
+ * also acquires sufficient locks on the source table(s).
  */
-ObjectAddress
-DefineView(ViewStmt *stmt, const char *queryString,
+Query *
+MakeViewParse(ViewStmt* stmt, const char* query_string,
            int stmt_location, int stmt_len)
-{// #lizard forgives
+{
+	Query	*viewParse = NULL;
     RawStmt    *rawstmt;
-    Query       *viewParse;
-    RangeVar   *view;
-    ListCell   *cell;
-    bool        check_option;
-    ObjectAddress address;
-
     /*
-     * Run parse analysis to convert the raw parse tree to a Query.  Note this
-     * also acquires sufficient locks on the source table(s).
-     *
      * Since parse analysis scribbles on its input, copy the raw parse tree;
      * this ensures we don't corrupt a prepared statement, for example.
      */
@@ -443,9 +435,59 @@ DefineView(ViewStmt *stmt, const char *queryString,
     rawstmt->stmt = (Node *) copyObject(stmt->query);
     rawstmt->stmt_location = stmt_location;
     rawstmt->stmt_len = stmt_len;
+	viewParse = parse_analyze(rawstmt, query_string, NULL, 0, NULL);
+	return viewParse;
+}
 
-    viewParse = parse_analyze(rawstmt, queryString, NULL, 0, NULL);
+#ifdef __TBASE__
+/*
+ * IsViewTemp
+ *		Check whethe we need a temporary view.
+ */
+bool
+IsViewTemp(ViewStmt* stmt, const char* query_string,
+				int stmt_location, int stmt_len,
+				List **relation_list)
+{
+	Query		*viewParse = NULL;
+    RangeVar	*view = NULL;
+	
 
+	/* don't corrupt original command */
+    view = (RangeVar*)copyObject(stmt->view);
+	viewParse = MakeViewParse(stmt, query_string, stmt_location, stmt_len);
+
+    /*
+     * If the user didn't explicitly ask for a temporary view, check whether
+     * we need one implicitly.	We allow TEMP to be inserted automatically as
+     * long as the CREATE command is consistent with that --- no explicit
+     * schema name.
+     */
+    if (view->relpersistence == RELPERSISTENCE_PERMANENT &&
+		CheckAndGetRelation(viewParse, relation_list)) 
+	{
+        view->relpersistence = RELPERSISTENCE_TEMP;
+    }
+
+    return view->relpersistence == RELPERSISTENCE_TEMP;
+}
+#endif
+
+/*
+ * DefineView
+ *		Execute a CREATE VIEW command.
+ */
+ObjectAddress
+DefineView(ViewStmt *stmt, const char *queryString,
+		   int stmt_location, int stmt_len)
+{
+	Query	   *viewParse;
+	RangeVar   *view;
+	ListCell   *cell;
+	bool		check_option;
+	ObjectAddress address;
+
+	viewParse = MakeViewParse(stmt, queryString, stmt_location, stmt_len);
     /*
      * The grammar should ensure that the result is a single SELECT Query.
      * However, it doesn't forbid SELECT INTO, so we have to check for that.

@@ -944,7 +944,7 @@ dropdb_prepare(const char *dbname, bool missing_ok)
 /*
  * DROP DATABASE
  */
-void
+bool
 dropdb(const char *dbname, bool missing_ok)
 {// #lizard forgives
     Oid            db_id;
@@ -982,7 +982,7 @@ dropdb(const char *dbname, bool missing_ok)
             ereport(NOTICE,
                     (errmsg("database \"%s\" does not exist, skipping",
                             dbname)));
-            return;
+			return false;
         }
     }
 
@@ -1156,6 +1156,7 @@ dropdb(const char *dbname, bool missing_ok)
 #endif
     }
 #endif
+	return true;
 }
 
 

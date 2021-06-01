@@ -109,6 +109,10 @@
 #ifdef _MLS_
 #include "utils/relcrypt.h"
 #endif
+#ifdef __TBASE__
+#include "parser/scansup.h"
+#include "catalog/catalog.h"
+#endif
 /*
  * Deletion processing requires additional state for each ObjectAddress that
  * it's planning to delete.  For simplicity and code-sharing we make the
@@ -127,7 +131,6 @@ typedef struct
 #define DEPFLAG_INTERNAL    0x0008    /* reached via internal dependency */
 #define DEPFLAG_EXTENSION    0x0010    /* reached via extension dependency */
 #define DEPFLAG_REVERSE        0x0020    /* reverse internal/extension link */
-
 
 /* expansible list of ObjectAddresses */
 struct ObjectAddresses
@@ -390,6 +393,246 @@ performDeletion(const ObjectAddress *object,
 
     heap_close(depRel, RowExclusiveLock);
 }
+
+#ifdef __TBASE__
+
+/*
+ * replace all invisible characters with ' ',
+ * leave no spaces next to ',' or '.'
+ */
+void
+OmitqueryStringSpace(char *queryString)
+{
+    char *front = queryString;
+    char *last = queryString;
+    bool skip = false;
+
+    if (queryString == NULL)
+    {
+        return;
+    }
+
+    /* omit space */
+    while (scanner_isspace(*front))
+    {
+        ++front;
+    }
+
+    while ((*front) != '\0')
+    {
+        if(scanner_isspace(*front) && skip == false)
+        {
+            while(scanner_isspace(*front))
+            {
+                ++front;
+            }
+
+            if ((*front) == ',' || (*front) == '.')
+            {
+                /* no need space */
+            }
+            else if (last != queryString && (*(last - 1) == ',' || *(last - 1) == '.'))
+            {
+                /* no need space */
+            }
+            else
+            {
+                /* replace all invisible characters with ' ' */
+                *last = ' ';
+                ++last;
+                continue;
+            }
+        }
+
+        if ((*front) == '\"')
+        {
+            skip = (skip == true) ? false : true;
+            *last = *front;
+            ++front;
+        }
+        else
+        {
+            *last = *front;
+            ++front;
+        }
+        ++last;
+    }
+    *last = '\0';
+}
+
+/*
+ * remove object name in query string (replace with ' ')
+ */
+void
+RemoveObjnameInQueryString(char *queryString, char *full_name)
+{
+    char *ptr = NULL;
+    char *tmp = NULL;
+    char *tmpStr = NULL;
+    char *start_ptr = queryString;
+    char *end_ptr = queryString + strlen(queryString) - 1;
+    int  len = 0;
+
+    tmpStr = queryString;
+    len = strlen(full_name);
+    while ((ptr = strstr(tmpStr, full_name)) != NULL)
+    {
+        /* is not independent string, skip */
+        if (((ptr - 1) >= start_ptr && *(ptr - 1) != ' ' && (*(ptr - 1) != ',')) ||
+                    ((ptr + len) <= end_ptr && *(ptr + len) != ' ' && *(ptr + len) != ',' && *(ptr + len) != ';'))
+        {
+            if (((ptr - 1) >= start_ptr && *(ptr - 1) == '\"' && (ptr + len) <= end_ptr && *(ptr + len) == '\"') &&
+                        ((ptr - 2) < start_ptr || *(ptr - 2) != '.'))
+            {
+                *(ptr - 1) = ' ';
+                *(ptr + len) = ' ';
+            }
+            else
+            {
+                tmpStr = ptr + len;
+                continue;
+            }
+        }
+
+        /* replace obj name with ' ' */
+        MemSet(ptr, ' ', len);
+
+        /* find the previous ',' */
+        tmp = ptr - 1;
+        while (tmp >= start_ptr && *tmp == ' ')
+        {
+            tmp--;
+        }
+
+        if (tmp >= start_ptr && *tmp == ',')
+        {
+            *tmp = ' ';
+        }
+        else
+        {
+            /* find the following ',' */
+            tmp = ptr + len;
+            while (tmp <= end_ptr && *tmp == ' ')
+            {
+                tmp++;
+            }
+
+            if (tmp <= end_ptr && *tmp == ',')
+            {
+                *tmp = ' ';
+            }
+        }
+
+        tmpStr = ptr + len;
+    }
+}
+
+/*
+ * Like RemoveRelations, implements drop relations. But the function
+ * only be used for local cn in parallel ddl mode.
+ */
+void
+RemoveRelationsParallelMode(DropStmt *drop, ObjectAddresses* objects,
+								List *heap_list)
+{
+	int		flags = 0;
+	int		i = 0;
+	char	relkind;
+	ListCell 	*lc;
+	Oid			heap_oid;
+
+	/* Determine required relkind */
+	relkind = GetRemoveObjectRelkind(drop->removeType);
+
+	if (drop->concurrent)
+	{
+		flags |= PERFORM_DELETION_CONCURRENTLY;
+	}
+
+	/*
+	 * In DROP INDEX, attempt to acquire lock on the parent table before
+	 * locking the index.
+	 */
+	foreach(lc, heap_list)
+	{
+		heap_oid = lfirst_oid(lc);
+		if (flags & PERFORM_DELETION_CONCURRENTLY)
+			LockRelationOid(heap_oid, ShareUpdateExclusiveLock);
+		else
+			LockRelationOid(heap_oid, AccessExclusiveLock);
+	}
+
+	for (i = 0; i < objects->numrefs; i++)
+	{
+		const ObjectAddress* thisobj = objects->refs + i;
+		Oid		 relOid = thisobj->objectId;
+		Relation child_rel = NULL;
+
+		AcquireDeletionLock(thisobj, flags);
+
+		/* could not drop child interval partition or its index */
+		if (RELKIND_RELATION == relkind)
+		{
+			bool report_error = false;
+
+			elog(DEBUG1, "drop table relOid: %u", relOid);
+
+			if (RELKIND_RELATION == relkind)
+			{
+				child_rel = heap_open(relOid, NoLock);
+			}
+			else
+			{
+				child_rel = index_open(relOid, NoLock);
+			}
+
+			if (RELATION_IS_CHILD(child_rel))
+			{
+				report_error = true;
+			}
+
+			if (RELKIND_RELATION == relkind)
+			{
+				heap_close(child_rel, NoLock);
+			}
+			else
+			{
+				index_close(child_rel, NoLock);
+			}
+
+			if (report_error)
+			{
+				;
+			}
+		}
+	}
+
+	performMultipleDeletions(objects, drop->behavior, flags);
+}
+
+/*
+ * Implements drop one or more objects such as schema/function/type. 
+ * The function only be used for local cn in parallel ddl mode.
+ */
+void
+RemoveObjectsParallelMode(DropStmt *stmt, ObjectAddresses *objects)
+{
+	int i;
+	for (i = 0; i < objects->numrefs; i++)
+	{
+		const ObjectAddress* thisobj = objects->refs + i;
+
+		if (IsSharedRelation(thisobj->classId))
+			LockSharedObject(thisobj->classId, thisobj->objectId,
+								0, AccessExclusiveLock);
+		else
+			LockDatabaseObject(thisobj->classId, thisobj->objectId,
+								0, AccessExclusiveLock);
+    }
+	/* Here we really delete them. */
+    performMultipleDeletions(objects, stmt->behavior, 0);
+}
+#endif
 
 /*
  * performMultipleDeletions: Similar to performDeletion, but act on multiple

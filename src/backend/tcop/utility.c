@@ -17,6 +17,7 @@
  *-------------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "stdio.h"
 
 #include "access/htup_details.h"
 #include "access/reloptions.h"
@@ -104,6 +105,8 @@
 #include "utils/ruleutils.h"
 #include "utils/memutils.h"
 #include "catalog/index.h"
+#include "catalog/pg_namespace.h"
+#include "storage/lmgr.h"
 #endif
 
 #ifdef __AUDIT__
@@ -152,7 +155,11 @@ extern bool    g_GTM_skip_catalog;
 
 bool is_txn_has_parallel_ddl;
 bool enable_parallel_ddl;
+bool leader_cn_executed_ddl;
+
 #endif
+
+static RemoteQueryExecType GetRenameExecType(RenameStmt *stmt, bool *is_temp);
 
 #endif
 
@@ -665,10 +672,14 @@ ProcessUtilityPre(PlannedStmt *pstmt,
                 /* Clean also remote Coordinators */
 				snprintf(query, STRINGLENGTH, "CLEAN CONNECTION TO ALL FOR DATABASE %s;",
                         quote_identifier(stmt->dbname));
+
                 ExecUtilityStmtOnNodes(parsetree, query, NULL, sentToRemote, true,
                         EXEC_ON_ALL_NODES, false, false);
 
-				if (!stmt->prepare)
+				/*
+				 * parallel ddl mode, we send drop db prepare in standard_ProcessUtility 
+				 */
+				if (!stmt->prepare && !is_txn_has_parallel_ddl)
 				{
 					/* Lock database and check the constraints before we actually dropping */
 					if (stmt->missing_ok)
@@ -779,7 +790,9 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 #ifdef _MIGRATE_
             if(!IsConnFromCoord() && !isRestoreMode && IS_PGXC_COORDINATOR)
             {                        
-                ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, false, EXEC_ON_ALL_NODES, false, false);        
+				ExecUtilityStmtOnNodes(parsetree, queryString, NULL,
+										sentToRemote, false, EXEC_ON_ALL_NODES,
+										false, false);
             }
 #endif
             all_done = true;
@@ -790,7 +803,9 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 #ifdef _MIGRATE_
             if(!IsConnFromCoord() && IS_PGXC_COORDINATOR)
             {                        
-                ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, false, EXEC_ON_ALL_NODES, false, false);        
+				ExecUtilityStmtOnNodes(parsetree, queryString, NULL,
+										sentToRemote, false, EXEC_ON_ALL_NODES,
+										false, false);	
             }
 #endif
             all_done = true;
@@ -813,7 +828,9 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 #ifdef _MIGRATE_
                 if(!IsConnFromCoord() && IS_PGXC_COORDINATOR)
                 {                        
-                    ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, false, EXEC_ON_ALL_NODES, false, false);        
+					ExecUtilityStmtOnNodes(parsetree, queryString, NULL,
+											sentToRemote, false, EXEC_ON_ALL_NODES,
+											false, false);
                 }    
 #endif
                 all_done = true;
@@ -844,33 +861,10 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 
                 if (IS_PGXC_LOCAL_COORDINATOR)
                 {
-                    /*
-                     * Get the necessary details about the relation before we
-                     * run ExecRenameStmt locally. Otherwise we may not be able
-                     * to look-up using the old relation name.
-                     */
-                    if (stmt->relation)
-                    {
-                        /*
-                         * If the table does not exist, don't send the query to
-                         * the remote nodes. The local node will eventually
-                         * report an error, which is then sent back to the
-                         * client.
-                         */
-                        Oid relid = RangeVarGetRelid(stmt->relation, NoLock, true);
-
-                        if (OidIsValid(relid))
-                            exec_type = ExecUtilityFindNodes(stmt->renameType,
-                                    relid,
-                                    &is_temp);
-                        else
-                            exec_type = EXEC_ON_NONE;
-                    }
-                    else
-                        exec_type = ExecUtilityFindNodes(stmt->renameType,
-                                InvalidOid,
-                                &is_temp);
+					exec_type = GetRenameExecType(stmt, &is_temp);
 #ifdef __TBASE__
+					if (LOCAL_PARALLEL_DDL)
+						exec_type = EXEC_ON_NONE;
                     /* clean connections of the old name first. */
                     if (OBJECT_DATABASE == stmt->renameType)
                     {
@@ -879,8 +873,9 @@ ProcessUtilityPre(PlannedStmt *pstmt,
                         DropDBCleanConnection(stmt->subname);
                         /* Clean also remote nodes */
                         sprintf(query, "CLEAN CONNECTION TO ALL FOR DATABASE %s;", stmt->subname);
-                        ExecUtilityStmtOnNodes(parsetree, query, NULL, sentToRemote, true,
-                                EXEC_ON_ALL_NODES, false, false);
+						ExecUtilityStmtOnNodes(parsetree, query, NULL,
+										sentToRemote, true, EXEC_ON_ALL_NODES,
+										false, false);
                     }
 #endif
                 }
@@ -899,7 +894,27 @@ ProcessUtilityPre(PlannedStmt *pstmt,
              * it will cause a deadlock in the cluster at Datanode levels.
              */
             if (!IsConnFromCoord())
+			{
+#ifdef __TBASE__
+				if (LOCAL_PARALLEL_DDL)
+				{
+					PGXCNodeHandle* leaderCnHandle = find_ddl_leader_cn();
+					RemoteQueryExecType execType = ((RemoteQuery *) parsetree)->exec_type;
+					if ((execType == EXEC_ON_ALL_NODES || execType == EXEC_ON_COORDS))
+					{
+						if (!is_ddl_leader_cn(leaderCnHandle->nodename))
+							Assert(leader_cn_executed_ddl);
+					}
+					ExecRemoteUtility((RemoteQuery *) parsetree,
+										leaderCnHandle, EXCLUED_LEADER_DDL);
+				}
+				else
+					ExecRemoteUtility((RemoteQuery *) parsetree,
+										NULL, NON_PARALLEL_DDL);
+#else
                 ExecRemoteUtility((RemoteQuery *) parsetree);
+#endif
+			}
             break;
 
         case T_CleanConnStmt:
@@ -1245,7 +1260,6 @@ ProcessUtilityPre(PlannedStmt *pstmt,
         ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, auto_commit,
                 exec_type, is_temp, add_context);
 
-
     return all_done;
 }
 
@@ -1369,16 +1383,21 @@ ProcessUtilityPost(PlannedStmt *pstmt,
             add_context = true;
             exec_type = EXEC_ON_ALL_NODES;
             break;
-
+		case T_DropdbStmt:
+		case T_DropRoleStmt:
         case T_DropTableSpaceStmt:
+#ifdef __TBASE__
+			if (LOCAL_PARALLEL_DDL)
+				break;
+#endif
+			exec_type = EXEC_ON_ALL_NODES;
+			break;
         case T_AlterTableSpaceOptionsStmt:
         case T_GrantRoleStmt:
         case T_AlterDatabaseSetStmt:
-        case T_DropdbStmt:
         case T_CreateRoleStmt:
         case T_AlterRoleStmt:
         case T_AlterRoleSetStmt:
-        case T_DropRoleStmt:
         case T_ReassignOwnedStmt:
         case T_LockStmt:
         case T_AlterOwnerStmt:
@@ -1658,6 +1677,10 @@ ProcessUtilityPost(PlannedStmt *pstmt,
             break;
 
         case T_CreateSeqStmt:
+#ifdef __TBASE__
+			if (LOCAL_PARALLEL_DDL)
+				break;
+#endif
             if (IS_PGXC_LOCAL_COORDINATOR)
             {
                 CreateSeqStmt *stmt = (CreateSeqStmt *) parsetree;
@@ -1781,28 +1804,126 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 static void
 parallel_ddl_process(Node *node)
 {
-    if (!enable_parallel_ddl || !IS_PGXC_LOCAL_COORDINATOR)
+	/*
+	 * set is_txn_has_parallel_ddl to be false in case of combination command
+	 * that include some type support parallel ddl and some unsupport parallel
+	 * ddl. eg: create extension which include T_CreateFunctionStmt and
+	 * T_CreateOpClassStmt and so on.
+	 */
+	if (is_txn_has_parallel_ddl && nodeTag(node) != T_RemoteQuery)
+	{
+		is_txn_has_parallel_ddl = false;
+	}
+
+	if (!enable_parallel_ddl)
     {
         return ;
     }
 
 	switch (nodeTag(node))
 	{
+		case T_AlterTableStmt:
+		case T_AlterDatabaseStmt:
+		case T_AlterDatabaseSetStmt:
+		case T_AlterRoleSetStmt:
+			break;
+		case T_AlterOwnerStmt:
+			{
+				AlterOwnerStmt *stmt = (AlterOwnerStmt *) node;
+				switch (stmt->objectType)
+				{
+					case OBJECT_DATABASE:
+					case OBJECT_SCHEMA:
+					case OBJECT_TABLE:
+					case OBJECT_FUNCTION:
+					case OBJECT_TYPE:
+						break;
+					default:
+						return;
+				}
+			}
+			break;
+		case T_AlterObjectSchemaStmt:
+			{
+				AlterObjectSchemaStmt *stmt = (AlterObjectSchemaStmt *) node;
+				switch (stmt->objectType)
+				{
+					case OBJECT_TABLE:
+					case OBJECT_FUNCTION:
+					case OBJECT_VIEW:
+					case OBJECT_TYPE:
+						break;
+					default:
+						return;
+				}
+			}
+			break;
+		case T_AlterSeqStmt:
 		case T_CreateStmt:
 		case T_CreateForeignTableStmt:
 		case T_CreateTableAsStmt:
 		case T_CreateSchemaStmt:
-		case T_AlterTableStmt:
-		case T_DefineStmt:
+		case T_CreateTableSpaceStmt:
+		case T_CreatedbStmt:
+		case T_CreateRoleStmt:
+		case T_CompositeTypeStmt:
+		case T_CreateEnumStmt:
+		case T_CreateRangeStmt:
+		case T_CreateSeqStmt:
+		case T_CreateFunctionStmt:
+		case T_ViewStmt:
+		case T_DropTableSpaceStmt:
+		case T_DropdbStmt:
+		case T_DropRoleStmt:
+			break;
 		case T_DropStmt:
+			{
+				DropStmt *stmt = (DropStmt *)node;
+				switch (stmt->removeType)
+				{
+					case OBJECT_INDEX:
+					case OBJECT_SEQUENCE:
+					case OBJECT_TABLE:
+					case OBJECT_VIEW:
+					case OBJECT_MATVIEW:
+					case OBJECT_FOREIGN_TABLE:
+					case OBJECT_SCHEMA:
+					case OBJECT_FUNCTION:
+					case OBJECT_TYPE:
+						break;
+					default:
+						return;
+				}
+			}
+			break;
 		case T_RenameStmt:
-		case T_TruncateStmt:
+			{
+				RenameStmt *stmt = (RenameStmt *)node;
+				switch (stmt->renameType)
+				{
+					case OBJECT_DATABASE:
+					case OBJECT_SCHEMA:
+					case OBJECT_ROLE:
+					case OBJECT_TABLE:
+					case OBJECT_INDEX:
+					case OBJECT_VIEW:
+					case OBJECT_FUNCTION:
+					case OBJECT_TYPE:
+						break;
+					default:
+						return;
+				}
+			}
+			break;
 		case T_IndexStmt:
     /* CONCURRENT INDEX is not supported */
     if (IsA(node,IndexStmt) && castNode(IndexStmt,node)->concurrent)
     {
 				return ;
     }
+			break;
+		case T_TruncateStmt:
+		case T_ReindexStmt:
 			break;
 		default:
 			return ;
@@ -2067,16 +2188,72 @@ standard_ProcessUtility(PlannedStmt *pstmt,
             /* no event triggers for global objects */
             if (IS_PGXC_LOCAL_COORDINATOR)
                 PreventTransactionChain(isTopLevel, "CREATE TABLESPACE");
+#ifdef __TBASE__
+			/*
+			 * If I am the main execute CN but not Leader CN,
+			 * Notify the Leader CN to create firstly.
+			 */
+			if (!sentToRemote && LOCAL_PARALLEL_DDL)
+			{
+				SendLeaderCNUtilityWithContext(queryString, false);
+			}
+#endif
             CreateTableSpace((CreateTableSpaceStmt *) parsetree);
             break;
 
         case T_DropTableSpaceStmt:
-            /* no event triggers for global objects */
-            /* Allow this to be run inside transaction block on remote nodes */
+			{
+				DropTableSpaceStmt *stmt = (DropTableSpaceStmt *)parsetree;
+				/* 
+				 * no event triggers for global objects
+				 * Allow this to be run inside transaction block on remote nodes
+				 */
             if (IS_PGXC_LOCAL_COORDINATOR)
                 PreventTransactionChain(isTopLevel, "DROP TABLESPACE");
 
-            DropTableSpace((DropTableSpaceStmt *) parsetree);
+#ifdef __TBASE__
+				/*
+				 * If I am the main execute CN but not Leader CN,
+				 * Notify the Leader CN to create firstly.
+				 */
+				if (!sentToRemote && LOCAL_PARALLEL_DDL)
+				{
+					PGXCNodeHandle	*leaderCnHandle = NULL;
+					leaderCnHandle = find_ddl_leader_cn();
+					if (!is_ddl_leader_cn(leaderCnHandle->nodename))
+					{
+						if (PreCheckforDropTableSpace(stmt))
+						{
+							SendLeaderCNUtility(queryString, false);
+							DropTableSpace(stmt, false);
+							ExecUtilityStmtOnNodes(parsetree, queryString,
+												NULL, sentToRemote, false,
+												EXEC_ON_ALL_NODES, false,
+												false);
+						}
+					}
+					else if (DropTableSpace(stmt, stmt->missing_ok))
+					{
+						ExecUtilityStmtOnNodes(parsetree, queryString,
+											NULL, sentToRemote, false,
+											EXEC_ON_ALL_NODES, false,
+											false);
+					}
+				}
+				/* From remote cn */
+				else if (!IS_PGXC_LOCAL_COORDINATOR && is_txn_has_parallel_ddl)
+				{
+					DropTableSpace(stmt, false);
+				}
+				/* non parallel ddl mode */
+				else
+				{
+					DropTableSpace(stmt, stmt->missing_ok);
+				}
+#else
+				DropTableSpace(stmt, stmt->missing_ok);
+#endif
+			}
             break;
 
         case T_AlterTableSpaceOptionsStmt:
@@ -2085,6 +2262,31 @@ standard_ProcessUtility(PlannedStmt *pstmt,
             break;
 
         case T_TruncateStmt:
+#ifdef __TBASE__
+			/*
+			 * If I am the main execute CN but not Leader CN,
+			 * Notify the Leader CN to create firstly.
+			 */
+			if (!sentToRemote && LOCAL_PARALLEL_DDL)
+			{
+				bool		is_temp = false;
+				ListCell	*cell;
+				foreach (cell, ((TruncateStmt *) parsetree)->relations) 
+				{
+					Oid relid;
+					RangeVar* rel = (RangeVar*)lfirst(cell);
+
+					relid = RangeVarGetRelid(rel, NoLock, false);
+
+					if (IsTempTable(relid))
+					{
+						is_temp = true;
+						break;
+					}
+				}
+				SendLeaderCNUtility(queryString, is_temp);
+			}
+#endif
             ExecuteTruncate((TruncateStmt *) parsetree);
             break;
 
@@ -2127,31 +2329,118 @@ standard_ProcessUtility(PlannedStmt *pstmt,
             /* no event triggers for global objects */
             if (IS_PGXC_LOCAL_COORDINATOR)
                 PreventTransactionChain(isTopLevel, "CREATE DATABASE");
+
+#ifdef __TBASE__
+			/*
+			 * If I am the main execute CN but not Leader CN,
+			 * Notify the Leader CN to create firstly.
+			 */
+			if (!sentToRemote && LOCAL_PARALLEL_DDL)
+			{
+				SendLeaderCNUtilityWithContext(queryString, false);
+			}
+#endif
+
             createdb(pstate, (CreatedbStmt *) parsetree);
             break;
 
         case T_AlterDatabaseStmt:
+#ifdef __TBASE__
+			/*
+			 * If I am the main execute CN but not Leader CN,
+			 * Notify the Leader CN to create firstly.
+			 */
+			if (!sentToRemote && LOCAL_PARALLEL_DDL)
+			{
+				/*
+				 * If this is not a SET TABLESPACE statement, just propogate
+				 * the cmd as usual.
+				 */
+				if (IsSetTableSpace((AlterDatabaseStmt*) parsetree))
+					SendLeaderCNUtility(queryString, false);
+				else
+					SendLeaderCNUtilityWithContext(queryString, false);
+			}
+#endif
             /* no event triggers for global objects */
             AlterDatabase(pstate, (AlterDatabaseStmt *) parsetree, isTopLevel);
             break;
 
         case T_AlterDatabaseSetStmt:
+#ifdef __TBASE__
+			/*
+			 * If I am the main execute CN but not Leader CN,
+			 * Notify the Leader CN to create firstly.
+			 */
+			if (!sentToRemote && LOCAL_PARALLEL_DDL)
+			{
+				SendLeaderCNUtility(queryString, false);
+			}
+#endif		
             /* no event triggers for global objects */
             AlterDatabaseSet((AlterDatabaseSetStmt *) parsetree);
             break;
 
         case T_DropdbStmt:
             {
+				char prepareQuery[STRINGLENGTH];
                 DropdbStmt *stmt = (DropdbStmt *) parsetree;
-
 				if (!stmt->prepare)
 				{
+					bool missing_ok = stmt->missing_ok;
                 /* no event triggers for global objects */
                 if (IS_PGXC_LOCAL_COORDINATOR)
 					{
                     PreventTransactionChain(isTopLevel, "DROP DATABASE");
 					}
-                dropdb(stmt->dbname, stmt->missing_ok);
+					/*
+					 * If I am the main execute CN but not Leader CN,
+					 * Notify the Leader CN to drop firstly.
+					 */
+					if (!sentToRemote && LOCAL_PARALLEL_DDL)
+					{
+						PGXCNodeHandle	*leaderCnHandle = NULL;
+						Oid				db_oid = InvalidOid;
+						leaderCnHandle = find_ddl_leader_cn();
+						
+						db_oid = get_database_oid(stmt->dbname,	missing_ok);
+
+						if (OidIsValid(db_oid))
+						{
+							snprintf(prepareQuery, STRINGLENGTH, "DROP DATABASE PREPARE %s;",
+						        			quote_identifier(stmt->dbname));
+							if (!is_ddl_leader_cn(leaderCnHandle->nodename))
+								SendLeaderCNUtility(prepareQuery, false);
+							else
+								dropdb_prepare(stmt->dbname, false);
+							ExecUtilityStmtOnNodes(parsetree, prepareQuery,
+												NULL, sentToRemote, false,
+												EXEC_ON_ALL_NODES, false,
+												false);
+
+							if (!is_ddl_leader_cn(leaderCnHandle->nodename))
+								SendLeaderCNUtility(queryString, false);
+						}
+						else
+							break;
+					}
+					/* 
+					 * In parallel ddl mode, we only send cmd to remote when
+					 * database exists, so database can not miss when the cmd
+					 * come from remote cn.
+					 */
+					if (!IS_PGXC_LOCAL_COORDINATOR && is_txn_has_parallel_ddl)
+					{
+						missing_ok = false;
+					}
+
+					if (dropdb(stmt->dbname, missing_ok) &&	LOCAL_PARALLEL_DDL)
+					{
+						ExecUtilityStmtOnNodes(parsetree, queryString, NULL,
+												sentToRemote, false,
+												EXEC_ON_ALL_NODES, false,
+												false);
+					}
             }
 				else
 				{
@@ -2301,6 +2590,16 @@ standard_ProcessUtility(PlannedStmt *pstmt,
              * ******************************** ROLE statements ****
              */
         case T_CreateRoleStmt:
+#ifdef __TBASE__
+			/*
+			 * If I am the main execute CN but not Leader CN,
+			 * Notify the Leader CN to create firstly.
+			 */
+            if (!sentToRemote && LOCAL_PARALLEL_DDL)
+            {
+                SendLeaderCNUtility(queryString, false);
+            }
+#endif
             /* no event triggers for global objects */
             CreateRole(pstate, (CreateRoleStmt *) parsetree);
             break;
@@ -2311,13 +2610,29 @@ standard_ProcessUtility(PlannedStmt *pstmt,
             break;
 
         case T_AlterRoleSetStmt:
+#ifdef __TBASE__
+			/*
+			 * If I am the main execute CN but not Leader CN,
+			 * Notify the Leader CN to create firstly.
+			 */
+            if (!sentToRemote && LOCAL_PARALLEL_DDL)
+            {
+                SendLeaderCNUtility(queryString, false);
+            }
+#endif
             /* no event triggers for global objects */
             AlterRoleSet((AlterRoleSetStmt *) parsetree);
             break;
 
         case T_DropRoleStmt:
+			{
+#ifdef __TBASE__
+				CheckAndDropRole(parsetree, sentToRemote, queryString);
+#else
             /* no event triggers for global objects */
-            DropRole((DropRoleStmt *) parsetree);
+				DropRole(stmt, stmt->missing_ok, NULL);
+#endif
+			}
             break;
 
         case T_ReassignOwnedStmt:
@@ -2368,9 +2683,17 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                 switch (stmt->kind)
                 {
                     case REINDEX_OBJECT_INDEX:
+#ifdef __TBASE__	
+						CheckAndSendLeaderCNReindex(sentToRemote, stmt,
+													queryString);
+#endif
                         ReindexIndex(stmt->relation, stmt->options);
                         break;
                     case REINDEX_OBJECT_TABLE:
+#ifdef __TBASE__	
+						CheckAndSendLeaderCNReindex(sentToRemote, stmt,
+													queryString);
+#endif
                         ReindexTable(stmt->relation, stmt->options);
                         break;
                     case REINDEX_OBJECT_SCHEMA:
@@ -2437,11 +2760,34 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                 RenameStmt *stmt = (RenameStmt *) parsetree;
 
                 if (EventTriggerSupportsObjectType(stmt->renameType))
+				{
                     ProcessUtilitySlow(pstate, pstmt, queryString,
                                        context, params, queryEnv,
                                        dest,
                                        sentToRemote,
                                        completionTag);
+				}
+#ifdef __TBASE__
+				else if (LOCAL_PARALLEL_DDL)
+				{
+					bool is_temp = false;
+					PGXCNodeHandle	*leaderCnHandle = find_ddl_leader_cn();
+					bool is_leader_cn = is_ddl_leader_cn(leaderCnHandle->nodename);
+					RemoteQueryExecType exec_type = GetRenameExecType(stmt, &is_temp);
+					/*
+					 * If I am the main execute CN but not Leader CN,
+					 * Notify the Leader CN to create firstly.
+					 */
+					if (!is_leader_cn)
+					{
+						SendLeaderCNUtility(queryString, is_temp);
+					}
+					ExecRenameStmt(stmt);
+					ExecUtilityStmtOnNodes(parsetree, queryString, NULL,
+											sentToRemote, false, exec_type,
+											is_temp, false);
+				}
+#endif
                 else
                     ExecRenameStmt(stmt);
 
@@ -2489,8 +2835,20 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                                        sentToRemote,
                                        completionTag);
                 else
+				{
+#ifdef __TBASE__
+					/*
+					 * If I am the main execute CN but not Leader CN,
+					 * Notify the Leader CN to create firstly.
+					 */
+					if (!sentToRemote && LOCAL_PARALLEL_DDL)
+					{
+						SendLeaderCNUtility(queryString, false);
+					}
+#endif
                     ExecAlterOwnerStmt(stmt);
             }
+			}
             break;
 
         case T_CommentStmt:
@@ -2550,7 +2908,9 @@ standard_ProcessUtility(PlannedStmt *pstmt,
             /* only if am the original session I will revoke other nodes to do the create sharding job */
             if(IS_PGXC_COORDINATOR && !IsConnFromCoord())
             {                        
-                ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, false, EXEC_ON_COORDS, false, false);
+				ExecUtilityStmtOnNodes(parsetree, queryString, NULL,
+										sentToRemote, false, EXEC_ON_COORDS,
+										false, false);
             
                 execnodes = (ExecNodes *)makeNode(ExecNodes);
                 for(i = 0; i < nodenum; i++)
@@ -2566,8 +2926,8 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                     execnodes->nodeList = lappend_int(execnodes->nodeList, nodeIndex[i]);
                     
                     ExecUtilityStmtOnNodes(parsetree, queryString, execnodes, 
-                                            sentToRemote, false, 
-                                            EXEC_ON_DATANODES, false, false);
+											sentToRemote, false, EXEC_ON_DATANODES,
+											false, false);
                     list_free(execnodes->nodeList);
                     execnodes->nodeList = NIL;
                 }
@@ -2622,7 +2982,9 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                 /* Send Move Data Command to All Coordinator,
                  *    BUT,it is necessary to add new node to all the Coordinators independently 
                  */
-                ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, false, EXEC_ON_COORDS, false, false);
+				ExecUtilityStmtOnNodes(parsetree, queryString, NULL,
+										sentToRemote, false, EXEC_ON_COORDS,
+										false, false);
 
                 /* generate new query string to datanode s*/
                 switch (stmt->strategy)
@@ -2702,8 +3064,8 @@ standard_ProcessUtility(PlannedStmt *pstmt,
     
                 /* Send Move Data Command to Data Node */
                 ExecUtilityStmtOnNodes(parsetree, movecmd, execnodes, 
-                                        sentToRemote, false, 
-                                        EXEC_ON_DATANODES, false, false);
+										sentToRemote, false, EXEC_ON_DATANODES,
+										false, false);
 
                 pfree(qstring_tonode->data);
                 pfree(qstring_tonode);
@@ -2754,7 +3116,9 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                 ExecNodes *execnodes;
                 
                 /* drop remote coord sharding map */
-                ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, false, EXEC_ON_COORDS, false, false);
+				ExecUtilityStmtOnNodes(parsetree, queryString, NULL,
+										sentToRemote, false, EXEC_ON_COORDS,
+										false, false);
                 
                 /* drop datanodes sharding map */
                 GetGroupNodesByNameOrder(group, nodeIndex, &nodenum);
@@ -2773,8 +3137,8 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                     execnodes->nodeList = lappend_int(execnodes->nodeList, nodeIndex[i]);
                 }
                 ExecUtilityStmtOnNodes(parsetree, queryString, execnodes, 
-                                                sentToRemote, false, 
-                                                EXEC_ON_DATANODES, false, false);
+										sentToRemote, false, EXEC_ON_DATANODES,
+										false, false);
                 list_free(execnodes->nodeList);
                 pfree(execnodes);                            
             }
@@ -2810,7 +3174,9 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                 /* Send cleansharding msg to all other cn and dn */
                 if (IS_PGXC_LOCAL_COORDINATOR)
                 {
-                    ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, false, EXEC_ON_ALL_NODES, false, false);
+					ExecUtilityStmtOnNodes(parsetree, queryString, NULL,
+											sentToRemote, false, EXEC_ON_ALL_NODES,
+											false, false);
                 }
                 /* Then cleansharding self */
                 ForceRefreshShardMap(InvalidOid);
@@ -2867,11 +3233,13 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                         elog(ERROR, "innel error: datanode %d cannot be found.", tooid);
                     execnodes->nodeList = lappend_int(execnodes->nodeList,toidx);
                     ExecUtilityStmtOnNodes(NULL, "CLEAN SHARDING;", execnodes, 
-                                            sentToRemote, false, 
-                                            EXEC_ON_DATANODES, false, false);
+											sentToRemote, false, EXEC_ON_DATANODES,
+											false, false);
                     
                     //second clean sharding of all cooridnators
-                    ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, false, EXEC_ON_COORDS, false, false);
+					ExecUtilityStmtOnNodes(parsetree, queryString, NULL,
+											sentToRemote, false, EXEC_ON_COORDS,
+											false, false);
                     //and self                        
                     ForceRefreshShardMap(InvalidOid);
 
@@ -2895,8 +3263,8 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                         execnodes->nodeList = lappend_int(execnodes->nodeList, nodeindex);
                     }
                     ExecUtilityStmtOnNodes(NULL, "CLEAN SHARDING;", execnodes, 
-                                            sentToRemote, false, 
-                                            EXEC_ON_DATANODES, false, false);
+											sentToRemote, false, EXEC_ON_DATANODES,
+											false, false);
             
 
                     //finally clean sharding at from datanode
@@ -2909,8 +3277,8 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                     execnodes->nodeList = lappend_int(execnodes->nodeList,fromidx);
 
                     ExecUtilityStmtOnNodes(NULL, "CLEAN SHARDING;", execnodes, 
-                                            sentToRemote, false, 
-                                            EXEC_ON_DATANODES, false, false);
+											sentToRemote, false, EXEC_ON_DATANODES,
+											false, false);
                     list_free(execnodes->nodeList);
                     pfree(execnodes);
                 }                    
@@ -3000,7 +3368,9 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                         || (CREATE_KEY_VALUE_EXEC_CN == g_create_key_value_mode))
                     {
                         /* first tell other coord node to create */
-                        ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, false, EXEC_ON_COORDS, false, false);
+    					ExecUtilityStmtOnNodes(parsetree, queryString, NULL,
+												sentToRemote, false, EXEC_ON_COORDS,
+												false, false);
                     }
 
                     if ((CREATE_KEY_VALUE_EXEC_ALL == g_create_key_value_mode)
@@ -3021,8 +3391,8 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                             execnodes->nodeList = lappend_int(execnodes->nodeList, nodeIndex[i]);
 
                             ExecUtilityStmtOnNodes(parsetree, queryString, execnodes, 
-                                                    sentToRemote, false, 
-                                                    EXEC_ON_DATANODES, false, false);
+    												sentToRemote, false, EXEC_ON_DATANODES,
+													false, false);
                             list_free(execnodes->nodeList);
                             execnodes->nodeList = NIL;
                         }
@@ -3045,8 +3415,8 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                                 execnodes->nodeList = lappend_int(execnodes->nodeList, nodeIndex[i]);
 
                                 ExecUtilityStmtOnNodes(parsetree, queryString, execnodes, 
-                                                        sentToRemote, false, 
-                                                        EXEC_ON_DATANODES, false, false);
+    													sentToRemote, false, EXEC_ON_DATANODES,
+														false, false);
                                 list_free(execnodes->nodeList);
                                 execnodes->nodeList = NIL;
                             }
@@ -3148,6 +3518,16 @@ ProcessUtilitySlow(ParseState *pstate,
                  * relation and attribute manipulation
                  */
             case T_CreateSchemaStmt:
+#ifdef __TBASE__
+				/*
+                 * If I am the main execute CN but not Leader CN,
+                 * Notify the Leader CN to create firstly.
+                 */
+				if (!sentToRemote && LOCAL_PARALLEL_DDL)
+				{
+					SendLeaderCNUtility(queryString, false);
+				}
+#endif
                 CreateSchemaCommand((CreateSchemaStmt *) parsetree,
                                     queryString, sentToRemote,
                                     pstmt->stmt_location,
@@ -3172,6 +3552,13 @@ ProcessUtilitySlow(ParseState *pstate,
                        PGXCSubCluster *subcluster = NULL;
 #endif
 
+#ifdef __TBASE__
+					Oid nspaceid;
+					bool exist_ok = true;
+
+					if (is_txn_has_parallel_ddl && IsConnFromCoord())
+						exist_ok = false;
+
                     /* Run parse analysis ... */
                     /*
                      * If sentToRemote is set it is either EXECUTE DIRECT or part
@@ -3181,14 +3568,18 @@ ProcessUtilitySlow(ParseState *pstate,
                      * it should explicitly specify distribution.
                      */
                     stmts = transformCreateStmt((CreateStmt *) parsetree,
-                            queryString, !is_local && !sentToRemote);
+							queryString, !is_local && !sentToRemote,
+							&nspaceid, exist_ok);
 
-#ifdef __TBASE__
 					if (NULL == stmts)
                     {
                         commandCollected = true;
                         break;
                     }
+
+#else
+					stmts = transformCreateStmt((CreateStmt *) parsetree,
+							queryString, !is_local && !sentToRemote);
 #endif
 
                     if (IS_PGXC_LOCAL_COORDINATOR)
@@ -3278,6 +3669,29 @@ ProcessUtilitySlow(ParseState *pstate,
                             }
                         }
                     }
+#ifdef __TBASE__
+					/*
+					 * If I am the main execute CN but not Leader CN,
+					 * Notify the Leader CN to create firstly.
+					 */
+					if (!sentToRemote && LOCAL_PARALLEL_DDL)
+					{
+						PGXCNodeHandle *leader_cn = find_ddl_leader_cn();
+						if (!is_ddl_leader_cn(leader_cn->nodename))
+						{
+							/*
+							 * Unlock namespace before send to Leader CN
+							 * in case of concurrent drop schema and create
+							 * schema.xxx dead lock.
+							 */
+							UnlockDatabaseObject(NamespaceRelationId, nspaceid,
+													0, AccessShareLock);
+							SendLeaderCNUtility(queryString, is_temp);
+							LockDatabaseObject(NamespaceRelationId, nspaceid,
+													0, AccessShareLock);
+						}
+					}
+#endif
 #ifdef __COLD_HOT__
                     /* Add check overlap remote query on top of query tree */
                     if (subcluster && distributeby)
@@ -3474,8 +3888,9 @@ ProcessUtilitySlow(ParseState *pstate,
                 {
                     if (auditString != NULL)
                     {
-                        ExecUtilityStmtOnNodes(parsetree, auditString, NULL, sentToRemote, true,
-                                EXEC_ON_ALL_NODES, false, false);
+						ExecUtilityStmtOnNodes(parsetree, auditString, NULL,
+										sentToRemote, true, EXEC_ON_ALL_NODES,
+										false, false);
                     }
                 }
 
@@ -3493,8 +3908,9 @@ ProcessUtilitySlow(ParseState *pstate,
                 {
                     if (cleanString != NULL)
                     {
-                        ExecUtilityStmtOnNodes(parsetree, cleanString, NULL, sentToRemote, true,
-                            EXEC_ON_ALL_NODES, false, false);
+						ExecUtilityStmtOnNodes(parsetree, cleanString, NULL,
+							sentToRemote, true,	EXEC_ON_ALL_NODES,
+							false, false);
                     }
                 }
 
@@ -3520,6 +3936,36 @@ ProcessUtilitySlow(ParseState *pstate,
                      * permissions.
                      */
                     lockmode = AlterTableGetLockLevel(atstmt->cmds);
+#ifdef __TBASE__
+					/*
+					 * If I am the main execute CN but not Leader CN,
+					 * Notify the Leader CN to create firstly.
+					 */
+					if (!sentToRemote && LOCAL_PARALLEL_DDL)
+					{
+						bool is_temp = false;
+						PGXCNodeHandle	*leaderCnHandle = find_ddl_leader_cn();
+						if (!is_ddl_leader_cn(leaderCnHandle->nodename))
+						{
+							relid = RangeVarGetRelid(atstmt->relation,
+															lockmode, true);
+							if (OidIsValid(relid))
+							{
+								ExecUtilityFindNodes(atstmt->relkind,
+													relid, &is_temp);
+								UnlockRelationOid(relid, lockmode);
+								SendLeaderCNUtility(queryString, is_temp);
+							}
+							else
+							{
+								ereport(NOTICE,
+									(errmsg("relation \"%s\" does not exist, skipping",
+											atstmt->relation->relname)));
+								break;
+							}
+						}
+					}
+#endif
                     relid = AlterTableLookupRelation(atstmt, lockmode);
 
                     if (OidIsValid(relid))
@@ -3543,7 +3989,6 @@ ProcessUtilitySlow(ParseState *pstate,
                                 exec_type = ExecUtilityFindNodes(atstmt->relkind,
                                         relid,
                                         &is_temp);
-
                                 stmts = AddRemoteQueryNode(stmts, queryString, exec_type);
                             }
                         }
@@ -3736,11 +4181,43 @@ ProcessUtilitySlow(ParseState *pstate,
 					List       *inheritors = NIL;
 #ifdef __TBASE__
                     Relation   rel = NULL;
+					bool		istemp = false;
 #endif
 
                     if (stmt->concurrent)
                         PreventTransactionChain(isTopLevel,
                                                 "CREATE INDEX CONCURRENTLY");
+
+#ifdef __TBASE__
+					if (!sentToRemote && LOCAL_PARALLEL_DDL)
+					{
+						relid =	RangeVarGetRelidExtended(stmt->relation,
+														AccessShareLock, true,
+												 		false, NULL, NULL);
+						if (OidIsValid(relid))
+						{
+							RemoteQueryExecType exectype;
+							exectype = ExecUtilityFindNodes(OBJECT_INDEX,
+															relid, &istemp);
+
+							/*
+							 * If I am the main execute CN but not Leader CN,
+							 * Notify the Leader CN to create firstly.
+							 */
+							if (exectype == EXEC_ON_ALL_NODES ||
+									exectype == EXEC_ON_COORDS)
+							{
+								PGXCNodeHandle *leaderCnHandle;
+								leaderCnHandle = find_ddl_leader_cn();
+								if (!is_ddl_leader_cn(leaderCnHandle->nodename))
+								{
+									UnlockRelationOid(relid, AccessShareLock);
+									SendLeaderCNUtility(queryString, istemp);
+								}
+							}
+						}
+					}
+#endif
 
                     /*
                      * Look up the relation OID just once, right here at the
@@ -3758,7 +4235,6 @@ ProcessUtilitySlow(ParseState *pstate,
                                                  false, false,
                                                  RangeVarCallbackOwnsRelation,
                                                  NULL);
-
 #if 0
                     /* could not create index on interval child table directly */
                     if (OidIsValid(relid))
@@ -3984,7 +4460,11 @@ ProcessUtilitySlow(ParseState *pstate,
 										queryString);
 						/* Send prepare extension msg to all other cn and dn */
 						extension_query_string = qstring->data;
-						ExecUtilityStmtOnNodes(parsetree, extension_query_string, NULL, sentToRemote, false, EXEC_ON_ALL_NODES, false, false);	
+						ExecUtilityStmtOnNodes(parsetree,
+												extension_query_string,
+												NULL, sentToRemote, false,
+												EXEC_ON_ALL_NODES,
+												false, false);
 						
 						/* stage 2 */
 						ExecuteExtension(pstate, (CreateExtensionStmt *) parsetree);
@@ -3994,7 +4474,11 @@ ProcessUtilitySlow(ParseState *pstate,
 										queryString);
 						/* Send execute extension msg to all other cn and dn */
 						extension_query_string = qstring->data;
-						ExecUtilityStmtOnNodes(parsetree, extension_query_string, NULL, sentToRemote, false, EXEC_ON_ALL_NODES, false, false);
+						ExecUtilityStmtOnNodes(parsetree,
+												extension_query_string,
+												NULL, sentToRemote, false,
+												EXEC_ON_ALL_NODES,
+												false, false);
 
 						pfree(qstring->data);
 						pfree(qstring);
@@ -4063,17 +4547,46 @@ ProcessUtilitySlow(ParseState *pstate,
             case T_CompositeTypeStmt:    /* CREATE TYPE (composite) */
                 {
                     CompositeTypeStmt *stmt = (CompositeTypeStmt *) parsetree;
-
+#ifdef __TBASE__
+					/*
+					 * If I am the main execute CN but not Leader CN,
+					 * Notify the Leader CN to create firstly.
+					 */
+					if (!sentToRemote && LOCAL_PARALLEL_DDL)
+					{
+						SendLeaderCNUtility(queryString, false);
+					}
+#endif
                     address = DefineCompositeType(stmt->typevar,
                                                   stmt->coldeflist);
                 }
                 break;
 
             case T_CreateEnumStmt:    /* CREATE TYPE AS ENUM */
+#ifdef __TBASE__
+					/*
+					 * If I am the main execute CN but not Leader CN,
+					 * Notify the Leader CN to create firstly.
+					 */
+					if (!sentToRemote && LOCAL_PARALLEL_DDL)
+					{
+						SendLeaderCNUtility(queryString, false);
+					}
+#endif
                 address = DefineEnum((CreateEnumStmt *) parsetree);
                 break;
 
             case T_CreateRangeStmt: /* CREATE TYPE AS RANGE */
+#ifdef __TBASE__
+					/*
+					 * If I am the main execute CN but not Leader CN,
+					 * Notify the Leader CN to create firstly.
+					 */
+					if (!sentToRemote && LOCAL_PARALLEL_DDL)
+					{
+						SendLeaderCNUtility(queryString, false);
+					}
+#endif
                 address = DefineRange((CreateRangeStmt *) parsetree);
                 break;
 
@@ -4083,6 +4596,37 @@ ProcessUtilitySlow(ParseState *pstate,
 
             case T_ViewStmt:    /* CREATE VIEW */
                 EventTriggerAlterTableStart(parsetree);
+#ifdef __TBASE__
+				/*
+				 * If I am the main execute CN but not Leader CN,
+				 * Notify the Leader CN to create firstly.
+				 */
+				if (!sentToRemote && LOCAL_PARALLEL_DDL)
+				{
+					PGXCNodeHandle	*leaderCnHandle = NULL;
+					leaderCnHandle = find_ddl_leader_cn();
+					if (!is_ddl_leader_cn(leaderCnHandle->nodename))
+					{
+						List		*relation_list = NIL;
+						ListCell	*lc;
+						bool tmp = IsViewTemp(((ViewStmt*)parsetree),
+												queryString,
+												pstmt->stmt_location,
+												pstmt->stmt_len,
+												&relation_list);
+
+						/* Unlock before we send to leander cn */
+						foreach(lc, relation_list)
+						{
+							Oid reloid = lfirst_oid(lc);
+							UnlockRelationOid(reloid, AccessShareLock);
+						}
+						if (!tmp)
+							SendLeaderCNUtility(queryString, tmp);
+						
+					}
+				}
+#endif
                 address = DefineView((ViewStmt *) parsetree, queryString,
                                      pstmt->stmt_location, pstmt->stmt_len);
                 EventTriggerCollectSimpleCommand(address, secondaryObject,
@@ -4093,6 +4637,16 @@ ProcessUtilitySlow(ParseState *pstate,
                 break;
 
             case T_CreateFunctionStmt:    /* CREATE FUNCTION */
+#ifdef __TBASE__
+				/*
+				 * If I am the main execute CN but not Leader CN,
+				 * Notify the Leader CN to create firstly.
+				 */
+				if (!sentToRemote && LOCAL_PARALLEL_DDL)
+				{
+					SendLeaderCNUtility(queryString, false);
+				}
+#endif
                 address = CreateFunction(pstate, (CreateFunctionStmt *) parsetree);
                 break;
 
@@ -4104,27 +4658,91 @@ ProcessUtilitySlow(ParseState *pstate,
                 address = DefineRule((RuleStmt *) parsetree, queryString);
                 break;
 
-            case T_CreateSeqStmt:
-                address = DefineSequence(pstate, (CreateSeqStmt *) parsetree);
+			case T_CreateSeqStmt:
 #ifdef __TBASE__
+				{
+					bool need_send = false;
+					bool is_temp = false;
+					bool exist_ok = !is_txn_has_parallel_ddl;
+					CreateSeqStmt *stmt = (CreateSeqStmt *) parsetree;
+					if (!stmt->is_serial)
+					{
+						is_temp = stmt->sequence->relpersistence == RELPERSISTENCE_TEMP;
+					}
+
+					if (!sentToRemote && LOCAL_PARALLEL_DDL)
+					{
+						PGXCNodeHandle	*leaderCnHandle = NULL;
+						need_send = PrecheckDefineSequence(stmt);
+						leaderCnHandle = find_ddl_leader_cn();
+
+						if (!need_send)
+							break;
+
+						/*
+						 * If I am the main execute CN but not Leader CN,
+						 * Notify the Leader CN to create firstly.
+						 */
+						if (!is_ddl_leader_cn(leaderCnHandle->nodename))
+						{
+							if (!is_temp && need_send)
+								SendLeaderCNUtility(queryString, is_temp);
+						}
+					}
+
+					address = DefineSequence(pstate, stmt, exist_ok);
+
+					if (is_temp)
+					{
+						PoolManagerSetCommand(NULL, 0, POOL_CMD_TEMP, NULL);
+					}
+
+					if (need_send)
+					{
+						RemoteQueryExecType exec_type = 
+							is_temp ? EXEC_ON_DATANODES : EXEC_ON_ALL_NODES;
+						ExecUtilityStmtOnNodes(parsetree, queryString, NULL,
+												sentToRemote, false, exec_type,
+												is_temp, false);
+					}
+				}
+#else
+				address = DefineSequence(pstate, (CreateSeqStmt *) parsetree);
+#endif
+				break;
+
+			case T_AlterSeqStmt:
+#ifdef __TBASE__
+                if (!sentToRemote && LOCAL_PARALLEL_DDL)
                 {
+					AlterSeqStmt *stmt = (AlterSeqStmt *) parsetree;
                     bool is_temp = false;
-                    CreateSeqStmt *stmt = (CreateSeqStmt *) parsetree;
-
-                    if (!stmt->is_serial)
+					PGXCNodeHandle	*leaderCnHandle = NULL;
+					leaderCnHandle = find_ddl_leader_cn();
+					/*
+					 * If I am the main execute CN but not Leader CN,
+					 * Notify the Leader CN to create firstly.
+					 */
+					if (!is_ddl_leader_cn(leaderCnHandle->nodename))
                     {
-                        is_temp = stmt->sequence->relpersistence == RELPERSISTENCE_TEMP;
+						Oid relid = RangeVarGetRelid(stmt->sequence,
+													NoLock, stmt->missing_ok);
+						RemoteQueryExecType exec_type = EXEC_ON_NONE;
+						if (!OidIsValid(relid))
+						{
+							break;
                     }
-
-                    if (is_temp)
+						exec_type = ExecUtilityFindNodes(OBJECT_SEQUENCE,
+															relid, &is_temp);
+						if (exec_type == EXEC_ON_ALL_NODES ||
+							exec_type == EXEC_ON_COORDS)
                     {
-                        PoolManagerSetCommand(NULL, 0, POOL_CMD_TEMP, NULL);
+							SendLeaderCNUtility(queryString, is_temp);
                     }
                 }
-#endif
-                break;
 
-            case T_AlterSeqStmt:
+                }
+#endif
                 address = AlterSequence(pstate, (AlterSeqStmt *) parsetree);
                 break;
 
@@ -4133,6 +4751,16 @@ ProcessUtilitySlow(ParseState *pstate,
                     CreateTableAsStmt *stmt = (CreateTableAsStmt *) parsetree;
                     if (IS_PGXC_DATANODE && stmt->relkind == OBJECT_MATVIEW)
                         stmt->into->skipData = true;
+#ifdef __TBASE__
+                /*
+                 * If I am the main execute CN but not Leader CN,
+                 * Notify the Leader CN to create firstly.
+                 */
+                if (!sentToRemote && LOCAL_PARALLEL_DDL)
+                {
+                    SendLeaderCNUtility(queryString, false);
+                }
+#endif
                     address = ExecCreateTableAs((CreateTableAsStmt *) parsetree,
                                                 queryString, params, queryEnv,
                                                 completionTag);
@@ -4286,7 +4914,33 @@ ProcessUtilitySlow(ParseState *pstate,
                 break;
 
             case T_RenameStmt:
-                address = ExecRenameStmt((RenameStmt *) parsetree);
+				{
+					RenameStmt * stmt = (RenameStmt *) parsetree;
+#ifdef __TBASE__
+					if (LOCAL_PARALLEL_DDL)
+					{
+						bool is_temp = false;
+						PGXCNodeHandle	*leaderCnHandle = find_ddl_leader_cn();
+						bool is_leader_cn = is_ddl_leader_cn(leaderCnHandle->nodename);
+						RemoteQueryExecType exec_type = GetRenameExecType(stmt, &is_temp);
+
+						/*
+						 * If I am the main execute CN but not Leader CN,
+						 * Notify the Leader CN to create firstly.
+						 */
+						if (!is_leader_cn)
+						{
+							SendLeaderCNUtility(queryString, is_temp);
+						}
+						address = ExecRenameStmt(stmt);
+						ExecUtilityStmtOnNodes(parsetree, queryString, NULL,
+												sentToRemote, false, exec_type,
+												is_temp, false);
+					}
+					else
+#endif
+						address = ExecRenameStmt(stmt);
+				}
                 break;
 
             case T_AlterObjectDependsStmt:
@@ -4296,12 +4950,32 @@ ProcessUtilitySlow(ParseState *pstate,
                 break;
 
             case T_AlterObjectSchemaStmt:
+#ifdef __TBASE__
+				/*
+				 * If I am the main execute CN but not Leader CN,
+				 * Notify the Leader CN to create firstly.
+				 */
+				if (!sentToRemote && LOCAL_PARALLEL_DDL)
+				{
+					SendLeaderCNUtility(queryString, false);
+				}
+#endif			
                 address =
                     ExecAlterObjectSchemaStmt((AlterObjectSchemaStmt *) parsetree,
                                               &secondaryObject);
                 break;
 
             case T_AlterOwnerStmt:
+#ifdef __TBASE__
+				/*
+				 * If I am the main execute CN but not Leader CN,
+				 * Notify the Leader CN to create firstly.
+				 */
+				if (!sentToRemote && LOCAL_PARALLEL_DDL)
+				{
+					SendLeaderCNUtility(queryString, false);
+				}
+#endif
                 address = ExecAlterOwnerStmt((AlterOwnerStmt *) parsetree);
                 break;
 
@@ -4444,6 +5118,122 @@ ProcessUtilitySlow(ParseState *pstate,
         EventTriggerEndCompleteQuery();
 }
 
+#ifdef __TBASE__
+/*
+ * SendLeaderCNUtility
+ * For parallel ddl, we execute ddl in leader cn firstly
+ * to avoid deadlock.
+ */
+void SendLeaderCNUtility(const char *queryString,
+						bool temp)
+{
+	PGXCNodeHandle	*leaderCnHandle = NULL;
+	RemoteQuery		*step = NULL;
+
+	leaderCnHandle = find_ddl_leader_cn();
+	if (is_ddl_leader_cn(leaderCnHandle->nodename))
+		return;
+
+	step = makeNode(RemoteQuery);
+	step->combine_type = COMBINE_TYPE_SAME;
+	step->sql_statement = pstrdup(queryString);
+	step->exec_type = temp ? EXEC_ON_NONE : EXEC_ON_COORDS;
+	step->exec_nodes = NULL;
+	step->is_temp = temp;
+	ExecRemoteUtility(step, leaderCnHandle, ONLY_LEADER_DDL);
+	pfree(step);
+
+	leader_cn_executed_ddl = true;
+}
+
+void SendLeaderCNUtilityWithContext(const char *queryString,
+									bool temp)
+{
+	PG_TRY();
+    {
+		SendLeaderCNUtility(queryString, temp);
+    }
+    PG_CATCH();
+	{
+
+        /*
+         * Some nodes failed. Add context about what all nodes the query
+         * failed
+         */
+        ExecNodes* coord_success_nodes = NULL;
+        ExecNodes* data_success_nodes = NULL;
+        char* msg_failed_nodes = NULL;
+
+        pgxc_all_success_nodes(&data_success_nodes, &coord_success_nodes, &msg_failed_nodes);
+        if (msg_failed_nodes != NULL)
+            errcontext("%s", msg_failed_nodes);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+}
+
+void CheckAndSendLeaderCNReindex(bool sentToRemote, ReindexStmt *stmt,
+									const char *queryString)
+{
+	RemoteQueryExecType exec_type = EXEC_ON_NONE;
+	PGXCNodeHandle	*leaderCnHandle = NULL;
+
+	if (sentToRemote || !LOCAL_PARALLEL_DDL)
+		return;
+
+	/*
+	 * If I am the main execute CN but not Leader CN, notify the Leader CN
+	 * to reindex firstly.
+	 */
+	leaderCnHandle = find_ddl_leader_cn();
+	if (!is_ddl_leader_cn(leaderCnHandle->nodename))
+	{
+		bool is_temp = false;
+		Oid relid = RangeVarGetRelid(stmt->relation, AccessShareLock, false);
+		if (OidIsValid(relid))
+		{
+			exec_type = ExecUtilityFindNodes(stmt->kind, relid, &is_temp);
+			UnlockRelationOid(relid, AccessShareLock);
+		}
+		if (exec_type == EXEC_ON_ALL_NODES || exec_type == EXEC_ON_COORDS)
+		{
+			SendLeaderCNUtility(queryString, is_temp);
+		}
+	}
+}
+
+#endif
+
+static RemoteQueryExecType GetRenameExecType(RenameStmt *stmt, bool *is_temp)
+{
+	RemoteQueryExecType	exec_type = EXEC_ON_NONE;
+	/*
+	 * Get the necessary details about the relation before we
+	 * run ExecRenameStmt locally. Otherwise we may not be able
+	 * to look-up using the old relation name.
+	 */
+	if (stmt->relation)
+	{
+		/*
+			* If the table does not exist, don't send the query to
+			* the remote nodes. The local node will eventually
+			* report an error, which is then sent back to the
+			* client.
+			*/
+		Oid relid = RangeVarGetRelid(stmt->relation,
+										NoLock, true);
+		if (OidIsValid(relid))
+			exec_type = ExecUtilityFindNodes(stmt->renameType,
+										relid, is_temp);
+		else
+			exec_type = EXEC_ON_NONE;
+	}
+	else
+		exec_type = ExecUtilityFindNodes(stmt->renameType,
+									InvalidOid,	is_temp);
+	return exec_type;
+}
+
 /*
  * Dispatch function for DropStmt
  */
@@ -4489,32 +5279,77 @@ ExecDropStmt(DropStmt *stmt, bool isTopLevel)
 #ifdef PGXC
             {
                 bool        is_temp = false;
+				RemoteQueryExecType exec_type = EXEC_ON_ALL_NODES;
 #ifdef __TBASE__
-				int         drop_cnt = 0;
                 char        *new_query_string = pstrdup(queryString);
+				ObjectAddresses *new_objects = NULL;
+				PGXCNodeHandle	*leaderCnHandle = NULL;
+				bool need_sendto_leadercn = false;
 #endif
-                RemoteQueryExecType exec_type = EXEC_ON_ALL_NODES;
 
                 /* Check restrictions on objects dropped */
                 DropStmtPreTreatment((DropStmt *) stmt, queryString, sentToRemote,
                         &is_temp, &exec_type);
 #endif
-
 #ifdef __TBASE__
-                drop_cnt = RemoveRelations(stmt, new_query_string);
+				if (!sentToRemote && LOCAL_PARALLEL_DDL)
+				{
+					leaderCnHandle = find_ddl_leader_cn();
+					if (!is_ddl_leader_cn(leaderCnHandle->nodename))
+						need_sendto_leadercn = true;
+				}
+				if (need_sendto_leadercn)
+				{
+					/*
+					 * For DROP TABLE/INDEX/VIEW/... IF EXISTS query, only 
+					 * notice is emitted, if the referred objects are not
+					 * found. In such case, the atomicity and consistency of
+					 * the query or transaction among local CN and remote nodes
+					 * can not be guaranteed against concurrent CREATE TABLE/
+					 * INDEX/VIEW/... query.
+					 *
+					 * To ensure such atomicity and consistency, we only refer
+					 * to local CN about the visibility of the objects to be
+					 * deleted and rewrite the query into new_query_string 
+					 * without the inivisible objects. Later, if the objects in
+					 * new_query_string are not found on remote nodes, which
+					 * should not happen, just ERROR.
+					 */
+					bool need_drop = false;
+					List *heap_list = NIL;
+					new_objects = PreCheckforRemoveRelation(stmt, 
+															new_query_string,
+															&need_drop,
+															&heap_list);
+					if (need_drop)
+					{
+						/*
+						 * If I am the main execute CN but not Leader CN,
+						 * Notify the Leader CN to create firstly.
+						 */
+						SendLeaderCNUtility(new_query_string, is_temp);
+						RemoveRelationsParallelMode(stmt, new_objects,
+													heap_list);
+						free_object_addresses(new_objects);
+					}
+					else
+					{
+						pfree(new_query_string);
+						free_object_addresses(new_objects);
+						break;
+					}
+				}
+				else if (RemoveRelations(stmt, new_query_string) == 0)
+				{
+					pfree(new_query_string);
+					break;
+				}
 #else
                 RemoveRelations(stmt);
 #endif
 
 #ifdef PGXC
 #ifdef __TBASE__
-                /* if drop nothing, skip */
-                if (drop_cnt == 0)
-                {
-                    pfree(new_query_string);
-                    break;
-                }
-
 				/* DROP is done depending on the object type and its temporary type */
 				if (IS_PGXC_LOCAL_COORDINATOR)
 					ExecUtilityStmtOnNodes(NULL, new_query_string, NULL, sentToRemote, false,
@@ -4529,17 +5364,101 @@ ExecDropStmt(DropStmt *stmt, bool isTopLevel)
             }
 #endif
             break;
+#ifdef __TBASE__
+		case OBJECT_SCHEMA:
+		case OBJECT_FUNCTION:
+		case OBJECT_TYPE:
+			{
+				bool is_temp = false;
+				bool need_drop = false;
+				RemoteQueryExecType exec_type = EXEC_ON_ALL_NODES;
+				ObjectAddresses *new_objects = NULL;
+				PGXCNodeHandle	*leaderCnHandle = NULL;
+				bool is_leader_cn = false;
+				char *new_query_string = pstrdup(queryString);
+
+				/* Check restrictions on objects dropped */
+				DropStmtPreTreatment((DropStmt *) stmt, queryString, sentToRemote,
+						&is_temp, &exec_type);
+
+				if (!sentToRemote && LOCAL_PARALLEL_DDL)
+				{
+					leaderCnHandle = find_ddl_leader_cn();
+					is_leader_cn = is_ddl_leader_cn(leaderCnHandle->nodename);
+					if (!is_leader_cn)
+					{
+						/*
+						 * To ensure such atomicity and consistency, we only refer
+						 * to local CN about the visibility of the objects to be
+						 * deleted and rewrite the query into new_query_string 
+						 * without the inivisible objects. Later, if the objects in
+						 * new_query_string are not found on remote nodes, which
+						 * should not happen, just ERROR.
+						 */
+						new_objects = PreCheckforRemoveObjects(stmt,
+															true,
+															&need_drop,
+															new_query_string,
+															true);
+						if (need_drop)
+						{
+							/*
+							* If I am the main execute CN but not Leader CN,
+							* Notify the Leader CN to create firstly.
+							*/
+							SendLeaderCNUtility(new_query_string, is_temp);
+							RemoveObjectsParallelMode(stmt, new_objects);
+							free_object_addresses(new_objects);
+						}
+						else
+						{
+							free_object_addresses(new_objects);
+							pfree(new_query_string);
+							break;
+						}
+					}
+					else
+					{
+						RemoveObjects(stmt, true, &need_drop,
+										new_query_string);
+						if (!need_drop)
+						{
+							pfree(new_query_string);
+							break;
+						}
+					}
+				}
+				else if (is_txn_has_parallel_ddl)
+				{
+					/* parallel ddl mode, from remote cn, can't miss object */
+					RemoveObjects(stmt, false, &need_drop, NULL);
+				}
+				else
+				{
+					/* non parallel ddl mode */
+					RemoveObjects(stmt, true, &need_drop, NULL);
+				}
+
+				if (IS_PGXC_LOCAL_COORDINATOR)
+					ExecUtilityStmtOnNodes(NULL, new_query_string, NULL,
+											sentToRemote, false, exec_type,
+											is_temp, false);
+				pfree(new_query_string);
+			}
+			break;
+#endif
         default:
 #ifdef PGXC
             {
                 bool        is_temp = false;
+				bool		need_drop = false;
                 RemoteQueryExecType exec_type = EXEC_ON_ALL_NODES;
 
                 /* Check restrictions on objects dropped */
                 DropStmtPreTreatment((DropStmt *) stmt, queryString, sentToRemote,
                         &is_temp, &exec_type);
 #endif
-                RemoveObjects(stmt);
+				RemoveObjects(stmt, true, &need_drop, NULL);
 #ifdef PGXC
                 if (IS_PGXC_LOCAL_COORDINATOR)
                     ExecUtilityStmtOnNodes(NULL, queryString, NULL, sentToRemote, false,
@@ -4550,6 +5469,70 @@ ExecDropStmt(DropStmt *stmt, bool isTopLevel)
     }
 }
 
+#ifdef __TBASE__
+void
+CheckAndDropRole(Node *parsetree, bool sentToRemote, const char *queryString)
+{
+	DropRoleStmt *stmt = (DropRoleStmt *) parsetree;
+	char *new_query_string = pstrdup(queryString);
+	bool need_drop = true;
+
+	if (!sentToRemote && LOCAL_PARALLEL_DDL)
+	{
+		PGXCNodeHandle	*leaderCnHandle = NULL;
+		leaderCnHandle = find_ddl_leader_cn();
+
+		/*
+		 * If I am the main execute CN but not Leader CN,
+		 * Notify the Leader CN to create firstly.
+		 */
+		if (!is_ddl_leader_cn(leaderCnHandle->nodename))
+		{
+			List *role_list = NIL;
+			need_drop = PreCheckDropRole(stmt, new_query_string, &role_list);
+			if (!need_drop)
+			{
+				pfree(new_query_string);
+				return;
+			}
+			SendLeaderCNUtility(new_query_string, false);
+			DropRoleParallelMode(role_list);
+			ExecUtilityStmtOnNodes(parsetree, new_query_string, NULL,
+									sentToRemote, false,
+									EXEC_ON_ALL_NODES, false,
+									false);
+		}
+		else
+		{
+			if (!DropRole(stmt, stmt->missing_ok, new_query_string))
+			{
+				pfree(new_query_string);
+				return;
+			}
+			ExecUtilityStmtOnNodes(parsetree, new_query_string, NULL,
+									sentToRemote, false,
+									EXEC_ON_ALL_NODES, false,
+									false);
+		}
+	}
+	/* From remote cn */
+	else if (!IS_PGXC_LOCAL_COORDINATOR && is_txn_has_parallel_ddl)
+	{
+		/* 
+		 * In parallel ddl mode, we only send cmd to remote when
+		 * database exists, so database can not miss when the cmd
+		 * come from remote cn.
+		 */
+		DropRole(stmt, false, NULL);
+	}
+	/* Non parallel ddl mode */
+	else
+	{
+		DropRole(stmt, stmt->missing_ok, NULL);
+	}
+	pfree(new_query_string);
+}
+#endif
 
 /*
  * UtilityReturnsTuples
@@ -6421,8 +7404,11 @@ GetCommandLogLevel(Node *parsetree)
 
 #ifdef PGXC
 static void
-ExecUtilityStmtOnNodesInternal(Node* parsetree, const char *queryString, ExecNodes *nodes, bool sentToRemote,
-        bool force_autocommit, RemoteQueryExecType exec_type, bool is_temp)
+ExecUtilityStmtOnNodesInternal(Node* parsetree, const char *queryString,
+								ExecNodes *nodes, bool sentToRemote,
+								bool force_autocommit,
+								RemoteQueryExecType exec_type,
+								bool is_temp)
 {
     /* Return if query is launched on no nodes */
     if (exec_type == EXEC_ON_NONE)
@@ -6449,7 +7435,18 @@ ExecUtilityStmtOnNodesInternal(Node* parsetree, const char *queryString, ExecNod
         step->force_autocommit = force_autocommit;
         step->exec_type = exec_type;
         step->parsetree = parsetree;
+#ifdef __TBASE__
+		if (LOCAL_PARALLEL_DDL &&
+			(exec_type == EXEC_ON_COORDS ||	exec_type == EXEC_ON_ALL_NODES))
+		{
+			PGXCNodeHandle* leaderCnHandle = find_ddl_leader_cn();
+			ExecRemoteUtility(step,	leaderCnHandle, EXCLUED_LEADER_DDL);
+		}
+		else
+			ExecRemoteUtility(step, NULL, NON_PARALLEL_DDL);
+#else
         ExecRemoteUtility(step);
+#endif
         pfree(step->sql_statement);
         pfree(step);
     }

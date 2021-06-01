@@ -20,7 +20,7 @@
 #include "nodes/parsenodes.h"
 
 extern Oid	createdb(ParseState *pstate, const CreatedbStmt *stmt);
-extern void dropdb(const char *dbname, bool missing_ok);
+extern bool dropdb(const char *dbname, bool missing_ok);
 extern void dropdb_prepare(const char *dbname, bool missing_ok);
 extern ObjectAddress RenameDatabase(const char *oldname, const char *newname);
 extern Oid	AlterDatabase(ParseState *pstate, AlterDatabaseStmt *stmt, bool isTopLevel);

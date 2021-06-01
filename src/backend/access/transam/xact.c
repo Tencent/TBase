@@ -98,6 +98,7 @@
 #include "pgxc/squeue.h"
 #include "postmaster/postmaster.h"
 #include "commands/extension.h"
+#include "tcop/utility.h"
 #endif
 /*
  *    User-tweakable parameters
@@ -4501,6 +4502,9 @@ CommitTransactionCommand(void)
             }
             break;
     }
+#ifdef __TBASE__
+	leader_cn_executed_ddl = false;
+#endif
 }
 
 /*
@@ -4626,8 +4630,24 @@ AbortCurrentTransaction(void)
              * we get ROLLBACK.
              */
         case TBLOCK_SUBINPROGRESS:
+			{
+				/*
+				 * In parallel mode, leader cn execute before local cn, so when
+				 * error occured, local cn will send ROLLBACK_SUBTXN to leader
+				 * cn, we deal with subtxn abort there.
+				 */
+				if (is_txn_has_parallel_ddl && !IS_PGXC_LOCAL_COORDINATOR)
+				{
+					PGXCNodeHandle	*leaderCnHandle = NULL;
+					leaderCnHandle = find_ddl_leader_cn();
+					if (is_ddl_leader_cn(leaderCnHandle->nodename))
+					{
+						break;
+					}
+				}
             AbortSubTransaction();
             s->blockState = TBLOCK_SUBABORT;
+			}
             break;
 
             /*
@@ -4654,6 +4674,9 @@ AbortCurrentTransaction(void)
             AbortCurrentTransaction();
             break;
     }
+#ifdef __TBASE__
+	leader_cn_executed_ddl = false;
+#endif
 }
 
 /*

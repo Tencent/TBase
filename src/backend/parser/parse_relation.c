@@ -71,6 +71,12 @@ static int    specialAttNum(const char *attname);
 #endif
 static bool isQueryUsingTempRelation_walker(Node *node, void *context);
 
+#ifdef __TBASE__
+typedef struct
+{
+	List *related_oids;		/* the related tableoid list */
+} ViewRelatedContext;
+#endif
 
 /*
  * refnameRangeTblEntry
@@ -3425,6 +3431,19 @@ errorMissingColumn(ParseState *pstate,
     }
 }
 
+#ifdef __TBASE__
+bool
+CheckAndGetRelation(Query *query, List **relation_list)
+{
+	bool				tmp = false;
+	ViewRelatedContext	context;
+
+	context.related_oids = NIL;
+	tmp = isQueryUsingTempRelation_walker((Node *) query, &context);
+	*relation_list = context.related_oids;
+	return tmp;
+}
+#endif
 
 /*
  * Examine a fully-parsed query, and return TRUE iff any relation underlying
@@ -3455,8 +3474,15 @@ isQueryUsingTempRelation_walker(Node *node, void *context)
             {
                 Relation    rel = heap_open(rte->relid, AccessShareLock);
                 char        relpersistence = rel->rd_rel->relpersistence;
-
                 heap_close(rel, AccessShareLock);
+#ifdef __TBASE__
+				if (context)
+				{
+					ViewRelatedContext *vrContext = (ViewRelatedContext *)context;
+					vrContext->related_oids = lappend_oid(vrContext->related_oids,
+														RelationGetRelid(rel));
+				}
+#endif
                 if (relpersistence == RELPERSISTENCE_TEMP)
                     return true;
             }

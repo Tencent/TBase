@@ -9356,7 +9356,11 @@ set_config_option(const char *name, const char *value,
         step->force_autocommit = true;
         step->exec_type = EXEC_ON_CURRENT;
 		step->is_set = true;
+#ifdef __TBASE__
+		ExecRemoteUtility(step, NULL, NON_PARALLEL_DDL);
+#else
         ExecRemoteUtility(step);
+#endif
         pfree(step);
         pfree(poolcmd.data);
     }
