@@ -146,12 +146,12 @@ typedef struct Query
     bool        hasForUpdate;    /* FOR [KEY] UPDATE/SHARE was specified */
     bool        hasRowSecurity; /* rewriter has applied some RLS policy */
 #ifdef __TBASE__
-	bool		isSingleValues; /*for interval partition insert */
-	bool        isMultiValues;  /* is simple insert into values (),(),()...();? */
-	bool        hasUnshippableTriggers; /* has unshippable triggers on resultRelation, 
-										 * only used for DML. Will be set at the plan phase
-										 * in shippability check.
-										 */
+    bool        isSingleValues; /*for interval partition insert */
+    bool        isMultiValues;  /* is simple insert into values (),(),()...();? */
+    bool        hasUnshippableTriggers; /* has unshippable triggers on resultRelation, 
+                                                                          * only used for DML. Will be set at the plan phase
+                                                                          * in shippability check.
+                                                                          */
     char        *copy_filename; /* fake filename for copy from */
     Bitmapset   *conflict_cols;
 #endif
