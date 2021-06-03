@@ -1,10 +1,95 @@
 --explain analyze
 create table a1(id int, num int, name text);
 create table a2(id int, num int, name text);
+--fqs case
+explain (costs off,timing off,summary off,analyze,verbose)
 insert into a1 values(1,generate_series(1,100),'a');
-insert into a1 values(2,generate_series(1,100),'b');
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Remote Fast Query Execution (actual rows=0 loops=1)
+   Output: 1, generate_series(1, 100), 'a'::text
+   Node expr: 1
+   Remote query: INSERT INTO a1 (id, num, name) VALUES (1, generate_series(1, 100), 'a'::text)
+(4 rows)
+
+set enable_fast_query_shipping to off;
+--insert into single value
+explain (costs off,timing off,summary off,analyze,verbose)
+insert into a1 values(2,1,'b');
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1) (actual rows=0 loops=1)
+   ->  Insert on public.a1
+         DN (actual rows=0..0 loops=1..1)
+         - datanode_1 (actual rows=0 loops=1)
+         ->  Result
+               DN (actual rows=1..1 loops=1..1)
+               - datanode_1 (actual rows=1 loops=1)
+               Output: 2, 1, 'b'::text
+(8 rows)
+
+--insert with set returning function
+explain (costs off,timing off,summary off,analyze,verbose)
+insert into a1 values(2,generate_series(2,100),'b');
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1) (actual rows=0 loops=1)
+   ->  Insert on public.a1
+         DN (actual rows=0..0 loops=1..1)
+         - datanode_1 (actual rows=0 loops=1)
+         ->  Remote Subquery Scan on local node
+               DN (actual rows=99..99 loops=1..1)
+               - datanode_1 (actual rows=99 loops=1)
+               Output: 2, generate_series(2, 100), 'b'::text
+               Distribute results by H: 2
+               ->  ProjectSet
+                     DN (actual rows=99..99 loops=1..1)
+                     - datanode_1 (actual rows=99 loops=1)
+                     Output: 2, generate_series(2, 100), 'b'::text
+                     ->  Result
+                           DN (actual rows=1..1 loops=1..1)
+                           - datanode_1 (actual rows=1 loops=1)
+(16 rows)
+
+explain (costs off,timing off,summary off,analyze,verbose)
 insert into a1 values(3,generate_series(1,100),'c');
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_2) (actual rows=0 loops=1)
+   ->  Insert on public.a1
+         DN (actual rows=0..0 loops=1..1)
+         - datanode_2 (actual rows=0 loops=1)
+         ->  Remote Subquery Scan on local node
+               DN (actual rows=100..100 loops=1..1)
+               - datanode_2 (actual rows=100 loops=1)
+               Output: 3, generate_series(1, 100), 'c'::text
+               Distribute results by H: 3
+               ->  ProjectSet
+                     DN (actual rows=100..100 loops=1..1)
+                     - datanode_2 (actual rows=100 loops=1)
+                     Output: 3, generate_series(1, 100), 'c'::text
+                     ->  Result
+                           DN (actual rows=1..1 loops=1..1)
+                           - datanode_2 (actual rows=1 loops=1)
+(16 rows)
+
+explain (costs off,timing off,summary off,analyze,verbose)
 insert into a2 select * from a1;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2) (actual rows=0 loops=1)
+   ->  Insert on public.a2
+         DN (actual rows=0..0 loops=1..1)
+         - datanode_1 (actual rows=0 loops=1)
+         - datanode_2 (actual rows=0 loops=1)
+         ->  Seq Scan on public.a1
+               DN (actual rows=100..200 loops=1..1)
+               - datanode_1 (actual rows=200 loops=1)
+               - datanode_2 (actual rows=100 loops=1)
+               Output: a1.id, a1.num, a1.name
+(10 rows)
+
+reset enable_fast_query_shipping;
 --normal cases
 explain (costs off,timing off,summary off,analyze,verbose)
 select count(*) from a1;
