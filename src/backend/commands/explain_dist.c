@@ -125,6 +125,7 @@ InstrOut(StringInfo buf, Plan *plan, Instrumentation *instr, int current_node_id
 	elog(DEBUG1, "InstrOut: plan_node_id %d, node %d, nloops %.0f", plan->plan_node_id, current_node_id, instr->nloops);
 }
 
+#if 0
 /*
  * WorkerInstrOut
  *
@@ -156,6 +157,7 @@ WorkerInstrOut(StringInfo buf, WorkerInstrumentation *worker_instr)
 			                 instr->startup, instr->total, instr->ntuples, instr->nloops);
 	}
 }
+#endif
 
 /*
  * SpecInstrOut

@@ -689,7 +689,6 @@ create_scan_plan(PlannerInfo *root, Path *best_path, int flags)
     /* find is there any tables located in more than one group */
     if ((rel->reloptkind == RELOPT_BASEREL || rel->reloptkind == RELOPT_OTHER_MEMBER_REL) && rel->rtekind == RTE_RELATION)
     {
-        bool error = false;
         
         rte = root->simple_rte_array[rel->relid];
         relation = heap_open(rte->relid, NoLock);
