@@ -27,7 +27,7 @@ bool gtm_is_standby(void);
 void gtm_set_standby(bool standby);
 void gtm_set_active_conninfo(const char *addr, int port);
 
-int gtm_standby_start_startup(void);
+int gtm_standby_start_startup(int timeout);
 int gtm_standby_finish_startup(void);
 
 int gtm_standby_restore_next_gxid(void);

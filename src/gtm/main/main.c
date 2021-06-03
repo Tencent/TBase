@@ -82,6 +82,8 @@ extern char *optarg;
 #define LOOPS_UNTIL_HIBERNATE        50
 #define HIBERNATE_FACTOR        25
 
+#define GTM_STARTUP_CONNECT_ACTIVE_TIMEOUT	(2)
+
 static char *progname = "gtm";
 char       *ListenAddresses;
 int            GTMPortNumber;
@@ -1097,7 +1099,7 @@ main(int argc, char *argv[])
      */
     if (Recovery_IsStandby())
     {
-        if (!gtm_standby_start_startup())
+        if (!gtm_standby_start_startup(GTM_STARTUP_CONNECT_ACTIVE_TIMEOUT))
         {
 #ifdef __TBASE__
             elog(LOG, "Failed to establish a connection to active-GTM.");
@@ -2046,7 +2048,7 @@ gtm_standby_pre_server_loop(char *data_dir)
          * retry establish a connection between the active and standby,
          * controlling frequency with select timeout
          */
-        if (gtm_standby_start_startup())
+        if (gtm_standby_start_startup(GTM_STARTUP_CONNECT_ACTIVE_TIMEOUT))
         {
             elog(LOG, "Standby GTM Startup connection established with active-GTM.");
             break;
@@ -3233,7 +3235,7 @@ reconnect:
 
     sleep(1);
 
-	if (!gtm_standby_start_startup())
+	if (!gtm_standby_start_startup(0))
     {
         elog(ERROR, "Failed to establish a connection to active-GTM.");
     }
