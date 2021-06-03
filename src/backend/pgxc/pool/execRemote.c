@@ -11161,7 +11161,8 @@ ExecShutdownRemoteSubplan(RemoteSubplanState *node)
 	Plan                *plan = ps->plan;
 	EState              *estate = ps->state;
 	
-	if ((node->eflags & EXEC_FLAG_EXPLAIN_ONLY) != 0)
+	/* do nothing if explain only or execute locally */
+	if ((node->eflags & EXEC_FLAG_EXPLAIN_ONLY) != 0 || node->local_exec)
 		return;
 	
 	elog(DEBUG1, "shutdown remote subplan worker %d, plan_node_id %d", ParallelWorkerNumber, plan->plan_node_id);

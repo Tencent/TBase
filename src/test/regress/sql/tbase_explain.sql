@@ -1,10 +1,21 @@
 --explain analyze
 create table a1(id int, num int, name text);
 create table a2(id int, num int, name text);
+--fqs case
+explain (costs off,timing off,summary off,analyze,verbose)
 insert into a1 values(1,generate_series(1,100),'a');
-insert into a1 values(2,generate_series(1,100),'b');
+set enable_fast_query_shipping to off;
+--insert into single value
+explain (costs off,timing off,summary off,analyze,verbose)
+insert into a1 values(2,1,'b');
+--insert with set returning function
+explain (costs off,timing off,summary off,analyze,verbose)
+insert into a1 values(2,generate_series(2,100),'b');
+explain (costs off,timing off,summary off,analyze,verbose)
 insert into a1 values(3,generate_series(1,100),'c');
+explain (costs off,timing off,summary off,analyze,verbose)
 insert into a2 select * from a1;
+reset enable_fast_query_shipping;
 
 --normal cases
 explain (costs off,timing off,summary off,analyze,verbose)

@@ -8322,7 +8322,8 @@ adjust_path_distribution(PlannerInfo *root, Query *parse, Path *path)
          * already have Result path, and if the distribution is one of
          *
          * a) 'hash' restricted to a single node
-         * b) 'replicate' without volatile functions in the target list
+		 * b) 'shard' restricted to a single node
+		 * c) 'replicate' without volatile functions in the target list
          *
          * In those cases we don't need the RemoteSubplan.
          *
@@ -8330,7 +8331,8 @@ adjust_path_distribution(PlannerInfo *root, Query *parse, Path *path)
          * See planner.c:2730 in 9.5.
          */
         if (!(IsA(path, ResultPath) && /* FIXME missing (result_plan->lefttree == NULL) condition */
-            ((root->distribution->distributionType == 'H' && bms_num_members(root->distribution->restrictNodes) == 1) ||
+		      (((root->distribution->distributionType == 'H' || root->distribution->distributionType == 'S') &&
+		        bms_num_members(root->distribution->restrictNodes) == 1) ||
              (root->distribution->distributionType == 'R' && !contain_mutable_functions((Node *)parse->targetList)))))
 
             path = create_remotesubplan_path(root, path, root->distribution);
