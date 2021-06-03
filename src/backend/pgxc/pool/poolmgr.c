@@ -2102,6 +2102,8 @@ agent_handle_input(PoolAgent * agent, StringInfo s)
     {
         int            res;
 
+        agent->cmd_start_time = get_system_time();
+
         /*
          * During a pool cleaning, Abort, Connect and Get Connections messages
          * are not allowed on pooler side.
@@ -2232,7 +2234,19 @@ agent_handle_input(PoolAgent * agent, StringInfo s)
                 /* Send result */
                 pool_sendres(&agent->port, res, NULL, 0, true);
                 break;
-                
+
+            case 'x':          /* get command statistics */
+		        handle_get_cmd_statistics(agent);
+		        break;
+
+            case 'y':          /* reset command statistics */
+                reset_pooler_cmd_statistics();
+                break;
+
+            case 'z':          /* get connections statistics */
+                handle_get_conn_statistics(agent);
+                break;
+
             case EOF:            /* EOF */
                 agent_destroy(agent);
                 return;    
@@ -2240,6 +2254,12 @@ agent_handle_input(PoolAgent * agent, StringInfo s)
                 elog(WARNING, POOL_MGR_PREFIX"invalid request tag:%c", qtype);
                 agent_destroy(agent);
                 return;
+        }
+
+        /* if cmd_start_time is not 0, means cmd handle in main loop sync, statistic here */
+        if (agent->cmd_start_time != 0)
+        {
+            update_pooler_cmd_statistics(qtype, get_system_time() - agent->cmd_start_time);
         }
 
         /* avoid reading from connection */
@@ -6263,6 +6283,11 @@ static void pooler_handle_sync_response_queue(void)
                     abort();
                 }
             }
+
+            if (connRsp->cmd_start_time != 0)
+            {
+                update_pooler_cmd_statistics(connRsp->cmd, connRsp->cmd_end_time - connRsp->cmd_start_time);
+            }
             
             /* handle pending agent, if any */
             agent_handle_pending_agent(agent);
@@ -7980,6 +8005,11 @@ void *pooler_sync_remote_operator_thread(void *arg)
             if (PoolPrintStatTimeout > 0 && 'g' == request->cmd)
             {
                 gettimeofday(&request->end_time, NULL);        
+            }
+
+            if (request->cmd_start_time != 0)
+            {
+                request->cmd_end_time = get_system_time();
             }
             
             /* clear task status */

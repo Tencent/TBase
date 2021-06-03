@@ -380,8 +380,8 @@ bool mls_check_relation_permission(Oid relid, bool * schema_bound)
             return true;
         }
 
-        if (transparent_crypt_check_table_has_crypto(parent_oid,  true, schema_bound) ||
-		        transparent_crypt_check_table_has_crypto(relid,  true, schema_bound))
+        if (trsprt_crypt_check_table_has_crypt(parent_oid,  true, schema_bound) ||
+		        trsprt_crypt_check_table_has_crypt(relid,  true, schema_bound))
         {
             return true;
         }
@@ -438,14 +438,14 @@ bool mls_check_column_permission(Oid relid, int attnum)
     {
         parent_oid = mls_get_parent_oid_by_relid(relid);
 
-        if (datamask_check_table_col_has_datamask(parent_oid, attnum) ||
-		        datamask_check_table_col_has_datamask(relid, attnum))
+        if (dmask_check_table_col_has_dmask(parent_oid, attnum) ||
+		        dmask_check_table_col_has_dmask(relid, attnum))
         {
             return true;
         }
 
-        if (transparent_crypt_check_table_col_has_crypto(parent_oid, attnum) ||
-		        transparent_crypt_check_table_col_has_crypto(relid, attnum))
+        if (trsprt_crypt_chk_tbl_col_has_crypt(parent_oid, attnum) ||
+		        trsprt_crypt_chk_tbl_col_has_crypt(relid, attnum))
         {
             return true;
         }

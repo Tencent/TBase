@@ -2622,7 +2622,6 @@ DROP INDEX CONCURRENTLY "concur_index2";				-- works
 ERROR:  index "concur_index2" does not exist
 DROP INDEX CONCURRENTLY IF EXISTS "concur_index2";		-- notice
 NOTICE:  index "concur_index2" does not exist, skipping
-ERROR:  DROP INDEX CONCURRENTLY cannot run inside a transaction block
 -- failures
 DROP INDEX CONCURRENTLY "concur_index2", "concur_index3";
 ERROR:  index "concur_index2" does not exist
@@ -2633,7 +2632,6 @@ ROLLBACK;
 -- successes
 DROP INDEX CONCURRENTLY IF EXISTS "concur_index3";
 NOTICE:  index "concur_index3" does not exist, skipping
-ERROR:  DROP INDEX CONCURRENTLY cannot run inside a transaction block
 DROP INDEX CONCURRENTLY "concur_index4";
 ERROR:  index "concur_index4" does not exist
 DROP INDEX CONCURRENTLY "concur_index5";

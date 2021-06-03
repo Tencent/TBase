@@ -372,7 +372,7 @@ record_out(PG_FUNCTION_ARGS)
 	 */
 	if (IS_PGXC_DATANODE && tupdesc->attrs_ext)
 	{
-		transparent_crypt_decrypt_all_cols_value_copy(&tuple, tupdesc, values, nulls);
+		trsprt_crypt_dcrpt_all_col_vale_cp(&tuple, tupdesc, values, nulls);
 	}
 	else
 	{
@@ -390,7 +390,7 @@ record_out(PG_FUNCTION_ARGS)
 
 	if (OidIsValid(parentOid) && datamask_check_table_has_datamask(parentOid))
 	{
-		datamask_exchange_all_cols_value_copy(tupdesc, values, nulls, parentOid);
+		dmask_exchg_all_cols_value_copy(tupdesc, values, nulls, parentOid);
 	}
 
     /* And build the result string */

@@ -2831,7 +2831,7 @@ MaintainGTS(Relation rel, BlockNumber blkno, Buffer buffer)
 			HeapTupleHeaderXminCommitted(tuphdr) &&
 			!HeapTupleHeaderXminFrozen(tuphdr))
 		{
-			GlobalTimestamp tuple_xmin_gts = HeapTupleHeaderGetXminTimestampAtomic(tuphdr);
+			GlobalTimestamp tuple_xmin_gts = HeapTupleHderGetXminTimestapAtomic(tuphdr);
 
 			if (GlobalTimestampIsValid(tuple_xmin_gts)
 				&& !CommitTimestampIsLocal(tuple_xmin_gts)
@@ -2857,7 +2857,7 @@ MaintainGTS(Relation rel, BlockNumber blkno, Buffer buffer)
 				if (reset)
 				{
 					changed = true;
-					HeapTupleHeaderSetXminTimestampAtomic(tuphdr, tlog_xmin_gts);
+					HeapTupleHderSetXminTimestapAtomic(tuphdr, tlog_xmin_gts);
 					elog(WARNING,
 						"relfilenode %u "
 						"pageno %u lineoff %u xmin %u xmin_gts "INT64_FORMAT" "
@@ -2878,7 +2878,7 @@ MaintainGTS(Relation rel, BlockNumber blkno, Buffer buffer)
 		if (TransactionIdIsNormal(xmax) &&
 			HeapTupleHeaderXmaxCommitted(tuphdr))
 		{
-			GlobalTimestamp tuple_xmax_gts = HeapTupleHeaderGetXmaxTimestampAtomic(tuphdr);
+			GlobalTimestamp tuple_xmax_gts = HeapTupleHderGetXmaxTimestapAtomic(tuphdr);
 
 			if (GlobalTimestampIsValid(tuple_xmax_gts)
 				&& !CommitTimestampIsLocal(tuple_xmax_gts)
@@ -2905,7 +2905,7 @@ MaintainGTS(Relation rel, BlockNumber blkno, Buffer buffer)
 				if (reset)
 				{
 					changed = true;
-					HeapTupleHeaderSetXmaxTimestampAtomic(tuphdr, tlog_xmax_gts);
+					HeapTupleHderSetXmaxTimestapAtomic(tuphdr, tlog_xmax_gts);
 					elog(WARNING,
 						"relfilenode "
 						"%u pageno %u lineoff %u "

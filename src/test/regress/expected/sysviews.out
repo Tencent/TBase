@@ -120,6 +120,7 @@ select name, setting from pg_settings where name like 'enable%';
  enable_pooler_stuck_exit          | off
  enable_pullup_subquery            | on
  enable_replication_slot_debug     | off
+ enable_sampling_analyze           | on
  enable_seqscan                    | on
  enable_shard_statistic            | on
  enable_sort                       | on
