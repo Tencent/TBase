@@ -52,7 +52,7 @@ extern int	 GTMPortNumber;
 #ifndef __XLOG__
 static GTM_Conn *gtm_standby_connect_to_standby_int(int *report_needed);
 #endif
-static GTM_Conn *gtm_standby_connectToActiveGTM(void);
+static GTM_Conn *gtm_standby_connectToActiveGTM(int timeout);
 static void AddBackupLabel(uint64 segment_no);
 
 /* Defined in main.c */
@@ -62,9 +62,9 @@ extern int   GTM_Standby_Connetion_Timeout;
 
 
 int
-gtm_standby_start_startup(void)
+gtm_standby_start_startup(int timeout)
 {
-	GTM_ActiveConn = gtm_standby_connectToActiveGTM();
+	GTM_ActiveConn = gtm_standby_connectToActiveGTM(timeout);
 	if (GTM_ActiveConn == NULL || GTMPQstatus(GTM_ActiveConn) != CONNECTION_OK)
 	{
 		int save_errno = errno;
@@ -644,7 +644,7 @@ void
 gtm_standby_finishActiveConn(void)
 {
 	
-	GTM_ActiveConn = gtm_standby_connectToActiveGTM();
+	GTM_ActiveConn = gtm_standby_connectToActiveGTM(0);
 	if (GTM_ActiveConn == NULL)
 	{
 		elog(DEBUG3, "Error in connection");
@@ -664,7 +664,7 @@ gtm_standby_finishActiveConn(void)
 }
 
 static GTM_Conn *
-gtm_standby_connectToActiveGTM(void)
+gtm_standby_connectToActiveGTM(int timeout)
 {
 	char connect_string[1024];
 	int active_port = Recovery_StandbyGetActivePort();
@@ -673,8 +673,16 @@ gtm_standby_connectToActiveGTM(void)
 	/* Need to connect to Active-GTM again here */
 	elog(LOG, "Connecting the GTM active on %s:%d...", active_address, active_port);
 
-	sprintf(connect_string, "host=%s port=%d node_name=%s remote_type=%d",
-			active_address, active_port, NodeName, GTM_NODE_GTM);
+	if (timeout != 0)
+    {
+        sprintf(connect_string, "host=%s port=%d node_name=%s remote_type=%d connect_timeout=%d",
+                active_address, active_port, NodeName, GTM_NODE_GTM, timeout);
+    }
+    else
+    {
+        sprintf(connect_string, "host=%s port=%d node_name=%s remote_type=%d",
+                active_address, active_port, NodeName, GTM_NODE_GTM);
+    }
 
 	return PQconnectGTM(connect_string);
 }
