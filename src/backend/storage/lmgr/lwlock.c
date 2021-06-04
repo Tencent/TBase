@@ -457,6 +457,13 @@ InitializeLWLocks(void)
     for (id = 0; id < NUM_PREDICATELOCK_PARTITIONS; id++, lock++)
         LWLockInitialize(&lock->lock, LWTRANCHE_PREDICATE_LOCK_MANAGER);
 
+	/* Initialize 2pc info cache LWLocks in main array */
+	lock = MainLWLockArray + NUM_INDIVIDUAL_LWLOCKS +
+		NUM_BUFFER_PARTITIONS + NUM_LOCK_PARTITIONS +
+		NUM_PREDICATELOCK_PARTITIONS;
+	for (id = 0; id < NUM_CACHE_2PC_PARTITIONS; id++, lock++)
+		LWLockInitialize(&lock->lock, LWTRANCHE_2PC_INFO_CACHE);
+
     /* Initialize named tranches. */
     if (NamedLWLockTrancheRequests > 0)
     {

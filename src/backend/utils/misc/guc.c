@@ -2705,7 +2705,7 @@ static struct config_bool ConfigureNamesBool[] =
 			NULL
 		},
 		&enable_2pc_file_check,
-		true,
+		false,
 		NULL, NULL, NULL
 	},
 	{
@@ -2723,15 +2723,6 @@ static struct config_bool ConfigureNamesBool[] =
 			NULL
 		},
 		&enable_2pc_entry_trace,
-		false,
-		NULL, NULL, NULL
-	},
-	{
-		{"enable_2pc_hash_table_check", PGC_USERSET, CUSTOM_OPTIONS,
-			gettext_noop("Enable 2PC hash table check."),
-			NULL
-		},
-		&enable_2pc_hash_table_check,
 		false,
 		NULL, NULL, NULL
 	},
@@ -4807,14 +4798,6 @@ static struct config_int ConfigureNamesInt[] =
 		},
 		&record_2pc_entry_size,
 		2048, 1028, INT_MAX,
-		NULL, NULL, NULL
-	},
-	{
-		{"record_2pc_partitions", PGC_POSTMASTER, CUSTOM_OPTIONS,
-			gettext_noop("2PC info cache partition number."),
-		},
-		&record_2pc_partitions,
-		32, 1, INT_MAX,
 		NULL, NULL, NULL
 	},
 #endif
