@@ -88,6 +88,7 @@
 #include "optimizer/planmain.h"
 #include "pgxc/squeue.h"
 #include "utils/relfilenodemap.h"
+#include "optimizer/pgxcship.h"
 #endif
 
 #ifdef __AUDIT__
