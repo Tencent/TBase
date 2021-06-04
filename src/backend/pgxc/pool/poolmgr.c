@@ -10473,10 +10473,11 @@ handle_get_connections(PoolAgent * agent, StringInfo s)
      * - List of Coordinators = NumPoolCoords * 4bytes (max)
      * - Number of Datanodes sent = 4bytes
      * - Number of Coordinators sent = 4bytes
+	 * - Raise error flag = 1byte
      * It is better to send in a same message the list of Co and Dn at the same
      * time, this permits to reduce interactions between postmaster and pooler
      */
-    pool_getmessage(&agent->port, s, 4 * agent->num_dn_connections + 4 * agent->num_coord_connections + 12);
+	pool_getmessage(&agent->port, s, 4 * agent->num_dn_connections + 4 * agent->num_coord_connections + 13);
     datanodecount = pq_getmsgint(s, 4);
     for (i = 0; i < datanodecount; i++)
     {
