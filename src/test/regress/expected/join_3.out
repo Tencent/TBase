@@ -1868,33 +1868,6 @@ SELECT '' AS "xxx", *
 (1 row)
 
 --
--- semijoin selectivity for <>
---
-explain (costs off)
-select * from int4_tbl i4, tenk1 a
-where exists(select * from tenk1 b
-             where a.twothousand = b.twothousand and a.fivethous <> b.fivethous)
-      and i4.f1 = a.tenthous;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)
-         ->  Hash Semi Join
-               Hash Cond: (a.twothousand = b.twothousand)
-               Join Filter: (a.fivethous <> b.fivethous)
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               Distribute results by H: twothousand
-               ->  Hash Join
-                     Hash Cond: (a.tenthous = i4.f1)
-               ->  Seq Scan on tenk1 a
-               ->  Hash
-                           ->  Seq Scan on int4_tbl i4
-         ->  Hash
-                     ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                     Distribute results by H: twothousand
-                           ->  Seq Scan on tenk1 b
-(15 rows)
-
---
 -- More complicated constructs
 --
 --
@@ -2447,7 +2420,7 @@ select count(*) from tenk1 a, tenk1 b
          ->  Partial Aggregate
                ->  Hash Join
                      Hash Cond: (a.hundred = b.thousand)
-                     ->  Seq Scan on tenk1 a
+                     ->  Index Only Scan using tenk1_hundred on tenk1 a
                      ->  Hash
                            ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                  ->  Seq Scan on tenk1 b
@@ -3318,7 +3291,7 @@ select count(*) from
                      Join Filter: (a.unique2 = b.unique1)
                      ->  Remote Subquery Scan on all
                            Distribute results by H: thousand
-                           ->  Seq Scan on tenk1 c
+                           ->  Index Only Scan using tenk1_thous_tenthous on tenk1 c
                      ->  Hash
                            ->  Remote Subquery Scan on all
                                  Distribute results by H: thousand
@@ -3363,7 +3336,7 @@ select b.unique1 from
                            Join Filter: (b.unique1 = 42)
                            ->  Remote Subquery Scan on all
                                  Distribute results by H: 42
-                                 ->  Seq Scan on tenk1 c
+                                 ->  Index Only Scan using tenk1_thous_tenthous on tenk1 c
                            ->  Hash
                                  ->  Remote Subquery Scan on all
                                        Distribute results by H: unique1
@@ -3468,17 +3441,19 @@ select f1, unique2, case when unique2 is null then f1 else 0 end
                                 QUERY PLAN                                
 --------------------------------------------------------------------------
  Remote Subquery Scan on all
-   ->  Hash Right Join
-         Hash Cond: (b.unique2 = a.f1)
+   ->  Merge Right Join
+         Merge Cond: (b.unique2 = a.f1)
          Filter: (CASE WHEN (b.unique2 IS NULL) THEN a.f1 ELSE 0 END = 0)
          ->  Remote Subquery Scan on all
                Distribute results by H: unique2
-               ->  Seq Scan on tenk1 b
-         ->  Hash
+               ->  Index Only Scan using tenk1_unique2 on tenk1 b
+         ->  Materialize
                ->  Remote Subquery Scan on all
                      Distribute results by H: f1
-                     ->  Seq Scan on int4_tbl a
-(11 rows)
+                     ->  Sort
+                           Sort Key: a.f1
+                           ->  Seq Scan on int4_tbl a
+(13 rows)
 
 select f1, unique2, case when unique2 is null then f1 else 0 end
   from int4_tbl a left join tenk1 b on f1 = unique2
@@ -3537,33 +3512,37 @@ left join
    using (join_key)
   ) foo3
 using (join_key);
-                              QUERY PLAN                               
------------------------------------------------------------------------
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
  Hash Right Join
    Output: "*VALUES*".column1, i1.f1, (666)
    Hash Cond: (i1.f1 = "*VALUES*".column1)
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          Output: i1.f1, 666
-         ->  Hash Right Join
+         ->  Merge Right Join
                Output: i1.f1, 666
-               Hash Cond: (i2.unique2 = i1.f1)
+               Merge Cond: (i2.unique2 = i1.f1)
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                      Output: i2.unique2
                      Distribute results by H: unique2
-                     ->  Seq Scan on public.tenk1 i2
+                     Sort Key: i2.unique2
+                     ->  Index Only Scan using tenk1_unique2 on public.tenk1 i2
                            Output: i2.unique2
-               ->  Hash
+               ->  Materialize
                      Output: i1.f1
                      ->  Remote Subquery Scan on all (datanode_1)
                            Output: i1.f1
                            Distribute results by H: f1
-                           ->  Seq Scan on public.int4_tbl i1
+                           ->  Sort
                                  Output: i1.f1
+                                 Sort Key: i1.f1
+                                 ->  Seq Scan on public.int4_tbl i1
+                                       Output: i1.f1
    ->  Hash
          Output: "*VALUES*".column1
          ->  Values Scan on "*VALUES*"
                Output: "*VALUES*".column1
-(24 rows)
+(28 rows)
 
 select foo1.join_key as foo1_id, foo3.join_key AS foo3_id, bug_field from
   (values (0),(1)) foo1(join_key)
@@ -4720,19 +4699,18 @@ select * from generate_series(100,200) g,
 explain (num_nodes off, nodes off, costs off)
   select count(*) from tenk1 a,
     tenk1 b join lateral (values(a.unique1)) ss(x) on b.unique2 = ss.x;
-                            QUERY PLAN                            
-------------------------------------------------------------
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
  Finalize Aggregate
    ->  Remote Subquery Scan on all
          ->  Partial Aggregate
-               ->  Hash Join
-                     Hash Cond: (b.unique2 = a.unique1)
-                           ->  Remote Subquery Scan on all
-                                 Distribute results by H: unique2
-                                 ->  Seq Scan on tenk1 b
-                     ->  Hash
-                           ->  Seq Scan on tenk1 a
-(10 rows)
+               ->  Merge Join
+                     Merge Cond: (b.unique2 = a.unique1)
+                     ->  Remote Subquery Scan on all
+                           Distribute results by H: unique2
+                           ->  Index Only Scan using tenk1_unique2 on tenk1 b
+                     ->  Index Only Scan using tenk1_unique1 on tenk1 a
+(9 rows)
 
 select count(*) from tenk1 a,
   tenk1 b join lateral (values(a.unique1)) ss(x) on b.unique2 = ss.x;
@@ -4745,18 +4723,18 @@ select count(*) from tenk1 a,
 explain (num_nodes off, nodes off, costs off)
   select count(*) from tenk1 a,
     tenk1 b join lateral (values(a.unique1),(-1)) ss(x) on b.unique2 = ss.x;
-                     QUERY PLAN                      
------------------------------------------------------
+                               QUERY PLAN                               
+------------------------------------------------------------------------
  Aggregate
    ->  Hash Join
          Hash Cond: ("*VALUES*".column1 = b.unique2)
          ->  Nested Loop
                ->  Remote Subquery Scan on all
-                     ->  Seq Scan on tenk1 a
+                     ->  Index Only Scan using tenk1_unique1 on tenk1 a
                ->  Values Scan on "*VALUES*"
          ->  Hash
                ->  Remote Subquery Scan on all
-                     ->  Seq Scan on tenk1 b
+                     ->  Index Only Scan using tenk1_unique2 on tenk1 b
 (10 rows)
 
 select count(*) from tenk1 a,
@@ -6085,8 +6063,8 @@ from onek t1, tenk1 t2
 where exists (select 1 from tenk1 t3
               where t3.thousand = t1.unique1 and t3.tenthous = t2.hundred)
       and t1.unique1 < 1;
-                                                                                                                QUERY PLAN                                                                                                                 
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    Output: t1.unique1, t2.hundred
    ->  Nested Loop
@@ -6101,13 +6079,13 @@ where exists (select 1 from tenk1 t3
                            Output: t3.thousand, t3.tenthous
                            Group Key: t3.thousand, t3.tenthous
                            ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                 Output: t3.unique1, t3.unique2, t3.two, t3.four, t3.ten, t3.twenty, t3.hundred, t3.thousand, t3.twothousand, t3.fivethous, t3.tenthous, t3.odd, t3.even, t3.stringu1, t3.stringu2, t3.string4
+                                 Output: t3.thousand, t3.tenthous
                                  Distribute results by H: thousand
                                  ->  HashAggregate
-                                       Output: t3.unique1, t3.unique2, t3.two, t3.four, t3.ten, t3.twenty, t3.hundred, t3.thousand, t3.twothousand, t3.fivethous, t3.tenthous, t3.odd, t3.even, t3.stringu1, t3.stringu2, t3.string4
+                                       Output: t3.thousand, t3.tenthous
                                        Group Key: t3.thousand, t3.tenthous
-                                       ->  Seq Scan on public.tenk1 t3
-                                             Output: t3.unique1, t3.unique2, t3.two, t3.four, t3.ten, t3.twenty, t3.hundred, t3.thousand, t3.twothousand, t3.fivethous, t3.tenthous, t3.odd, t3.even, t3.stringu1, t3.stringu2, t3.string4
+                                       ->  Index Only Scan using tenk1_thous_tenthous on public.tenk1 t3
+                                             Output: t3.thousand, t3.tenthous
                      ->  Hash
                            Output: t1.unique1
                            ->  Remote Subquery Scan on all (datanode_1,datanode_2)

@@ -4057,12 +4057,12 @@ explain (verbose true, costs false, nodes false) select count(*) + sum(val) + av
  Remote Subquery Scan on all
    Output: (((count(*) + sum(val)))::numeric + avg(val)), val2
    Sort Key: xc_groupby_tab1.val2
-   ->  Sort
-         Output: ((((count(*) + sum(val)))::numeric + avg(val))), val2
-         Sort Key: xc_groupby_tab1.val2
-         ->  Finalize HashAggregate
-               Output: (((count(*) + sum(val)))::numeric + avg(val)), val2
-               Group Key: xc_groupby_tab1.val2
+   ->  Finalize GroupAggregate
+         Output: (((count(*) + sum(val)))::numeric + avg(val)), val2
+         Group Key: xc_groupby_tab1.val2
+         ->  Sort
+               Output: val2, (PARTIAL count(*)), (PARTIAL sum(val)), (PARTIAL avg(val))
+               Sort Key: xc_groupby_tab1.val2
                ->  Remote Subquery Scan on all
                      Output: val2, PARTIAL count(*), PARTIAL sum(val), PARTIAL avg(val)
                      Distribute results by H: val2
@@ -4106,12 +4106,12 @@ explain (verbose true, costs false, nodes false) select sum(val), avg(val), 2 * 
  Remote Subquery Scan on all
    Output: sum(val), avg(val), (2 * val2)
    Sort Key: (2 * xc_groupby_tab1.val2)
-   ->  Sort
-         Output: (sum(val)), (avg(val)), ((2 * val2))
-         Sort Key: ((2 * xc_groupby_tab1.val2))
-         ->  Finalize HashAggregate
-               Output: sum(val), avg(val), ((2 * val2))
-               Group Key: (2 * xc_groupby_tab1.val2)
+   ->  Finalize GroupAggregate
+         Output: sum(val), avg(val), ((2 * val2))
+         Group Key: ((2 * xc_groupby_tab1.val2))
+         ->  Sort
+               Output: ((2 * val2)), (PARTIAL sum(val)), (PARTIAL avg(val))
+               Sort Key: ((2 * xc_groupby_tab1.val2))
                ->  Remote Subquery Scan on all
                      Output: (2 * val2), PARTIAL sum(val), PARTIAL avg(val)
                      Distribute results by H: (2 * val2)

@@ -292,13 +292,17 @@ select * from a1 where num >= (select count(*) from a2 where name='c') limit 1;
    ->  Remote Subquery Scan on all (datanode_1,datanode_2) (actual rows=1 loops=1)
          Output: a1.id, a1.num, a1.name
          ->  Limit
-               DN (never executed)
+               DN (actual rows=1..1 loops=1..1)
+               - datanode_1 (actual rows=1 loops=1)
+               - datanode_2 (actual rows=1 loops=1)
                Output: a1.id, a1.num, a1.name
                ->  Seq Scan on public.a1
-                     DN (never executed)
+                     DN (actual rows=1..1 loops=1..1)
+                     - datanode_1 (actual rows=1 loops=1)
+                     - datanode_2 (actual rows=1 loops=1)
                      Output: a1.id, a1.num, a1.name
                      Filter: (a1.num >= $0)
-(27 rows)
+(31 rows)
 
 explain (costs off,timing off,summary off,analyze,verbose)
 select count(*) from a1 group by name having count(*) = (select count(*) from a2 where name='a');

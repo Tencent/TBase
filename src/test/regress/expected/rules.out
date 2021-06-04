@@ -2397,9 +2397,6 @@ toyemp| SELECT emp.name,
     emp.location,
     (12 * emp.salary) AS annualsal
    FROM emp;
-zv1| SELECT zt1.f1,
-    'dummy'::text AS junk
-   FROM pg_temp_17.zt1;
 SELECT tablename, rulename, definition FROM pg_rules
 	ORDER BY tablename, rulename;
 pg_settings|pg_settings_n|CREATE RULE pg_settings_n AS

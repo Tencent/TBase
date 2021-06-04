@@ -164,6 +164,3 @@ test: xl_primary_key xl_foreign_key xl_distribution_column_types xl_alter_table 
 
 # This runs TBase specific tests
 test: tbase_explain
-
-test: redistribute_custom_types
-test: nestloop_by_shard
