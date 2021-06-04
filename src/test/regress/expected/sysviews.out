@@ -117,6 +117,7 @@ select name, setting from pg_settings where name like 'enable%';
  enable_plpgsql_debug_print        | off
  enable_pooler_debug_print         | on
  enable_pooler_stuck_exit          | off
+ enable_pooler_thread_log_print    | on
  enable_pullup_subquery            | on
  enable_replication_slot_debug     | off
  enable_sampling_analyze           | on
@@ -128,7 +129,7 @@ select name, setting from pg_settings where name like 'enable%';
  enable_tidscan                    | on
  enable_transparent_crypt          | on
  enable_user_authority_force_check | off
-(56 rows)
+(57 rows)
 
 -- Test that the pg_timezone_names and pg_timezone_abbrevs views are
 -- more-or-less working.  We can't test their contents in any great detail
