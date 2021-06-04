@@ -2,14 +2,14 @@
  *
  * barrier.c
  *
- *      Barrier handling for PITR
+ *	  Barrier handling for PITR
  *
  *
  * Portions Copyright (c) 1996-2009, PostgreSQL Global Development Group
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
  *
  * IDENTIFICATION
- *      $$
+ *	  $$
  *
  *-------------------------------------------------------------------------
  */
@@ -53,25 +53,25 @@ static void EndBarrier(PGXCNodeAllHandles *handles, const char *id);
 void
 ProcessCreateBarrierPrepare(const char *id)
 {
-    StringInfoData buf;
+	StringInfoData buf;
 
-    if (!IS_PGXC_REMOTE_COORDINATOR)
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("The CREATE BARRIER PREPARE message is expected to "
-                        "arrive at a Coordinator from another Coordinator")));
+	if (!IS_PGXC_REMOTE_COORDINATOR)
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("The CREATE BARRIER PREPARE message is expected to "
+						"arrive at a Coordinator from another Coordinator")));
 
-    LWLockAcquire(BarrierLock, LW_EXCLUSIVE);
+	LWLockAcquire(BarrierLock, LW_EXCLUSIVE);
 
-    pq_beginmessage(&buf, 'b');
-    pq_sendstring(&buf, id);
-    pq_endmessage(&buf);
-    pq_flush();
+	pq_beginmessage(&buf, 'b');
+	pq_sendstring(&buf, id);
+	pq_endmessage(&buf);
+	pq_flush();
 
-    /*
-     * TODO Start a timer to terminate the pending barrier after a specified
-     * timeout
-     */
+	/*
+	 * TODO Start a timer to terminate the pending barrier after a specified
+	 * timeout
+	 */
 }
 
 /*
@@ -81,24 +81,24 @@ ProcessCreateBarrierPrepare(const char *id)
 void
 ProcessCreateBarrierEnd(const char *id)
 {
-    StringInfoData buf;
+	StringInfoData buf;
 
-    if (!IS_PGXC_REMOTE_COORDINATOR)
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("The CREATE BARRIER END message is expected to "
-                        "arrive at a Coordinator from another Coordinator")));
+	if (!IS_PGXC_REMOTE_COORDINATOR)
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("The CREATE BARRIER END message is expected to "
+						"arrive at a Coordinator from another Coordinator")));
 
-    LWLockRelease(BarrierLock);
+	LWLockRelease(BarrierLock);
 
-    pq_beginmessage(&buf, 'b');
-    pq_sendstring(&buf, id);
-    pq_endmessage(&buf);
-    pq_flush();
+	pq_beginmessage(&buf, 'b');
+	pq_sendstring(&buf, id);
+	pq_endmessage(&buf);
+	pq_flush();
 
-    /*
-     * TODO Stop the timer
-     */
+	/*
+	 * TODO Stop the timer
+	 */
 }
 
 /*
@@ -109,186 +109,186 @@ ProcessCreateBarrierEnd(const char *id)
 void
 ProcessCreateBarrierExecute(const char *id)
 {
-    StringInfoData buf;
+	StringInfoData buf;
 
-    if (!IsConnFromCoord())
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("The CREATE BARRIER EXECUTE message is expected to "
-                        "arrive from a Coordinator")));
-    {
-        XLogRecPtr recptr;
+	if (!IsConnFromCoord())
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("The CREATE BARRIER EXECUTE message is expected to "
+						"arrive from a Coordinator")));
+	{
+		XLogRecPtr recptr;
 
-        XLogBeginInsert();
-        XLogRegisterData((char *) &id, strlen(id) + 1);
-        recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE);
-        XLogFlush(recptr);
-    }
+		XLogBeginInsert();
+		XLogRegisterData((char *) &id, strlen(id) + 1);
+		recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE);
+		XLogFlush(recptr);
+	}
 
-    pq_beginmessage(&buf, 'b');
-    pq_sendstring(&buf, id);
-    pq_endmessage(&buf);
-    pq_flush();
+	pq_beginmessage(&buf, 'b');
+	pq_sendstring(&buf, id);
+	pq_endmessage(&buf);
+	pq_flush();
 }
 
 static const char *
 generate_barrier_id(const char *id)
 {
-    char genid[1024];
-    TimestampTz ts;
+	char genid[1024];
+	TimestampTz ts;
 
-    /*
-     * If the caller can passed a NULL value, generate an id which is
-     * guaranteed to be unique across the cluster. We use a combination of
-     * the Coordinator node id and current timestamp.
-     */
+	/*
+	 * If the caller can passed a NULL value, generate an id which is
+	 * guaranteed to be unique across the cluster. We use a combination of
+	 * the Coordinator node id and current timestamp.
+	 */
 
-    if (id)
-       return id;
+	if (id)
+	   return id;
 
-    ts = GetCurrentTimestamp();
+	ts = GetCurrentTimestamp();
 #ifdef HAVE_INT64_TIMESTAMP
-    sprintf(genid, "%s_"INT64_FORMAT, PGXCNodeName, ts);
+	sprintf(genid, "%s_"INT64_FORMAT, PGXCNodeName, ts);
 #else
-    sprintf(genid, "%s_%.0f", PGXCNodeName, ts);
+	sprintf(genid, "%s_%.0f", PGXCNodeName, ts);
 #endif
-    return pstrdup(genid);
+	return pstrdup(genid);
 }
 
 static PGXCNodeAllHandles *
 SendBarrierPrepareRequest(List *coords, const char *id)
 {
-    PGXCNodeAllHandles *coord_handles;
-    int conn;
-    int msglen;
-    int barrier_idlen;
+	PGXCNodeAllHandles *coord_handles;
+	int conn;
+	int msglen;
+	int barrier_idlen;
 
-    coord_handles = get_handles(NIL, coords, true, true);
+	coord_handles = get_handles(NIL, coords, true, true, true);
 
-    for (conn = 0; conn < coord_handles->co_conn_count; conn++)
-    {
-        PGXCNodeHandle *handle = coord_handles->coord_handles[conn];
+	for (conn = 0; conn < coord_handles->co_conn_count; conn++)
+	{
+		PGXCNodeHandle *handle = coord_handles->coord_handles[conn];
 
-        /* Invalid connection state, return error */
-        if (handle->state != DN_CONNECTION_STATE_IDLE)
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("Failed to send CREATE BARRIER PREPARE request "
-                             "to the node")));
+		/* Invalid connection state, return error */
+		if (handle->state != DN_CONNECTION_STATE_IDLE)
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Failed to send CREATE BARRIER PREPARE request "
+						 	"to the node")));
 
-        barrier_idlen = strlen(id) + 1;
+		barrier_idlen = strlen(id) + 1;
 
-        msglen = 4; /* for the length itself */
-        msglen += barrier_idlen;
-        msglen += 1; /* for barrier command itself */
+		msglen = 4; /* for the length itself */
+		msglen += barrier_idlen;
+		msglen += 1; /* for barrier command itself */
 
-        /* msgType + msgLen */
-        if (ensure_out_buffer_capacity(handle->outEnd + 1 + msglen, handle) != 0)
-        {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("Out of memory")));
-        }
+		/* msgType + msgLen */
+		if (ensure_out_buffer_capacity(handle->outEnd + 1 + msglen, handle) != 0)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Out of memory")));
+		}
 
-        handle->outBuffer[handle->outEnd++] = 'b';
-        msglen = htonl(msglen);
-        memcpy(handle->outBuffer + handle->outEnd, &msglen, 4);
-        handle->outEnd += 4;
+		handle->outBuffer[handle->outEnd++] = 'b';
+		msglen = htonl(msglen);
+		memcpy(handle->outBuffer + handle->outEnd, &msglen, 4);
+		handle->outEnd += 4;
 
-        handle->outBuffer[handle->outEnd++] = CREATE_BARRIER_PREPARE;
+		handle->outBuffer[handle->outEnd++] = CREATE_BARRIER_PREPARE;
 
-        memcpy(handle->outBuffer + handle->outEnd, id, barrier_idlen);
-        handle->outEnd += barrier_idlen;
+		memcpy(handle->outBuffer + handle->outEnd, id, barrier_idlen);
+		handle->outEnd += barrier_idlen;
 
-        PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_QUERY);
+		PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_QUERY);
 
-        pgxc_node_flush(handle);
-    }
+		pgxc_node_flush(handle);
+	}
 
-    return coord_handles;
+	return coord_handles;
 }
 
 static void
 CheckBarrierCommandStatus(PGXCNodeAllHandles *conn_handles, const char *id,
-                          const char *command)
+						  const char *command)
 {
-    int conn;
-    int count = conn_handles->co_conn_count + conn_handles->dn_conn_count;
+	int conn;
+	int count = conn_handles->co_conn_count + conn_handles->dn_conn_count;
 
-    elog(DEBUG2, "Check CREATE BARRIER <%s> %s command status", id, command);
+	elog(DEBUG2, "Check CREATE BARRIER <%s> %s command status", id, command);
 
-    for (conn = 0; conn < count; conn++)
-    {
-        PGXCNodeHandle *handle;
+	for (conn = 0; conn < count; conn++)
+	{
+		PGXCNodeHandle *handle;
 
-        if (conn < conn_handles->co_conn_count)
-            handle = conn_handles->coord_handles[conn];
-        else
-            handle = conn_handles->datanode_handles[conn - conn_handles->co_conn_count];
+		if (conn < conn_handles->co_conn_count)
+			handle = conn_handles->coord_handles[conn];
+		else
+			handle = conn_handles->datanode_handles[conn - conn_handles->co_conn_count];
 
-        if (pgxc_node_receive(1, &handle, NULL))
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("Failed to receive response from the remote side")));
+		if (pgxc_node_receive(1, &handle, NULL))
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Failed to receive response from the remote side")));
 
-        if (handle_response(handle, NULL) != RESPONSE_BARRIER_OK)
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("CREATE BARRIER PREPARE command failed "
-                             "with error %s", handle->error)));
-    }
+		if (handle_response(handle, NULL) != RESPONSE_BARRIER_OK)
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("CREATE BARRIER PREPARE command failed "
+						 	"with error %s", handle->error)));
+	}
 
-    elog(DEBUG2, "Successfully completed CREATE BARRIER <%s> %s command on "
-                 "all nodes", id, command);
+	elog(DEBUG2, "Successfully completed CREATE BARRIER <%s> %s command on "
+				 "all nodes", id, command);
 }
 
 static void
 SendBarrierEndRequest(PGXCNodeAllHandles *coord_handles, const char *id)
 {
-    int conn;
-    int msglen;
-    int barrier_idlen;
+	int conn;
+	int msglen;
+	int barrier_idlen;
 
-    elog(DEBUG2, "Sending CREATE BARRIER <%s> END command to all Coordinators", id);
+	elog(DEBUG2, "Sending CREATE BARRIER <%s> END command to all Coordinators", id);
 
-    for (conn = 0; conn < coord_handles->co_conn_count; conn++)
-    {
-        PGXCNodeHandle *handle = coord_handles->coord_handles[conn];
+	for (conn = 0; conn < coord_handles->co_conn_count; conn++)
+	{
+		PGXCNodeHandle *handle = coord_handles->coord_handles[conn];
 
-        /* Invalid connection state, return error */
-        if (handle->state != DN_CONNECTION_STATE_IDLE)
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("Failed to send CREATE BARRIER PREPARE request "
-                             "to the node")));
+		/* Invalid connection state, return error */
+		if (handle->state != DN_CONNECTION_STATE_IDLE)
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Failed to send CREATE BARRIER PREPARE request "
+						 	"to the node")));
 
-        barrier_idlen = strlen(id) + 1;
+		barrier_idlen = strlen(id) + 1;
 
-        msglen = 4; /* for the length itself */
-        msglen += barrier_idlen;
-        msglen += 1; /* for barrier command itself */
+		msglen = 4; /* for the length itself */
+		msglen += barrier_idlen;
+		msglen += 1; /* for barrier command itself */
 
-        /* msgType + msgLen */
-        if (ensure_out_buffer_capacity(handle->outEnd + 1 + msglen, handle) != 0)
-        {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("Out of memory")));
-        }
+		/* msgType + msgLen */
+		if (ensure_out_buffer_capacity(handle->outEnd + 1 + msglen, handle) != 0)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Out of memory")));
+		}
 
-        handle->outBuffer[handle->outEnd++] = 'b';
-        msglen = htonl(msglen);
-        memcpy(handle->outBuffer + handle->outEnd, &msglen, 4);
-        handle->outEnd += 4;
+		handle->outBuffer[handle->outEnd++] = 'b';
+		msglen = htonl(msglen);
+		memcpy(handle->outBuffer + handle->outEnd, &msglen, 4);
+		handle->outEnd += 4;
 
-        handle->outBuffer[handle->outEnd++] = CREATE_BARRIER_END;
+		handle->outBuffer[handle->outEnd++] = CREATE_BARRIER_END;
 
-        memcpy(handle->outBuffer + handle->outEnd, id, barrier_idlen);
-        handle->outEnd += barrier_idlen;
+		memcpy(handle->outBuffer + handle->outEnd, id, barrier_idlen);
+		handle->outEnd += barrier_idlen;
 
-        PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_QUERY);
-        pgxc_node_flush(handle);
-    }
+		PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_QUERY);
+		pgxc_node_flush(handle);
+	}
 
 }
 
@@ -306,35 +306,35 @@ SendBarrierEndRequest(PGXCNodeAllHandles *coord_handles, const char *id)
 static PGXCNodeAllHandles *
 PrepareBarrier(const char *id)
 {
-    PGXCNodeAllHandles *coord_handles;
+	PGXCNodeAllHandles *coord_handles;
 
-    elog(DEBUG2, "Preparing Coordinators for BARRIER");
+	elog(DEBUG2, "Preparing Coordinators for BARRIER");
 
-    /*
-     * Send a CREATE BARRIER PREPARE message to all the Coordinators. We should
-     * send an asynchronous request so that we can disable local commits and
-     * then wait for the remote Coordinators to finish the work
-     */
-    coord_handles = SendBarrierPrepareRequest(GetAllCoordNodes(), id);
+	/*
+	 * Send a CREATE BARRIER PREPARE message to all the Coordinators. We should
+	 * send an asynchronous request so that we can disable local commits and
+	 * then wait for the remote Coordinators to finish the work
+	 */
+	coord_handles = SendBarrierPrepareRequest(GetAllCoordNodes(), id);
 
-    /*
-     * Disable local commits
-     */
-    LWLockAcquire(BarrierLock, LW_EXCLUSIVE);
+	/*
+	 * Disable local commits
+	 */
+	LWLockAcquire(BarrierLock, LW_EXCLUSIVE);
 
-    elog(DEBUG2, "Disabled 2PC commits originating at the driving Coordinator");
+	elog(DEBUG2, "Disabled 2PC commits originating at the driving Coordinator");
 
-    /*
-     * TODO Start a timer to cancel the barrier request in case of a timeout
-     */
+	/*
+	 * TODO Start a timer to cancel the barrier request in case of a timeout
+	 */
 
-    /*
-     * Local in-flight commits are now over. Check status of the remote
-     * Coordinators
-     */
-    CheckBarrierCommandStatus(coord_handles, id, "PREPARE");
+	/*
+	 * Local in-flight commits are now over. Check status of the remote
+	 * Coordinators
+	 */
+	CheckBarrierCommandStatus(coord_handles, id, "PREPARE");
 
-    return coord_handles;
+	return coord_handles;
 }
 
 /*
@@ -344,80 +344,80 @@ PrepareBarrier(const char *id)
 static void
 ExecuteBarrier(const char *id)
 {
-    List *barrierDataNodeList = GetAllDataNodes();
-    List *barrierCoordList = GetAllCoordNodes();
-    PGXCNodeAllHandles *conn_handles;
-    int conn;
-    int msglen;
-    int barrier_idlen;
+	List *barrierDataNodeList = GetAllDataNodes();
+	List *barrierCoordList = GetAllCoordNodes();
+	PGXCNodeAllHandles *conn_handles;
+	int conn;
+	int msglen;
+	int barrier_idlen;
 
-    conn_handles = get_handles(barrierDataNodeList, barrierCoordList, false, true);
+	conn_handles = get_handles(barrierDataNodeList, barrierCoordList, false, true, true);
 
-    elog(DEBUG2, "Sending CREATE BARRIER <%s> EXECUTE message to "
-                 "Datanodes and Coordinator", id);
-    /*
-     * Send a CREATE BARRIER request to all the Datanodes and the Coordinators
-     */
-    for (conn = 0; conn < conn_handles->co_conn_count + conn_handles->dn_conn_count; conn++)
-    {
-        PGXCNodeHandle *handle;
+	elog(DEBUG2, "Sending CREATE BARRIER <%s> EXECUTE message to "
+				 "Datanodes and Coordinator", id);
+	/*
+	 * Send a CREATE BARRIER request to all the Datanodes and the Coordinators
+	 */
+	for (conn = 0; conn < conn_handles->co_conn_count + conn_handles->dn_conn_count; conn++)
+	{
+		PGXCNodeHandle *handle;
 
-        if (conn < conn_handles->co_conn_count)
-            handle = conn_handles->coord_handles[conn];
-        else
-            handle = conn_handles->datanode_handles[conn - conn_handles->co_conn_count];
+		if (conn < conn_handles->co_conn_count)
+			handle = conn_handles->coord_handles[conn];
+		else
+			handle = conn_handles->datanode_handles[conn - conn_handles->co_conn_count];
 
-        /* Invalid connection state, return error */
-        if (handle->state != DN_CONNECTION_STATE_IDLE)
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("Failed to send CREATE BARRIER EXECUTE request "
-                             "to the node")));
+		/* Invalid connection state, return error */
+		if (handle->state != DN_CONNECTION_STATE_IDLE)
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Failed to send CREATE BARRIER EXECUTE request "
+						 	"to the node")));
 
-        barrier_idlen = strlen(id) + 1;
+		barrier_idlen = strlen(id) + 1;
 
-        msglen = 4; /* for the length itself */
-        msglen += barrier_idlen;
-        msglen += 1; /* for barrier command itself */
+		msglen = 4; /* for the length itself */
+		msglen += barrier_idlen;
+		msglen += 1; /* for barrier command itself */
 
-        /* msgType + msgLen */
-        if (ensure_out_buffer_capacity(handle->outEnd + 1 + msglen, handle) != 0)
-        {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("Out of memory")));
-        }
+		/* msgType + msgLen */
+		if (ensure_out_buffer_capacity(handle->outEnd + 1 + msglen, handle) != 0)
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("Out of memory")));
+		}
 
-        handle->outBuffer[handle->outEnd++] = 'b';
-        msglen = htonl(msglen);
-        memcpy(handle->outBuffer + handle->outEnd, &msglen, 4);
-        handle->outEnd += 4;
+		handle->outBuffer[handle->outEnd++] = 'b';
+		msglen = htonl(msglen);
+		memcpy(handle->outBuffer + handle->outEnd, &msglen, 4);
+		handle->outEnd += 4;
 
-        handle->outBuffer[handle->outEnd++] = CREATE_BARRIER_EXECUTE;
+		handle->outBuffer[handle->outEnd++] = CREATE_BARRIER_EXECUTE;
 
-        memcpy(handle->outBuffer + handle->outEnd, id, barrier_idlen);
-        handle->outEnd += barrier_idlen;
+		memcpy(handle->outBuffer + handle->outEnd, id, barrier_idlen);
+		handle->outEnd += barrier_idlen;
 
-        PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_QUERY);
-        pgxc_node_flush(handle);
-    }
+		PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_QUERY);
+		pgxc_node_flush(handle);
+	}
 
-    CheckBarrierCommandStatus(conn_handles, id, "EXECUTE");
+	CheckBarrierCommandStatus(conn_handles, id, "EXECUTE");
 
-    pfree_pgxc_all_handles(conn_handles);
+	pfree_pgxc_all_handles(conn_handles);
 
-    /*
-     * Also WAL log the BARRIER locally and flush the WAL buffers to disk
-     */
-    {
-        XLogRecPtr recptr;
+	/*
+	 * Also WAL log the BARRIER locally and flush the WAL buffers to disk
+	 */
+	{
+		XLogRecPtr recptr;
 
-        XLogBeginInsert();
-        XLogRegisterData((char *) &id, strlen(id) + 1);
+		XLogBeginInsert();
+		XLogRegisterData((char *) &id, strlen(id) + 1);
 
-        recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE);
-        XLogFlush(recptr);
-    }
+		recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE);
+		XLogFlush(recptr);
+	}
 }
 
 /*
@@ -426,70 +426,70 @@ ExecuteBarrier(const char *id)
 static void
 EndBarrier(PGXCNodeAllHandles *prepared_handles, const char *id)
 {
-    /* Resume 2PC locally */
-    LWLockRelease(BarrierLock);
+	/* Resume 2PC locally */
+	LWLockRelease(BarrierLock);
 
-    SendBarrierEndRequest(prepared_handles, id);
+	SendBarrierEndRequest(prepared_handles, id);
 
-    CheckBarrierCommandStatus(prepared_handles, id, "END");
+	CheckBarrierCommandStatus(prepared_handles, id, "END");
 }
 
 void
 RequestBarrier(const char *id, char *completionTag)
 {
-    PGXCNodeAllHandles *prepared_handles;
-    const char *barrier_id;
+	PGXCNodeAllHandles *prepared_handles;
+	const char *barrier_id;
 
-    elog(DEBUG2, "CREATE BARRIER request received");
-    /*
-     * Ensure that we are a Coordinator and the request is not from another
-     * coordinator
-     */
-    if (!IS_PGXC_COORDINATOR)
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("CREATE BARRIER command must be sent to a Coordinator")));
+	elog(DEBUG2, "CREATE BARRIER request received");
+	/*
+	 * Ensure that we are a Coordinator and the request is not from another
+	 * coordinator
+	 */
+	if (!IS_PGXC_COORDINATOR)
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("CREATE BARRIER command must be sent to a Coordinator")));
 
-    if (IsConnFromCoord())
-        ereport(ERROR,
-                (errcode(ERRCODE_INTERNAL_ERROR),
-                 errmsg("CREATE BARRIER command is not expected from another Coordinator")));
+	if (IsConnFromCoord())
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("CREATE BARRIER command is not expected from another Coordinator")));
 
-    /*
-     * Get a barrier id if the user has not supplied it
-     */
-    barrier_id = generate_barrier_id(id);
+	/*
+	 * Get a barrier id if the user has not supplied it
+	 */
+	barrier_id = generate_barrier_id(id);
 
-    elog(DEBUG2, "CREATE BARRIER <%s>", barrier_id);
+	elog(DEBUG2, "CREATE BARRIER <%s>", barrier_id);
 
-    /*
-     * Step One. Prepare all Coordinators for upcoming barrier request
-     */
-    prepared_handles = PrepareBarrier(barrier_id);
+	/*
+	 * Step One. Prepare all Coordinators for upcoming barrier request
+	 */
+	prepared_handles = PrepareBarrier(barrier_id);
 
-    /*
-     * Step two. Issue BARRIER command to all involved components, including
-     * Coordinators and Datanodes
-     */
-    ExecuteBarrier(barrier_id);
+	/*
+	 * Step two. Issue BARRIER command to all involved components, including
+	 * Coordinators and Datanodes
+	 */
+	ExecuteBarrier(barrier_id);
 
-    /*
-     * Step three. Inform Coordinators about a successfully completed barrier
-     */
-    EndBarrier(prepared_handles, barrier_id);
-    /* Finally report the barrier to GTM to backup its restart point */
-    ReportBarrierGTM(barrier_id);
+	/*
+	 * Step three. Inform Coordinators about a successfully completed barrier
+	 */
+	EndBarrier(prepared_handles, barrier_id);
+	/* Finally report the barrier to GTM to backup its restart point */
+	ReportBarrierGTM(barrier_id);
 
-    /* Free the handles */
-    pfree_pgxc_all_handles(prepared_handles);
+	/* Free the handles */
+	pfree_pgxc_all_handles(prepared_handles);
 
-    if (completionTag)
-        snprintf(completionTag, COMPLETION_TAG_BUFSIZE, "BARRIER %s", barrier_id);
+	if (completionTag)
+		snprintf(completionTag, COMPLETION_TAG_BUFSIZE, "BARRIER %s", barrier_id);
 }
 
 void
 barrier_redo(XLogReaderState *record)
 {
-    /* Nothing to do */
-    return;
+	/* Nothing to do */
+	return;
 }

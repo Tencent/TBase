@@ -661,7 +661,7 @@ apply_exec_on_nodes(StringInfo s, char *nspname, char *relname, ExecNodes * exec
 		return;
 
 	/* send apply message to DN and wait response */
-	all_handles = get_handles(exec_nodes->nodeList, NIL, false, true);
+	all_handles = get_handles(exec_nodes->nodeList, NIL, false, true, true);
 
 	/* send insert/update/delete to DN and wait exec finish */
 	apply_exec_on_dn_nodes(s, nspname, relname, all_handles);

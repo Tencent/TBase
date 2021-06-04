@@ -171,7 +171,8 @@ extern Oid PGXCGetMainNodeOid(Oid nodeoid);
 extern int PGXCNodeGetNodeIdFromName(char *node_name, char *node_type);
 extern Oid PGXCNodeGetNodeOid(int nodeid, char node_type);
 
-extern PGXCNodeAllHandles *get_handles(List *datanodelist, List *coordlist, bool is_query_coord_only, bool is_global_session);
+extern PGXCNodeAllHandles *get_handles(List *datanodelist, List *coordlist,
+									   bool is_query_coord_only, bool is_global_session, bool raise_error);
 
 extern PGXCNodeAllHandles *get_current_handles(void);
 #ifdef __TBASE__

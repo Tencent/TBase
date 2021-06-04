@@ -5865,7 +5865,7 @@ DataNodeCopyBegin(RemoteCopyData *rcstate)
     else
     {
         PGXCNodeAllHandles *pgxc_handles;
-        pgxc_handles = get_handles(nodelist, NULL, false, true);
+		pgxc_handles = get_handles(nodelist, NULL, false, true, true);
         connections = pgxc_handles->datanode_handles;
         Assert(pgxc_handles->dn_conn_count == conn_count);
         pfree(pgxc_handles);
@@ -6261,6 +6261,7 @@ get_exec_connections(RemoteQueryState *planstate,
     int            co_conn_count, dn_conn_count;
     bool        is_query_coord_only = false;
     PGXCNodeAllHandles *pgxc_handles = NULL;
+	bool        missing_ok = (exec_nodes ? exec_nodes->missing_ok : false);
 
 #ifdef __TBASE__
     if (IsParallelWorker())
@@ -6527,7 +6528,7 @@ get_exec_connections(RemoteQueryState *planstate,
 #endif
 
     /* Get other connections (non-primary) */
-    pgxc_handles = get_handles(nodelist, coordlist, is_query_coord_only, is_global_session);
+	pgxc_handles = get_handles(nodelist, coordlist, is_query_coord_only, is_global_session, !missing_ok);
     if (!pgxc_handles)
         ereport(ERROR,
                 (errcode(ERRCODE_INTERNAL_ERROR),
@@ -6538,7 +6539,7 @@ get_exec_connections(RemoteQueryState *planstate,
     {
         /* Let's assume primary connection is always a Datanode connection for the moment */
         PGXCNodeAllHandles *pgxc_conn_res;
-        pgxc_conn_res = get_handles(primarynode, NULL, false, is_global_session);
+		pgxc_conn_res = get_handles(primarynode, NULL, false, is_global_session, true);
 
         /* primary connection is unique */
         primaryconnection = pgxc_conn_res->datanode_handles[0];
@@ -6552,6 +6553,50 @@ get_exec_connections(RemoteQueryState *planstate,
         pgxc_handles->primary_handle = primaryconnection;
     }
 
+	if (missing_ok)
+	{
+		/* compact handle list exclude missing nodes */
+		int i = 0;
+		while (dn_conn_count && i < dn_conn_count)
+		{
+			if (DN_CONNECTION_STATE_ERROR(pgxc_handles->datanode_handles[i]))
+			{
+				/* find last healthy handle */
+				while (dn_conn_count - 1 > i &&
+				       DN_CONNECTION_STATE_ERROR(pgxc_handles->datanode_handles[dn_conn_count - 1]))
+					dn_conn_count--;
+				
+				/* replace bad handle with last healthy handle */
+				pgxc_handles->datanode_handles[i] =
+					pgxc_handles->datanode_handles[dn_conn_count - 1];
+				/* exclude bad handle */
+				pgxc_handles->datanode_handles[dn_conn_count - 1] = NULL;
+				dn_conn_count--;
+			}
+			i++;
+		}
+		
+		i = 0;
+		while (co_conn_count && i < co_conn_count)
+		{
+			if (DN_CONNECTION_STATE_ERROR(pgxc_handles->coord_handles[i]))
+			{
+				/* find last healthy handle */
+				while (co_conn_count - 1 > i &&
+				       DN_CONNECTION_STATE_ERROR(pgxc_handles->coord_handles[co_conn_count - 1]))
+					co_conn_count--;
+				
+				/* replace bad handle with last healthy handle */
+				pgxc_handles->coord_handles[i] =
+					pgxc_handles->coord_handles[co_conn_count - 1];
+				/* exclude bad handle */
+				pgxc_handles->coord_handles[co_conn_count - 1] = NULL;
+				co_conn_count--;
+			}
+			i++;
+		}
+	}
+	
     /* Depending on the execution type, we still need to save the initial node counts */
     pgxc_handles->dn_conn_count = dn_conn_count;
     pgxc_handles->co_conn_count = co_conn_count;
@@ -7168,7 +7213,7 @@ ExecCloseRemoteStatement(const char *stmt_name, List *nodelist)
         return;
 
     /* get needed Datanode connections */
-    all_handles = get_handles(nodelist, NIL, false, true);
+	all_handles = get_handles(nodelist, NIL, false, true, true);
     conn_count = all_handles->dn_conn_count;
     connections = all_handles->datanode_handles;
 
@@ -8188,7 +8233,7 @@ pgxc_node_remote_prefinish(char *prepareGID, char *nodestring)
     if (nodelist == NIL && coordlist == NIL)
         return false;
 
-    pgxc_handles = get_handles(nodelist, coordlist, false, true);
+	pgxc_handles = get_handles(nodelist, coordlist, false, true, true);
 
     for (i = 0; i < pgxc_handles->dn_conn_count; i++)
     {
@@ -8548,7 +8593,7 @@ pgxc_node_remote_finish(char *prepareGID, bool commit,
         return prepared_local;
 
 
-    pgxc_handles = get_handles(nodelist, coordlist, false, true);
+	pgxc_handles = get_handles(nodelist, coordlist, false, true, true);
 #ifdef __TWO_PHASE_TRANS__
     SetLocalTwoPhaseStateHandles(pgxc_handles);
 #endif
@@ -10466,7 +10511,7 @@ ExecFinishInitRemoteSubplan(RemoteSubplanState *node)
     if (node->execOnAll)
     {
         PGXCNodeAllHandles *pgxc_connections;
-        pgxc_connections = get_handles(node->execNodes, NIL, false, true);
+		pgxc_connections = get_handles(node->execNodes, NIL, false, true, true);
         combiner->conn_count = pgxc_connections->dn_conn_count;
         combiner->connections = pgxc_connections->datanode_handles;
         combiner->current_conn = 0;

@@ -526,10 +526,11 @@ pg_stat_get_remote_activity(const char *sessionid, bool coordonly, Tuplestoresta
 	plan->exec_type = EXEC_ON_ALL_NODES;
 	plan->sql_statement = (char *) query;
 	plan->force_autocommit = false;
+	plan->exec_nodes = makeNode(ExecNodes);
+	plan->exec_nodes->missing_ok = true;
 	
 	if (coordonly)
 	{
-		plan->exec_nodes = makeNode(ExecNodes);
 		plan->exec_nodes->nodeList = GetAllCoordNodes();
 		plan->exec_type = EXEC_ON_COORDS;
 	}

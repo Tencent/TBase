@@ -489,7 +489,8 @@ static void insert_database_pool(DatabasePool *pool);
 static void reload_database_pools(PoolAgent *agent);
 static DatabasePool *find_database_pool(const char *database, const char *user_name, const char *pgoptions);
 
-static int agent_acquire_connections(PoolAgent *agent, List *datanodelist, List *coordlist, int32 *num, int **fd_result, int **pid_result);
+static int agent_acquire_connections(PoolAgent *agent, List *datanodelist, List *coordlist,
+									 bool raise_error, int32 *num, int **fd_result, int **pid_result);
 static int send_local_commands(PoolAgent *agent, List *datanodelist, List *coordlist);
 static int cancel_query_on_connections(PoolAgent *agent, List *datanodelist, List *coordlist, int signal);
 static PGXCNodePoolSlot *acquire_connection(DatabasePool *dbPool, PGXCNodePool **pool,int32 nodeidx, Oid node, bool bCoord);
@@ -1797,13 +1798,15 @@ PoolManagerDisconnect(void)
  * Get pooled connections
  */
 int *
-PoolManagerGetConnections(List *datanodelist, List *coordlist, int **pids)
-{// #lizard forgives
+PoolManagerGetConnections(List *datanodelist, List *coordlist, bool raise_error, int **pids)
+{
     int            i;
     ListCell   *nodelist_item;
     int           *fds;
     int            totlen = list_length(datanodelist) + list_length(coordlist);
+	int         totsize = sizeof(int) * (totlen + 2) + 1; /* sizeof nodes list + raise_error flag */
     int            nodes[totlen + 2];
+	char       *msg;
     int         pool_recvpids_num;
     int         pool_recvfds_ret;
 
@@ -1850,7 +1853,11 @@ PoolManagerGetConnections(List *datanodelist, List *coordlist, int **pids)
                  errmsg(POOL_MGR_PREFIX"out of memory")));
     }
 
-    pool_putmessage(&poolHandle->port, 'g', (char *) nodes, sizeof(int) * (totlen + 2));
+	msg = palloc(totsize);
+	memcpy(msg, (char *) nodes, totsize - 1);
+	msg[totsize - 1] = (char) raise_error;
+	pool_putmessage(&poolHandle->port, 'g', msg, totsize);
+	pfree(msg);
 
     if (PoolConnectDebugPrint)
     {
@@ -2913,8 +2920,9 @@ FATAL_ERROR:
  * return 0 : when fd_result and pid_result is not NULL, acquire connection is done(acquire from freeslot in pool).
  */
 static int 
-agent_acquire_connections(PoolAgent *agent, List *datanodelist, List *coordlist, int32 *num, int **fd_result, int **pid_result)
-{// #lizard forgives
+agent_acquire_connections(PoolAgent *agent, List *datanodelist, List *coordlist,
+						  bool raise_error, int32 *num, int **fd_result, int **pid_result)
+{
     int32              i    = 0;
     int32             acquire_seq = 0;
     int                  node = 0;
@@ -3101,6 +3109,7 @@ agent_acquire_connections(PoolAgent *agent, List *datanodelist, List *coordlist,
                     elog(LOG, POOL_MGR_PREFIX"[agent_acquire_connections]going to acquire conn by sync thread for node:%s.", nodePool->node_name);
                 }
                 
+				asyncTaskCtl->m_missing_ok = !raise_error;
                 /* dispatch build connection request */
                 succeed = dispatch_connection_request(asyncTaskCtl,
                                                         false,
@@ -3153,6 +3162,7 @@ agent_acquire_connections(PoolAgent *agent, List *datanodelist, List *coordlist,
                         asyncTaskCtl = create_task_control(datanodelist, coordlist, *fd_result, *pid_result);
                     }
                     
+					asyncTaskCtl->m_missing_ok = !raise_error;
                     /* dispatch set param request */
                     succeed = dispatch_connection_request(asyncTaskCtl,
                                                             false,
@@ -3233,6 +3243,7 @@ agent_acquire_connections(PoolAgent *agent, List *datanodelist, List *coordlist,
                     asyncTaskCtl = create_task_control(datanodelist, coordlist, *fd_result, *pid_result);
                 }
 
+				asyncTaskCtl->m_missing_ok = !raise_error;
                 /* dispatch build connection request */
                 succeed = dispatch_connection_request(asyncTaskCtl,
                                                         true,
@@ -3287,6 +3298,8 @@ agent_acquire_connections(PoolAgent *agent, List *datanodelist, List *coordlist,
                     {
                         asyncTaskCtl = create_task_control(datanodelist, coordlist, *fd_result, *pid_result);
                     }
+					
+					asyncTaskCtl->m_missing_ok = !raise_error;
                     /* dispatch set param request */
                     succeed = dispatch_connection_request(asyncTaskCtl,
                                                             true,
@@ -7509,17 +7522,28 @@ void *pooler_sync_remote_operator_thread(void *arg)
                                         PGXCNodeClose(slot->conn);
                                         slot->conn = NULL;
                                     }
-                                    request->current_status = PoolConnectStaus_error;
-#ifdef __TBASE__
-                                    SpinLockAcquire(&request->agent->port.lock);
-                                    request->agent->port.error_code = POOL_ERR_GET_CONNECTIONS_CONNECTION_BAD;
-                                    snprintf(request->agent->port.err_msg, POOL_ERR_MSG_LEN, "%s, connection info [%s]", poolErrorMsg[POOL_ERR_GET_CONNECTIONS_CONNECTION_BAD],
-                                        request->nodepool->connstr);
-                                    SpinLockRelease(&request->agent->port.lock);
-#endif
-									set_task_status(request->taskControl, PoolAyncCtlStaus_error);		
+									
 									finish_task_request(request->taskControl);
-									break;
+									
+									if (request->taskControl->m_missing_ok)
+									{
+										request->current_status = PoolConnectStaus_done;
+										break;
+									}
+									else
+									{
+                                        request->current_status = PoolConnectStaus_error;
+#ifdef __TBASE__
+                                        SpinLockAcquire(&request->agent->port.lock);
+                                        request->agent->port.error_code = POOL_ERR_GET_CONNECTIONS_CONNECTION_BAD;
+                                        snprintf(request->agent->port.err_msg, POOL_ERR_MSG_LEN, "%s, connection info [%s]", poolErrorMsg[POOL_ERR_GET_CONNECTIONS_CONNECTION_BAD],
+                                            request->nodepool->connstr);
+                                        SpinLockRelease(&request->agent->port.lock);
+#endif
+                                        set_task_status(request->taskControl, PoolAyncCtlStaus_error);		
+                                        pooler_thread_logger(LOG, "connection not connect for node:[%s] failed errno %d", request->nodepool->connstr, errno);
+                                        break;
+								    }				
 								}				
 
 								slot->xc_cancelConn = (NODE_CANCEL *) PQgetCancel((PGconn *)slot->conn);
@@ -7710,6 +7734,12 @@ void *pooler_sync_remote_operator_thread(void *arg)
 #endif
                                             node_number++;
                                         }
+										else if (request->taskControl->m_missing_ok)
+										{
+											request->taskControl->m_result[node_number] = 0;
+											request->taskControl->m_pidresult[node_number] = 0;
+											node_number++;
+										}
                                     }
 
                                     /* Save then in the array fds for Coordinators */
@@ -7726,6 +7756,12 @@ void *pooler_sync_remote_operator_thread(void *arg)
 #endif
                                             node_number++;
                                         }
+										else
+										{
+											request->taskControl->m_result[node_number] = 0;
+											request->taskControl->m_pidresult[node_number] = 0;
+											node_number++;
+										}
                                     }                
 
 #ifdef     _POOLER_CHECK_    
@@ -8687,7 +8723,8 @@ static inline bool get_acquire_success_status(PGXCASyncTaskCtl  *taskControl)
 {        
     bool bsucceed;
     SpinLockAcquire(&taskControl->m_lock);
-    bsucceed = taskControl->m_number_done == taskControl->m_number_succeed;
+	bsucceed = taskControl->m_number_done == taskControl->m_number_succeed ||
+	           taskControl->m_missing_ok;
     SpinLockRelease(&taskControl->m_lock);
     return bsucceed;
 }
@@ -10241,6 +10278,7 @@ handle_get_connections(PoolAgent * agent, StringInfo s)
     List   *datanodelist = NIL;
     List   *coordlist = NIL;
     int     connect_num = 0;
+	bool    raise_error = true;
     /*
      * Length of message is caused by:
      * - Message header = 4bytes
@@ -10273,6 +10311,8 @@ handle_get_connections(PoolAgent * agent, StringInfo s)
     {
         elog(LOG, POOL_MGR_PREFIX"backend required %d coordinator connections, pid:%d", coordcount, agent->pid);
     }
+	
+	raise_error = pq_getmsgbyte(s);
     pq_getmsgend(s);
 
     if(!is_pool_locked)
@@ -10282,7 +10322,7 @@ handle_get_connections(PoolAgent * agent, StringInfo s)
          * In case of error agent_acquire_connections will log
          * the error and return -1
          */
-        ret = agent_acquire_connections(agent, datanodelist, coordlist, &connect_num, &fds, &pids);
+		ret = agent_acquire_connections(agent, datanodelist, coordlist, raise_error, &connect_num, &fds, &pids);
         /* async acquire connection will be done in parallel threads */
         if (0 == ret && fds && pids)
         {

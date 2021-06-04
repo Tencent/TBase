@@ -174,6 +174,7 @@ typedef struct PGXCASyncTaskCtl
     CommandId             m_max_command_id;
 
     /* errmsg and error status. */
+	bool                  m_missing_ok;
     int32                  m_error_offset;
     char                  m_error_msg[PGXC_POOL_ERROR_MSG_LEN];
 }PGXCASyncTaskCtl;
@@ -328,7 +329,7 @@ extern int PoolManagerSetCommand(PGXCNodeHandle **connections, int32 count, Pool
                                   const char *set_command);
 
 /* Get pooled connections */
-extern int *PoolManagerGetConnections(List *datanodelist, List *coordlist, int **pids);
+extern int *PoolManagerGetConnections(List *datanodelist, List *coordlist, bool raise_error, int **pids);
 
 /* Clean pool connections */
 extern void PoolManagerCleanConnection(List *datanodelist, List *coordlist, char *dbname, char *username);

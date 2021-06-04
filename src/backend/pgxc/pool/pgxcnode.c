@@ -3615,7 +3615,7 @@ get_any_handle(List *datanodelist)
                     //char   *init_str = NULL;
                     List   *allocate = list_make1_int(node);
                     int       *pids;
-                    int    *fds = PoolManagerGetConnections(allocate, NIL,
+					int    *fds = PoolManagerGetConnections(allocate, NIL, true,
                             &pids);
                     PGXCNodeHandle        *node_handle;
 
@@ -3685,8 +3685,8 @@ get_any_handle(List *datanodelist)
  * Coordinator fds is returned only if transaction uses a DDL
  */
 PGXCNodeAllHandles *
-get_handles(List *datanodelist, List *coordlist, bool is_coord_only_query, bool is_global_session)
-{// #lizard forgives
+get_handles(List *datanodelist, List *coordlist, bool is_coord_only_query, bool is_global_session, bool raise_error)
+{
     PGXCNodeAllHandles    *result;
     ListCell        *node_list_item;
     List            *dn_allocate = NIL;
@@ -3864,7 +3864,7 @@ get_handles(List *datanodelist, List *coordlist, bool is_coord_only_query, bool 
     {
         int    j = 0;
         int *pids;
-        int    *fds = PoolManagerGetConnections(dn_allocate, co_allocate, &pids);
+		int	*fds = PoolManagerGetConnections(dn_allocate, co_allocate, raise_error, &pids);
 
         if (!fds)
         {
@@ -3927,6 +3927,13 @@ get_handles(List *datanodelist, List *coordlist, bool is_coord_only_query, bool 
                 }
 
                 node_handle = &dn_handles[node];
+				
+				if (be_pid == 0 && !raise_error)
+				{
+					PGXCNodeSetConnectionState(node_handle, DN_CONNECTION_STATE_ERROR_FATAL);
+					continue;
+				}
+				
                 pgxc_node_init(node_handle, fdsock, is_global_session, be_pid);
                 dn_handles[node] = *node_handle;
                 datanode_count++;
@@ -3985,6 +3992,13 @@ get_handles(List *datanodelist, List *coordlist, bool is_coord_only_query, bool 
                 }
 
                 node_handle = &co_handles[node];
+				
+				if (be_pid == 0 && !raise_error)
+				{
+					PGXCNodeSetConnectionState(node_handle, DN_CONNECTION_STATE_ERROR_FATAL);
+					continue;
+				}
+				
                 pgxc_node_init(node_handle, fdsock, is_global_session, be_pid);
                 co_handles[node] = *node_handle;
                 coord_count++;

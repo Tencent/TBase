@@ -117,6 +117,7 @@ typedef struct
 	Datum		rewrite_value;	/* function evaluate result */
 	bool		isnull;
 	bool		rewrite_done;		/* function rewritted */
+	bool        missing_ok;
 } ExecNodes;
 
 
