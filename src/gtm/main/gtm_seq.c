@@ -1027,7 +1027,7 @@ GTM_SeqRename(GTM_SequenceKey seqkey, GTM_SequenceKey newseqkey,
     {
         newseqinfo = seq_find_seqinfo(newseqkey);
 #ifdef __TBASE__
-        if (NULL == seqinfo)
+        if (NULL == newseqinfo)
         {
             GTM_FormSeqOfStore(newseqkey);
             newseqinfo = seq_find_seqinfo(newseqkey);
