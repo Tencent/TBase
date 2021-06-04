@@ -173,6 +173,9 @@ extern PGDLLIMPORT int NamedLWLockTrancheRequests;
 /* Number of partitions of the shared buffer mapping hashtable */
 #define NUM_BUFFER_PARTITIONS  128
 
+/* Number of partitions of the 2pc info cache hashtable */
+#define NUM_CACHE_2PC_PARTITIONS  128
+
 /* Number of partitions the shared lock tables are divided into */
 #define LOG2_NUM_LOCK_PARTITIONS  4
 #define NUM_LOCK_PARTITIONS  (1 << LOG2_NUM_LOCK_PARTITIONS)
@@ -187,9 +190,10 @@ extern PGDLLIMPORT int NamedLWLockTrancheRequests;
     (BUFFER_MAPPING_LWLOCK_OFFSET + NUM_BUFFER_PARTITIONS)
 #define PREDICATELOCK_MANAGER_LWLOCK_OFFSET \
     (LOCK_MANAGER_LWLOCK_OFFSET + NUM_LOCK_PARTITIONS)
-#define NUM_FIXED_LWLOCKS \
+#define CACHE_2PC_LWLOCK_OFFSET \
     (PREDICATELOCK_MANAGER_LWLOCK_OFFSET + NUM_PREDICATELOCK_PARTITIONS)
-
+#define NUM_FIXED_LWLOCKS \
+	(CACHE_2PC_LWLOCK_OFFSET + NUM_CACHE_2PC_PARTITIONS)
 typedef enum LWLockMode
 {
     LW_EXCLUSIVE,
@@ -288,6 +292,7 @@ typedef enum BuiltinTrancheIds
     LWTRANCHE_PARALLEL_WORKER_DSA,
 #endif
     LWTRANCHE_TBM,
+	LWTRANCHE_2PC_INFO_CACHE,
     LWTRANCHE_FIRST_USER_DEFINED
 }            BuiltinTrancheIds;
 

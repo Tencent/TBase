@@ -101,11 +101,9 @@ extern bool enable_2pc_file_cache;
 extern bool enable_2pc_file_check;
 extern bool enable_2pc_entry_key_check;
 extern bool enable_2pc_entry_trace;
-extern bool enable_2pc_hash_table_check;
 
 extern int record_2pc_cache_size;
 extern int record_2pc_entry_size;
-extern int record_2pc_partitions;
 #endif
 
 extern Size TwoPhaseShmemSize(void);
