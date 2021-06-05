@@ -1719,7 +1719,7 @@ create table test(v int primary key, w int) distribute by shard(v);
 NOTICE:  Replica identity is needed for shard table, please add to this table through "alter table" command.
 insert into test values(generate_series(1,50), generate_series(1,50));
 create view test_sort as select * from test where v in (select v from test where w < 20) order by v asc;
-select * from test_sort;
+select * from test_sort order by 1;
  v  | w  
 ----+----
   1 |  1

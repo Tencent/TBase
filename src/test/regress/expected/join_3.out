@@ -3513,13 +3513,13 @@ left join
   ) foo3
 using (join_key);
                                    QUERY PLAN                                   
------------------------------------------------------------------------
+--------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    Output: "*VALUES*".column1, i1.f1, 666
    ->  Hash Right Join
          Output: "*VALUES*".column1, i1.f1, (666)
          Hash Cond: (i1.f1 = "*VALUES*".column1)
-         ->  Hash Right Join
+         ->  Merge Right Join
                Output: i1.f1, 666
                Merge Cond: (i2.unique2 = i1.f1)
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
@@ -3538,14 +3538,14 @@ using (join_key);
                                  Sort Key: i1.f1
                                  ->  Seq Scan on public.int4_tbl i1
                                        Output: i1.f1
-   ->  Hash
-         Output: "*VALUES*".column1
+         ->  Hash
+               Output: "*VALUES*".column1
                ->  Remote Subquery Scan on all (datanode_1)
                      Output: "*VALUES*".column1
                      Distribute results by H: column1
-         ->  Values Scan on "*VALUES*"
-               Output: "*VALUES*".column1
-(27 rows)
+                     ->  Values Scan on "*VALUES*"
+                           Output: "*VALUES*".column1
+(31 rows)
 
 select foo1.join_key as foo1_id, foo3.join_key AS foo3_id, bug_field from
   (values (0),(1)) foo1(join_key)
@@ -5433,28 +5433,28 @@ select * from
   lateral (select f1 from int4_tbl
            where f1 = any (select unique1 from tenk1
                            where unique2 = v.x offset 0)) ss;
-                                       QUERY PLAN                                       
+                                    QUERY PLAN                                    
 ----------------------------------------------------------------------------------
  Remote Subquery Scan on all
    Output: "*VALUES*".column1, "*VALUES*".column2, int4_tbl.f1
    ->  Nested Loop
-   Output: "*VALUES*".column1, "*VALUES*".column2, int4_tbl.f1
-   ->  Values Scan on "*VALUES*"
-         Output: "*VALUES*".column1, "*VALUES*".column2
-               ->  Hash Join
+         Output: "*VALUES*".column1, "*VALUES*".column2, int4_tbl.f1
+         ->  Values Scan on "*VALUES*"
+               Output: "*VALUES*".column1, "*VALUES*".column2
+         ->  Hash Join
+               Output: int4_tbl.f1
+               Inner Unique: true
+               Hash Cond: (int4_tbl.f1 = tenk1.unique1)
+               ->  Seq Scan on public.int4_tbl
                      Output: int4_tbl.f1
-                     Inner Unique: true
-                     Hash Cond: (int4_tbl.f1 = tenk1.unique1)
-                     ->  Seq Scan on public.int4_tbl
-                           Output: int4_tbl.f1
-                     ->  Hash
+               ->  Hash
+                     Output: tenk1.unique1
+                     ->  HashAggregate
                            Output: tenk1.unique1
-                           ->  HashAggregate
+                           Group Key: tenk1.unique1
+                           ->  Index Scan using tenk1_unique2 on public.tenk1
                                  Output: tenk1.unique1
-                                 Group Key: tenk1.unique1
-                                 ->  Index Scan using tenk1_unique2 on public.tenk1
-                                       Output: tenk1.unique1
-                                       Index Cond: (tenk1.unique2 = "*VALUES*".column2)
+                                 Index Cond: (tenk1.unique2 = "*VALUES*".column2)
 (20 rows)
 
 select * from
@@ -5478,39 +5478,39 @@ lateral (select * from int8_tbl t1,
                                      where q2 = (select greatest(t1.q1,t2.q2))
                                        and (select v.id=0)) offset 0) ss2) ss
          where t1.q1 = ss.q2) ss0;
-                                    QUERY PLAN                                     
+                                 QUERY PLAN                                  
 -----------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1)
    Output: "*VALUES*".column1, t1.q1, t1.q2, ss2.q1, ss2.q2
-               ->  Nested Loop
+   ->  Nested Loop
          Output: "*VALUES*".column1, t1.q1, t1.q2, ss2.q1, ss2.q2
-                     ->  Seq Scan on public.int8_tbl t1
-                           Output: t1.q1, t1.q2
+         ->  Seq Scan on public.int8_tbl t1
+               Output: t1.q1, t1.q2
          ->  Nested Loop
                Output: "*VALUES*".column1, ss2.q1, ss2.q2
                ->  Values Scan on "*VALUES*"
                      Output: "*VALUES*".column1
-                     ->  Subquery Scan on ss2
-                           Output: ss2.q1, ss2.q2
-                           Filter: (t1.q1 = ss2.q2)
-                           ->  Seq Scan on public.int8_tbl t2
-                                 Output: t2.q1, t2.q2
-                                 Filter: (SubPlan 3)
-                                 SubPlan 3
-                                   ->  Remote Subquery Scan on all (datanode_1)
+               ->  Subquery Scan on ss2
+                     Output: ss2.q1, ss2.q2
+                     Filter: (t1.q1 = ss2.q2)
+                     ->  Seq Scan on public.int8_tbl t2
+                           Output: t2.q1, t2.q2
+                           Filter: (SubPlan 3)
+                           SubPlan 3
+                             ->  Remote Subquery Scan on all (datanode_1)
+                                   Output: t3.q2
+                                   ->  Result
                                          Output: t3.q2
-                                         ->  Result
-                                               Output: t3.q2
-                                               One-Time Filter: $4
-                                               InitPlan 1 (returns $2)
-                                                 ->  Result
-                                                       Output: GREATEST($0, t2.q2)
-                                               InitPlan 2 (returns $4)
-                                                 ->  Result
-                                                       Output: ($3 = 0)
-                                               ->  Seq Scan on public.int8_tbl t3
-                                                     Output: t3.q1, t3.q2
-                                                     Filter: (t3.q2 = $2)
+                                         One-Time Filter: $4
+                                         InitPlan 1 (returns $2)
+                                           ->  Result
+                                                 Output: GREATEST($0, t2.q2)
+                                         InitPlan 2 (returns $4)
+                                           ->  Result
+                                                 Output: ($3 = 0)
+                                         ->  Seq Scan on public.int8_tbl t3
+                                               Output: t3.q1, t3.q2
+                                               Filter: (t3.q2 = $2)
 (31 rows)
 
 select * from (values (0), (1)) v(id),

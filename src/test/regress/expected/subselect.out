@@ -776,70 +776,70 @@ where a.thousand = b.thousand
 explain (verbose, costs off)
   select x, x from
     (select (select now()) as x from (values(1),(2)) v(y)) ss;
-        QUERY PLAN         
+                QUERY PLAN                
 ------------------------------------------
  Remote Subquery Scan on all (datanode_1)
    Output: $0, $1
    ->  Values Scan on "*VALUES*"
-   Output: $0, $1
-   InitPlan 1 (returns $0)
-     ->  Result
-           Output: now()
-   InitPlan 2 (returns $1)
-     ->  Result
-           Output: now()
+         Output: $0, $1
+         InitPlan 1 (returns $0)
+           ->  Result
+                 Output: now()
+         InitPlan 2 (returns $1)
+           ->  Result
+                 Output: now()
 (10 rows)
 
 explain (verbose, costs off)
   select x, x from
     (select (select random()) as x from (values(1),(2)) v(y)) ss;
-            QUERY PLAN            
+                QUERY PLAN                
 ------------------------------------------
  Remote Subquery Scan on all (datanode_1)
    Output: ss.x, ss.x
    ->  Subquery Scan on ss
-   Output: ss.x, ss.x
-   ->  Values Scan on "*VALUES*"
-         Output: $0
-         InitPlan 1 (returns $0)
-           ->  Result
-                 Output: random()
+         Output: ss.x, ss.x
+         ->  Values Scan on "*VALUES*"
+               Output: $0
+               InitPlan 1 (returns $0)
+                 ->  Result
+                       Output: random()
 (9 rows)
 
 explain (verbose, costs off)
   select x, x from
     (select (select now() where y=y) as x from (values(1),(2)) v(y)) ss;
-                              QUERY PLAN                              
+                                 QUERY PLAN                                 
 ----------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1)
    Output: (SubPlan 1), (SubPlan 2)
    ->  Values Scan on "*VALUES*"
-   Output: (SubPlan 1), (SubPlan 2)
-   SubPlan 1
-     ->  Result
-           Output: now()
-           One-Time Filter: ("*VALUES*".column1 = "*VALUES*".column1)
-   SubPlan 2
-     ->  Result
-           Output: now()
-           One-Time Filter: ("*VALUES*".column1 = "*VALUES*".column1)
+         Output: (SubPlan 1), (SubPlan 2)
+         SubPlan 1
+           ->  Result
+                 Output: now()
+                 One-Time Filter: ("*VALUES*".column1 = "*VALUES*".column1)
+         SubPlan 2
+           ->  Result
+                 Output: now()
+                 One-Time Filter: ("*VALUES*".column1 = "*VALUES*".column1)
 (12 rows)
 
 explain (verbose, costs off)
   select x, x from
     (select (select random() where y=y) as x from (values(1),(2)) v(y)) ss;
-                                 QUERY PLAN                                 
+                                    QUERY PLAN                                    
 ----------------------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1)
    Output: ss.x, ss.x
    ->  Subquery Scan on ss
-   Output: ss.x, ss.x
-   ->  Values Scan on "*VALUES*"
-         Output: (SubPlan 1)
-         SubPlan 1
-           ->  Result
-                 Output: random()
-                 One-Time Filter: ("*VALUES*".column1 = "*VALUES*".column1)
+         Output: ss.x, ss.x
+         ->  Values Scan on "*VALUES*"
+               Output: (SubPlan 1)
+               SubPlan 1
+                 ->  Result
+                       Output: random()
+                       One-Time Filter: ("*VALUES*".column1 = "*VALUES*".column1)
 (10 rows)
 
 --
@@ -1962,28 +1962,28 @@ with recursive x(a) as
     select z.a || z1.a as a from z cross join z as z1
     where length(z.a || z1.a) < 5))
 select * from x;
-                        QUERY PLAN                        
+                           QUERY PLAN                           
 ----------------------------------------------------------------
  CTE Scan on x
    Output: x.a
    CTE x
      ->  Remote Subquery Scan on all (datanode_1)
            Output: x_1.a
-     ->  Recursive Union
-           ->  Values Scan on "*VALUES*"
-                 Output: "*VALUES*".column1
-           ->  Nested Loop
-                 Output: (z.a || z1.a)
-                 Join Filter: (length((z.a || z1.a)) < 5)
-                 CTE z
-                   ->  WorkTable Scan on x x_1
-                         Output: x_1.a
-                 ->  CTE Scan on z
-                       Output: z.a
-                 ->  Materialize
-                       Output: z1.a
-                       ->  CTE Scan on z z1
+           ->  Recursive Union
+                 ->  Values Scan on "*VALUES*"
+                       Output: "*VALUES*".column1
+                 ->  Nested Loop
+                       Output: (z.a || z1.a)
+                       Join Filter: (length((z.a || z1.a)) < 5)
+                       CTE z
+                         ->  WorkTable Scan on x x_1
+                               Output: x_1.a
+                       ->  CTE Scan on z
+                             Output: z.a
+                       ->  Materialize
                              Output: z1.a
+                             ->  CTE Scan on z z1
+                                   Output: z1.a
 (20 rows)
 
 with recursive x(a) as
@@ -2027,19 +2027,19 @@ with recursive x(a) as
     select z.a || z.a as a from z
     where length(z.a || z.a) < 5))
 select * from x;
-                       QUERY PLAN                       
+                          QUERY PLAN                          
 --------------------------------------------------------------
  CTE Scan on x
    Output: x.a
    CTE x
      ->  Remote Subquery Scan on all (datanode_1)
            Output: x.a
-     ->  Recursive Union
-           ->  Values Scan on "*VALUES*"
-                 Output: "*VALUES*".column1
-           ->  WorkTable Scan on x x_1
-                 Output: (x_1.a || x_1.a)
-                 Filter: (length((x_1.a || x_1.a)) < 5)
+           ->  Recursive Union
+                 ->  Values Scan on "*VALUES*"
+                       Output: "*VALUES*".column1
+                 ->  WorkTable Scan on x x_1
+                       Output: (x_1.a || x_1.a)
+                       Filter: (length((x_1.a || x_1.a)) < 5)
 (11 rows)
 
 with recursive x(a) as

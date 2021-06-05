@@ -1884,7 +1884,7 @@ pgxc_query_contains_only_pg_catalog(List *rtable)
     return true;
 }
 
-ExecNodes *
+static ExecNodes *
 make_FQS_single_node()
 {
 	ExecNodes       *exec_nodes;

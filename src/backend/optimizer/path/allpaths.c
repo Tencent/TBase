@@ -2095,7 +2095,7 @@ check_list_contain_all_const(List *list)
 		node = lfirst(lc);
 		if (IsA(node, List))
 		{
-			if (!check_list_contain_all_const(node))
+			if (!check_list_contain_all_const((List *)node))
 			{
 				return false;
 			}

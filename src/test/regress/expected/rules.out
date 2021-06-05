@@ -3198,7 +3198,7 @@ RETURNING *;
          Conflict Filter: ((excluded.hat_color <> 'forbidden'::bpchar) AND (hat_data.* <> excluded.*))
          CTE data
            ->  Remote Subquery Scan on all
-           ->  Values Scan on "*VALUES*"
+                 ->  Values Scan on "*VALUES*"
          ->  Remote Subquery Scan on all
                Distribute results by H: hat_name
                ->  CTE Scan on data
