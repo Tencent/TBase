@@ -711,7 +711,8 @@ HandleRemoteInstr(char *msg_body, size_t len, int nodeid, ResponseCombiner *comb
 	
 	if (combiner->recv_instr_htbl == NULL)
 	{
-		elog(ERROR, "combiner is not prepared for instrumentation");
+		elog(WARNING, "combiner is not prepared for instrumentation");
+		return;
 	}
 	elog(DEBUG1, "Handle remote instrument: nodeid %d", nodeid);
 	
