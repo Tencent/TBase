@@ -18,6 +18,7 @@
 #include "storage/procarray.h"
 #include "storage/shmem.h"
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/portal.h"
 #include "utils/snapmgr.h"
 #include "utils/timestamp.h"
@@ -98,6 +99,8 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static PortalStart_hook_type prev_PortalStart = NULL;
 static PortalDrop_hook_type prev_PortalDrop = NULL;
 static ExecutorStart_hook_type prev_ExecutorStart = NULL;
+
+static bool pgcs_enable_planstate; /* whether to show planstate in result sets */
 
 /*
  * Macros to load and store st_changecount with the memory barriers.
@@ -372,20 +375,28 @@ pgcs_report_query_activity(QueryDesc *desc, int eflags)
 	
 	if (desc->planstate != NULL)
 	{
-		ExplainState *es = NewExplainState();
-		
-		/* make planstate text tree */
-		es->costs = false;
-		/* we don't want plan->targetlist been changed */
-		es->skip_remote_query = true;
-		
-		ExplainBeginOutput(es);
-		ExplainPrintPlan(es, desc);
-		ExplainEndOutput(es);
-		/* remove last '\n' */
-		if (es->str->len > 1)
-			es->str->data[--es->str->len] = '\0';
-		planstate_str = es->str;
+		/* make planstate text tree if enabled */
+		if (pgcs_enable_planstate)
+		{
+			ExplainState *es = NewExplainState();
+			
+			es->costs = false;
+			/* we don't want plan->targetlist been changed */
+			es->skip_remote_query = true;
+			
+			ExplainBeginOutput(es);
+			ExplainPrintPlan(es, desc);
+			ExplainEndOutput(es);
+			/* remove last '\n' */
+			if (es->str->len > 1)
+				es->str->data[--es->str->len] = '\0';
+			planstate_str = es->str;
+		}
+		else
+		{
+			planstate_str = makeStringInfo();
+			appendStringInfoString(planstate_str, "disabled");
+		}
 		
 		/* find name of RemoteSubplan to show as cursors */
 		cursors = makeStringInfo();
@@ -1038,6 +1049,20 @@ _PG_init(void)
 {
 	if (!process_shared_preload_libraries_in_progress)
 		return;
+	
+	/*
+	 * Define (or redefine) custom GUC variables.
+	 */
+	DefineCustomBoolVariable("pg_stat_cluster_activity.enable_planstate",
+	                         "whether to show planstate in result sets.",
+	                         NULL,
+	                         &pgcs_enable_planstate,
+	                         true,
+	                         PGC_SUSET,
+	                         0,
+	                         NULL,
+	                         NULL,
+	                         NULL);
 	
 	/*
 	 * Request additional shared resources.  (These are no-ops if we're not in
