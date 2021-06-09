@@ -8966,9 +8966,7 @@ ExecRemoteQuery(PlanState *pstate)
 		if (step->force_autocommit)
 			need_tran_block = false;
 		else
-			need_tran_block = (step->statement && step->statement[0] != '\0') ||
-				step->cursor ||
-				node->rqs_num_params ||
+			need_tran_block = step->cursor ||
 					(!step->read_only && total_conn_count > 1) ||
 					(TransactionBlockStatusCode() == 'T');
 
