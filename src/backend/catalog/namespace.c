@@ -4108,6 +4108,15 @@ recomputeNamespacePath(void)
     if (!list_member_oid(oidlist, PG_CATALOG_NAMESPACE))
         oidlist = lcons_oid(PG_CATALOG_NAMESPACE, oidlist);
 
+#ifdef __TBASE__
+        /*
+         * If this is secondary backend of a distributed session, check if primary backend
+         * of the same session has created temporary namespace and wire it up.
+         */
+        if (IsConnFromDatanode() && IS_PGXC_DATANODE && !OidIsValid(myTempNamespace))
+                FindTemporaryNamespace();
+#endif
+
     if (OidIsValid(myTempNamespace) &&
         !list_member_oid(oidlist, myTempNamespace))
         oidlist = lcons_oid(myTempNamespace, oidlist);
