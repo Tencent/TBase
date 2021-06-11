@@ -975,3 +975,14 @@ insert into returningwrtest values (2, 'foo') returning returningwrtest;
 (1 row)
 
 drop table returningwrtest;
+-- check insert into a shard table from a CTE table
+create table t1(f1 int,f2 int) distribute by shard(f1);
+NOTICE:  Replica identity is needed for shard table, please add to this table through "alter table" command.
+create table t2(f1 int,f2 int) distribute by shard(f1);
+NOTICE:  Replica identity is needed for shard table, please add to this table through "alter table" command.
+insert into t1 values(1,1);
+insert into t1 values(2,2);
+with baseInfo as(select * from t1)
+insert into t2 select * from baseInfo;
+drop table t1;
+drop table t2;
