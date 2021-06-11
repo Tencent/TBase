@@ -1929,10 +1929,10 @@ GetGlobalSeqName(Relation seqrel, const char *new_seqname, const char *new_schem
 	 * In case of distributed session use MyFirstBackendId for temp objects.
 	 */
 	if (OidIsValid(MyCoordId))
-	        is_temp = seqrel->rd_backend == MyFirstBackendId;
+	        is_temp = (seqrel->rd_backend == MyFirstBackendId);
 	else
 #endif
-        is_temp = seqrel->rd_backend == MyBackendId;
+        is_temp = (seqrel->rd_backend == MyBackendId);
 
     /* Get all the necessary relation names */
     dbname = get_database_name(seqrel->rd_node.dbNode);
