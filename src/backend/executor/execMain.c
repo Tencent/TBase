@@ -3176,7 +3176,10 @@ EvalPlanQualInit(EPQState *epqstate, EState *estate,
     /* ... and remember data that EvalPlanQualBegin will need */
 	epqstate->plan = copyObject(subplan);
 	/* Reset cursor name of remote subplans if any */
-	ResetRemoteSubplanCursor(epqstate->plan, estate->es_plannedstmt->subplans, "epq");
+	ResetRemoteSubplanCursor(epqstate->plan,
+	                         (estate->es_plannedstmt ?
+	                          estate->es_plannedstmt->subplans : NULL),
+	                         "epq");
     epqstate->arowMarks = auxrowmarks;
     epqstate->epqParam = epqParam;
 }
@@ -3195,7 +3198,8 @@ EvalPlanQualSetPlan(EPQState *epqstate, Plan *subplan, List *auxrowmarks)
 	epqstate->plan = copyObject(subplan);
 	/* Reset cursor name of remote subplans if any */
 	ResetRemoteSubplanCursor(epqstate->plan,
-	                         epqstate->parentestate->es_plannedstmt->subplans,
+	                         (epqstate->parentestate->es_plannedstmt ?
+	                          epqstate->parentestate->es_plannedstmt->subplans : NULL),
 	                         "epq");
     /* The rowmarks depend on the plan, too */
     epqstate->arowMarks = auxrowmarks;
