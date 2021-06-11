@@ -2000,9 +2000,10 @@ IsTempSequence(Oid relid)
 
     /* open and AccessShareLock sequence */
     init_sequence(relid, &elm, &seqrel);
+	
 #ifdef PGXC
         if (OidIsValid(MyCoordId))
-                res = seqrel->rd_backend == MyFirstBackendId;
+                res = (seqrel->rd_backend == MyFirstBackendId);
         else
 #endif
     res = seqrel->rd_backend == MyBackendId;
