@@ -26,10 +26,10 @@ CREATE OR REPLACE FUNCTION pg_stat_get_cluster_activity(
     OUT planstate text,
     OUT portal text,
     OUT cursors text,
-    OUT backend_start timestamp,
-    OUT xact_start timestamp,
-    OUT query_start timestamp,
-    OUT state_change timestamp
+    OUT backend_start timestamp with time zone,
+    OUT xact_start timestamp with time zone,
+    OUT query_start timestamp with time zone,
+    OUT state_change timestamp with time zone
 )
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
