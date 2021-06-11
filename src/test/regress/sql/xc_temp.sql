@@ -141,3 +141,11 @@ DROP TABLE table_rep,table_hash,table_rb;
 CREATE TEMP TABLE table_parent (a int);
 CREATE TABLE table_child (like table_parent, b int);
 DROP TABLE table_child;
+
+-- Access temp sequence in redistribution.
+CREATE TEMP TABLE IF NOT EXISTS rep_tbl_temp (col_int int, col_bigserial bigserial, constraint pk_p_id_key primary key (col_int)) DISTRIBUTE BY REPLICATION;
+INSERT INTO rep_tbl_temp values (0);
+INSERT INTO rep_tbl_temp values (1);
+INSERT INTO rep_tbl_temp values (2);
+SELECT col_int, col_bigserial FROM rep_tbl_temp ORDER BY col_int;
+DROP TABLE rep_tbl_temp;

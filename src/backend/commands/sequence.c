@@ -1922,7 +1922,18 @@ GetGlobalSeqName(Relation seqrel, const char *new_seqname, const char *new_schem
     char *seqname, *dbname, *relname;
     char namespace[NAMEDATALEN * 2];
     int charlen;
-    bool is_temp = seqrel->rd_backend == MyBackendId;
+	bool is_temp = false;
+ 
+#ifdef PGXC
+	/*
+	 * In case of distributed session use MyFirstBackendId for temp objects.
+	 */
+	if (OidIsValid(MyCoordId))
+	        is_temp = seqrel->rd_backend == MyFirstBackendId;
+	else
+#endif
+        is_temp = seqrel->rd_backend == MyBackendId;
+
     /* Get all the necessary relation names */
     dbname = get_database_name(seqrel->rd_node.dbNode);
 
@@ -1989,7 +2000,11 @@ IsTempSequence(Oid relid)
 
     /* open and AccessShareLock sequence */
     init_sequence(relid, &elm, &seqrel);
-
+#ifdef PGXC
+        if (OidIsValid(MyCoordId))
+                res = seqrel->rd_backend == MyFirstBackendId;
+        else
+#endif
     res = seqrel->rd_backend == MyBackendId;
     relation_close(seqrel, NoLock);
     return res;
