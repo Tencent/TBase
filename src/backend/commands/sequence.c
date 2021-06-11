@@ -2006,7 +2006,7 @@ IsTempSequence(Oid relid)
                 res = (seqrel->rd_backend == MyFirstBackendId);
         else
 #endif
-    res = seqrel->rd_backend == MyBackendId;
+	res = (seqrel->rd_backend == MyBackendId);
     relation_close(seqrel, NoLock);
     return res;
 }
