@@ -1015,6 +1015,9 @@ pg_cancel_session(PG_FUNCTION_ARGS)
 static void
 pgcs_shmem_startup(void)
 {
+	if (prev_shmem_startup_hook)
+		prev_shmem_startup_hook();
+	
 	CreateSharedClusterStatus();
 }
 
