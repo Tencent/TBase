@@ -912,15 +912,16 @@ static bool isRemoteTableAsSelect(char * rtblname)
  * then local server will use COPY FROM statement to copy data into table
  * directly.
  */
-static void
+static uint64
 copyRemoteTableTo(char *nspname, char *tblname, char *rnspname, char *rtblname,
 					char *connstr)
 {
-	bool		freeconn = false;
-	char		*conname = connstr;
-	PGconn		*conn = NULL;
-	ParseState	*pstate = NULL;
-	Relation	rel = NULL;
+	bool	freeconn = false;
+	char	*conname = connstr;
+	PGconn	*conn = NULL;
+	ParseState	*pstate;
+	Relation	rel;
+	uint64 processed = 0;
 
 	dblink_init();
 
@@ -967,7 +968,8 @@ copyRemoteTableTo(char *nspname, char *tblname, char *rnspname, char *rtblname,
 
 		cstate = BeginCopyFrom(pstate, rel, NULL, false, copy_read_data, NULL, NIL);
 
-		(void) CopyFrom(cstate);
+		processed = CopyFrom(cstate);
+
 		EndCopyFrom(cstate);
 
 		relation_close(rel, RowExclusiveLock);
@@ -989,12 +991,15 @@ copyRemoteTableTo(char *nspname, char *tblname, char *rnspname, char *rtblname,
 	tmp_cbuf = NULL;
 	if (freeconn)
 		PQfinish(conn);
+
+	return processed;
 }
 
 PG_FUNCTION_INFO_V1(dblink_copy_table);
 Datum
 dblink_copy_table(PG_FUNCTION_ARGS)
 {
+	uint64 processed = 0;
 	char	*nspname;
 	char	*tblname;
 	char	*rnspname;
@@ -1011,9 +1016,9 @@ dblink_copy_table(PG_FUNCTION_ARGS)
 	rtblname = text_to_cstring(PG_GETARG_TEXT_PP(3));
 	connstr = text_to_cstring(PG_GETARG_TEXT_PP(4));
 
-	copyRemoteTableTo(nspname, tblname, rnspname, rtblname, connstr);
+	processed = copyRemoteTableTo(nspname, tblname, rnspname, rtblname, connstr);
 
-	return (Datum) 0;
+	PG_RETURN_INT64((int64)processed);
 }
 
 /*
