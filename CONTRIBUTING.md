@@ -1,26 +1,26 @@
 # Contributing  
 ---
-如果你有好的意见或建议，欢迎给我们提 [Issues](https://github.com/Tencent/TBase/issues) 或 [Pull Requests](https://github.com/Tencent/TBase/pulls)，为TBase开源社区贡献力量。TBase 持续招募贡献者，即使是在 issue 中回答问题，或者做一些简单的 bugfix ，也会给 TBase 带来很大的帮助。
+If you have good comments or suggestions, welcome to create [Issues](https://github.com/Tencent/TBase/issues) or [Pull Requests](https://github.com/Tencent/TBase/pulls)，contribute to the TBase open source community.TBase continues to recruit contributors, even if it is answering questions in the issue, or doing some simple bugfixes, it will be of great help to TBase.
 
-[腾讯开源激励计划](https://opensource.tencent.com/contribution) 鼓励开发者的参与和贡献，期待你的加入。
+[Tencent Open Source Incentive Program](https://opensource.tencent.com/contribution) Encourage developers to participate and contribute, and look forward to your joining.
 
 ## Issue  
-#### 对于贡献者  
+#### For contributors 
 
-在提 issue 前请确保满足一下条件：
+Please ensure that the following conditions are met before submitting an issue:
 
-* 必须是一个 bug 或者功能新增
-* 已经在 issue 中搜索过，并且没有找到相似的 issue 或者解决方案
-* 新建 Issue 时请提供详细的描述、截屏或者短视频来辅助我们定位问题
+* Must be a bug or new feature
+* Have searched in the issue, and did not find a similar issue or solution
+* When creating a new issue, please provide a detailed description, screenshot or short video to help us locate the problem
 
 ## Pull Request  
-我们欢迎大家贡献代码来使我们的产品更加强大，代码团队会监控所有的 Pull request, 我们会做相应的代码检查和测试，测试通过之后我们就会接纳 PR ，但是不会立即合并到 master 分支。
+We welcome everyone to contribute code to make our product more powerful. The code team will monitor all pull requests, and we will do the corresponding code inspection and testing. After the test passes, we will accept the PR, but will not immediately merge into the master branch.
 
-在完成一个 PR 之前请做一下确认:
+Please confirm before completing a PR:
 
-1. 从 master 分支中 fork 你自己的分支。
-2. 在修改了代码之后请修改对应的文档和注释。
-3. 在新建的文件中请加入 License 和 Copyright 申明。
-4. 确保一致的代码风格。
-5. 做充分的测试。
-6. 然后，你可以提交你的代码到 dev 分支。
+1. Fork your own branch from the master branch.
+2. Please modify the corresponding documents and comments after modifying the code.
+3. Please add License and Copyright declarations in the newly created file.
+4. Ensure a consistent code style.
+5. Do adequate testing.
+6. Then, you can submit your code to the dev branch.
