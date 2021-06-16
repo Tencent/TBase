@@ -179,7 +179,7 @@ AS 'MODULE_PATHNAME', 'dblink_is_busy'
 LANGUAGE C STRICT PARALLEL RESTRICTED;
 
 CREATE FUNCTION dblink_copy_table(text, text, text, text, text)
-RETURNS int4
+RETURNS int8
 AS 'MODULE_PATHNAME', 'dblink_copy_table'
 LANGUAGE C STRICT PARALLEL RESTRICTED;
 
