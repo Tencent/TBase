@@ -1736,6 +1736,69 @@ select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);
 ---+---
 (0 rows)
 
+explain select * from tbl_a a where a.b NOT IN (select b.a from tbl_b b where b.b > a.b);
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Nested Loop Anti Join  (cost=200.00..6935.40 rows=1123 width=8)
+   Join Filter: ((b.b > a.b) AND ((a.b = b.a) OR (a.b IS NULL) OR (b.a IS NULL)))
+   ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..120.53 rows=675 width=8)
+         ->  Seq Scan on tbl_a a  (cost=0.00..11.75 rows=675 width=8)
+   ->  Materialize  (cost=100.00..123.90 rows=675 width=8)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..120.53 rows=675 width=8)
+               ->  Seq Scan on tbl_b b  (cost=0.00..11.75 rows=675 width=8)
+(7 rows)
+
+select * from tbl_a a where a.b NOT IN (select b.a from tbl_b b where b.b > a.b);
+ a  | b 
+----+---
+  1 | 1
+  2 | 1
+  5 | 1
+  6 | 1
+  8 | 1
+  9 | 1
+  3 | 1
+  4 | 1
+  7 | 1
+ 10 | 1
+(10 rows)
+
+drop table tbl_a;
+drop table tbl_b;
+-- test NOT IN/ANY with NOT NULL restriction
+create table tbl_a(a int NOT NULL, b int NOT NULL);
+create table tbl_b(a int NOT NULL, b int NOT NULL);
+insert into tbl_a select generate_series(1,10),1;
+insert into tbl_b select generate_series(2,11),1;
+explain select * from tbl_a a where a.b NOT IN (select b.a from tbl_b b where b.b > a.b);
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=120.19..150.77 rows=562 width=8)
+   ->  Hash Anti Join  (cost=120.19..150.77 rows=562 width=8)
+         Hash Cond: (a.b = b.a)
+         Join Filter: (b.b > a.b)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=100.00..120.53 rows=675 width=8)
+               Distribute results by H: b
+               ->  Seq Scan on tbl_a a  (cost=0.00..11.75 rows=675 width=8)
+         ->  Hash  (cost=11.75..11.75 rows=675 width=8)
+               ->  Seq Scan on tbl_b b  (cost=0.00..11.75 rows=675 width=8)
+(9 rows)
+
+select * from tbl_a a where a.b NOT IN (select b.a from tbl_b b where b.b > a.b);
+ a  | b 
+----+---
+  1 | 1
+  2 | 1
+  5 | 1
+  6 | 1
+  8 | 1
+  9 | 1
+  3 | 1
+  4 | 1
+  7 | 1
+ 10 | 1
+(10 rows)
+
 drop table tbl_a;
 drop table tbl_b;
 -- more RTEs in subquery
@@ -2144,14 +2207,18 @@ create table notin_t1 (id1 int, num1 int not null);
 create table notin_t2 (id2 int, num2 int not null);
 explain(costs off) select num1 from notin_t1 where num1 not in (select num2 from notin_t2);
                             QUERY PLAN                             
--------------------------------------------------------------------
+-----------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
+   ->  Hash Anti Join
+         Hash Cond: (notin_t1.num1 = notin_t2.num2)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               Distribute results by H: num1
    ->  Seq Scan on notin_t1
-         Filter: (NOT (hashed SubPlan 1))
-         SubPlan 1
+         ->  Hash
            ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     Distribute results by H: num2
                  ->  Seq Scan on notin_t2
-(6 rows)
+(10 rows)
 
 drop table notin_t1;
 drop table notin_t2;

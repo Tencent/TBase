@@ -152,6 +152,11 @@ static Node *convert_testexpr_mutator(Node *node,
                          convert_testexpr_context *context);
 static bool subplan_is_hashable(Plan *plan);
 static bool testexpr_is_hashable(Node *testexpr);
+#ifdef __TBASE__
+static Node *convert_joinqual_to_antiqual(Node* node, Query* parse);
+static Node *convert_opexpr_to_boolexpr_for_antijoin(Node* node, Query* parse);
+static bool var_is_nullable(Node *node, Query *parse);
+#endif
 static bool hash_ok_operator(OpExpr *expr);
 static bool contain_dml(Node *node);
 static bool contain_dml_walker(Node *node, void *context);
@@ -1342,6 +1347,98 @@ testexpr_is_hashable(Node *testexpr)
     return false;
 }
 
+#ifdef __TBASE__
+/*
+ * Rewrite qual to complete nullability check for NOT IN/ANY sublink pullup
+ */
+static Node*
+convert_joinqual_to_antiqual(Node* node, Query* parse)
+{
+	Node* antiqual = NULL;
+
+	if (node == NULL)
+		return NULL;
+
+	switch (nodeTag(node))
+	{
+		case T_OpExpr:
+			antiqual = convert_opexpr_to_boolexpr_for_antijoin(node, parse);
+			break;
+		case T_BoolExpr:
+		{
+			/* Not IN, should be and clause.*/
+            if (and_clause(node))
+            {
+            	BoolExpr* boolexpr = (BoolExpr*)node;
+            	List* andarglist = NIL;
+            	ListCell* l = NULL;
+
+            	foreach (l, boolexpr->args)
+            	{
+            		Node* andarg = (Node*)lfirst(l);
+            		Node* expr = NULL;
+
+            		/* The listcell type of args should be OpExpr. */
+            		expr = convert_opexpr_to_boolexpr_for_antijoin(andarg, parse);
+            		if (expr == NULL)
+            			return NULL;
+
+            		andarglist = lappend(andarglist, expr);
+            	}
+
+            	antiqual = (Node*)makeBoolExpr(AND_EXPR, andarglist, boolexpr->location);
+            }
+            else
+            	return NULL;
+        }
+			break;
+		case T_ScalarArrayOpExpr:
+		case T_RowCompareExpr:
+		default:
+			antiqual = NULL;
+			break;
+	}
+
+	return antiqual;
+}
+
+static Node *
+convert_opexpr_to_boolexpr_for_antijoin(Node *node, Query *parse)
+{
+	Node	*boolexpr = NULL;
+	List	*antiqual = NIL;
+	OpExpr	*opexpr = NULL;
+	Node	*larg = NULL;
+	Node	*rarg = NULL;
+
+	if (!IsA(node, OpExpr))
+		return NULL;
+	else
+		opexpr = (OpExpr*)node;
+
+	antiqual = (List*)list_make1(opexpr);
+
+	larg = (Node*)linitial(opexpr->args);
+	if (IsA(larg, RelabelType))
+		larg = (Node*)((RelabelType*)larg)->arg;
+	if (var_is_nullable(larg, parse))
+		antiqual = lappend(antiqual, makeNullTest(IS_NULL, (Expr*)copyObject(larg)));
+
+	rarg = (Node*)lsecond(opexpr->args);
+	if (IsA(rarg, RelabelType))
+		rarg = (Node*)((RelabelType*)rarg)->arg;
+	if (var_is_nullable(rarg, parse))
+		antiqual = lappend(antiqual, makeNullTest(IS_NULL, (Expr*)copyObject(rarg)));
+
+	if (list_length(antiqual) > 1)
+		boolexpr = (Node*)makeBoolExprTreeNode(OR_EXPR, antiqual);
+	else
+		boolexpr = (Node*)opexpr;
+
+	return boolexpr;
+}
+#endif
+
 /*
  * Check expression is hashable + strict
  *
@@ -2305,10 +2402,6 @@ convert_ANY_sublink_to_join(PlannerInfo *root, SubLink *sublink,
 		return NULL;
 #ifdef __TBASE__
 	}
-
-	/* TODO: Currently we do not pullup under_not */
-	if (under_not)
-		return NULL;
 #endif
 
     /*
@@ -2380,16 +2473,33 @@ convert_ANY_sublink_to_join(PlannerInfo *root, SubLink *sublink,
 	 * And finally, build the JoinExpr node.
 	 */
 	result = makeNode(JoinExpr);
+
 #ifdef __TBASE__
-    result->jointype = under_not ? JOIN_ANTI : JOIN_SEMI;
-#else
-    result->jointype = JOIN_SEMI;
+	/* Different logic for NOT IN/ANY sublink */
+	if (under_not)
+	{
+        Node* antiquals = NULL;
+
+        antiquals = convert_joinqual_to_antiqual(quals, parse);
+
+        if (antiquals == NULL)
+            return NULL;
+
+        result->jointype = JOIN_ANTI;
+        result->quals = antiquals;
+	}
+	else
+	{
+		/* Basic logic for IN/ANY sublink */
+		result->jointype = JOIN_SEMI;
+		result->quals = quals;
+	}
 #endif
+
     result->isNatural = false;
     result->larg = NULL;        /* caller must fill this in */
     result->rarg = (Node *) rtr;
     result->usingClause = NIL;
-    result->quals = quals;
     result->alias = NULL;
     result->rtindex = 0;        /* we don't need an RTE for it */
 
@@ -5683,3 +5793,46 @@ SS_remote_attach_initplans(PlannerInfo *root, Plan *plan)
 	SS_remote_attach_initplans(root, plan->lefttree);
 	SS_remote_attach_initplans(root, plan->righttree);
 }
+
+#ifdef __TBASE__
+static bool
+var_is_nullable(Node *node, Query *parse)
+{
+	RangeTblEntry* rte;
+	bool result = true;
+	Var *var = NULL;
+
+	if (IsA(node, Var))
+		var = (Var*) node;
+	else
+		return true;
+
+	if (IS_SPECIAL_VARNO(var->varno) ||
+		var->varno <= 0 || var->varno > list_length(parse->rtable))
+		return true;
+
+	rte = (RangeTblEntry *)list_nth(parse->rtable, var->varno - 1);
+	if (rte->rtekind == RTE_RELATION)
+	{
+		HeapTuple tp;
+
+		tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(rte->relid), Int16GetDatum(var->varattno));
+		if (!HeapTupleIsValid(tp))
+			return true;
+		result = !((Form_pg_attribute)GETSTRUCT(tp))->attnotnull;
+		ReleaseSysCache(tp);
+	}
+	else if (rte->rtekind == RTE_SUBQUERY)
+	{
+		if (rte->subquery->groupingSets == NIL)
+		{
+			TargetEntry *te = (TargetEntry *)list_nth(rte->subquery->targetList, var->varattno - 1);
+			if (IsA(te->expr, Var))
+				result = var_is_nullable((Node *)te->expr, rte->subquery);
+		}
+	}
+
+	return result;
+}
+
+#endif

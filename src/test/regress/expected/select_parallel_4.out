@@ -140,19 +140,17 @@ explain (costs off)
 	select count(*) from tenk1 where (two, four) not in
 	(select hundred, thousand from tenk2 where thousand > 100);
                                      QUERY PLAN                                      
--------------------------------------------------------------------------------------
- Finalize Aggregate
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Nested Loop Anti Join
+         Join Filter: (((tenk1.two = tenk2.hundred) OR (tenk1.two IS NULL) OR (tenk2.hundred IS NULL)) AND ((tenk1.four = tenk2.thousand) OR (tenk1.four IS NULL) OR (tenk2.thousand IS NULL)))
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-         ->  Gather
-               Workers Planned: 4
-               ->  Partial Aggregate
-                     ->  Parallel Seq Scan on tenk1
-                           Filter: (NOT (hashed SubPlan 1))
-                           SubPlan 1
+               ->  Seq Scan on tenk1
+         ->  Materialize
                              ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                    ->  Seq Scan on tenk2
                                          Filter: (thousand > 100)
-(11 rows)
+(9 rows)
 
 select count(*) from tenk1 where (two, four) not in
 	(select hundred, thousand from tenk2 where thousand > 100);

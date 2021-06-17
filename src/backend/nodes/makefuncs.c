@@ -695,3 +695,50 @@ makeGroupingSet(GroupingSetKind kind, List *content, int location)
     n->location = location;
     return n;
 }
+
+#ifdef __TBASE__
+/*
+ * makeNullTest -
+ *	  creates a Null Test expr like "expr is (NOT) NULL"
+ */
+NullTest *
+makeNullTest(NullTestType type, Expr *expr)
+{
+	NullTest *n = makeNode(NullTest);
+
+	n->nulltesttype = type;
+	n->arg = expr;
+
+	return n;
+}
+
+/*
+ * makeBoolExpr -
+ *	  creates a BoolExpr tree node.
+ */
+Expr *
+makeBoolExprTreeNode(BoolExprType boolop, List *args)
+{
+	Node *node = NULL;
+	ListCell *lc = NULL;
+
+	foreach (lc, args)
+	{
+		BoolExpr* b = NULL;
+
+		if (node == NULL)
+		{
+			node = (Node*)lfirst(lc);
+			continue;
+		}
+
+		b = makeNode(BoolExpr);
+		b->boolop = boolop;
+		b->args = list_make2(node, lfirst(lc));
+		b->location = 0;
+		node = (Node*)b;
+	}
+
+	return (Expr*)node;
+}
+#endif

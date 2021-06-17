@@ -150,4 +150,8 @@ extern DefElem *makeDefElemExtended(char *nameSpace, char *name, Node *arg,
 
 extern GroupingSet *makeGroupingSet(GroupingSetKind kind, List *content, int location);
 
+#ifdef __TBASE__
+extern NullTest *makeNullTest(NullTestType type, Expr *expr);
+extern Expr *makeBoolExprTreeNode(BoolExprType boolop, List *args);
+#endif
 #endif                            /* MAKEFUNC_H */
