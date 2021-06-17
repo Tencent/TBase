@@ -700,6 +700,20 @@ select a.a,(select b.a from tbl_b b where b.a = a.a limit 1) q from tbl_a a orde
 -- support pullup lateral ANY_SUBLINK
 explain select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);
 select * from tbl_a a where a.b IN (select b.a from tbl_b b where b.b > a.b);
+explain select * from tbl_a a where a.b NOT IN (select b.a from tbl_b b where b.b > a.b);
+select * from tbl_a a where a.b NOT IN (select b.a from tbl_b b where b.b > a.b);
+
+drop table tbl_a;
+drop table tbl_b;
+
+-- test NOT IN/ANY with NOT NULL restriction
+create table tbl_a(a int NOT NULL, b int NOT NULL);
+create table tbl_b(a int NOT NULL, b int NOT NULL);
+insert into tbl_a select generate_series(1,10),1;
+insert into tbl_b select generate_series(2,11),1;
+
+explain select * from tbl_a a where a.b NOT IN (select b.a from tbl_b b where b.b > a.b);
+select * from tbl_a a where a.b NOT IN (select b.a from tbl_b b where b.b > a.b);
 
 drop table tbl_a;
 drop table tbl_b;
