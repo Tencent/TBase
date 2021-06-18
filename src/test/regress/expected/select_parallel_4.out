@@ -139,17 +139,17 @@ alter table tenk2 set (parallel_workers = 0);
 explain (costs off)
 	select count(*) from tenk1 where (two, four) not in
 	(select hundred, thousand from tenk2 where thousand > 100);
-                                     QUERY PLAN                                      
+                                                                                           QUERY PLAN                                                                                           
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Aggregate
    ->  Nested Loop Anti Join
          Join Filter: (((tenk1.two = tenk2.hundred) OR (tenk1.two IS NULL) OR (tenk2.hundred IS NULL)) AND ((tenk1.four = tenk2.thousand) OR (tenk1.four IS NULL) OR (tenk2.thousand IS NULL)))
-   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                ->  Seq Scan on tenk1
          ->  Materialize
-                             ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-                                   ->  Seq Scan on tenk2
-                                         Filter: (thousand > 100)
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                     ->  Seq Scan on tenk2
+                           Filter: (thousand > 100)
 (9 rows)
 
 select count(*) from tenk1 where (two, four) not in
