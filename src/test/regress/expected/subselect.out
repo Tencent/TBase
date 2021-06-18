@@ -2206,18 +2206,18 @@ drop table catalog_sales, catalog_returns, date_dim;
 create table notin_t1 (id1 int, num1 int not null);
 create table notin_t2 (id2 int, num2 int not null);
 explain(costs off) select num1 from notin_t1 where num1 not in (select num2 from notin_t2);
-                            QUERY PLAN                             
+                              QUERY PLAN                               
 -----------------------------------------------------------------------
  Remote Subquery Scan on all (datanode_1,datanode_2)
    ->  Hash Anti Join
          Hash Cond: (notin_t1.num1 = notin_t2.num2)
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                Distribute results by H: num1
-   ->  Seq Scan on notin_t1
+               ->  Seq Scan on notin_t1
          ->  Hash
-           ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                      Distribute results by H: num2
-                 ->  Seq Scan on notin_t2
+                     ->  Seq Scan on notin_t2
 (10 rows)
 
 drop table notin_t1;
