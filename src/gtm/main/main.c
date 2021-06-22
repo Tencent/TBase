@@ -2767,7 +2767,6 @@ GTM_ThreadLogCollector(void *argp)
         GTM_ProcessLogCollection();
     }
 
-    GTM_DeInitLogCollector();
     elog(LOG, "GTM is shutting down, log collector exits!");
     return my_threadinfo;
 }
