@@ -394,6 +394,10 @@ InitMultinodeExecutor(bool is_force)
     MemoryContextSwitchTo(oldcontext);
 
 	PGXCSessionId[0] = '\0';
+	if (IsConnFromApp())
+	{
+		sprintf(PGXCSessionId, "%s_%d_%ld", PGXCNodeName, MyProcPid, GetCurrentTimestamp());
+	}
 	
     if (IS_PGXC_COORDINATOR)
     {
@@ -403,8 +407,6 @@ InitMultinodeExecutor(bool is_force)
                        get_pgxc_nodename(co_handles[count].nodeoid)) == 0)
                 PGXCNodeId = count + 1;
         }
-		
-		sprintf(PGXCSessionId, "%s_%d_%ld", PGXCNodeName, MyProcPid, GetCurrentTimestamp());
     }
     else /* DataNode */
     {
