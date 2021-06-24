@@ -83,6 +83,7 @@
 #include "storage/extentmapping.h"
 #include "storage/extent_xlog.h"
 #include "storage/smgr.h"
+#include "utils/relcryptmap.h"
 
 static void extent_xlog_apply_record(XLogReaderState *record);
 static void extent_xlog_apply_truncate(XLogReaderState *record);
@@ -364,6 +365,12 @@ extent_xlog_apply_truncate(XLogReaderState *record)
     SMgrRelation reln;
     reln = smgropen(xlrec->rnode, InvalidBackendId);
     smgrdounlinkfork(reln, EXTENT_FORKNUM, true);
+#ifdef _MLS_
+	/*
+     * clean up the rnode infomation in rel crypt hash table
+     */
+	remove_rel_crypt_hash_elem(&(reln->smgr_relcrypt), false);
+#endif
     smgrclose(reln);
 }
 

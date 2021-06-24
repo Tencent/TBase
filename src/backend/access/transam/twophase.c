@@ -120,6 +120,7 @@
 #ifdef __TBASE__
 #include "access/gtm.h"
 #include "utils/timeout.h"
+#include "utils/relcryptmap.h"
 #endif
 #include "pgxc/execRemote.h"
 
@@ -2080,6 +2081,12 @@ FinishPreparedTransaction(const char *gid, bool isCommit)
         SMgrRelation srel = smgropen(delrels[i], InvalidBackendId);
 
         smgrdounlink(srel, false);
+#ifdef _MLS_
+		/*
+		 * clean up the rnode infomation in rel crypt hash table
+		 */
+		remove_rel_crypt_hash_elem(&(srel->smgr_relcrypt), true);
+#endif
         smgrclose(srel);
     }
 

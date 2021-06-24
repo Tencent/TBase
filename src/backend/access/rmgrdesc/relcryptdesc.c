@@ -94,7 +94,6 @@ void rel_crypt_desc(StringInfo buf, XLogReaderState *record)
                     xlrec->algo_id, xlrec->option, xlrec->keysize);
                 break;
             }
-            break;
         case XLOG_CRYPT_KEY_DELETE:
             appendStringInfo(buf, "xlog type is comming, info:%u", XLOG_CRYPT_KEY_DELETE);
             break;
@@ -107,8 +106,13 @@ void rel_crypt_desc(StringInfo buf, XLogReaderState *record)
                 break;
             }
         case XLOG_REL_CRYPT_DELETE:
-            appendStringInfo(buf, "xlog type is comming, info:%u", XLOG_REL_CRYPT_DELETE);
+            {
+            	xl_rel_crypt_delete *xlrec;
+				xlrec = (xl_rel_crypt_delete *) XLogRecGetData(record);
+				appendStringInfo(buf, "rel crypt delete, database:%u tablespace:%u relnode:%u, algo_id:%d",
+						xlrec->rnode.dbNode, xlrec->rnode.spcNode, xlrec->rnode.relNode, xlrec->algo_id);
             break;
+            }
         default:
             Assert(0);
             break;

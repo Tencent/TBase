@@ -99,6 +99,7 @@
 #include "postmaster/postmaster.h"
 #include "commands/extension.h"
 #include "tcop/utility.h"
+#include "utils/relcryptmap.h"
 #endif
 /*
  *    User-tweakable parameters
@@ -7412,6 +7413,12 @@ xact_redo_commit(xl_xact_parsed_commit *parsed,
             for (fork = 0; fork <= MAX_FORKNUM; fork++)
                 XLogDropRelation(parsed->xnodes[i], fork);
             smgrdounlink(srel, true);
+#ifdef _MLS_
+			/*
+			 * clean up the rnode infomation in rel crypt hash table
+			 */
+			remove_rel_crypt_hash_elem(&(srel->smgr_relcrypt), false);
+#endif
             smgrclose(srel);
         }
     }
@@ -7537,6 +7544,12 @@ xact_redo_abort(xl_xact_parsed_abort *parsed, TransactionId xid)
         for (fork = 0; fork <= MAX_FORKNUM; fork++)
             XLogDropRelation(parsed->xnodes[i], fork);
         smgrdounlink(srel, true);
+#ifdef _MLS_
+		/*
+		 * clean up the rnode infomation in rel crypt hash table
+		 */
+		remove_rel_crypt_hash_elem(&(srel->smgr_relcrypt), false);
+#endif
         smgrclose(srel);
     }
 }

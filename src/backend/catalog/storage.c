@@ -97,6 +97,7 @@
 #include "storage/smgr.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
+#include "utils/relcryptmap.h"
 
 /*
  * We keep a list of all relations (represented as RelFileNode values)
@@ -466,7 +467,15 @@ smgrDoPendingDeletes(bool isCommit)
         smgrdounlinkall(srels, nrels, false);
 
         for (i = 0; i < nrels; i++)
+		{
+#ifdef _MLS_
+			/*
+			 * clean up the rnode infomation in rel crypt hash table
+			 */
+			remove_rel_crypt_hash_elem(&(srels[i]->smgr_relcrypt), true);
+#endif
             smgrclose(srels[i]);
+		}
 
         pfree(srels);
     }
