@@ -747,7 +747,7 @@ raw_heap_insert(RewriteState state, HeapTuple tup)
 #ifdef _SHARDING_        
         state->rs_buf = RelationGetBufferForTuple_shard(state->rs_new_rel, 
                                         HeapTupleGetShardId(tup),
-                                        BLCKSZ/2,
+										len,
                                         InvalidBuffer,
                                         0,
                                         NULL,
