@@ -5487,6 +5487,11 @@ PgxcNodeRefreshBackendHandlesShmem(List *nodes_alter)
     int nid;
     PGXCNodeHandle *handle = NULL;
 
+	if (PersistentConnections && nodes_alter != NIL)
+	{
+		release_handles(true);
+	}
+
     foreach(lc, nodes_alter)
     {
         char ntype = PGXC_NODE_NONE;
