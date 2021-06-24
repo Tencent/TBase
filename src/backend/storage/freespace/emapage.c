@@ -100,6 +100,7 @@
 #include "utils/lsyscache.h"
 #include "funcapi.h"
 #include "lib/stringinfo.h"
+#include "utils/relcryptmap.h"
 
 #define ExtentAssertEMEIsFree(eme) ExtentAssert((eme).is_occupied == 0)
 #define ExtentAssertEMEIsOccup(eme) ExtentAssert((eme).is_occupied == 1)
@@ -7078,6 +7079,12 @@ RebuildExtentMap(Relation rel)
     //TODO: write xlog for truncate extent file
     RelationOpenSmgr(rel);
     smgrdounlinkfork(rel->rd_smgr, EXTENT_FORKNUM, false);
+#ifdef _MLS_
+	/*
+     * clean up the rnode infomation in rel crypt hash table
+     */
+	remove_rel_crypt_hash_elem(&(rel->rd_smgr->smgr_relcrypt), true);
+#endif
     RelationCloseSmgr(rel);
     
     INIT_EXLOG_TRUNCATE(&xlrec);

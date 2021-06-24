@@ -113,6 +113,9 @@
 #include "utils/relcryptmisc.h"
 #include "storage/relcryptstorage.h"
 #include "utils/relcryptmap.h"
+#include "catalog/indexing.h"
+#include "utils/fmgroids.h"
+#include "utils/relfilenodemap.h"
 
 #ifdef _MLS_
 #include "utils/mls_extension.h"
@@ -1212,8 +1215,18 @@ void rel_crypt_redo(XLogReaderState *record)
                 break;
             }
         case XLOG_REL_CRYPT_DELETE:
-            elog(ERROR, "xlog type is comming, info:%u", XLOG_REL_CRYPT_DELETE);
+            {
+        	    xl_rel_crypt_delete *xlrec;
+        	    xlrec = (xl_rel_crypt_delete *) XLogRecGetData(record);
+        	    if (g_enable_crypt_debug)
+	            {
+        	    	elog(LOG, "REL_CRYPT_DELETE, redo XLOG_REL_CRYPT_DELETE, relfilenode:%d:%d:%d, algo_id:%d",
+        	    			xlrec->rnode.dbNode, xlrec->rnode.spcNode, xlrec->rnode.relNode,
+        	    			xlrec->algo_id);
+	            }
+        	    rel_crypt_hash_delete(&(xlrec->rnode), false);
             break;
+            }
         default:
             elog(ERROR, "recrypt redo, unknown info, info:%u", info & XLR_RMGR_INFO_MASK);
             break;
@@ -1273,6 +1286,89 @@ static int rel_crypt_hash_key_cmp (const void *key1, const void *key2, Size keys
         return 0;
 
     return 1;
+}
+
+/*
+ * this function is used to remove hash elem
+ *
+ * if write_wal is true, remove action will write wal
+ */
+void remove_rel_crypt_hash_elem(RelCrypt relCrypt, bool write_wal)
+{
+	if (relCrypt != NULL)
+	{
+		/*
+		 * if the algo_id is invalid, skip
+		 */
+		if (relCrypt->algo_id == TRANSP_CRYPT_INVALID_ALGORITHM_ID)
+		{
+			return;
+		}
+		/*
+		 * do remove the rnode and algo_id map in rel_crypt_hash table
+	     */
+		rel_crypt_hash_delete(&(relCrypt->relfilenode), write_wal);
+	}
+}
+
+/*
+ * do delete rel crypt hash elem about a rnode
+ */
+void rel_crypt_hash_delete(RelFileNode *rnode, bool write_wal)
+{
+	RelCrypt relCrypt;
+	bool     found = false;
+
+	uint32 hashcode;
+	int 	 partitionno;
+	LWLock	*partitionLock;
+
+	hashcode = rel_crypt_hash_code(rnode);
+	partitionno   = rel_crypt_hash_partition(hashcode);
+	partitionLock = rel_crypt_get_partition_lock(partitionno);
+
+	LWLockAcquire(partitionLock, LW_EXCLUSIVE);
+
+	relCrypt = (RelCrypt) hash_search_with_hash_value(g_rel_crypt_hash,
+	                                                  (void *) rnode,
+	                                                  hashcode,
+	                                                  HASH_REMOVE,
+	                                                  &found);
+
+	if (found)
+	{
+		/*
+		 * need to flush crypt map in next checkpoint
+		 */
+		RequestFlushRelcryptMap();
+	}
+
+	/*
+	 * Critical section
+	 */
+	if (found && write_wal)
+	{
+		xl_rel_crypt_delete xlrec;
+		XLogRecPtr	lsn;
+
+		/* now errors are fatal ... */
+		START_CRIT_SECTION();
+
+		xlrec.rnode   = relCrypt->relfilenode;
+		xlrec.algo_id = relCrypt->algo_id;
+
+		XLogBeginInsert();
+		XLogRegisterData((char *) (&xlrec), sizeof(xl_rel_crypt_delete));
+
+		lsn = XLogInsert(RM_REL_CRYPT_ID, XLOG_REL_CRYPT_DELETE);
+
+		/* As always, WAL must hit the disk before the data update does */
+		XLogFlush(lsn);
+
+		END_CRIT_SECTION();
+	}
+
+	LWLockRelease(partitionLock);
 }
 
 void rel_crypt_hash_insert(RelFileNode * rnode, AlgoId algo_id, bool write_wal, bool in_building_procedure)
@@ -1663,8 +1759,13 @@ static void rel_crypt_write_mapfile_post(RelCryptMapFile *map, int element_cnt, 
     return;
 }
 
-static void rel_crypt_write_mapfile(void)
-{// #lizard forgives
+/*
+ * if is_backup is true, it means to backup the pg_rel_crypt.map
+ * to pg_rel_crypt.map.backup, if is_backup is false, it means
+ * flush the data to disk
+ */
+void rel_crypt_write_mapfile(bool is_backup)
+{
     int              loop;
     int              lock_loop;
     char            *mapfilename;
@@ -1685,7 +1786,18 @@ static void rel_crypt_write_mapfile(void)
     mapfilename     = palloc0(MAXPGPATH);
     mapfilename_new = palloc0(MAXPGPATH);
 
+    /*
+     * if backup the file, the filename will be renamed as pg_rel_crypt.map.backup
+     * else the file named as pg_rel_crypt.map
+     */
+    if (is_backup)
+    {
+    	snprintf(mapfilename, MAXPGPATH, "%s/%s.backup", "global", REL_CRYPT_MAP_FILENAME);
+    }
+    else
+    {
     snprintf(mapfilename,     MAXPGPATH, "%s/%s",    "global", REL_CRYPT_MAP_FILENAME);
+    }
     snprintf(mapfilename_new, MAXPGPATH, "%s/%s.%d", "global", REL_CRYPT_MAP_FILENAME, MyProcPid);
 
     buffile = BufFileOpen(mapfilename_new, (O_WRONLY|O_CREAT|PG_BINARY), (S_IRUSR|S_IWUSR), true, ERROR);
@@ -2016,13 +2128,80 @@ Datum pg_crypt_key_hash_dump(PG_FUNCTION_ARGS)
     return (Datum) 0;
 }
 
+/*
+ * Check the relfilenode exist
+ */
+bool CheckRelFileNodeExists(RelFileNode *rnode)
+{
+	Oid relid;
+
+	if (rnode != NULL)
+	{
+		relid = RelidByRelfilenode(rnode->spcNode, rnode->relNode);
+
+		if (OidIsValid(relid))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/*
+ * mark the invalid elem in g_rel_crypt_hash to delete
+ */
+List * MarkRelCryptInvalid(void)
+{
+	List * result = NIL;
+	HASH_SEQ_STATUS status;
+	int lock_loop = 0;
+	RelCryptEntry *relcrypt;
+	bool is_exist = false;
+
+	/* lock all partition lock */
+	for (lock_loop = 0; lock_loop < REL_CRYPT_HASHTABLE_NUM_PARTITIONS; lock_loop++)
+	{
+		LWLockAcquire(rel_crypt_get_partition_lock(lock_loop), LW_SHARED);
+	}
+
+	hash_seq_init(&status, g_rel_crypt_hash);
+	while ((relcrypt = (RelCryptEntry *) hash_seq_search(&status)) != NULL)
+	{
+		 /* only deal with current database */
+		if (relcrypt->relfilenode.dbNode != MyDatabaseId)
+		{
+			continue;
+		}
+
+		is_exist = CheckRelFileNodeExists(&(relcrypt->relfilenode));
+		if (!is_exist)
+		{
+			elog(DEBUG5, "check relfilenode exist, dbNode:%d, spcNode:%d, relNode:%d",
+			     relcrypt->relfilenode.dbNode, relcrypt->relfilenode.spcNode, relcrypt->relfilenode.relNode);
+			result = lappend(result, relcrypt);
+		}
+	}
+
+	/* release all */
+	for (lock_loop = REL_CRYPT_HASHTABLE_NUM_PARTITIONS - 1; lock_loop >= 0; lock_loop--)
+	{
+		LWLockRelease(rel_crypt_get_partition_lock(lock_loop));
+	}
+
+	return result;
+}
+
+/*
+ * do checkpoint to flush crypt map file to disk
+ */
 void CheckPointRelCrypt(void)
 {
     if (g_enable_crypt_debug)
     {
         elog(LOG, "CheckPointRelCrypt check to flush crypt mapfile BEGIN");
     }
-    rel_crypt_write_mapfile();
+    rel_crypt_write_mapfile(false);
     crypt_key_info_write_mapfile();
     if (g_enable_crypt_debug)
     {
@@ -2031,13 +2210,16 @@ void CheckPointRelCrypt(void)
     return;
 }
 
+/*
+ * if system in startup state, need to flush crypt map file
+ */
 void StartupReachConsistentState(void)
 {
     if (g_enable_crypt_debug)
     {
         elog(LOG, "StartupReachConsistentState check to flush crypt mapfile BEGIN");
     }
-    rel_crypt_write_mapfile();
+    rel_crypt_write_mapfile(false);
     crypt_key_info_write_mapfile();
     if (g_enable_crypt_debug)
     {
@@ -2045,6 +2227,7 @@ void StartupReachConsistentState(void)
     }
     return;
 }
+
 
 #endif
 

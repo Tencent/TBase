@@ -95,6 +95,8 @@ typedef struct xl_rel_crypt_insert
     int         algo_id;
 } xl_rel_crypt_insert;
 
+typedef xl_rel_crypt_insert xl_rel_crypt_delete;
+
 extern void rel_crypt_redo(XLogReaderState *record);
 extern void rel_crypt_desc(StringInfo buf, XLogReaderState *record);
 extern const char * rel_crypt_identify(uint8 info);
@@ -112,6 +114,11 @@ extern void crypt_key_info_load_default_key(void);
 extern void crypt_key_info_free(CryptKeyInfo cryptkey);
 extern CryptKeyInfo crypt_key_info_alloc(int option);
 extern void rel_crypt_hash_insert(RelFileNode * rnode, AlgoId algo_id, bool write_wal, bool in_building_procedure);
+extern void remove_rel_crypt_hash_elem(RelCrypt relCrypt, bool write_wal);
+extern void rel_crypt_hash_delete(RelFileNode * rnode, bool write_wal);
 extern void crypt_key_info_hash_insert(CryptKeyInfo cryptkey_input, bool write_wal, bool in_building_procedure);
 extern int crypt_key_info_cal_key_size(CryptKeyInfo cryptkey);
+extern bool CheckRelFileNodeExists(RelFileNode *rnode);
+extern List* MarkRelCryptInvalid(void);
+extern void rel_crypt_write_mapfile(bool is_backup);
 #endif                          /* RELCRYPT_MAP_H */
