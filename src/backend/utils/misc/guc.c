@@ -2753,7 +2753,7 @@ static struct config_bool ConfigureNamesBool[] =
              NULL
         },
         &enable_parallel_ddl,
-        false,
+        true,
         NULL, NULL, NULL
     },
     {
