@@ -4302,7 +4302,7 @@ GTMStorageHandle *GTM_StoreGetAllSeqInDatabase(GTM_SequenceKey seq_database_key,
     GTMStorageHandle    bucket_handle = INVALID_STORAGE_HANDLE;
     GTM_StoredSeqInfo  *seq_info      = NULL;
     bool                ret           = false;
-    
+	Assert(seq_database_key->gsk_keylen <= SEQ_KEY_MAX_LENGTH);
 
     if (enable_gtm_sequence_debug)
     {
@@ -4326,7 +4326,8 @@ GTMStorageHandle *GTM_StoreGetAllSeqInDatabase(GTM_SequenceKey seq_database_key,
         {
             seq_info = GetSeqStore(bucket_handle);
 
-            if(strncmp(seq_database_key->gsk_key,seq_info->gs_key.gsk_key,seq_database_key->gsk_keylen - 1) != 0)
+			if(!(strncmp(seq_database_key->gsk_key,seq_info->gs_key.gsk_key,seq_database_key->gsk_keylen - 1) == 0 &&
+			        seq_info->gs_key.gsk_key[seq_database_key->gsk_keylen - 1] == '.'))
             {
                 bucket_handle = seq_info->gs_next;
                 continue;
