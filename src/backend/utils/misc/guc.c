@@ -2359,6 +2359,15 @@ static struct config_bool ConfigureNamesBool[] =
         NULL, NULL, NULL
     },
 #endif
+    {
+            {"parse_snapshot", PGC_USERSET, CUSTOM_OPTIONS,
+             gettext_noop("allow forced ddl of inconsistent metadata"),
+             NULL
+            },
+            &g_parse_snapshot,
+            true,
+            NULL, NULL, NULL
+    },    
 #ifdef _SHARDING_
     {
         {"allow_dml_on_datanode", PGC_USERSET, CUSTOM_OPTIONS,

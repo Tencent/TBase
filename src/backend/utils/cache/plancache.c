@@ -991,9 +991,9 @@ BuildCachedPlan(CachedPlanSource *plansource, List *qlist,
      * for planning.  But if it isn't, and we need one, install one.
      */
     snapshot_set = false;
-    if (!ActiveSnapshotSet() &&
+	if ((!ActiveSnapshotSet() &&
         plansource->raw_parse_tree &&
-        analyze_requires_snapshot(plansource->raw_parse_tree))
+		analyze_requires_snapshot(plansource->raw_parse_tree)) && g_parse_snapshot)
     {
         PushActiveSnapshot(GetTransactionSnapshot());
         snapshot_set = true;
