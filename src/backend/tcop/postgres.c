@@ -211,6 +211,8 @@ static char *remotePrepareGID = NULL;
 /* for error code contrib */
 bool g_is_in_init_phase = false;
 
+bool g_parse_snapshot = true;
+
 bool IsNormalPostgres = false;
 
 bool explain_stmt = false;
@@ -1443,7 +1445,7 @@ exec_simple_query(const char *query_string)
         /*
          * Set up a snapshot if parse analysis/planning will need one.
          */
-        if (analyze_requires_snapshot(parsetree))
+		if (analyze_requires_snapshot(parsetree) && g_parse_snapshot)
         {
 #ifdef __TBASE__
             /* use local snapshot instead of global if told so */
@@ -1918,7 +1920,7 @@ exec_parse_message(const char *query_string,    /* string to execute */
         /*
          * Set up a snapshot if parse analysis will need one.
          */
-        if (analyze_requires_snapshot(raw_parse_tree))
+		if (analyze_requires_snapshot(raw_parse_tree) && g_parse_snapshot)
         {
 #ifdef __TBASE__
             /* use local snapshot instead of global if told so */
@@ -2477,9 +2479,9 @@ exec_bind_message(StringInfo input_message)
      * snapshot active till we're done, so that plancache.c doesn't have to
      * take new ones.
      */
-    if (numParams > 0 ||
+	if ((numParams > 0 ||
         (psrc->raw_parse_tree &&
-         analyze_requires_snapshot(psrc->raw_parse_tree)))
+		 analyze_requires_snapshot(psrc->raw_parse_tree))) && g_parse_snapshot)
     {
 #ifdef __TBASE__
         /* use local snapshot instead of global if told so */
