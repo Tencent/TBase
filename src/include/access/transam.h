@@ -270,6 +270,8 @@ extern TransactionId GetNewTransactionId(bool isSubXact);
 extern bool TransactIdIsCurentGlobalTransacId(TransactionId xid);
 extern TransactionId GetNextTransactionId(void);
 extern void ExtendLogs(TransactionId xid);
+extern int GetNumSubTransactions(void);
+extern TransactionId *GetSubTransactions(void);
 #endif
 extern TransactionId ReadNewTransactionId(void);
 extern void SetTransactionIdLimit(TransactionId oldest_datfrozenxid,

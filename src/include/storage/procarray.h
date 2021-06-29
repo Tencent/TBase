@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * procarray.h
- *      POSTGRES process array definitions.
+ *	  POSTGRES process array definitions.
  *
  *
  * Portions Copyright (c) 2012-2014, TransLattice, Inc.
@@ -26,8 +26,8 @@ extern int GlobalSnapshotSource;
 
 typedef enum GlobalSnapshotSourceType
 {
-    GLOBAL_SNAPSHOT_SOURCE_GTM,
-    GLOBAL_SNAPSHOT_SOURCE_COORDINATOR
+	GLOBAL_SNAPSHOT_SOURCE_GTM,
+	GLOBAL_SNAPSHOT_SOURCE_COORDINATOR
 } GlobalSnapshotSourceType;
 #endif
 
@@ -38,33 +38,33 @@ typedef enum GlobalSnapshotSourceType
  * to avoid forcing to include proc.h when including procarray.h. So if you modify
  * PROC_XXX flags, you need to modify these flags.
  */
-#define        PROCARRAY_VACUUM_FLAG            0x02    /* currently running lazy
-                                                     * vacuum */
-#define        PROCARRAY_ANALYZE_FLAG            0x04    /* currently running
-                                                     * analyze */
-#define        PROCARRAY_LOGICAL_DECODING_FLAG 0x10    /* currently doing logical
-                                                     * decoding outside xact */
+#define		PROCARRAY_VACUUM_FLAG			0x02	/* currently running lazy
+													 * vacuum */
+#define		PROCARRAY_ANALYZE_FLAG			0x04	/* currently running
+													 * analyze */
+#define		PROCARRAY_LOGICAL_DECODING_FLAG 0x10	/* currently doing logical
+													 * decoding outside xact */
 
-#define        PROCARRAY_SLOTS_XMIN            0x20    /* replication slot xmin,
-                                                     * catalog_xmin */
+#define		PROCARRAY_SLOTS_XMIN			0x20	/* replication slot xmin,
+													 * catalog_xmin */
 /*
  * Only flags in PROCARRAY_PROC_FLAGS_MASK are considered when matching
  * PGXACT->vacuumFlags. Other flags are used for different purposes and
  * have no corresponding PROC flag equivalent.
  */
-#define        PROCARRAY_PROC_FLAGS_MASK    (PROCARRAY_VACUUM_FLAG | \
-                                         PROCARRAY_ANALYZE_FLAG | \
-                                         PROCARRAY_LOGICAL_DECODING_FLAG)
+#define		PROCARRAY_PROC_FLAGS_MASK	(PROCARRAY_VACUUM_FLAG | \
+										 PROCARRAY_ANALYZE_FLAG | \
+										 PROCARRAY_LOGICAL_DECODING_FLAG)
 
 /* Use the following flags as an input "flags" to GetOldestXmin function */
 /* Consider all backends except for logical decoding ones which manage xmin separately */
-#define        PROCARRAY_FLAGS_DEFAULT            PROCARRAY_LOGICAL_DECODING_FLAG
+#define		PROCARRAY_FLAGS_DEFAULT			PROCARRAY_LOGICAL_DECODING_FLAG
 /* Ignore vacuum backends */
-#define        PROCARRAY_FLAGS_VACUUM            PROCARRAY_FLAGS_DEFAULT | PROCARRAY_VACUUM_FLAG
+#define		PROCARRAY_FLAGS_VACUUM			PROCARRAY_FLAGS_DEFAULT | PROCARRAY_VACUUM_FLAG
 /* Ignore analyze backends */
-#define        PROCARRAY_FLAGS_ANALYZE            PROCARRAY_FLAGS_DEFAULT | PROCARRAY_ANALYZE_FLAG
+#define		PROCARRAY_FLAGS_ANALYZE			PROCARRAY_FLAGS_DEFAULT | PROCARRAY_ANALYZE_FLAG
 /* Ignore both vacuum and analyze backends */
-#define        PROCARRAY_FLAGS_VACUUM_ANALYZE    PROCARRAY_FLAGS_DEFAULT | PROCARRAY_VACUUM_FLAG | PROCARRAY_ANALYZE_FLAG
+#define		PROCARRAY_FLAGS_VACUUM_ANALYZE	PROCARRAY_FLAGS_DEFAULT | PROCARRAY_VACUUM_FLAG | PROCARRAY_ANALYZE_FLAG
 
 extern Size ProcArrayShmemSize(void);
 extern void CreateSharedProcArray(void);
@@ -77,17 +77,17 @@ extern void ProcArrayClearTransaction(PGPROC *proc);
 #ifdef PGXC  /* PGXC_DATANODE */
 typedef enum
 {
-    SNAPSHOT_UNDEFINED,   /* Coordinator has not sent snapshot or not yet connected */
-    SNAPSHOT_LOCAL,       /* Coordinator has instructed Datanode to build up snapshot from the local procarray */
-    SNAPSHOT_COORDINATOR, /* Coordinator has sent snapshot data */
-    SNAPSHOT_DIRECT       /* Datanode obtained directly from GTM */
+	SNAPSHOT_UNDEFINED,   /* Coordinator has not sent snapshot or not yet connected */
+	SNAPSHOT_LOCAL,       /* Coordinator has instructed Datanode to build up snapshot from the local procarray */
+	SNAPSHOT_COORDINATOR, /* Coordinator has sent snapshot data */
+	SNAPSHOT_DIRECT       /* Datanode obtained directly from GTM */
 } SnapshotSource;
 
 extern void SetGlobalTimestamp(GlobalTimestamp gts, SnapshotSource source);
 #if 0
 extern void SetGlobalSnapshotData(TransactionId xmin, TransactionId xmax, int xcnt,
-        TransactionId *xip,
-        SnapshotSource source);
+		TransactionId *xip,
+		SnapshotSource source);
 #endif
 extern void UnsetGlobalSnapshotData(void);
 extern void ReloadConnInfoOnBackends(bool refresh_only);
@@ -95,23 +95,23 @@ extern void ReloadConnInfoOnBackends(bool refresh_only);
 extern void ProcArrayInitRecovery(TransactionId initializedUptoXID);
 extern void ProcArrayApplyRecoveryInfo(RunningTransactions running);
 extern void ProcArrayApplyXidAssignment(TransactionId topxid,
-                            int nsubxids, TransactionId *subxids);
+							int nsubxids, TransactionId *subxids);
 
 extern void RecordKnownAssignedTransactionIds(TransactionId xid);
 extern void ExpireTreeKnownAssignedTransactionIds(TransactionId xid,
-                                      int nsubxids, TransactionId *subxids,
-                                      TransactionId max_xid);
+									  int nsubxids, TransactionId *subxids,
+									  TransactionId max_xid);
 extern void ExpireAllKnownAssignedTransactionIds(void);
 extern void ExpireOldKnownAssignedTransactionIds(TransactionId xid);
 
-extern int    GetMaxSnapshotXidCount(void);
-extern int    GetMaxSnapshotSubxidCount(void);
+extern int	GetMaxSnapshotXidCount(void);
+extern int	GetMaxSnapshotSubxidCount(void);
 
 #define GetSnapshotData(snapshot, latest) GetSnapshotData_shard(snapshot, latest, true)
 extern Snapshot GetSnapshotData_shard(Snapshot snapshot, bool latest, bool need_shardmap);
 
 extern bool ProcArrayInstallImportedXmin(TransactionId xmin,
-                             VirtualTransactionId *sourcevxid);
+							 VirtualTransactionId *sourcevxid);
 extern bool ProcArrayInstallRestoredXmin(TransactionId xmin, PGPROC *proc);
 extern void ProcArrayCheckXminConsistency(TransactionId global_xmin);
 extern void SetLatestCompletedXid(TransactionId latestCompletedXid);
@@ -123,13 +123,13 @@ extern bool TransactionIdIsInProgress(TransactionId xid);
 extern bool TransactionIdIsPrepared(TransactionId xid, Snapshot snapshot, GlobalTimestamp *prepare_ts);
 #endif
 #ifdef __TBASE__
-extern TransactionId GetLocalTransactionId(const char *globalXid);
+extern TransactionId GetLocalTransactionId(const char *globalXid, TransactionId *subxids, int *nsub);
 #endif
 extern char *GetGlobalTransactionId(const TransactionId pid);
 extern bool TransactionIdIsActive(TransactionId xid);
 extern TransactionId GetOldestXmin(Relation rel, int flags);
 extern TransactionId GetOldestXminInternal(Relation rel, int flags,
-        bool computeLocal, TransactionId lastGlobalXmin);
+		bool computeLocal, TransactionId lastGlobalXmin);
 extern TransactionId GetOldestActiveTransactionId(void);
 extern TransactionId GetOldestSafeDecodingTransactionId(bool catalogOnly);
 
@@ -138,38 +138,38 @@ extern bool HaveVirtualXIDsDelayingChkpt(VirtualTransactionId *vxids, int nvxids
 
 extern PGPROC *BackendPidGetProc(int pid);
 extern PGPROC *BackendPidGetProcWithLock(int pid);
-extern int    BackendXidGetPid(TransactionId xid);
+extern int	BackendXidGetPid(TransactionId xid);
 extern bool IsBackendPid(int pid);
 
 extern VirtualTransactionId *GetCurrentVirtualXIDs(TransactionId limitXmin,
-                      bool excludeXmin0, bool allDbs, int excludeVacuum,
-                      int *nvxids);
+					  bool excludeXmin0, bool allDbs, int excludeVacuum,
+					  int *nvxids);
 extern VirtualTransactionId *GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbOid);
 extern pid_t CancelVirtualTransaction(VirtualTransactionId vxid, ProcSignalReason sigmode);
 
 extern bool MinimumActiveBackends(int min);
-extern int    CountDBBackends(Oid databaseid);
-extern int    CountDBConnections(Oid databaseid);
+extern int	CountDBBackends(Oid databaseid);
+extern int	CountDBConnections(Oid databaseid);
 extern void CancelDBBackends(Oid databaseid, ProcSignalReason sigmode, bool conflictPending);
-extern int    CountUserBackends(Oid roleid);
+extern int	CountUserBackends(Oid roleid);
 extern bool CountOtherDBBackends(Oid databaseId,
-                     int *nbackends, int *nprepared);
+					 int *nbackends, int *nprepared);
 
 extern void XidCacheRemoveRunningXids(TransactionId xid,
-                          int nxids, const TransactionId *xids,
-                          TransactionId latestXid);
+						  int nxids, const TransactionId *xids,
+						  TransactionId latestXid);
 #ifdef XCP
 extern void GetGlobalSessionInfo(int pid, Oid *coordId, int *coordPid);
-extern int    GetFirstBackendId(int *numBackends, int *backends);
+extern int	GetFirstBackendId(int *numBackends, int *backends);
 #endif /* XCP */
 
 extern void ProcArraySetReplicationSlotXmin(TransactionId xmin,
-                                TransactionId catalog_xmin, bool already_locked);
+								TransactionId catalog_xmin, bool already_locked);
 
 extern void ProcArrayGetReplicationSlotXmin(TransactionId *xmin,
-                                TransactionId *catalog_xmin);
+								TransactionId *catalog_xmin);
 #ifdef __TBASE__
 extern RunningTransactions GetCurrentRunningTransaction(void);
 extern GlobalTimestamp GetLatestCommitTS(void);
 #endif
-#endif                            /* PROCARRAY_H */
+#endif							/* PROCARRAY_H */

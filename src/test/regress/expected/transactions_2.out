@@ -676,6 +676,72 @@ ERROR:  portal "ctt" cannot be run
 COMMIT;
 DROP FUNCTION create_temp_tab();
 DROP FUNCTION invert(x float8);
+-- Test for distributed subtrans in secondary DNs
+begin;
+savepoint s;
+-- create tables in subtransaction
+create table t1_trans(f1 int,f2 int);
+create table t2_trans(f1 int,f2 int);
+create table t3_trans(f1 int,f2 int);
+insert into t1_trans values(1,1),(2,2);
+insert into t3_trans select * from t1_trans;
+insert into t2_trans(f2) select count(1) from t3_trans;
+select * from t2_trans;
+ f1 | f2 
+----+----
+    |  2
+(1 row)
+
+abort;
+begin;
+-- create tables in parent transaction
+create table t1_trans(f1 int,f2 int);
+create table t2_trans(f1 int,f2 int);
+create table t3_trans(f1 int,f2 int);
+savepoint s;
+insert into t1_trans values(1,1),(2,2);
+insert into t3_trans select * from t1_trans;
+insert into t2_trans(f2) select count(1) from t3_trans;
+select * from t2_trans;
+ f1 | f2 
+----+----
+    |  2
+(1 row)
+
+abort;
+-- create tables out of transaction
+create table t1_trans(f1 int,f2 int);
+create table t2_trans(f1 int,f2 int);
+create table t3_trans(f1 int,f2 int);
+insert into t1_trans values(1,1),(2,2);
+begin;
+savepoint s;
+insert into t3_trans select * from t1_trans;
+insert into t2_trans(f2) select count(1) from t3_trans;
+select * from t2_trans;
+ f1 | f2 
+----+----
+    |  2
+(1 row)
+
+abort;
+-- test for subtrans in parallel worker
+begin;
+savepoint s;
+set parallel_setup_cost=0;
+set parallel_tuple_cost=0;
+set min_parallel_table_scan_size=0;
+set min_parallel_rows_size=0;
+set max_parallel_workers_per_gather=2;
+insert into t3_trans select * from t1_trans;
+select count(*) from t3_trans join t1_trans using (f2);
+ count 
+-------
+     2
+(1 row)
+
+abort;
+drop table t1_trans, t2_trans, t3_trans;
 -- Test for successful cleanup of an aborted transaction at session exit.
 -- THIS MUST BE THE LAST TEST IN THIS FILE.
 begin;

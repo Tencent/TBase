@@ -6512,7 +6512,14 @@ EstimateTransactionStateSpace(void)
                                  * command counter, XID count */
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__    
+	int nsub = GetNumSubTransactions();
     nxids++; /* local xid */
+	if (nsub > 0)
+	{
+		nxids = add_size(nxids, nsub); /* local subxids */
+	}
+	else /* only do for loop below */
+	{
 #endif
 
     for (s = CurrentTransactionState; s != NULL; s = s->parent)
@@ -6521,6 +6528,9 @@ EstimateTransactionStateSpace(void)
             nxids = add_size(nxids, 1);
         nxids = add_size(nxids, s->nChildXids);
     }
+#ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
+	}
+#endif
 
     nxids = add_size(nxids, nParallelCurrentXids);
 
@@ -6562,6 +6572,7 @@ SerializeTransactionState(Size maxsize, char *start_address)
     Size        c = 0;
     TransactionId *workspace;
     TransactionId *result = (TransactionId *) start_address;
+	int         nsub = 0;
 
     result[c++] = (TransactionId) XactIsoLevel;
     result[c++] = (TransactionId) XactDeferrable;
@@ -6588,10 +6599,17 @@ SerializeTransactionState(Size maxsize, char *start_address)
         return;
     }
 
+	nsub = GetNumSubTransactions();
     /*
      * OK, we need to generate a sorted list of XIDs that our workers should
      * view as current.  First, figure out how many there are.
      */
+	if (nsub > 0)
+	{
+		nxids = add_size(nxids, nsub);
+	}
+	else
+	{
     for (s = CurrentTransactionState; s != NULL; s = s->parent)
     {
         if (TransactionIdIsValid(s->transactionId))
@@ -6599,9 +6617,20 @@ SerializeTransactionState(Size maxsize, char *start_address)
         nxids = add_size(nxids, s->nChildXids);
     }
     Assert((c + 1 + nxids) * sizeof(TransactionId) <= maxsize);
+	}
 
     /* Copy them to our scratch space. */
     workspace = palloc(nxids * sizeof(TransactionId));
+	
+	if (nsub > 0)
+	{
+		TransactionId *subxids = GetSubTransactions();
+		memcpy(&workspace[i], subxids,
+		       nsub * sizeof(TransactionId));
+		i += nsub;
+	}
+	else
+	{
     for (s = CurrentTransactionState; s != NULL; s = s->parent)
     {
         if (TransactionIdIsValid(s->transactionId))
@@ -6611,6 +6640,7 @@ SerializeTransactionState(Size maxsize, char *start_address)
         i += s->nChildXids;
     }
     Assert(i == nxids);
+	}
 
     /* Sort them. */
     qsort(workspace, nxids, sizeof(TransactionId), xidComparator);

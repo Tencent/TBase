@@ -1963,7 +1963,7 @@ GetMaxSnapshotSubxidCount(void)
 }
 
 #ifdef __TBASE__
-TransactionId GetLocalTransactionId(const char *globalXid)
+TransactionId GetLocalTransactionId(const char *globalXid, TransactionId *subxids, int *nsub)
 {
     
     ProcArrayStruct *arrayP = procArray;
@@ -1979,6 +1979,8 @@ TransactionId GetLocalTransactionId(const char *globalXid)
         int         pgprocno = pgprocnos[index];
         PGPROC *proc = &allProcs[pgprocno];
         volatile PGXACT *pgxact = &allPgXact[pgprocno];
+		TransactionId    result =  InvalidTransactionId;
+		int         nxid;
         
         LWLockAcquire(&proc->globalxidLock, LW_SHARED);
         if (!proc->hasGlobalXid || strcmp(globalXid, proc->globalXid) != 0)
@@ -1992,10 +1994,21 @@ TransactionId GetLocalTransactionId(const char *globalXid)
             continue;
         }
         
+		result = pgxact->xid;
+		
+		/* look for max xid in subtrans */
+		*nsub = pgxact->nxids;
+		for (nxid = 0; nxid < pgxact->nxids; nxid++)
+		{
+			TransactionId subxid = proc->subxids.xids[nxid];
+			subxids[nxid] = subxid;
+		}
+		
         LWLockRelease(&proc->globalxidLock);
         LWLockRelease(ProcArrayLock);
-        elog(DEBUG8, "found xid %d for global xid %s", pgxact->xid, globalXid);
-        return pgxact->xid;
+		elog(DEBUG8, "found xid %d for global xid %s", result, globalXid);
+		
+		return result;
     }
 
     LWLockRelease(ProcArrayLock);

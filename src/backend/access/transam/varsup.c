@@ -91,6 +91,11 @@ GetForceXidFromGTM(void)
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
 static TransactionId local_xid = InvalidTransactionId;
+static TransactionId local_subxids[PGPROC_MAX_CACHED_SUBXIDS] = {};
+static int local_nsub;
+/* exported information about parallel workers, see xact.c */
+extern int nParallelCurrentXids;
+extern TransactionId *ParallelCurrentXids;
 /*
  * Set next transaction id to use
  */
@@ -123,10 +128,10 @@ StoreGlobalXid(const char *globalXid)
     else if(IsConnFromDatanode())
     {
         
-        local_xid = GetLocalTransactionId(globalXid);
+		local_xid = GetLocalTransactionId(globalXid, local_subxids, &local_nsub);
         if(enable_distri_print)
         {
-            elog (LOG, " global xid %s to local xid %d", globalXid, local_xid);
+			elog (LOG, " global xid %s to local xid %d, %d subxids", globalXid, local_xid, local_nsub);
         }
     }
     
@@ -158,21 +163,55 @@ void SetLocalTransactionId(TransactionId xid)
     }
     local_xid = xid;
 
+	/* if xid is invalid, also need to reset subxid array */
+	if (!TransactionIdIsValid(xid))
+	{
+		local_nsub = 0;
+	}
 }
 
-TransactionId GetNextTransactionId(void)
+TransactionId
+GetNextTransactionId(void)
 {
     return local_xid;
+}
+
+int
+GetNumSubTransactions(void)
+{
+	return local_nsub;
+}
+
+TransactionId *
+GetSubTransactions(void)
+{
+	return local_subxids;
 }
 
 bool
 TransactIdIsCurentGlobalTransacId(TransactionId xid)
 {
+	int i;
+	
     if(enable_distri_print)
     {
         elog(LOG, "is current transaction xid %u local xid %d", xid, local_xid);
     }
-    return TransactionIdIsValid(local_xid) && TransactionIdEquals(xid, local_xid);
+	
+	if (!TransactionIdIsValid(local_xid))
+		return false;
+	
+	if (TransactionIdEquals(xid, local_xid))
+		return true;
+	
+	/* check subxids */
+	for (i = 0; i < local_nsub; i++)
+	{
+		if (TransactionIdEquals(local_subxids[i], xid))
+			return true;
+	}
+	
+	return false;
 }
 
 #ifdef __TWO_PHASE_TRANS__

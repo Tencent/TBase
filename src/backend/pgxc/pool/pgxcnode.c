@@ -3088,7 +3088,8 @@ pgxc_node_send_cmd_id(PGXCNodeHandle *handle, CommandId cid)
     int            i32;
 
     /* No need to send command ID if its sending flag is not enabled */
-    if (!IsSendCommandId())
+	/* XXX: parallel worker always send cid */
+	if (!IsSendCommandId() && !IsParallelWorker())
     {
         return 0;
     }
