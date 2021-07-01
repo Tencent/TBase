@@ -953,7 +953,6 @@ retry_pools:
                 return NULL;
         }
         
-        Assert(tle);
         /* We found the TargetEntry for the partition column */
         list_free(rel_exec_nodes->primarynodelist);
         rel_exec_nodes->primarynodelist = NULL;
