@@ -1554,12 +1554,6 @@ reset_handles(void)
 		return;
 	}
 
-	/* Do not reset connections if we have prepared statements on nodes */
-	if (HaveActiveDatanodeStatements())
-	{
-		return;
-	}
-
 	/* Reset Datanodes handles occupied memory */
 	for (i = 0; i < NumDataNodes; i++)
 	{

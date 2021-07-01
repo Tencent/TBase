@@ -3673,12 +3673,6 @@ pgxc_node_remote_cleanup_all(void)
         return;
     }
 
-	/* Do not cleanup connections if we have prepared statements on nodes */
-	if (HaveActiveDatanodeStatements())
-	{
-		return;
-	}
-
     /*
      * Send down snapshot followed by DISCARD ALL command.
      */
@@ -4679,8 +4673,15 @@ prepare_err:
 		}
 		else
 		{
+			if (HaveActiveDatanodeStatements())
+			{
+				reset_handles();
+			}
+			else
+			{
         release_handles(false);
     }
+	}
 	}
     
     clear_handles();
@@ -4749,10 +4750,17 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
     }
     else
     {
+				if (HaveActiveDatanodeStatements())
+				{
+					reset_handles();
+				}
+				else
+				{
 				release_handles(false);
 			}
         }
     }
+	}
 
     clear_handles();
 }
@@ -4980,9 +4988,16 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
 	}
 	else
 	{
+				if (HaveActiveDatanodeStatements())
+				{
+					reset_handles();
+				}
+				else
+				{
 				release_handles(false);
 			}
 		}
+	}
 	}
 	
 	clear_handles();
@@ -5826,9 +5841,16 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
             pgxc_node_remote_cleanup_all();
 		if (need_release_handle)
         {
+			if (HaveActiveDatanodeStatements())
+			{
+				reset_handles();
+			}
+			else
+			{
 			release_handles(false);
         }
     }
+	}
     
     clear_handles();
     pfree_pgxc_all_handles(handles);
@@ -8763,8 +8785,15 @@ pgxc_node_remote_finish(char *prepareGID, bool commit,
 		}
 		else
 		{
+			if (HaveActiveDatanodeStatements())
+			{
+				reset_handles();
+			}
+			else
+			{
         release_handles(false);
     }
+	}
 	}
     clear_handles();
     pfree_pgxc_all_handles(pgxc_handles);
