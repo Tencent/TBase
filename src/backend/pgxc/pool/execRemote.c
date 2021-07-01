@@ -3649,13 +3649,17 @@ pgxc_node_begin(int conn_count, PGXCNodeHandle **connections,
  * specific stuff before releasing them to pool for reuse by other sessions.
  */
 static void
-pgxc_node_remote_cleanup_all(void)
-{// #lizard forgives
+pgxc_node_remote_cleanup_all(bool sub)
+{
     PGXCNodeAllHandles *handles = get_current_handles();
     PGXCNodeHandle *new_connections[handles->co_conn_count + handles->dn_conn_count];
     int                new_conn_count = 0;
     int                i;
-    char           *resetcmd = "RESET ALL;"
+	/* if it's called by sub-commit or sub-abort, DO NOT reset global_session */
+	char		   *resetcmd = sub ? "RESET ALL;"
+	                                 "RESET SESSION AUTHORIZATION;"
+	                                 "RESET transaction_isolation;" :
+	                           "RESET ALL;"
                                "RESET SESSION AUTHORIZATION;"
                                "RESET transaction_isolation;"
                                "RESET global_session";
@@ -4665,7 +4669,7 @@ prepare_err:
 	if (!temp_object_included)
     {
         /* Clean up remote sessions */
-        pgxc_node_remote_cleanup_all();
+		pgxc_node_remote_cleanup_all(false);
 
 		if (PersistentConnections)
 		{
@@ -4737,10 +4741,12 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
 
     stat_transaction(conn_count);
 
+    /* do not cleanup remote session for subtrans */
 	if (!temp_object_included)
         {
             /* Clean up remote sessions */
-            pgxc_node_remote_cleanup_all();
+		pgxc_node_remote_cleanup_all(txn_type == TXN_TYPE_CommitSubTxn ||
+		                             txn_type == TXN_TYPE_RollbackSubTxn);
 
 		if (need_release_handle)
 		{
@@ -5838,7 +5844,8 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
         if (!temp_object_included)
         {
             /* Clean up remote sessions */
-            pgxc_node_remote_cleanup_all();
+		pgxc_node_remote_cleanup_all(txn_type == TXN_TYPE_CommitSubTxn ||
+		                             txn_type == TXN_TYPE_RollbackSubTxn);
 		if (need_release_handle)
         {
 			if (HaveActiveDatanodeStatements())
@@ -8778,7 +8785,7 @@ pgxc_node_remote_finish(char *prepareGID, bool commit,
 	if (!temp_object_included)
     {
         /* Clean up remote sessions */
-        pgxc_node_remote_cleanup_all();
+		pgxc_node_remote_cleanup_all(false);
 		if (PersistentConnections)
 		{
 			reset_handles();
