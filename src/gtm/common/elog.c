@@ -778,7 +778,7 @@ write_pipe_chunks(char *data, int len, int dest)
     Assert(len > 0);
 
     p.proto.nuls[0] = p.proto.nuls[1] = '\0';
-    p.proto.pid = (exit_flag == GTM_DEFAULT_EXIT_FLAG) ? (int) MyThreadID : 0;
+    p.proto.pid = (exit_flag == GTM_DEFAULT_EXIT_FLAG) ? (int) (ThreadId + 1) : 0;
 
     /* write all but the last chunk */
     while (len > PIPE_MAX_PAYLOAD)
