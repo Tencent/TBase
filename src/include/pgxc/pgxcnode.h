@@ -213,6 +213,8 @@ extern int	pgxc_node_send_execute(PGXCNodeHandle * handle, const char *portal, i
 extern int	pgxc_node_send_close(PGXCNodeHandle * handle, bool is_statement,
 					 const char *name);
 extern int	pgxc_node_send_sync(PGXCNodeHandle * handle);
+extern int	pgxc_node_send_my_sync(PGXCNodeHandle * handle);
+
 #ifdef __SUBSCRIPTION__
 extern int pgxc_node_send_apply(PGXCNodeHandle * handle, char * buf, int len, bool ignore_pk_conflict);
 #endif
