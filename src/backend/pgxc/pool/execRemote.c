@@ -4780,20 +4780,12 @@ prepare_err:
     else
         elog(ERROR, "failed to PREPARE transaction on one or more nodes");
 
-	if (!temp_object_included)
+	if (!temp_object_included && !PersistentConnections)
     {
         /* Clean up remote sessions */
 		pgxc_node_remote_cleanup_all(false);
-
-		if (PersistentConnections)
-		{
-			reset_handles();
-		}
-		else
-		{
         release_handles(false);
     }
-	}
     
     clear_handles();
 
@@ -4848,23 +4840,24 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
 
     stat_transaction(conn_count);
 
-    /* do not cleanup remote session for subtrans */
-	if (!temp_object_included)
+    if (need_release_handle)
+    {
+        if (!temp_object_included && !PersistentConnections)
         {
             /* Clean up remote sessions */
 		pgxc_node_remote_cleanup_all(txn_type == TXN_TYPE_CommitSubTxn ||
 		                             txn_type == TXN_TYPE_RollbackSubTxn);
-
-		if (need_release_handle)
-		{
-			if (PersistentConnections)
-			{
-				reset_handles();
+            release_handles(false);
+        }
     }
     else
     {
-				release_handles(false);
-			}
+        /* in subtxn, we just cleanup the connections. not release the handles. */
+        if (!temp_object_included && !PersistentConnections)
+        {
+            /* Clean up remote sessions without release handles. */
+            pgxc_node_remote_cleanup_all(txn_type == TXN_TYPE_CommitSubTxn ||
+                                         txn_type == TXN_TYPE_RollbackSubTxn);
         }
     }
 
@@ -5081,21 +5074,23 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
 #ifndef __TBASE__
 	stat_transaction(conn_count);
 
-	if (!temp_object_included)
-	{
-		/* Clean up remote sessions */
-		pgxc_node_remote_cleanup_all();
 	
 	if (need_release_handle)
 	{
-			if (PersistentConnections)
+		if (!temp_object_included && !PersistentConnections)
 		{
-				reset_handles();
+			/* Clean up remote sessions */
+			pgxc_node_remote_cleanup_all();
+			release_handles(false);
+		}
 	}
 	else
 	{
-				release_handles(false);
-			}
+		/* in subtxn, we just cleanup the connections. not release the handles. */
+		if (!temp_object_included && !PersistentConnections)
+		{
+			/* Clean up remote sessions without release handles. */
+			pgxc_node_remote_cleanup_all();
 		}
 	}
 	
@@ -5940,25 +5935,26 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
     }
 #endif    
     
-	/*
-	 * Drop the connections to ensure aborts are handled properly.
-	 *
-	 * XXX We should really be consulting PersistentConnections parameter and
-	 * keep the connections if its set. But as a short term measure, to address
-	 * certain issues for aborted transactions, we drop the connections.
-	 * Revisit and fix the issue
-	 */
+	if (need_release_handle)
+	{
 	if (!temp_object_included)
         {
             /* Clean up remote sessions */
 		pgxc_node_remote_cleanup_all(txn_type == TXN_TYPE_CommitSubTxn ||
 		                             txn_type == TXN_TYPE_RollbackSubTxn);
-		if (need_release_handle)
-		{
 			release_handles(false);
         }
     }
-    
+	else
+	{
+		/* in subtxn, we just cleanup the connections. not release the handles. */
+		if (!temp_object_included)
+		{
+            /* Clean up remote sessions */
+            pgxc_node_remote_cleanup_all(txn_type == TXN_TYPE_CommitSubTxn ||
+                                         txn_type == TXN_TYPE_RollbackSubTxn);
+		}
+	}
     clear_handles();
     pfree_pgxc_all_handles(handles);
 
@@ -7959,6 +7955,29 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
 
     pgxc_node_remote_abort(txn_type, need_release_handle);
 
+	/*
+	 * Drop the connections to ensure aborts are handled properly.
+	 *
+	 * XXX We should really be consulting PersistentConnections parameter and
+	 * keep the connections if its set. But as a short term measure, to address
+	 * certain issues for aborted transactions, we drop the connections.
+	 * Revisit and fix the issue
+	 */
+	elog(DEBUG5, "temp_object_included %d", temp_object_included);
+	/* cleanup and release handles is already done in pgxc_node_remote_abort */
+#if 0	
+	if (release_handle)
+	{
+		if (!temp_object_included)
+		{
+			/* Clean up remote sessions */
+			pgxc_node_remote_cleanup_all();
+			release_handles();
+		}
+	}
+	
+	clear_handles();
+#endif
     pfree_pgxc_all_handles(all_handles);
 
     if (log_gtm_stats)
@@ -8923,19 +8942,12 @@ pgxc_node_remote_finish(char *prepareGID, bool commit,
     }
 #endif    
 
-	if (!temp_object_included)
+	if (!temp_object_included && !PersistentConnections)
     {
         /* Clean up remote sessions */
 		pgxc_node_remote_cleanup_all(false);
-		if (PersistentConnections)
-		{
-			reset_handles();
-		}
-		else
-		{
         release_handles(false);
     }
-	}
     clear_handles();
     pfree_pgxc_all_handles(pgxc_handles);
 	reset_transaction_handles();

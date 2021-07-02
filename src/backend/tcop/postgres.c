@@ -629,6 +629,7 @@ SocketBackend(StringInfo inBuf)
                          errmsg("invalid frontend message type %d", qtype)));
             break;
 
+        case 'L':
         case 'S':                /* sync */
             /* stop any active skip-till-Sync */
             ignore_till_sync = false;
@@ -5803,6 +5804,10 @@ PostgresMain(int argc, char *argv[],
                 send_ready_for_query = true;
                 break;
 
+            case 'L':			/* sync */
+                pq_getmsgend(&input_message);
+                finish_xact_command();
+                break;	
 #ifdef __TBASE__
             case 'N':
                 {

@@ -2571,6 +2571,51 @@ pgxc_node_send_sync(PGXCNodeHandle * handle)
     return pgxc_node_flush(handle);
 }
 
+
+/*
+ * Send SYNC message down to the Datanode
+ */
+int
+pgxc_node_send_my_sync(PGXCNodeHandle * handle)
+{
+    /* size */
+    int			msgLen = 4;
+
+    /* msgType + msgLen */
+    if (ensure_out_buffer_capacity(handle->outEnd + 1 + msgLen, handle) != 0)
+    {
+        add_error_message(handle, "out of memory");
+        return EOF;
+    }
+
+    handle->outBuffer[handle->outEnd++] = 'L';
+    /* size */
+    msgLen = htonl(msgLen);
+    memcpy(handle->outBuffer + handle->outEnd, &msgLen, 4);
+    handle->outEnd += 4;
+
+    handle->in_extended_query = false;
+    handle->needSync = false;
+
+    msgLen = 4;
+    /* msgType + msgLen */
+    if (ensure_out_buffer_capacity(handle->outEnd + 1 + msgLen, handle) != 0)
+    {
+        add_error_message(handle, "out of memory");
+        return EOF;
+    }
+
+    handle->outBuffer[handle->outEnd++] = 'H';
+    /* size */
+    msgLen = htonl(msgLen);
+    memcpy(handle->outBuffer + handle->outEnd, &msgLen, 4);
+    handle->outEnd += 4;
+
+    handle->in_extended_query = true;
+
+    return pgxc_node_flush(handle);
+}
+
 #ifdef __SUBSCRIPTION__
 /*
  * Send logical apply message down to the Datanode
@@ -2633,7 +2678,7 @@ pgxc_node_send_query_extended(PGXCNodeHandle *handle, const char *query,
     if (fetch_size >= 0)
         if (pgxc_node_send_execute(handle, portal, fetch_size))
             return EOF;
-    if (pgxc_node_send_flush(handle))
+	if (pgxc_node_send_my_sync(handle))
         return EOF;
 
     return 0;
