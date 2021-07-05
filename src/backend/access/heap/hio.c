@@ -182,7 +182,7 @@ GetVisibilityMapPins(Relation relation, Buffer buffer1, Buffer buffer2,
  * amount which ramps up as the degree of contention ramps up, but limiting
  * the result to some sane overall value.
  */
-static Buffer
+static void
 RelationAddExtraBlocks(Relation relation, BulkInsertState bistate, ShardID sid)
 {// #lizard forgives
     Page        page;
@@ -194,7 +194,6 @@ RelationAddExtraBlocks(Relation relation, BulkInsertState bistate, ShardID sid)
     Buffer        buffer;
 
 #ifdef _SHARDING_    
-    Buffer        firstBuffer = InvalidBuffer;
     if(RelationHasExtent(relation) && !ShardIDIsValid(sid))
     {
         elog(ERROR, "extent-organized relation must extend with shardid.");
@@ -275,19 +274,12 @@ RelationAddExtraBlocks(Relation relation, BulkInsertState bistate, ShardID sid)
         if(bistate)
             bistate->sid = sid;
 #endif
+		UnlockReleaseBuffer(buffer);
 
         /* Remember first block number thus added. */
         if (firstBlock == InvalidBlockNumber)
-        {
             firstBlock = blockNum;
-            firstBuffer = buffer;
-        }
-#ifdef _SHARDING_
-        else
-        {
-            UnlockReleaseBuffer(buffer);
-        }
-#endif
+
         /*
          * Immediately update the bottom level of the FSM.  This has a good
          * chance of making this page visible to other concurrently inserting
@@ -308,7 +300,6 @@ RelationAddExtraBlocks(Relation relation, BulkInsertState bistate, ShardID sid)
      */
     UpdateFreeSpaceMap(relation, firstBlock, blockNum, freespace);
 
-    return firstBuffer;
 }
 
 #ifdef _SHARDING_
@@ -1056,23 +1047,12 @@ loop:
                 UnlockRelationForExtension(relation, ExclusiveLock);
                 goto loop;
             }
+			RelationAddExtraBlocks(relation, bistate, 
+								RelationHasExtent(relation) ? sid : InvalidShardID);
         }
     }
     
-#ifdef _SHARDING_    
-    /*
-     * We can be certain that locking the otherBuffer first is OK, since it
-     * must have a lower page number.
-     */
-    if (otherBuffer != InvalidBuffer)
-        LockBuffer(otherBuffer, BUFFER_LOCK_EXCLUSIVE);
 
-    /* Time to bulk-extend. */
-    buffer = RelationAddExtraBlocks(relation, bistate, 
-                                RelationHasExtent(relation) ? sid : InvalidShardID);
-#endif    
-
-#if 0
     /*
      * In addition to whatever extension we performed above, we always add at
      * least one block to satisfy our own request.
@@ -1095,7 +1075,6 @@ loop:
      * Now acquire lock on the new page.
      */
     LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
-#endif
 
     /*
      * Release the file-extension lock; it's now OK for someone else to extend
@@ -1117,14 +1096,12 @@ loop:
     
     page = BufferGetPage(buffer);
     
-#if 0
     if (!PageIsNew(page))
         elog(ERROR, "page %u of relation \"%s\" should be empty but is not",
              BufferGetBlockNumber(buffer),
              RelationGetRelationName(relation));
 
-    PageInit(page, BufferGetPageSize(buffer), 0, sid);
-#endif
+	PageInit_shard(page, BufferGetPageSize(buffer), 0, sid, false);
 
     if (len > PageGetHeapFreeSpace(page))
     {
