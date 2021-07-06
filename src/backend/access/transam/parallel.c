@@ -246,7 +246,7 @@ InitializeParallelDSM(ParallelContext *pcxt)
         gxidlen = EstimateGlobalXidSpace();
         shm_toc_estimate_chunk(&pcxt->estimator, gxidlen);
 #endif
-		sidlen = PGXCSessionId[0] == '\0' ? 0 : strlen(PGXCSessionId) + 1;
+		sidlen = sizeof(int) + (PGXCSessionId[0] == '\0' ? 0 : strlen(PGXCSessionId) + 1);
 		shm_toc_estimate_chunk(&pcxt->estimator, sidlen);
         /* If you add more chunks here, you probably need to add keys. */
 		shm_toc_estimate_keys(&pcxt->estimator, 8);
