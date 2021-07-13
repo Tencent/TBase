@@ -2,6 +2,14 @@
 -- CREATE SEQUENCE
 --
 
+CREATE DATABASE db_seq1;
+CREATE DATABASE db_seq2;
+\c db_seq1
+CREATE SEQUENCE my_seq;
+\c db_seq2
+CREATE SEQUENCE my_seq;
+\c regression
+
 -- various error cases
 CREATE UNLOGGED SEQUENCE sequence_testx;
 CREATE SEQUENCE sequence_testx INCREMENT BY 0;
@@ -414,3 +422,15 @@ SELECT nextval('test_seq1');
 SELECT nextval('test_seq1');
 
 DROP SEQUENCE test_seq1;
+-- Test sequece when alter database
+ALTER DATABASE db_seq1 RENAME TO db_seq3;
+ALTER DATABASE db_seq2 RENAME TO db_seq1;
+\c db_seq1
+DROP SEQUENCE my_seq;
+CREATE SEQUENCE my_seq;
+DROP SEQUENCE my_seq;
+\c db_seq3
+DROP SEQUENCE my_seq;
+CREATE SEQUENCE my_seq;
+DROP SEQUENCE my_seq;
+\q

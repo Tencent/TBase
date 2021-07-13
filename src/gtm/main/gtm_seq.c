@@ -3538,11 +3538,11 @@ ProcessDBSequenceRenameCommand(Port *myport, StringInfo message, bool is_backup)
             
             GTM_StoreGetSeqKey(handles[i], old_key);
             temp_seqkey.gsk_key    = old_key;
-            temp_seqkey.gsk_keylen = strnlen(old_key, SEQ_KEY_MAX_LENGTH);
+			temp_seqkey.gsk_keylen = strnlen(old_key, SEQ_KEY_MAX_LENGTH) + 1;
             
             snprintf(new_key, SEQ_KEY_MAX_LENGTH, "%s%s", newseqkey.gsk_key, old_key + strnlen(seqkey.gsk_key, SEQ_KEY_MAX_LENGTH));
             temp_newseqkey.gsk_key    = new_key;
-            temp_newseqkey.gsk_keylen = strnlen(new_key, SEQ_KEY_MAX_LENGTH);
+			temp_newseqkey.gsk_keylen = strnlen(new_key, SEQ_KEY_MAX_LENGTH) + 1;
             if ((errcode = GTM_SeqRename(&temp_seqkey, &temp_newseqkey, gxid)))
             {
                 ereport(ERROR,

@@ -118,7 +118,7 @@ void RegisterSeqCreate(char *name, int32 type)
     
     old_cxt = MemoryContextSwitchTo(TopMemoryContext);
     key = (GTM_SequenceKeyData*)palloc(sizeof(GTM_SequenceKeyData));
-    key->gsk_keylen  = strlen(name);
+	key->gsk_keylen  = strlen(name) + 1;
     key->gsk_key     = pstrdup(name);
     key->gsk_type    = type;    
     g_CreateSeqList  = lappend(g_CreateSeqList, key);
