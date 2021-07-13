@@ -1138,6 +1138,76 @@ pg_plan_queries(List *querytrees, int cursorOptions, ParamListInfo boundParams)
     return stmt_list;
 }
 
+/*
+ * get myself query string from original query string,
+ * if the query string contain multi stmt
+ */
+static char*
+get_myself_query_string(char* query_string, char** out_query_string)
+{
+    char       *string_delimeter = NULL;
+    char       *myself_query_string = NULL;
+    int         myself_query_string_len = 0;
+    int         pos = 0;
+    bool        in_quotation = false;
+    int         query_string_len = 0;
+
+    if (query_string && query_string[0] != '\0')
+    {
+        /* skip space and redundant ';' */
+        while (*query_string != '\0')
+        {
+            if (ch_is_space(*query_string) || *query_string == ';')
+            {
+                query_string++;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        if (*query_string == '\0')
+        {
+            *out_query_string = NULL;
+            return NULL;
+        }
+
+        /* find ';' in query string, be careful of '\'' */
+        query_string_len = strlen(query_string);
+        for (pos = 0; pos < query_string_len; pos++)
+        {
+            if (query_string[pos] == '\'')
+            {
+                in_quotation = (in_quotation) ? false : true;
+            }
+
+            if (query_string[pos] == ';' && !in_quotation)
+            {
+                string_delimeter = &query_string[pos];
+                break;
+            }
+        }
+
+        if (string_delimeter == NULL)
+        {
+            myself_query_string = query_string;
+            query_string = NULL;
+        }
+        else
+        {
+            myself_query_string_len = string_delimeter - query_string;
+            myself_query_string = palloc(myself_query_string_len + 1);
+            memcpy(myself_query_string, query_string, myself_query_string_len);
+            myself_query_string[myself_query_string_len] = '\0';
+
+            query_string = string_delimeter + 1;
+        }
+    }
+
+    *out_query_string = myself_query_string;
+    return query_string;
+}
 
 /*
  * exec_simple_query
@@ -1156,6 +1226,7 @@ exec_simple_query(const char *query_string)
     bool        isTopLevel;
     char        msec_str[32];
     bool        multiCommands = false;
+    char       *query_string_tmp = NULL;
 
     /*
      * Report query to various monitoring facilities.
@@ -1227,6 +1298,8 @@ exec_simple_query(const char *query_string)
                          errmsg("COMMIT or ROLLBACK "
                                 "in multi-statement queries not allowed")));
         }
+
+        query_string_tmp = (char*) query_string;
     }
 
     /*
@@ -1284,6 +1357,14 @@ exec_simple_query(const char *query_string)
         Portal        portal;
         DestReceiver *receiver;
         int16        format;
+        char       *myself_query_string = NULL;
+
+        if (query_string_tmp && query_string_tmp[0] != '\0')
+        {
+            /* get this portal's query when has multi parse tree */
+            query_string_tmp = get_myself_query_string(query_string_tmp, &myself_query_string);
+        }
+
 #ifdef PGXC
 
         /*
@@ -1446,7 +1527,7 @@ exec_simple_query(const char *query_string)
          */
         PortalDefineQuery(portal,
                           NULL,
-                          query_string,
+                          (myself_query_string) ? myself_query_string : query_string,
                           commandTag,
                           plantree_list,
                           NULL);
