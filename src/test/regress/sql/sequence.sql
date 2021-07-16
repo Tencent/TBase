@@ -459,10 +459,3 @@ insert into t2(f2) values(5);
 insert into t3(f2) values(6);
 select gsk_key from pg_list_storage_sequence() where gsk_key like '%db_seq1_bak.%';
 \q
-<<<<<<< HEAD
-=======
-
-
-
-
->>>>>>> 85b5350be... fix gtm seq bug when create databse or drop databse http://tapd.woa.com/10092131/bugtrace/bugs/view?bug_id=1010092131096383437&jump_count=1 and http://tapd.woa.com/pgxz/bugtrace/bugs/view/1010092131087562597 (merge request !1132)
