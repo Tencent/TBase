@@ -1657,23 +1657,6 @@ set_joinpath_distribution(PlannerInfo *root, JoinPath *pathnode)
     if (innerd == NULL && outerd == NULL)
         return NIL;
 #ifdef __TBASE__
-    /*
-     * DML may need to push down to datanodes, for example:
-     *   DELETE FROM
-     *   	geocode_settings as gc
-     *   USING geocode_settings_default AS gf
-     *   WHERE
-     *   	gf.name = gc.name and gf.setting = gc.setting;
-     * prefer_olap means pulling query up to coordinator node, in case data
-     * re-distribute in TPC-C test case.
-     *
-     * TODO: We need to automatically determine whether we need to pull it up,
-     * but not using GUC.
-     */
-    if(!prefer_olap && false == dml)
-    {
-        goto pull_up;
-    }
 
 	/*
 	 * If outer or inner subpaths are distributed by shard and they do not exist
@@ -1802,6 +1785,23 @@ set_joinpath_distribution(PlannerInfo *root, JoinPath *pathnode)
         return alternate;
     }
 
+	/*
+	 * DML may need to push down to datanodes, for example:
+	 *   DELETE FROM
+	 *   	geocode_settings as gc
+	 *   USING geocode_settings_default AS gf
+	 *   WHERE
+	 *   	gf.name = gc.name and gf.setting = gc.setting;
+	 * prefer_olap means pulling query up to coordinator node, in case data
+	 * re-distribute in TPC-C test case.
+	 *
+	 * TODO: We need to automatically determine whether we need to pull it up,
+		* but not using GUC.
+		*/
+	if(!prefer_olap && false == dml)
+	{
+		goto pull_up;
+	}
 
     restrictClauses = list_copy(pathnode->joinrestrictinfo);
     restrictClauses = list_concat(restrictClauses,
