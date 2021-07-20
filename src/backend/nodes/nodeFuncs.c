@@ -3912,7 +3912,7 @@ plantree_walk_initplans(List *plans,
 	foreach(lc, plans)
 	{
 		Plan    *splan = (Plan *) list_nth(subplans,
-								 (lfirst_node(SubPlan, lc))->plan_id);
+		                                   (lfirst_node(SubPlan, lc))->plan_id - 1);
 		
 		if (walker(splan, context))
 			return true;
