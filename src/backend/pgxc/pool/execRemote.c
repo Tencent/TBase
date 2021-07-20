@@ -1163,8 +1163,8 @@ ValidateAndCloseCombiner(ResponseCombiner *combiner)
  * connection should be buffered.
  */
 void
-BufferConnection(PGXCNodeHandle *conn)
-{// #lizard forgives
+BufferConnection(PGXCNodeHandle *conn, bool need_prefetch)
+{
     ResponseCombiner *combiner = conn->combiner;
     MemoryContext oldcontext;
 
@@ -1375,15 +1375,112 @@ BufferConnection(PGXCNodeHandle *conn)
             continue;
         }
 
-        /* incomplete message, read more */
         if (res == RESPONSE_EOF)
         {
+#ifdef __TBASE__
+		    if (need_prefetch)
+            {
+                /*
+                 * We encountered incomplete message, try to read more.
+                 * Here if we read timeout, then we move to other connections to read, because we
+                 * easily got deadlock if a specific cursor run as producer on two nodes. If we can
+                 * consume data from all all connections, we can break the deadlock loop.
+                 */
+                bool   bComplete          = false;
+                DNConnectionState state   = DN_CONNECTION_STATE_IDLE;
+                int    i                  = 0;
+                int    ret 			      = 0;
+                PGXCNodeHandle *save_conn = NULL;
+                struct timeval timeout;
+                timeout.tv_sec  	      = 0;
+                timeout.tv_usec 	      = 1000;
+
+                save_conn = conn;
+                while (1)
+                {
+                    conn  = save_conn;
+                    state = conn->state; /* Save the connection state. */
+                    ret   = pgxc_node_receive(1, &conn, &timeout);
+                    if (DNStatus_OK == ret)
+                    {
+                        /* We got data, handle it. */
+                        break;
+                    }
+                    else if (DNStatus_ERR == ret)
+                    {
+                        ereport(ERROR,
+                                (errcode(ERRCODE_INTERNAL_ERROR),
+                                        errmsg("Failed to receive more data from data node %u", conn->nodeoid)));
+                    }
+                    else
+                    {
+                        /* Restore the saved state of connection. */
+                        conn->state = state;
+                    }
+
+                    /* Try to read data from other connections. */
+                    for (i = 0; i < combiner->conn_count; i ++)
+                    {
+                        conn  = combiner->connections[i];
+                        if (save_conn != conn && conn != NULL)
+                        {
+                            /* Save the connection state. */
+                            state = conn->state;
+                            if (state == DN_CONNECTION_STATE_QUERY)
+                            {
+                                ret = pgxc_node_receive(1, &conn, &timeout);
+                                if (DNStatus_OK == ret)
+                                {
+                                    /* We got data, prefetch it. */
+                                    bComplete = PreFetchConnection(conn, i);
+                                    if (bComplete)
+                                    {
+                                        /* Receive Complete on one connection, we need retry to read from current_conn. */
+                                        break;
+                                    }
+                                    else
+                                    {
+                                        /* Maybe Suspend or Expired, just move to next connection and read. */
+                                        continue;
+                                    }
+                                }
+                                else if (DNStatus_EXPIRED == ret)
+                                {
+                                    /* Restore the saved state of connection. */
+                                    conn->state = state;
+                                    continue;
+                                }
+                                else
+                                {
+                                    ereport(ERROR,
+                                            (errcode(ERRCODE_INTERNAL_ERROR),
+                                                    errmsg("Failed to receive more data from data node %u", conn->nodeoid)));
+                                }
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            else
+            {
+                /* incomplete message, read more */
+                if (pgxc_node_receive(1, &conn, NULL))
+                {
+                    PGXCNodeSetConnectionState(conn,
+                                               DN_CONNECTION_STATE_ERROR_FATAL);
+                    add_error_message(conn, "Failed to fetch from data node");
+                }
+            }
+#else
+            /* incomplete message, read more */
             if (pgxc_node_receive(1, &conn, NULL))
             {
                 PGXCNodeSetConnectionState(conn,
                         DN_CONNECTION_STATE_ERROR_FATAL);
                 add_error_message(conn, "Failed to fetch from data node");
             }
+#endif
         }
 
         /*
@@ -3464,7 +3561,7 @@ pgxc_node_begin(int conn_count, PGXCNodeHandle **connections,
          * any bugs reported
          */
         if (connections[i]->state == DN_CONNECTION_STATE_QUERY)
-            BufferConnection(connections[i]);
+			BufferConnection(connections[i], false);
 
 		/* Send global session id */
 		if (pgxc_node_send_sessionid(connections[i]))
@@ -3979,7 +4076,7 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
         {
             /* Read in any pending input */
             if (conn->state != DN_CONNECTION_STATE_IDLE)
-                BufferConnection(conn);
+				BufferConnection(conn, false);
 
             if (conn->read_only)
             {
@@ -4857,7 +4954,7 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
             /* Read in any pending input */
             if (conn->state != DN_CONNECTION_STATE_IDLE)
             {
-                BufferConnection(conn);                
+				BufferConnection(conn, false);
             }
 
 #if 0    
@@ -5513,7 +5610,7 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
             /* Read in any pending input */
             if (conn->state != DN_CONNECTION_STATE_IDLE)
             {
-                BufferConnection(conn);
+				BufferConnection(conn, false);
             }
 
             /*
@@ -6802,7 +6899,7 @@ SendTxnInfo(RemoteQuery *node, PGXCNodeHandle *conn,
 			CommandId cid, Snapshot snapshot)
 {
 	if (conn->state == DN_CONNECTION_STATE_QUERY)
-		BufferConnection(conn);
+		BufferConnection(conn, false);
 	if (snapshot && pgxc_node_send_snapshot(conn, snapshot))
 	{
 		ereport(ERROR,
@@ -7176,7 +7273,7 @@ ExecCloseRemoteStatement(const char *stmt_name, List *nodelist)
     for (i = 0; i < conn_count; i++)
     {
         if (connections[i]->state == DN_CONNECTION_STATE_QUERY)
-            BufferConnection(connections[i]);
+			BufferConnection(connections[i], false);
         if (pgxc_node_send_close(connections[i], true, stmt_name) != 0)
         {
             /*
