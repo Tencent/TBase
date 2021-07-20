@@ -392,7 +392,7 @@ extern void HandleCmdComplete(CmdType commandType, CombineTag *combine, const ch
         if ((conn)->state == DN_CONNECTION_STATE_QUERY && \
                 (conn)->combiner && \
                 (conn)->combiner != (ResponseCombiner *) (node)) \
-            BufferConnection(conn); \
+			BufferConnection(conn, true); \
         (conn)->combiner = (ResponseCombiner *) (node); \
     } while(0)
 
@@ -400,7 +400,7 @@ extern TupleTableSlot *FetchTuple(ResponseCombiner *combiner);
 extern void InitResponseCombiner(ResponseCombiner *combiner, int node_count,
                        CombineType combine_type);
 extern void CloseCombiner(ResponseCombiner *combiner);
-extern void BufferConnection(PGXCNodeHandle *conn);
+extern void BufferConnection(PGXCNodeHandle *conn, bool need_prefetch);
 extern bool PreFetchConnection(PGXCNodeHandle *conn, int32 node_index);
 
 extern void ExecRemoteQueryReScan(RemoteQueryState *node, ExprContext *exprCtxt);
