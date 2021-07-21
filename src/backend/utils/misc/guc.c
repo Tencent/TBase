@@ -2360,11 +2360,11 @@ static struct config_bool ConfigureNamesBool[] =
     },
 #endif
     {
-            {"parse_snapshot", PGC_USERSET, CUSTOM_OPTIONS,
-             gettext_noop("allow forced ddl of inconsistent metadata"),
+            {"snapshot_for_analyze", PGC_USERSET, CUSTOM_OPTIONS,
+             gettext_noop("enable/disable get snapshot for analyze and rewrite"),
              NULL
             },
-            &g_parse_snapshot,
+            &g_snapshot_for_analyze,
             true,
             NULL, NULL, NULL
     },    

@@ -4840,24 +4840,14 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
 
     stat_transaction(conn_count);
 
-    if (need_release_handle)
-    {
         if (!temp_object_included && !PersistentConnections)
         {
             /* Clean up remote sessions */
 		pgxc_node_remote_cleanup_all(txn_type == TXN_TYPE_CommitSubTxn ||
 		                             txn_type == TXN_TYPE_RollbackSubTxn);
-            release_handles(false);
-        }
-    }
-    else
-    {
-        /* in subtxn, we just cleanup the connections. not release the handles. */
-        if (!temp_object_included && !PersistentConnections)
+        if (need_release_handle)
         {
-            /* Clean up remote sessions without release handles. */
-            pgxc_node_remote_cleanup_all(txn_type == TXN_TYPE_CommitSubTxn ||
-                                         txn_type == TXN_TYPE_RollbackSubTxn);
+            release_handles(false);
         }
     }
 

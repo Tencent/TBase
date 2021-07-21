@@ -993,7 +993,7 @@ BuildCachedPlan(CachedPlanSource *plansource, List *qlist,
     snapshot_set = false;
 	if ((!ActiveSnapshotSet() &&
         plansource->raw_parse_tree &&
-		analyze_requires_snapshot(plansource->raw_parse_tree)) && g_parse_snapshot)
+		analyze_requires_snapshot(plansource->raw_parse_tree)) && g_snapshot_for_analyze)
     {
         PushActiveSnapshot(GetTransactionSnapshot());
         snapshot_set = true;

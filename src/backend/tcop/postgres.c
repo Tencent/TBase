@@ -211,7 +211,7 @@ static char *remotePrepareGID = NULL;
 /* for error code contrib */
 bool g_is_in_init_phase = false;
 
-bool g_parse_snapshot = true;
+bool g_snapshot_for_analyze = true;
 
 bool IsNormalPostgres = false;
 
@@ -1445,7 +1445,7 @@ exec_simple_query(const char *query_string)
         /*
          * Set up a snapshot if parse analysis/planning will need one.
          */
-		if (analyze_requires_snapshot(parsetree) && g_parse_snapshot)
+		if (analyze_requires_snapshot(parsetree) && g_snapshot_for_analyze)
         {
 #ifdef __TBASE__
             /* use local snapshot instead of global if told so */
@@ -1920,7 +1920,7 @@ exec_parse_message(const char *query_string,    /* string to execute */
         /*
          * Set up a snapshot if parse analysis will need one.
          */
-		if (analyze_requires_snapshot(raw_parse_tree) && g_parse_snapshot)
+		if (analyze_requires_snapshot(raw_parse_tree) && g_snapshot_for_analyze)
         {
 #ifdef __TBASE__
             /* use local snapshot instead of global if told so */
@@ -2481,7 +2481,7 @@ exec_bind_message(StringInfo input_message)
      */
 	if ((numParams > 0 ||
         (psrc->raw_parse_tree &&
-		 analyze_requires_snapshot(psrc->raw_parse_tree))) && g_parse_snapshot)
+		 analyze_requires_snapshot(psrc->raw_parse_tree))) && g_snapshot_for_analyze)
     {
 #ifdef __TBASE__
         /* use local snapshot instead of global if told so */
