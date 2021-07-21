@@ -310,7 +310,7 @@ extern int    tcp_keepalives_count;
 #ifdef _SHARDING_
 extern bool g_allow_dml_on_datanode;
 extern bool g_allow_force_ddl;
-extern bool g_parse_snapshot;
+extern bool g_snapshot_for_analyze;
 extern bool trace_extent;
 #endif
 
