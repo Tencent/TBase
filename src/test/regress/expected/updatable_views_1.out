@@ -2095,42 +2095,30 @@ UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
          Update on public.t11
          Update on public.t12
          Update on public.t111
-         ->  Bitmap Heap Scan on public.t1
+         ->  Index Scan using t1_a_idx on public.t1
                Output: 100, t1.b, t1.c, t1.ctid, t1.shardid
-               Recheck Cond: ((t1.a > 5) AND (t1.a < 7))
+               Index Cond: ((t1.a > 5) AND (t1.a < 7))
                Filter: ((t1.a <> 6) AND (SubPlan 1) AND snoop(t1.a) AND leakproof(t1.a))
-               ->  Bitmap Index Scan on t1_a_idx
-                     Index Cond: ((t1.a > 5) AND (t1.a < 7))
                SubPlan 1
                  ->  Remote Subquery Scan on all (datanode_1)
                        ->  Append
-                             ->  Bitmap Heap Scan on public.t12 t12_1
-                                   Recheck Cond: (t12_1.a = t1.a)
-                                   ->  Bitmap Index Scan on t12_a_idx
-                                         Index Cond: (t12_1.a = t1.a)
-                             ->  Bitmap Heap Scan on public.t111 t111_1
-                                   Recheck Cond: (t111_1.a = t1.a)
-                                   ->  Bitmap Index Scan on t111_a_idx
-                                         Index Cond: (t111_1.a = t1.a)
-         ->  Bitmap Heap Scan on public.t11
+                             ->  Seq Scan on public.t12 t12_1
+                                   Filter: (t12_1.a = t1.a)
+                             ->  Seq Scan on public.t111 t111_1
+                                   Filter: (t111_1.a = t1.a)
+         ->  Index Scan using t11_a_idx on public.t11
                Output: 100, t11.b, t11.c, t11.d, t11.ctid, t11.shardid
-               Recheck Cond: ((t11.a > 5) AND (t11.a < 7))
+               Index Cond: ((t11.a > 5) AND (t11.a < 7))
                Filter: ((t11.a <> 6) AND (SubPlan 1) AND snoop(t11.a) AND leakproof(t11.a))
-               ->  Bitmap Index Scan on t11_a_idx
-                     Index Cond: ((t11.a > 5) AND (t11.a < 7))
-         ->  Bitmap Heap Scan on public.t12
+         ->  Index Scan using t12_a_idx on public.t12
                Output: 100, t12.b, t12.c, t12.e, t12.ctid, t12.shardid
-               Recheck Cond: ((t12.a > 5) AND (t12.a < 7))
+               Index Cond: ((t12.a > 5) AND (t12.a < 7))
                Filter: ((t12.a <> 6) AND (SubPlan 1) AND snoop(t12.a) AND leakproof(t12.a))
-               ->  Bitmap Index Scan on t12_a_idx
-                     Index Cond: ((t12.a > 5) AND (t12.a < 7))
-         ->  Bitmap Heap Scan on public.t111
+         ->  Index Scan using t111_a_idx on public.t111
                Output: 100, t111.b, t111.c, t111.d, t111.e, t111.ctid, t111.shardid
-               Recheck Cond: ((t111.a > 5) AND (t111.a < 7))
+               Index Cond: ((t111.a > 5) AND (t111.a < 7))
                Filter: ((t111.a <> 6) AND (SubPlan 1) AND snoop(t111.a) AND leakproof(t111.a))
-               ->  Bitmap Index Scan on t111_a_idx
-                     Index Cond: ((t111.a > 5) AND (t111.a < 7))
-(41 rows)
+(29 rows)
 
 UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
 SELECT * FROM v1 WHERE a=100; -- Nothing should have been changed to 100
@@ -2153,42 +2141,30 @@ UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
          Update on public.t11
          Update on public.t12
          Update on public.t111
-         ->  Bitmap Heap Scan on public.t1
+         ->  Index Scan using t1_a_idx on public.t1
                Output: (t1.a + 1), t1.b, t1.c, t1.ctid, t1.shardid
-               Recheck Cond: ((t1.a > 5) AND (t1.a = 8))
+               Index Cond: ((t1.a > 5) AND (t1.a = 8))
                Filter: ((SubPlan 1) AND snoop(t1.a) AND leakproof(t1.a))
-               ->  Bitmap Index Scan on t1_a_idx
-                     Index Cond: ((t1.a > 5) AND (t1.a = 8))
                SubPlan 1
                  ->  Remote Subquery Scan on all (datanode_1)
                        ->  Append
-                             ->  Bitmap Heap Scan on public.t12 t12_1
-                                   Recheck Cond: (t12_1.a = t1.a)
-                                   ->  Bitmap Index Scan on t12_a_idx
-                                         Index Cond: (t12_1.a = t1.a)
-                             ->  Bitmap Heap Scan on public.t111 t111_1
-                                   Recheck Cond: (t111_1.a = t1.a)
-                                   ->  Bitmap Index Scan on t111_a_idx
-                                         Index Cond: (t111_1.a = t1.a)
-         ->  Bitmap Heap Scan on public.t11
+                             ->  Seq Scan on public.t12 t12_1
+                                   Filter: (t12_1.a = t1.a)
+                             ->  Seq Scan on public.t111 t111_1
+                                   Filter: (t111_1.a = t1.a)
+         ->  Index Scan using t11_a_idx on public.t11
                Output: (t11.a + 1), t11.b, t11.c, t11.d, t11.ctid, t11.shardid
-               Recheck Cond: ((t11.a > 5) AND (t11.a = 8))
+               Index Cond: ((t11.a > 5) AND (t11.a = 8))
                Filter: ((SubPlan 1) AND snoop(t11.a) AND leakproof(t11.a))
-               ->  Bitmap Index Scan on t11_a_idx
-                     Index Cond: ((t11.a > 5) AND (t11.a = 8))
-         ->  Bitmap Heap Scan on public.t12
+         ->  Index Scan using t12_a_idx on public.t12
                Output: (t12.a + 1), t12.b, t12.c, t12.e, t12.ctid, t12.shardid
-               Recheck Cond: ((t12.a > 5) AND (t12.a = 8))
+               Index Cond: ((t12.a > 5) AND (t12.a = 8))
                Filter: ((SubPlan 1) AND snoop(t12.a) AND leakproof(t12.a))
-               ->  Bitmap Index Scan on t12_a_idx
-                     Index Cond: ((t12.a > 5) AND (t12.a = 8))
-         ->  Bitmap Heap Scan on public.t111
+         ->  Index Scan using t111_a_idx on public.t111
                Output: (t111.a + 1), t111.b, t111.c, t111.d, t111.e, t111.ctid, t111.shardid
-               Recheck Cond: ((t111.a > 5) AND (t111.a = 8))
+               Index Cond: ((t111.a > 5) AND (t111.a = 8))
                Filter: ((SubPlan 1) AND snoop(t111.a) AND leakproof(t111.a))
-               ->  Bitmap Index Scan on t111_a_idx
-                     Index Cond: ((t111.a > 5) AND (t111.a = 8))
-(41 rows)
+(29 rows)
 
 UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
 SELECT * FROM v1 WHERE b=8;

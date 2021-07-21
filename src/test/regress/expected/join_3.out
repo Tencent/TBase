@@ -5776,13 +5776,13 @@ select * from j1 inner join j2 on j1.id = j2.id;
    ->  Nested Loop
          Output: j1.id, j2.id
          Inner Unique: true
+         Join Filter: (j1.id = j2.id)
          ->  Seq Scan on public.j1
                Output: j1.id
-         ->  Bitmap Heap Scan on public.j2
+         ->  Materialize
                Output: j2.id
-               Recheck Cond: (j2.id = j1.id)
-               ->  Bitmap Index Scan on j2_pkey
-                     Index Cond: (j2.id = j1.id)
+               ->  Seq Scan on public.j2
+               Output: j2.id
 (14 rows)
 
 -- ensure join is not unique when not an equi-join
@@ -5795,17 +5795,15 @@ select * from j1 inner join j2 on j1.id > j2.id;
    Join Filter: (j1.id > j2.id)
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          Output: j1.id
-         ->  Bitmap Heap Scan on public.j1
+         ->  Seq Scan on public.j1
                Output: j1.id
-               ->  Bitmap Index Scan on j1_pkey
    ->  Materialize
          Output: j2.id
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                Output: j2.id
-               ->  Bitmap Heap Scan on public.j2
+               ->  Seq Scan on public.j2
                      Output: j2.id
-                     ->  Bitmap Index Scan on j2_pkey
-(15 rows)
+(13 rows)
 
 -- ensure non-unique rel is not chosen as inner
 explain (verbose, costs off)
@@ -5819,13 +5817,13 @@ select * from j1 inner join j3 on j1.id = j3.id;
    ->  Nested Loop
          Output: j1.id, j3.id
          Inner Unique: true
+         Join Filter: (j1.id = j3.id)
          ->  Seq Scan on public.j3
                Output: j3.id
-         ->  Bitmap Heap Scan on public.j1
+         ->  Materialize
                Output: j1.id
-               Recheck Cond: (j1.id = j3.id)
-               ->  Bitmap Index Scan on j1_pkey
-                     Index Cond: (j1.id = j3.id)
+               ->  Seq Scan on public.j1
+               Output: j1.id
 (14 rows)
 
 -- ensure left join is marked as unique
@@ -5840,13 +5838,13 @@ select * from j1 left join j2 on j1.id = j2.id;
    ->  Nested Loop Left Join
          Output: j1.id, j2.id
          Inner Unique: true
+         Join Filter: (j1.id = j2.id)
          ->  Seq Scan on public.j1
                Output: j1.id
-         ->  Bitmap Heap Scan on public.j2
+         ->  Materialize
                Output: j2.id
-               Recheck Cond: (j1.id = j2.id)
-               ->  Bitmap Index Scan on j2_pkey
-                     Index Cond: (j1.id = j2.id)
+               ->  Seq Scan on public.j2
+               Output: j2.id
 (14 rows)
 
 -- ensure right join is marked as unique
@@ -5859,13 +5857,13 @@ select * from j1 right join j2 on j1.id = j2.id;
    ->  Nested Loop Left Join
          Output: j1.id, j2.id
          Inner Unique: true
+         Join Filter: (j1.id = j2.id)
          ->  Seq Scan on public.j2
                Output: j2.id
-         ->  Bitmap Heap Scan on public.j1
+         ->  Materialize
                Output: j1.id
-               Recheck Cond: (j1.id = j2.id)
-               ->  Bitmap Index Scan on j1_pkey
-                     Index Cond: (j1.id = j2.id)
+               ->  Seq Scan on public.j1
+               Output: j1.id
 (12 rows)
 
 -- ensure full join is marked as unique
@@ -5898,17 +5896,15 @@ select * from j1 cross join j2;
    Output: j1.id, j2.id
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          Output: j1.id
-         ->  Bitmap Heap Scan on public.j1
+         ->  Seq Scan on public.j1
                Output: j1.id
-               ->  Bitmap Index Scan on j1_pkey
    ->  Materialize
          Output: j2.id
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                Output: j2.id
-               ->  Bitmap Heap Scan on public.j2
+               ->  Seq Scan on public.j2
                      Output: j2.id
-                     ->  Bitmap Index Scan on j2_pkey
-(14 rows)
+(12 rows)
 
 -- ensure a natural join is marked as unique
 explain (verbose, costs off)
@@ -5922,13 +5918,13 @@ select * from j1 natural join j2;
    ->  Nested Loop
          Output: j1.id
          Inner Unique: true
+         Join Filter: (j1.id = j2.id)
          ->  Seq Scan on public.j1
                Output: j1.id
-         ->  Bitmap Heap Scan on public.j2
+         ->  Materialize
                Output: j2.id
-               Recheck Cond: (j2.id = j1.id)
-               ->  Bitmap Index Scan on j2_pkey
-                     Index Cond: (j2.id = j1.id)
+               ->  Seq Scan on public.j2
+               Output: j2.id
 (14 rows)
 
 -- ensure a distinct clause allows the inner to become unique
@@ -5942,6 +5938,7 @@ inner join (select distinct id from j3) j3 on j1.id = j3.id;
    ->  Nested Loop
          Output: j1.id, j3.id
          Inner Unique: true
+         Join Filter: (j1.id = j3.id)
          ->  Unique
                Output: j3.id
                ->  Sort
@@ -5949,12 +5946,9 @@ inner join (select distinct id from j3) j3 on j1.id = j3.id;
                      Sort Key: j3.id
                      ->  Seq Scan on public.j3
                            Output: j3.id
-         ->  Bitmap Heap Scan on public.j1
+         ->  Seq Scan on public.j1
                Output: j1.id
-               Recheck Cond: (j1.id = j3.id)
-               ->  Bitmap Index Scan on j1_pkey
-                     Index Cond: (j1.id = j3.id)
-(17 rows)
+(15 rows)
 
 -- ensure group by clause allows the inner to become unique
 explain (verbose, costs off)
@@ -5967,6 +5961,7 @@ inner join (select id from j3 group by id) j3 on j1.id = j3.id;
    ->  Nested Loop
          Output: j1.id, j3.id
          Inner Unique: true
+         Join Filter: (j1.id = j3.id)
          ->  Group
                Output: j3.id
                Group Key: j3.id
@@ -5975,12 +5970,9 @@ inner join (select id from j3 group by id) j3 on j1.id = j3.id;
                      Sort Key: j3.id
                      ->  Seq Scan on public.j3
                            Output: j3.id
-         ->  Bitmap Heap Scan on public.j1
+         ->  Seq Scan on public.j1
                Output: j1.id
-               Recheck Cond: (j1.id = j3.id)
-               ->  Bitmap Index Scan on j1_pkey
-                     Index Cond: (j1.id = j3.id)
-(18 rows)
+(16 rows)
 
 drop table j1;
 drop table j2;
@@ -6009,7 +6001,7 @@ inner join j2 on j1.id1 = j2.id1;
    ->  Nested Loop
          Output: j1.id1, j1.id2, j2.id1, j2.id2
          Join Filter: (j1.id1 = j2.id1)
-         ->  Index Only Scan using j2_pkey on public.j2
+         ->  Seq Scan on public.j2
                Output: j2.id1, j2.id2
          ->  Seq Scan on public.j1
                Output: j1.id1, j1.id2
@@ -6028,14 +6020,12 @@ inner join j2 on j1.id1 = j2.id1 and j1.id2 = j2.id2;
    ->  Nested Loop
          Output: j1.id1, j1.id2, j2.id1, j2.id2
          Inner Unique: true
-         ->  Index Only Scan using j2_pkey on public.j2
+         Join Filter: ((j1.id1 = j2.id1) AND (j1.id2 = j2.id2))
+         ->  Seq Scan on public.j2
                Output: j2.id1, j2.id2
-         ->  Bitmap Heap Scan on public.j1
+         ->  Seq Scan on public.j1
                Output: j1.id1, j1.id2
-               Recheck Cond: ((j1.id1 = j2.id1) AND (j1.id2 = j2.id2))
-               ->  Bitmap Index Scan on j1_pkey
-                     Index Cond: ((j1.id1 = j2.id1) AND (j1.id2 = j2.id2))
-(14 rows)
+(12 rows)
 
 -- ensure we don't detect the join to be unique when quals are not part of the
 -- join condition
@@ -6050,15 +6040,13 @@ inner join j2 on j1.id1 = j2.id1 where j1.id2 = 1;
    Remote query: SELECT j1.id1, j1.id2, j2.id1, j2.id2 FROM (j1 JOIN j2 ON ((j1.id1 = j2.id1))) WHERE (j1.id2 = 1)
    ->  Nested Loop
          Output: j1.id1, j1.id2, j2.id1, j2.id2
-         Inner Unique: true
-         ->  Index Only Scan using j2_pkey on public.j2
-               Output: j2.id1, j2.id2
-         ->  Bitmap Heap Scan on public.j1
+         Join Filter: (j1.id1 = j2.id1)
+         ->  Seq Scan on public.j1
                Output: j1.id1, j1.id2
-               Recheck Cond: ((j1.id1 = j2.id1) AND (j1.id2 = 1))
-               ->  Bitmap Index Scan on j1_pkey
-                     Index Cond: ((j1.id1 = j2.id1) AND (j1.id2 = 1))
-(14 rows)
+               Filter: (j1.id2 = 1)
+         ->  Seq Scan on public.j2
+               Output: j2.id1, j2.id2
+(12 rows)
 
 -- as above, but for left joins.
 explain (verbose, costs off)
@@ -6073,14 +6061,12 @@ left join j2 on j1.id1 = j2.id1 where j1.id2 = 1;
    ->  Nested Loop Left Join
          Output: j1.id1, j1.id2, j2.id1, j2.id2
          Join Filter: (j1.id1 = j2.id1)
-         ->  Bitmap Heap Scan on public.j1
+         ->  Seq Scan on public.j1
                Output: j1.id1, j1.id2
-               Recheck Cond: (j1.id2 = 1)
-               ->  Bitmap Index Scan on j1_pkey
-                     Index Cond: (j1.id2 = 1)
-         ->  Index Only Scan using j2_pkey on public.j2
+               Filter: (j1.id2 = 1)
+         ->  Seq Scan on public.j2
                Output: j2.id1, j2.id2
-(14 rows)
+(12 rows)
 
 -- validate logic in merge joins which skips mark and restore.
 -- it should only do this if all quals which were used to detect the unique
@@ -6099,13 +6085,11 @@ where j1.id1 % 1000 = 1 and j2.id1 % 1000 = 1;
    Node/s: datanode_1, datanode_2
    ->  Nested Loop
          Join Filter: ((j1.id1 = j2.id1) AND (j1.id2 = j2.id2))
-         ->  Bitmap Heap Scan on j1
-               Recheck Cond: ((id1 % 1000) = 1)
-               ->  Bitmap Index Scan on j1_id1_idx
-         ->  Bitmap Heap Scan on j1 j2
-               Recheck Cond: ((id1 % 1000) = 1)
-               ->  Bitmap Index Scan on j1_id1_idx
-(10 rows)
+         ->  Seq Scan on j1
+               Filter: ((id1 % 1000) = 1)
+         ->  Seq Scan on j1 j2
+               Filter: ((id1 % 1000) = 1)
+(8 rows)
 
 select * from j1 j1
 inner join j1 j2 on j1.id1 = j2.id1 and j1.id2 = j2.id2
