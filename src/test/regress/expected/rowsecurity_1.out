@@ -2074,9 +2074,8 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Seq Scan on z1
                Filter: (((a % 2) = 0) AND f_leak(b))
-   ->  Materialize
          ->  CTE Scan on q
-(9 rows)
+(8 rows)
 
 SET ROLE regress_rls_group1;
 SELECT * FROM z1 WHERE f_leak(b) order by 1;
@@ -2126,9 +2125,8 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Seq Scan on z1
                Filter: (((a % 2) = 0) AND f_leak(b))
-   ->  Materialize
          ->  CTE Scan on q
-(9 rows)
+(8 rows)
 
 SET SESSION AUTHORIZATION regress_rls_carol;
 SELECT * FROM z1 WHERE f_leak(b) order by 1;
@@ -2178,9 +2176,8 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Seq Scan on z1
                Filter: (((a % 2) = 1) AND f_leak(b))
-   ->  Materialize
          ->  CTE Scan on q
-(9 rows)
+(8 rows)
 
 SET ROLE regress_rls_group2;
 SELECT * FROM z1 WHERE f_leak(b) order by 1;
@@ -2230,9 +2227,8 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Seq Scan on z1
                Filter: (((a % 2) = 1) AND f_leak(b))
-   ->  Materialize
          ->  CTE Scan on q
-(9 rows)
+(8 rows)
 
 --
 -- Views should follow policy for view owner.

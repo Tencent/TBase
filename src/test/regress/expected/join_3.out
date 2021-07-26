@@ -3844,9 +3844,9 @@ where t1.f1 = ss.f1;
                ->  Seq Scan on public.int8_tbl i8
                      Output: i8.q1, i8.q2
                      Filter: (i8.q2 = 123)
-   ->  Materialize
-         Output: (i8.q1), t2.f1
          ->  Limit
+               Output: (i8.q1), t2.f1
+         ->  Materialize
                Output: (i8.q1), t2.f1
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                      Output: i8.q1, t2.f1
@@ -3876,7 +3876,7 @@ select * from
   lateral (select ss1.* from text_tbl t3 limit 1) as ss2
 where t1.f1 = ss2.f1;
                                     QUERY PLAN                                     
------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------
  Nested Loop
    Output: t1.f1, i8.q1, i8.q2, (i8.q1), t2.f1, ((i8.q1)), (t2.f1)
    Join Filter: (t1.f1 = (t2.f1))
@@ -3889,11 +3889,11 @@ where t1.f1 = ss2.f1;
                ->  Seq Scan on public.int8_tbl i8
                      Output: i8.q1, i8.q2
                      Filter: (i8.q2 = 123)
-   ->  Materialize
-         Output: (i8.q1), t2.f1, ((i8.q1)), (t2.f1)
          ->  Nested Loop
                Output: (i8.q1), t2.f1, ((i8.q1)), (t2.f1)
                ->  Limit
+                     Output: (i8.q1), t2.f1
+               ->  Materialize
                      Output: (i8.q1), t2.f1
                      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                            Output: i8.q1, t2.f1
@@ -3901,10 +3901,10 @@ where t1.f1 = ss2.f1;
                                  Output: (i8.q1), t2.f1
                                  ->  Seq Scan on public.text_tbl t2
                                        Output: i8.q1, t2.f1
-               ->  Materialize
-                     Output: ((i8.q1)), (t2.f1)
                      ->  Limit
                            Output: ((i8.q1)), (t2.f1)
+               ->  Materialize
+                     Output: ((i8.q1)), (t2.f1)
                            ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                  Output: (i8.q1), t2.f1
                                  ->  Limit
@@ -3962,12 +3962,12 @@ where tt1.f1 = ss1.c0;
                            ->  Seq Scan on public.text_tbl tt4
                                  Output: tt4.f1
                                  Filter: (tt4.f1 = 'foo'::text)
-   ->  Materialize
-         Output: ss1.c0
          ->  Subquery Scan on ss1
                Output: ss1.c0
                Filter: (ss1.c0 = 'foo'::text)
                ->  Limit
+                     Output: (tt4.f1)
+               ->  Materialize
                      Output: (tt4.f1)
                      ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                            Output: tt4.f1
@@ -4026,9 +4026,9 @@ where ss1.c2 = 0;
                      Output: i42.f1
                      ->  Seq Scan on public.int4_tbl i42
                            Output: i42.f1
-   ->  Materialize
-         Output: (i41.f1), (i8.q1), (i8.q2), (i42.f1), (i43.f1), ((42))
          ->  Limit
+               Output: (i41.f1), (i8.q1), (i8.q2), (i42.f1), (i43.f1), ((42))
+         ->  Materialize
                Output: (i41.f1), (i8.q1), (i8.q2), (i42.f1), (i43.f1), ((42))
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                      Output: i41.f1, i8.q1, i8.q2, i42.f1, i43.f1, (42)
@@ -4065,9 +4065,9 @@ select * from
  Nested Loop Left Join
    Join Filter: ((1) = COALESCE((1)))
    ->  Result
-   ->  Materialize
          ->  Hash Full Join
                Hash Cond: (a1.unique1 = (1))
+         ->  Materialize
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                      ->  Seq Scan on tenk1 a1
                ->  Hash

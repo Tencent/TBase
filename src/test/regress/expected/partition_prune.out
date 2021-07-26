@@ -1410,8 +1410,8 @@ explain (costs off) select * from mc2p t1, lateral (select count(*) from mc3p t2
                      Filter: (a = 1)
                ->  Seq Scan on mc2p_default t1_2
                      Filter: (a = 1)
-   ->  Materialize
-         ->  Finalize Aggregate
+   ->  Finalize Aggregate
+         ->  Materialize
                ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                      ->  Partial Aggregate
                            ->  Append
@@ -1449,8 +1449,8 @@ explain (costs off) select * from mc2p t1, lateral (select count(*) from mc3p t2
                      Filter: (a = 1)
                ->  Seq Scan on mc2p_default t1_2
                      Filter: (a = 1)
-   ->  Materialize
-         ->  Finalize Aggregate
+   ->  Finalize Aggregate
+         ->  Materialize
                ->  Remote Subquery Scan on all (datanode_1)
                      ->  Partial Aggregate
                            ->  Append

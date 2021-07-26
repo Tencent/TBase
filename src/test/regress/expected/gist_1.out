@@ -131,8 +131,8 @@ cross join lateral
  Nested Loop
    ->  Remote Subquery Scan on all (datanode_1)
          ->  Values Scan on "*VALUES*"
-   ->  Materialize
-         ->  Limit
+   ->  Limit
+         ->  Materialize
                ->  Remote Subquery Scan on all (datanode_1)
                      ->  Limit
                            ->  Index Only Scan using gist_tbl_point_index on gist_tbl

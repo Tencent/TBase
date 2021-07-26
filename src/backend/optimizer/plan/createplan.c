@@ -346,8 +346,8 @@ static int add_sort_column(AttrNumber colIdx, Oid sortOp, Oid coll,
 static double GetPlanRows(Plan *plan);
 static bool set_plan_parallel(Plan *plan);
 static void set_plan_nonparallel(Plan *plan);
+static Plan *materialize_top_remote_subplan(Plan *node);
 static bool contain_node_walker(Plan *node, NodeTag type, bool search_nonparallel);
-
 #endif
 static RemoteSubplan *find_push_down_plan(Plan *plan, bool force);
 
@@ -4806,9 +4806,11 @@ create_nestloop_plan(PlannerInfo *root,
      */
 #ifdef __TBASE__
 	if (!IsA(inner_plan, Material) && contain_remote_subplan_walker((Node*)inner_plan, NULL, true))
+    {
+        inner_plan = materialize_top_remote_subplan(inner_plan);
+    }
 #else
     if (IsA(inner_plan, RemoteSubplan))
-#endif
     {
         Plan       *matplan = (Plan *) make_material(inner_plan);
 
@@ -4822,6 +4824,7 @@ create_nestloop_plan(PlannerInfo *root,
 
         inner_plan = matplan;
     }
+#endif
 #endif
 
     join_plan = make_nestloop(tlist,
