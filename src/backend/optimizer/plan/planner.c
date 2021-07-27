@@ -324,6 +324,7 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
     glob->dependsOnRole = false;
 #ifdef __TBASE__
     groupOids = NULL;
+	min_workers_of_hashjon_gather = PG_INT32_MAX;
 #endif
 #ifdef __COLD_HOT__
     has_cold_hot_table = false;

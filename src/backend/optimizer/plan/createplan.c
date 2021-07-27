@@ -107,6 +107,7 @@ bool mergejoin = false;
 bool child_of_gather = false;
 bool enable_group_across_query = false;
 bool enable_distributed_unique_plan = false;
+int min_workers_of_hashjon_gather = PG_INT32_MAX;
 #endif
 #ifdef __COLD_HOT__
 bool has_cold_hot_table = false;
@@ -345,6 +346,7 @@ static int add_sort_column(AttrNumber colIdx, Oid sortOp, Oid coll,
 static double GetPlanRows(Plan *plan);
 static bool set_plan_parallel(Plan *plan);
 static void set_plan_nonparallel(Plan *plan);
+static bool contain_hashjon_walker(Plan *node);
 
 #endif
 static RemoteSubplan *find_push_down_plan(Plan *plan, bool force);
@@ -6472,7 +6474,7 @@ make_remotesubplan(PlannerInfo *root,
 
             heap_parallel_workers = Min(heap_parallel_workers, max_parallel_workers_per_gather);
 
-            gather->num_workers = Max(heap_parallel_workers, nWorkers);
+			gather->num_workers = Min(Max(heap_parallel_workers, nWorkers), min_workers_of_hashjon_gather);
         }
         else
         {
@@ -6711,6 +6713,8 @@ make_remotesubplan(PlannerInfo *root,
                 parallel_workers = heap_parallel_workers;
 
                 parallel_workers = Min(parallel_workers, max_parallel_workers_per_gather);
+				/* launched parallel workers must less than hashjoin's parallel workers under it */
+                parallel_workers = Min(parallel_workers, min_workers_of_hashjon_gather);
                 
 				gather_plan = make_gather(copyObject(gather_left->targetlist),
                                           NIL,
@@ -6747,6 +6751,7 @@ make_remotesubplan(PlannerInfo *root,
             }
         }
     }
+    min_workers_of_hashjon_gather = PG_INT32_MAX;
 #endif
 
     if (resultDistribution)
@@ -8263,6 +8268,15 @@ make_gather(List *qptlist,
     node->single_copy = single_copy;
     node->invisible = false;
 
+#ifdef __TBASE__
+	/*
+	 * if there has hashjoin in the lower layer, write down the smallest workers
+	 */
+    if (min_workers_of_hashjon_gather > nworkers && contain_hashjon_walker(subplan))
+    {
+        min_workers_of_hashjon_gather = nworkers;
+    }
+#endif
     return node;
 }
 
@@ -8926,6 +8940,189 @@ contain_remote_subplan_walker(Node *node, void *context, bool include_cte)
         }
     }
     return false;
+}
+
+/*
+ * check if contain hashjon in the plan
+ */
+static bool
+contain_hashjon_walker(Plan *node)
+{
+    Plan *plan = node;
+
+    if (!plan)
+    {
+        return false;
+    }
+
+    if (IsA(node, RemoteSubplan) || IsA(node, RemoteQuery) || IsA(plan, Gather))
+    {
+        return false;
+    }
+
+    if (IsA(node, HashJoin))
+    {
+        return true;
+    }
+
+    if (IsA(node, SubqueryScan))
+    {
+        SubqueryScan *subquery = (SubqueryScan *)node;
+        plan = subquery->subplan;
+    }
+
+    if (IsA(plan, Append))
+    {
+        ListCell *lc;
+        Append *append = (Append *)plan;
+
+        foreach(lc, append->appendplans)
+        {
+            Plan *appendplan = (Plan *)lfirst(lc);
+
+            if (appendplan && contain_hashjon_walker(appendplan))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+    else if (IsA(plan, MergeAppend))
+    {
+        ListCell *lc;
+        MergeAppend *mergeappend = (MergeAppend *)plan;
+
+        foreach(lc, mergeappend->mergeplans)
+        {
+            Plan *mergeappendplan = (Plan *)lfirst(lc);
+
+            if (mergeappendplan && contain_hashjon_walker(mergeappendplan))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    if (outerPlan(plan))
+    {
+        if (contain_hashjon_walker(outerPlan(plan)))
+        {
+            return true;
+        }
+    }
+
+    if (innerPlan(plan))
+    {
+        if (contain_hashjon_walker(innerPlan(plan)))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
+static Plan*
+materialize_top_remote_subplan(Plan *node)
+{
+    Node *plan = (Node *)node;
+
+    if (!plan)
+    {
+        return NULL;
+    }
+
+    if (IsA(node, Material))
+    {
+        return node;
+    }
+
+    if (IsA(node, RemoteSubplan))
+    {
+        Plan	   *matplan = (Plan *) make_material(node);
+
+        /*
+         * We assume the materialize will not spill to disk, and therefore
+         * charge just cpu_operator_cost per tuple.  (Keep this estimate in
+         * sync with cost_mergejoin.)
+         */
+        copy_plan_costsize(matplan, node);
+        matplan->total_cost += cpu_operator_cost * matplan->plan_rows;
+
+        return matplan;
+    }
+
+    if (IsA(node, SubqueryScan))
+    {
+        SubqueryScan *subquery = (SubqueryScan *)node;
+        plan = (Node *)subquery->subplan;
+    }
+
+    if (IsA(plan, Append))
+    {
+        ListCell *lc;
+        Append *append = (Append *)plan;
+
+        foreach(lc, append->appendplans)
+        {
+            Plan *appendplan = (Plan *)lfirst(lc);
+
+            if (appendplan)
+            {
+                Plan *tmpplan = materialize_top_remote_subplan(appendplan);
+                if (tmpplan && tmpplan != lfirst(lc))
+                {
+                    lfirst(lc) = tmpplan;
+                }
+            }
+        }
+
+        return node;
+    }
+    else if (IsA(plan, MergeAppend))
+    {
+        ListCell *lc;
+        MergeAppend *mergeappend = (MergeAppend *)plan;
+
+        foreach(lc, mergeappend->mergeplans)
+        {
+            Plan *mergeappendplan = (Plan *)lfirst(lc);
+
+            if (mergeappendplan)
+            {
+                Plan *tmpplan = materialize_top_remote_subplan(mergeappendplan);
+                if (tmpplan && tmpplan != lfirst(lc))
+                {
+                    lfirst(lc) = tmpplan;
+                }
+            }
+        }
+
+        return node;
+    }
+
+    if (outerPlan(plan))
+    {
+        Plan *tmpplan = materialize_top_remote_subplan(outerPlan(plan));
+        if (tmpplan && tmpplan != outerPlan(plan))
+        {
+            outerPlan(plan) = tmpplan;
+        }
+    }
+
+    if (innerPlan(plan))
+    {
+        Plan *tmpplan = materialize_top_remote_subplan(innerPlan(plan));
+        if (tmpplan && tmpplan != innerPlan(plan))
+        {
+            innerPlan(plan) = tmpplan;
+        }
+    }
+    return node;
 }
 
 static void

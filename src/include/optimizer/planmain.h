@@ -99,6 +99,7 @@ extern int remote_subplan_depth;
 extern List *groupOids;
 extern bool enable_distributed_unique_plan;
 extern bool has_cold_hot_table;
+extern int min_workers_of_hashjon_gather;
 
 #define INSERT_TRIGGER "tt_dn_in_"
 #define UPDATE_TRIGGER "tt_dn_up_"
