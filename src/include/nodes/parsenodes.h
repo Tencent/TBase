@@ -2903,6 +2903,7 @@ typedef struct IndexStmt
 #ifdef __TBASE__
     /* used for interval partition */
     Oid         parentIndexOid;
+	List       *partsOldNode;   /* like oldNode just for partition tables */
 #endif
 } IndexStmt;
 

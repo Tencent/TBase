@@ -494,7 +494,7 @@ static void ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId,
                      bool rewrite);
 static void RebuildConstraintComment(AlteredTableInfo *tab, int pass,
                          Oid objid, Relation rel, char *conname);
-static void TryReuseIndex(Oid oldId, IndexStmt *stmt);
+static void TryReuseIndex(Relation rel, Oid oldId, IndexStmt *stmt);
 static void TryReuseForeignKey(Oid oldId, Constraint *con);
 static void change_owner_fix_column_acls(Oid relationOid,
                              Oid oldOwnerId, Oid newOwnerId);
@@ -8715,6 +8715,7 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
     bool        check_rights;
     bool        skip_build;
     bool        quiet;
+	bool        save_oldnode;
     ObjectAddress address;
 
     Assert(IsA(stmt, IndexStmt));
@@ -8725,8 +8726,10 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 
     /* suppress schema rights check when rebuilding existing index */
     check_rights = !is_rebuild;
+	/* if we're resuing an old node */
+	save_oldnode = OidIsValid(stmt->oldNode);
     /* skip index build if phase 3 will do it or we're reusing an old one */
-    skip_build = tab->rewrite > 0 || OidIsValid(stmt->oldNode);
+	skip_build = tab->rewrite > 0 || save_oldnode;
     /* suppress notices when rebuilding existing index */
     quiet = is_rebuild;
 
@@ -8771,6 +8774,10 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
                 partidxstmt = (IndexStmt *)copyObject((void*)stmt);
                 partidxstmt->relation->relname = GetPartitionName(RelationGetRelid(rel), i, false);
                 partidxstmt->idxname = GetPartitionName(indexOid, i, true);
+				if (save_oldnode)
+				{
+					partidxstmt->oldNode = list_nth_oid(stmt->partsOldNode, i);
+				}
 
                 partOid = get_relname_relid(partidxstmt->relation->relname, RelationGetNamespace(rel));
 
@@ -8789,6 +8796,19 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
                                    false,    /* check_not_in_use */
                                    skip_build,    /* skip_build */
                                    quiet); /* quiet */
+				/*
+                 * If TryReuseIndex() stashed a relfilenode for us, we used it for the new
+                 * index instead of building from scratch.  The DROP of the old edition of
+                 * this index will have scheduled the storage for deletion at commit, so
+                 * cancel that pending deletion.
+                 */
+				if (save_oldnode)
+				{
+					Relation	irel = index_open(addr.objectId, NoLock);
+
+					RelationPreserveStorage(irel->rd_node, true);
+					index_close(irel, NoLock);
+				}
 
                 /* Make dependency entries */
                 myself.classId = RelationRelationId;
@@ -8819,7 +8839,7 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
      * this index will have scheduled the storage for deletion at commit, so
      * cancel that pending deletion.
      */
-    if (OidIsValid(stmt->oldNode))
+	if (save_oldnode)
     {
         Relation    irel = index_open(address.objectId, NoLock);
 
@@ -11912,7 +11932,7 @@ ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId, char *cmd,
             AlterTableCmd *newcmd;
 
             if (!rewrite)
-                TryReuseIndex(oldId, stmt);
+                TryReuseIndex(rel, oldId, stmt);
 			stmt->reset_default_tblspc = true;
             /* keep the index's comment */
             stmt->idxcomment = GetComment(oldId, RelationRelationId, 0);
@@ -11941,7 +11961,7 @@ ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId, char *cmd,
                     indoid = get_constraint_index(oldId);
 
                     if (!rewrite)
-                        TryReuseIndex(indoid, indstmt);
+						TryReuseIndex(rel, indoid, indstmt);
                     /* keep any comment on the index */
                     indstmt->idxcomment = GetComment(indoid,
                                                      RelationRelationId, 0);
@@ -12028,7 +12048,7 @@ RebuildConstraintComment(AlteredTableInfo *tab, int pass, Oid objid,
  * for the real analysis, then mutates the IndexStmt based on that verdict.
  */
 static void
-TryReuseIndex(Oid oldId, IndexStmt *stmt)
+TryReuseIndex(Relation rel, Oid oldId, IndexStmt *stmt)
 {
     if (CheckIndexCompatible(oldId,
                              stmt->accessMethod,
@@ -12039,6 +12059,25 @@ TryReuseIndex(Oid oldId, IndexStmt *stmt)
 
         stmt->oldNode = irel->rd_node.relNode;
         index_close(irel, NoLock);
+
+		if (RELATION_IS_INTERVAL(rel))
+		{
+			int nParts = 0;
+			int i = 0;
+
+			nParts = RelationGetNParts(rel);
+			stmt->partsOldNode = NULL;
+
+			for (i = 0; i < nParts; i++)
+			{
+				Relation iprel = index_open(RelationGetPartitionIndex(rel, oldId, i),
+				                            NoLock);
+
+				stmt->partsOldNode = lappend_oid(stmt->partsOldNode,
+				                                            iprel->rd_node.relNode);
+				index_close(iprel, NoLock);
+			}
+		}
     }
 }
 
