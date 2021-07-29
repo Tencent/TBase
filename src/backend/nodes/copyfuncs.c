@@ -3753,6 +3753,7 @@ _copyIndexStmt(const IndexStmt *from)
 	COPY_SCALAR_FIELD(reset_default_tblspc);
 #ifdef __TBASE__
     COPY_SCALAR_FIELD(parentIndexOid);
+	COPY_NODE_FIELD(partsOldNode);
 #endif
     return newnode;
 }
