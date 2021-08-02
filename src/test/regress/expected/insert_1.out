@@ -875,40 +875,30 @@ with baseInfo as(select * from t1)
 insert into t2 select * from baseInfo;
 drop table t1;
 drop table t2;
--- Determine whether tables of different groups are allowed to insert.
-set default_locator_type to shard;
-drop table if exists t2;
-NOTICE:  table "t2" does not exist, skipping
-drop table if exists t2_rep;
-NOTICE:  table "t2_rep" does not exist, skipping
-drop table if exists t2_new;
-NOTICE:  table "t2_new" does not exist, skipping
-create table t2(f1 int,f2 int);
-NOTICE:  Replica identity is needed for shard table, please add to this table through "alter table" command.
-create table t2_rep(f1 int,f2 int) distribute by replication;
-insert into t2_rep values(1,1),(2,2);
-insert into t2 select * from t2_rep;
-select count(*) from t2_rep;
- count 
--------
-     2
+-- test insert with returning in JDBC
+drop table if exists insertwithret;
+NOTICE:  table "insertwithret" does not exist, skipping
+create table insertwithret(a int, b text, c int);
+prepare p0(int,text,int) as insert into insertwithret values($1, $2, $3) returning a;
+prepare p1(int,text,int) as insert into insertwithret values($1, $2, $3) returning a,b;
+prepare p2(int,text,int) as insert into insertwithret values($1, $2, $3) returning c;
+prepare p3(int,text,int) as insert into insertwithret values($1, $2, $3);
+execute p0(1, 'abc', 1);
+ a 
+---
+ 1
 (1 row)
 
-select count(*) from t2;
- count 
--------
-     2
+execute p1(1, 'abc', 1);
+ a |  b  
+---+-----
+ 1 | abc
 (1 row)
 
-create table t2_new as select * from t2_rep;
-NOTICE:  Replica identity is needed for shard table, please add to this table through "alter table" command.
-select count(*) from t2_new;
- count 
--------
-     2
+execute p2(1, 'abc', 1);
+ c 
+---
+ 1
 (1 row)
 
-drop table t2;
-drop table t2_rep;
-drop table t2_new;
-reset default_locator_type;
+execute p3(1, 'abc', 1);

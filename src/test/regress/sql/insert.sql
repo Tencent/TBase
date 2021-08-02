@@ -573,3 +573,15 @@ drop table t2;
 drop table t2_rep;
 drop table t2_new;
 reset default_locator_type;
+-- test insert with returning in JDBC
+drop table if exists insertwithret;
+create table insertwithret(a int, b text, c int);
+prepare p0(int,text,int) as insert into insertwithret values($1, $2, $3) returning a;
+prepare p1(int,text,int) as insert into insertwithret values($1, $2, $3) returning a,b;
+prepare p2(int,text,int) as insert into insertwithret values($1, $2, $3) returning c;
+prepare p3(int,text,int) as insert into insertwithret values($1, $2, $3);
+
+execute p0(1, 'abc', 1);
+execute p1(1, 'abc', 1);
+execute p2(1, 'abc', 1);
+execute p3(1, 'abc', 1);
