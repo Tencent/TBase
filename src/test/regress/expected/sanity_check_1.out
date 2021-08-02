@@ -60,6 +60,7 @@ inet_tbl|t
 inhf|f
 inhx|t
 insert_tbl|f
+insertwithret|f
 int2_tbl|f
 int4_tbl|f
 int8_tbl|f

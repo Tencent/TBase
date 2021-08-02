@@ -188,6 +188,7 @@ ProcessQuery(PlannedStmt *plan,
 			 char *completionTag,
 			 int instrument)
 {
+    int         eflags = 0;
     QueryDesc  *queryDesc;
 
     /*
@@ -206,10 +207,15 @@ ProcessQuery(PlannedStmt *plan,
                                 GetActiveSnapshot(), InvalidSnapshot,
 								dest, params, queryEnv, instrument);
 
+	if (plan->hasReturning)
+	{
+	    eflags |= EXEC_FLAG_RETURNING;
+	}
+
     /*
      * Call ExecutorStart to prepare the plan for execution
      */
-    ExecutorStart(queryDesc, 0);
+	ExecutorStart(queryDesc, eflags);
 
     /*
      * Run the plan to completion.
