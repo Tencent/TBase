@@ -1132,6 +1132,8 @@ typedef struct PgStat_FunctionCallUsage
 	instr_time	f_start;
 } PgStat_FunctionCallUsage;
 
+typedef void (*pgstat_report_hook_type) (BackendState state, const char *cmd_str);
+extern PGDLLIMPORT pgstat_report_hook_type pgstat_report_hook;
 
 /* ----------
  * GUC parameters
