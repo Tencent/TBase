@@ -143,6 +143,8 @@ char       *pgstat_stat_tmpname = NULL;
  */
 PgStat_MsgBgWriter BgWriterStats;
 
+pgstat_report_hook_type pgstat_report_hook = NULL;
+
 /* ----------
  * Local data
  * ----------
@@ -3128,6 +3130,9 @@ pgstat_report_activity(BackendState state, const char *cmd_str)
     }
 
     pgstat_increment_changecount_after(beentry);
+	
+	if (pgstat_report_hook)
+		pgstat_report_hook(state, cmd_str);
 }
 
 /*-----------

@@ -96,6 +96,7 @@ static PgClusterStatus *ClusterStatusArray = NULL;
 static PgClusterStatus *MyCSEntry = NULL;
 
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
+static pgstat_report_hook_type prev_pgstat_report_hook = NULL;
 static PortalStart_hook_type prev_PortalStart = NULL;
 static PortalDrop_hook_type prev_PortalDrop = NULL;
 static ExecutorStart_hook_type prev_ExecutorStart = NULL;
@@ -341,13 +342,34 @@ pgcs_report_common(PgClusterStatus *entry, QueryDesc *desc)
 
 /* ----------
  * pgcs_report_query_activity
+ *
+ *  Do nothing but set common field, just enable this cluster entry
+ *  to make it visible in the same time as pg_stat_activity. Hooked
+ *  in pgstat_report_activity, args are redundant.
+ */
+static void
+pgcs_report_query_activity(BackendState state, const char *cmd_str)
+{
+	volatile PgClusterStatus *entry;
+	
+	pgcs_entry_initialize();
+	entry = MyCSEntry;
+	
+	pgcs_report_common((PgClusterStatus *) entry, NULL);
+	
+	if (prev_pgstat_report_hook)
+		prev_pgstat_report_hook(state, cmd_str);
+}
+
+/* ----------
+ * pgcs_report_executor_activity
  * 
  *  Report fileds of per-query referred, hooked as ExecutorStart_hook
  *  report planstate, cursors and common fields.
  * ----------
  */
 static void
-pgcs_report_query_activity(QueryDesc *desc, int eflags)
+pgcs_report_executor_activity(QueryDesc *desc, int eflags)
 {
 	volatile PgClusterStatus *entry;
 	StringInfo planstate_str = NULL;
@@ -1076,12 +1098,14 @@ _PG_init(void)
 	 */
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = pgcs_shmem_startup;
+	prev_pgstat_report_hook = pgstat_report_hook;
+	pgstat_report_hook = pgcs_report_query_activity;
 	prev_PortalStart = PortalStart_hook;
 	PortalStart_hook = pgcs_report_activity;
 	prev_PortalDrop = PortalDrop_hook;
 	PortalDrop_hook = pgcs_report_activity;
 	prev_ExecutorStart = ExecutorStart_hook;
-	ExecutorStart_hook = pgcs_report_query_activity;
+	ExecutorStart_hook = pgcs_report_executor_activity;
 }
 
 /*
@@ -1092,6 +1116,7 @@ _PG_fini(void)
 {
 	/* Uninstall hooks. */
 	shmem_startup_hook = prev_shmem_startup_hook;
+	pgstat_report_hook = prev_pgstat_report_hook;
 	PortalStart_hook = prev_PortalStart;
 	PortalDrop_hook = prev_PortalDrop;
 	ExecutorStart_hook = prev_ExecutorStart;
