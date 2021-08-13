@@ -129,6 +129,7 @@ struct pgxc_node_handle
 	long        recv_datarows;
 	bool 		plpgsql_need_begin_sub_txn;
 	bool 		plpgsql_need_begin_txn;
+	char        node_type;
 #endif
 };
 typedef struct pgxc_node_handle PGXCNodeHandle;
@@ -142,6 +143,8 @@ typedef struct
 	int					co_conn_count;	/* number of Coordinator handles */
 	PGXCNodeHandle	  **coord_handles;	/* an array of Coordinator handles */
 } PGXCNodeAllHandles;
+
+extern PGXCNodeAllHandles *current_transaction_handles;
 
 extern volatile bool HandlesInvalidatePending;
 
@@ -178,9 +181,13 @@ extern PGXCNodeAllHandles *get_handles(List *datanodelist, List *coordlist,
 
 extern PGXCNodeAllHandles *get_current_handles(void);
 #ifdef __TBASE__
+extern PGXCNodeAllHandles *get_current_txn_handles(void);
 extern PGXCNodeAllHandles *get_current_cn_handles(void);
 extern PGXCNodeAllHandles *get_current_dn_handles(void);
 extern PGXCNodeAllHandles * get_sock_fatal_handles(void);
+extern void init_transaction_handles(void);
+extern void reset_transaction_handles(void);
+extern void register_transaction_handles(PGXCNodeHandle* handle);
 #endif
 extern void pfree_pgxc_all_handles(PGXCNodeAllHandles *handles);
 
