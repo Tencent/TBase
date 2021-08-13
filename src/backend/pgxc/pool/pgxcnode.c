@@ -98,6 +98,8 @@ static PGXCNodeHandle *sdn_handles = NULL;
  */
 static PGXCNodeHandle *co_handles = NULL;
 
+PGXCNodeAllHandles *current_transaction_handles = NULL;
+
 #ifdef __TBASE__
 /* Hash key: nodeoid value: index in  dn_handles or co_handles */
 static HTAB *node_handles_hash = NULL; 
@@ -164,6 +166,8 @@ static void PGXCNodeHandleError(PGXCNodeHandle *handle, char *msg_body, int len)
 static PGXCNodeAllHandles * get_empty_handles(void);
 static void get_current_dn_handles_internal(PGXCNodeAllHandles *result);
 static void get_current_cn_handles_internal(PGXCNodeAllHandles *result);
+static void get_current_txn_dn_handles_internal(PGXCNodeAllHandles *result);
+static void get_current_txn_cn_handles_internal(PGXCNodeAllHandles *result);
 #endif
 
 /*
@@ -324,6 +328,7 @@ InitMultinodeExecutor(bool is_force)
 				"node_handles_hash enter primary datanode nodeoid: %d",
 				node_handle_ent->nodeoid);
         }
+        dn_handles[count].node_type = PGXC_NODE_DATANODE;
 #endif        
         
     }
@@ -354,6 +359,7 @@ InitMultinodeExecutor(bool is_force)
 				"node_handles_hash enter slave datanode nodeoid: %d",
 				node_handle_ent->nodeoid);
         }
+        sdn_handles[count].node_type = PGXC_NODE_SLAVEDATANODE;
 #endif        
         
     }
@@ -383,6 +389,7 @@ InitMultinodeExecutor(bool is_force)
 				"node_handles_hash enter coordinator nodeoid: %d",
 				node_handle_ent->nodeoid);
         }
+        co_handles[count].node_type = PGXC_NODE_COORDINATOR;
 #endif    
     }
 
@@ -427,6 +434,8 @@ InitMultinodeExecutor(bool is_force)
 #ifdef __TBASE__
     if(strcmp(PGXCMainClusterName, PGXCClusterName) == 0)
         IsPGXCMainCluster = true;
+
+    init_transaction_handles();
 #endif
     
 }
@@ -4165,7 +4174,16 @@ get_current_handles(void)
 }
 
 #ifdef __TBASE__
+/* get current transaction handles that register in pgxc_node_begin */
+PGXCNodeAllHandles *
+get_current_txn_handles(void)
+{
+    PGXCNodeAllHandles *result = get_empty_handles();
 
+    get_current_txn_cn_handles_internal(result);
+    get_current_txn_dn_handles_internal(result);
+    return result;
+}
 
 PGXCNodeAllHandles *
 get_current_cn_handles(void)
@@ -4211,6 +4229,35 @@ get_current_dn_handles_internal(PGXCNodeAllHandles *result)
     }
 }
 
+/* get current transaction dn handles that register in pgxc_node_begin */
+static void
+get_current_txn_dn_handles_internal(PGXCNodeAllHandles *result)
+{
+    int					i;
+    int                 count = 0;
+
+    if (current_transaction_handles == NULL || current_transaction_handles->dn_conn_count == 0)
+    {
+        return;
+    }
+
+    count = current_transaction_handles->dn_conn_count;
+    result->datanode_handles = (PGXCNodeHandle **)
+            palloc(count * sizeof(PGXCNodeHandle *));
+    if (!result->datanode_handles)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_OUT_OF_MEMORY),
+                        errmsg("out of memory")));
+    }
+
+    result->dn_conn_count = 0;
+    for (i = 0; i < count; i++)
+    {
+        result->datanode_handles[result->dn_conn_count++] = current_transaction_handles->datanode_handles[i];
+    }
+}
+
 static void
 get_current_cn_handles_internal(PGXCNodeAllHandles *result)
 {
@@ -4234,6 +4281,35 @@ get_current_cn_handles_internal(PGXCNodeAllHandles *result)
         {
             result->coord_handles[result->co_conn_count++] = node_handle;
         }
+    }
+}
+
+/* get current transaction cn handles that register in pgxc_node_begin */
+static void
+get_current_txn_cn_handles_internal(PGXCNodeAllHandles *result)
+{
+    int					i;
+    int                 count = 0;
+
+    if (current_transaction_handles == NULL || current_transaction_handles->co_conn_count == 0)
+    {
+        return;
+    }
+
+    count = current_transaction_handles->co_conn_count;
+    result->coord_handles = (PGXCNodeHandle **)
+            palloc(count * sizeof(PGXCNodeHandle *));
+    if (!result->coord_handles)
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_OUT_OF_MEMORY),
+                        errmsg("out of memory")));
+    }
+
+    result->co_conn_count = 0;
+    for (i = 0; i < count; i++)
+    {
+        result->coord_handles[result->co_conn_count++] = current_transaction_handles->coord_handles[i];
     }
 }
 
@@ -4290,6 +4366,107 @@ get_sock_fatal_handles(void)
 
 	return result;
 }
+
+/*
+ * init current transaction handles for connections
+ */
+void
+init_transaction_handles(void)
+{
+    MemoryContext oldcontext;
+    oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+    if (current_transaction_handles == NULL)
+    {
+        current_transaction_handles = (PGXCNodeAllHandles *) palloc0(sizeof(PGXCNodeAllHandles));
+    }
+
+    current_transaction_handles->primary_handle = NULL;
+
+    current_transaction_handles->dn_conn_count = 0;
+    if (current_transaction_handles->datanode_handles == NULL)
+    {
+        current_transaction_handles->datanode_handles = (PGXCNodeHandle **) palloc(NumDataNodes * sizeof(PGXCNodeHandle *));
+    }
+    else
+    {
+        current_transaction_handles->datanode_handles = (PGXCNodeHandle **) repalloc(current_transaction_handles->datanode_handles, NumDataNodes * sizeof(PGXCNodeHandle *));
+    }
+
+    current_transaction_handles->co_conn_count = 0;
+    if (current_transaction_handles->coord_handles == NULL)
+    {
+        current_transaction_handles->coord_handles = (PGXCNodeHandle **) palloc(NumCoords * sizeof(PGXCNodeHandle *));
+    }
+    else
+    {
+        current_transaction_handles->coord_handles = (PGXCNodeHandle **) repalloc(current_transaction_handles->coord_handles, NumCoords * sizeof(PGXCNodeHandle *));
+    }
+    MemoryContextSwitchTo(oldcontext);
+    return;
+}
+
+/*
+ * reset current transaction handles
+ */
+void
+reset_transaction_handles(void)
+{
+    if (current_transaction_handles == NULL)
+    {
+        return;
+    }
+
+    current_transaction_handles->dn_conn_count = 0;
+    current_transaction_handles->co_conn_count = 0;
+    return;
+}
+
+/*
+ * register current transaction handle to current_transaction_handles
+ */
+void
+register_transaction_handles(PGXCNodeHandle* handle)
+{
+    int i = 0;
+    char node_type = handle->node_type;
+
+    if (!IS_PGXC_LOCAL_COORDINATOR)
+    {
+        return;
+    }
+
+    Assert (current_transaction_handles != NULL);
+
+    if (node_type == PGXC_NODE_DATANODE)
+    {
+        for (i = 0; i < current_transaction_handles->dn_conn_count; i++)
+        {
+            if (current_transaction_handles->datanode_handles[i] == handle)
+            {
+                return;
+            }
+        }
+        current_transaction_handles->datanode_handles[current_transaction_handles->dn_conn_count++] = handle;
+        Assert(current_transaction_handles->dn_conn_count <= NumDataNodes);
+    }
+    else if (node_type == PGXC_NODE_COORDINATOR)
+    {
+        for (i = 0; i < current_transaction_handles->co_conn_count; i++)
+        {
+            if (current_transaction_handles->coord_handles[i] == handle)
+            {
+                return;
+            }
+        }
+        current_transaction_handles->coord_handles[current_transaction_handles->co_conn_count++] = handle;
+        Assert(current_transaction_handles->co_conn_count <= NumCoords);
+    }
+    else
+    {
+        elog(ERROR, "invalid node_type %c in register_transaction_handles", node_type);
+    }
+}
+
 #endif
 
 /* Free PGXCNodeAllHandles structure */

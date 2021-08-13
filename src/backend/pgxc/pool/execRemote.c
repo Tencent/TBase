@@ -2549,6 +2549,14 @@ READ_ROWBUFFER:
         }
         else if (res == RESPONSE_COMPLETE)
         {        
+            if (conn->state == DN_CONNECTION_STATE_ERROR_FATAL)
+            {
+                ereport(ERROR,
+                        (errcode(ERRCODE_INTERNAL_ERROR),
+                                errmsg("Unexpected FATAL ERROR on Connection to Datanode %s pid %d",
+                                       conn->nodename, conn->backend_pid)));
+            }
+
             /*
              * In case of Simple Query Protocol we should receive ReadyForQuery
              * before removing connection from the list. In case of Extended
@@ -2655,13 +2663,6 @@ READ_ROWBUFFER:
                                         
                     return NULL;
                 }
-            }
-            else if (conn->state == DN_CONNECTION_STATE_ERROR_FATAL)
-            {
-                ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("Unexpected FATAL ERROR on Connection to Datanode %s pid %d",
-                             conn->nodename, conn->backend_pid)));
             }
         }
         else if (res == RESPONSE_ERROR)
@@ -3683,6 +3684,8 @@ pgxc_node_begin(int conn_count, PGXCNodeHandle **connections,
 			elog(DEBUG5, "pgxc_node_begin send %s to node %s, pid:%d", cmd,
 					connections[i]->nodename, connections[i]->backend_pid);
 			new_connections[new_count++] = connections[i];
+			/* if send begin, register current connection */
+			register_transaction_handles(connections[i]);
         }
     }
 
@@ -3938,7 +3941,8 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
     ResponseCombiner combiner;
     PGXCNodeHandle **connections = NULL;
     int                conn_count = 0;
-    PGXCNodeAllHandles *handles = get_current_handles();
+	/* get current transaction handles that we register when pgxc_node_begin */
+	PGXCNodeAllHandles *handles = get_current_txn_handles();
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
     GlobalTimestamp global_prepare_ts = InvalidGlobalTimestamp;
 #endif
@@ -4071,7 +4075,10 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
          * Skip empty slots
          */
         if (conn->sock == NO_SOCKET)
-            continue;
+        {
+            elog(ERROR, "pgxc_node_remote_prepare, remote node %s's connection handle is invalid, backend_pid: %d",
+                 conn->nodename, conn->backend_pid);
+        }
         else if (conn->transaction_status == 'T')
         {
             /* Read in any pending input */
@@ -4277,7 +4284,10 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
          * Skip empty slots
          */
         if (conn->sock == NO_SOCKET)
-            continue;
+        {
+            elog(ERROR, "pgxc_node_remote_prepare, remote node %s's connection handle is invalid, backend_pid: %d",
+                 conn->nodename, conn->backend_pid);
+        }
         else if (conn->transaction_status == 'T')
         {
             if (conn->read_only)
@@ -5489,7 +5499,8 @@ void get_partnodes(PGXCNodeAllHandles * handles, StringInfo participants)
         conn = handles->datanode_handles[i];
         if (conn->sock == NO_SOCKET)
         {
-            continue;
+            elog(ERROR, "get_partnodes, remote node %s's connection handle is invalid, backend_pid: %d",
+                 conn->nodename, conn->backend_pid);
         }
         else if (conn->transaction_status == 'T')
         {
@@ -5498,6 +5509,11 @@ void get_partnodes(PGXCNodeAllHandles * handles, StringInfo participants)
                 is_readonly = false;
                 appendStringInfo(participants, "%s,", conn->nodename);
             }
+        }
+        else if (conn->transaction_status == 'E')
+        {
+            elog(ERROR, "get_partnodes, remote node %s is in error state, backend_pid: %d",
+                 conn->nodename, conn->backend_pid);
         }
     }
  
@@ -5506,7 +5522,8 @@ void get_partnodes(PGXCNodeAllHandles * handles, StringInfo participants)
         conn = handles->coord_handles[i];
         if (conn->sock == NO_SOCKET)
         {
-            continue;
+            elog(ERROR, "get_partnodes, remote node %s's connection handle is invalid, backend_pid: %d",
+                 conn->nodename, conn->backend_pid);
         }
         else if (conn->transaction_status == 'T')
         {
@@ -5515,6 +5532,11 @@ void get_partnodes(PGXCNodeAllHandles * handles, StringInfo participants)
                 is_readonly = false;
                 appendStringInfo(participants, "%s,", conn->nodename);
             }
+        }
+        else if (conn->transaction_status == 'E')
+        {
+            elog(ERROR, "get_partnodes, remote node %s is in error state, backend_pid: %d",
+                 conn->nodename, conn->backend_pid);
         }
     }
     if (is_readonly && !IsXidImplicit(gid))
@@ -7524,6 +7546,7 @@ void
 AtEOXact_Remote(void)
 {
     PGXCNodeResetParams(true);
+    reset_transaction_handles();
 }
 
 /*
@@ -8066,6 +8089,7 @@ PostPrepare_Remote(char *prepareGID, bool implicit)
     if (log_gtm_stats)
         ShowUsageCommon("PostPrepare_Remote", &start_r, &start_t);
 #endif
+    reset_transaction_handles();
 }
 
 /*
@@ -8133,8 +8157,8 @@ IsTwoPhaseCommitRequired(bool localWrite)
 		elog(ERROR, "IsTwoPhaseCommitRequired, Found %d sock fatal handles exist", sock_fatal_count);
 	}
 #endif
-
-    handles = get_current_handles();
+    /* get current transaction handles that we register when pgxc_node_begin */
+	handles = get_current_txn_handles();
     for (i = 0; i < handles->dn_conn_count; i++)
     {
         PGXCNodeHandle *conn = handles->datanode_handles[i];
@@ -8143,8 +8167,12 @@ IsTwoPhaseCommitRequired(bool localWrite)
 		elog(DEBUG5, "IsTwoPhaseCommitRequired, conn->nodename=%s, conn->sock=%d, conn->read_only=%d, conn->transaction_status=%c", 
 			conn->nodename, conn->sock, conn->read_only, conn->transaction_status);
 #endif
-        if (conn->sock != NO_SOCKET && !conn->read_only &&
-                conn->transaction_status == 'T')
+		if (conn->sock == NO_SOCKET)
+        {
+            elog(ERROR, "IsTwoPhaseCommitRequired, remote node %s's connection handle is invalid, backend_pid: %d",
+                 conn->nodename, conn->backend_pid);
+        }
+        else if (!conn->read_only && conn->transaction_status == 'T')
         {
             if (found)
             {
@@ -8156,6 +8184,11 @@ IsTwoPhaseCommitRequired(bool localWrite)
                 found = true; /* first found */
             }
         }
+        else if (conn->transaction_status == 'E')
+        {
+            elog(ERROR, "IsTwoPhaseCommitRequired, remote node %s is in error state, backend_pid: %d",
+                    conn->nodename, conn->backend_pid);
+        }
     }
     for (i = 0; i < handles->co_conn_count; i++)
     {
@@ -8165,8 +8198,12 @@ IsTwoPhaseCommitRequired(bool localWrite)
 		elog(DEBUG5, "IsTwoPhaseCommitRequired, conn->nodename=%s, conn->sock=%d, conn->read_only=%d, conn->transaction_status=%c", 
 			conn->nodename, conn->sock, conn->read_only, conn->transaction_status);
 #endif
-        if (conn->sock != NO_SOCKET && !conn->read_only &&
-                conn->transaction_status == 'T')
+		if (conn->sock == NO_SOCKET)
+        {
+            elog(ERROR, "IsTwoPhaseCommitRequired, remote node %s's connection handle is invalid, backend_pid: %d",
+                 conn->nodename, conn->backend_pid);
+        }
+        else if (!conn->read_only && conn->transaction_status == 'T')
         {
             if (found)
             {
@@ -8177,6 +8214,11 @@ IsTwoPhaseCommitRequired(bool localWrite)
             {
                 found = true; /* first found */
             }
+        }
+        else if (conn->transaction_status == 'E')
+        {
+            elog(ERROR, "IsTwoPhaseCommitRequired, remote node %s is in error state, backend_pid: %d",
+                 conn->nodename, conn->backend_pid);
         }
     }
     pfree_pgxc_all_handles(handles);
@@ -8898,6 +8940,7 @@ pgxc_node_remote_finish(char *prepareGID, bool commit,
 	}
     clear_handles();
     pfree_pgxc_all_handles(pgxc_handles);
+	reset_transaction_handles();
     pfree(finish_cmd);
 
 #ifdef __TWO_PHASE_TRANS__
