@@ -2,6 +2,7 @@
 
 #include "catalog/pg_authid.h"
 #include "catalog/pg_type.h"
+#include "commands/dbcommands.h"
 #include "commands/explain.h"
 #include "common/ip.h"
 #include "fmgr.h"
@@ -715,12 +716,24 @@ pg_stat_get_cluster_activity(PG_FUNCTION_ARGS)
 		values[1] = Int32GetDatum(beentry->st_procpid);
 		
 		if (beentry->st_databaseid != InvalidOid)
-			values[7] = ObjectIdGetDatum(beentry->st_databaseid);
+		{
+			char *dbname = get_database_name(beentry->st_databaseid);
+			if (dbname != NULL)
+				values[7] = CStringGetTextDatum(dbname);
+			else
+				nulls[7] = true;
+		}
 		else
 			nulls[7] = true;
 		
 		if (beentry->st_userid != InvalidOid)
-			values[8] = ObjectIdGetDatum(beentry->st_userid);
+		{
+			char *usename = GetUserNameFromId(beentry->st_userid, true);
+			if (usename != NULL)
+				values[8] = CStringGetTextDatum(usename);
+			else
+				nulls[8] = true;
+		}
 		else
 			nulls[8] = true;
 		
