@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * snapmgr.h
- *      POSTGRES snapshot manager
+ *	  POSTGRES snapshot manager
  *
  * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -34,13 +34,19 @@
 #define OLD_SNAPSHOT_PADDING_ENTRIES 10
 #define OLD_SNAPSHOT_TIME_MAP_ENTRIES (old_snapshot_threshold + OLD_SNAPSHOT_PADDING_ENTRIES)
 
+typedef enum SnapshotStatus
+{
+	S_DEFAULT,
+	S_FOR_CTAS			/* After creating a table, obtain a new snapshot in the QueryRewriteCTAS process */
+} SnapshotStatus;
+
 /*
  * Common definition of relation properties that allow early pruning/vacuuming
  * when old_snapshot_threshold >= 0.
  */
 #define RelationAllowsEarlyPruning(rel) \
 ( \
-     RelationNeedsWAL(rel) \
+	 RelationNeedsWAL(rel) \
   && !IsCatalogRelation(rel) \
   && !RelationIsAccessibleInLogicalDecoding(rel) \
   && !RelationHasUnloggedIndex(rel) \
@@ -66,7 +72,7 @@ extern TransactionId RecentGlobalDataXmin;
 
 extern GlobalTimestamp RecentCommitTs;
 extern GlobalTimestamp RecentDataTs;
-extern int    vacuum_delta;
+extern int	vacuum_delta;
 extern bool vacuum_debug_print;
 
 
@@ -88,6 +94,8 @@ extern void InvalidateCatalogSnapshotConditionally(void);
 extern void PushActiveSnapshot(Snapshot snapshot);
 extern void PushCopiedSnapshot(Snapshot snapshot);
 extern void UpdateActiveSnapshotCommandId(void);
+void UpdateActiveSnapshotStatus(SnapshotStatus new_status);
+SnapshotStatus GetActiveSnapshotStatus(void);
 extern void PopActiveSnapshot(void);
 extern Snapshot GetActiveSnapshot(void);
 extern bool ActiveSnapshotSet(void);
@@ -106,9 +114,9 @@ extern bool XactHasExportedSnapshots(void);
 extern void DeleteAllExportedSnapshotFiles(void);
 extern bool ThereAreNoPriorRegisteredSnapshots(void);
 extern TransactionId TransactionIdLimitedForOldSnapshots(TransactionId recentXmin,
-                                    Relation relation);
+									Relation relation);
 extern void MaintainOldSnapshotTimeMapping(TimestampTz whenTaken,
-                               TransactionId xmin);
+							   TransactionId xmin);
 
 extern char *ExportSnapshot(Snapshot snapshot);
 
@@ -142,28 +150,28 @@ extern bool LookupPreparedXid(TransactionId xid, GlobalTimestamp *prepare_timest
 static inline bool
 TestForOldTimestamp(GlobalTimestamp currentTimestamp, GlobalTimestamp oldestTimestamp)
 {
-    
-    if(IsInitProcessingMode())
-    {
-        return true;
-    }
+	
+	if(IsInitProcessingMode())
+	{
+		return true;
+	}
 
-    if(CommitTimestampIsLocal(currentTimestamp))
-    {
-        return true;
-    }
-    
-    if(currentTimestamp < oldestTimestamp)
-    {
-        elog(DEBUG12, "test for old time true ts " INT64_FORMAT " recent " INT64_FORMAT, currentTimestamp, oldestTimestamp);
-        return true;
-    }
-    else
-    {
-        elog(DEBUG12, "test for old time false ts " INT64_FORMAT " recent " INT64_FORMAT, currentTimestamp, oldestTimestamp);
-        return false;
-    }
+	if(CommitTimestampIsLocal(currentTimestamp))
+	{
+		return true;
+	}
+	
+	if(currentTimestamp < oldestTimestamp)
+	{
+		elog(DEBUG12, "test for old time true ts " INT64_FORMAT " recent " INT64_FORMAT, currentTimestamp, oldestTimestamp);
+		return true;
+	}
+	else
+	{
+		elog(DEBUG12, "test for old time false ts " INT64_FORMAT " recent " INT64_FORMAT, currentTimestamp, oldestTimestamp);
+		return false;
+	}
 }
 
 
-#endif                            /* SNAPMGR_H */
+#endif							/* SNAPMGR_H */

@@ -190,6 +190,7 @@ typedef struct ActiveSnapshotElt
 {
     Snapshot    as_snap;
     int            as_level;
+	SnapshotStatus status;
     struct ActiveSnapshotElt *as_next;
 } ActiveSnapshotElt;
 
@@ -895,6 +896,7 @@ PushActiveSnapshot(Snapshot snap)
 
     newactive->as_next = ActiveSnapshot;
     newactive->as_level = GetCurrentTransactionNestLevel();
+	newactive->status = S_DEFAULT;
 
     newactive->as_snap->active_count++;
 
@@ -955,6 +957,22 @@ UpdateActiveSnapshotCommandId(void)
      */
     SetSendCommandId(true);
 #endif    
+}
+
+void
+UpdateActiveSnapshotStatus(SnapshotStatus new_status)
+{
+	Assert(ActiveSnapshot != NULL);
+
+	ActiveSnapshot->status = new_status;
+}
+
+SnapshotStatus
+GetActiveSnapshotStatus(void)
+{
+	Assert(ActiveSnapshot != NULL);
+
+	return ActiveSnapshot->status;
 }
 
 /*
@@ -1288,9 +1306,15 @@ AtEOXact_Snapshot(bool isCommit, bool resetXmin)
             elog(WARNING, "registered snapshots seem to remain after cleanup");
 
         /* complain about unpopped active snapshots */
-        for (active = ActiveSnapshot; active != NULL; active = active->as_next)
+		for (active = ActiveSnapshot; active != NULL && active->status != S_FOR_CTAS; active = active->as_next)
+		{
             elog(WARNING, "snapshot %p still active", active);
     }
+
+		/* Resources to clean up, pop all active snapshots */
+		while (ActiveSnapshotSet())
+			PopActiveSnapshot();
+	}
 
     /*
      * And reset our state.  We don't need to free the memory explicitly --

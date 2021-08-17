@@ -4112,8 +4112,11 @@ QueryRewriteCTAS(Query *parsetree)
     ProcessUtility(wrapper, cquery.data, PROCESS_UTILITY_QUERY,
             NULL, NULL, NULL, false, NULL);
 
-    PopActiveSnapshot();
+	/* Use new snapshot for insert and update the snapshot status. */
+	if (ActiveSnapshotSet())
+        PopActiveSnapshot();
     PushActiveSnapshot(GetTransactionSnapshot());
+	UpdateActiveSnapshotStatus(S_FOR_CTAS);
 
 
     /*

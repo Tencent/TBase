@@ -2018,6 +2018,20 @@ PortalRunUtility(Portal portal, PlannedStmt *pstmt,
     if (snapshot != NULL && ActiveSnapshotSet() &&
         snapshot == GetActiveSnapshot())
         PopActiveSnapshot();
+	else
+	{
+		/* Clear snapshots created in process QueryRewriteCTAS */
+		while (ActiveSnapshotSet())
+		{
+			if (S_FOR_CTAS == GetActiveSnapshotStatus() ||
+				snapshot == GetActiveSnapshot())
+			{
+				PopActiveSnapshot();
+				continue;
+			}
+			break;
+		}
+	}
 }
 
 /*
