@@ -516,6 +516,7 @@ static char *flatten_reloptions(Oid relid);
 #ifdef __TBASE__
 static Bitmapset *pruning_walker(Relation rel, Node *expr);
 static Bitmapset *pruning_opexpr(Relation rel, OpExpr *expr);
+static Bitmapset *pruning_scalar_array_opexpr(Relation rel, ScalarArrayOpExpr *expr);
 static Bitmapset *get_full_pruning_result(Relation rel);
 static int get_daysofmonth(int startmonth, int startday, 
                                 int endmonth, int endday);
@@ -12275,12 +12276,58 @@ pruning_walker(Relation rel, Node *expr)
                 }
             }
             break;
+		case T_ScalarArrayOpExpr:
+			result = pruning_scalar_array_opexpr(rel, (ScalarArrayOpExpr*)expr);
+			break;
         default:
             result = get_full_pruning_result(rel);
             break;
     }
 
     return result;
+}
+
+static int
+find_partidx_by_const(Datum constvalue, int consttype, Form_pg_partition_interval routerinfo, QulificationType qualtype)
+{
+	int partidx = -1; /* full as default */
+	
+	switch(consttype)
+	{
+		case INT2OID:  /* int2 */
+		{
+			int value_int16;
+			value_int16 = DatumGetInt16(constvalue);
+			partidx = find_partidx_by_int(routerinfo->partstartvalue_int, routerinfo->partinterval_int,
+			                              routerinfo->partnparts, (int64) value_int16, qualtype);
+		}
+			break;
+		case INT4OID: /* int4 */
+		{
+			int value_int32;
+			value_int32 = DatumGetInt32(constvalue);
+			partidx = find_partidx_by_int(routerinfo->partstartvalue_int, routerinfo->partinterval_int,
+			                              routerinfo->partnparts, (int64) value_int32, qualtype);
+		}
+			break;
+		case INT8OID: /* int8 */
+		{
+			partidx = find_partidx_by_int(routerinfo->partstartvalue_int, routerinfo->partinterval_int,
+			                              routerinfo->partnparts, DatumGetInt64(constvalue), qualtype);
+		}
+			break;
+		case TIMESTAMPOID: /* timestamp */
+			partidx = find_partidx_by_timestamp(routerinfo->partstartvalue_ts, routerinfo->partinterval_int,
+			                                    routerinfo->partinterval_type,
+			                                    routerinfo->partnparts, DatumGetTimestamp(constvalue),
+			                                    qualtype);
+			break;
+		default:
+			elog(WARNING, "unsupported partidx type %d", consttype);
+			break;
+	}
+	
+	return partidx;
 }
 
 static Bitmapset *
@@ -12381,34 +12428,202 @@ pruning_opexpr(Relation rel, OpExpr *expr)
     switch(arg_const->consttype)
     {
         case INT2OID:  /* int2 */
+		case INT4OID: /* int4 */
+		case INT8OID: /* int8 */
+		case TIMESTAMPOID: /* timestamp */
             {
-                int value_int16;
-                value_int16 = DatumGetInt16(arg_const->constvalue);
-                partidx = find_partidx_by_int(routerinfo->partstartvalue_int, routerinfo->partinterval_int,
-                                    routerinfo->partnparts, (int64)value_int16, qualtype);
+			partidx = find_partidx_by_const(arg_const->constvalue, arg_const->consttype, routerinfo, qualtype);
             }
             break;
-        case INT4OID: /* int4 */
+		default:
+			elog(ERROR, "unsupported const type:[%u]", arg_const->consttype);
+	}
+
+	npart = RelationGetNParts(rel);
+	if(npart <= 0)
             {
-                int value_int32;
-                value_int32 = DatumGetInt32(arg_const->constvalue);
-                partidx = find_partidx_by_int(routerinfo->partstartvalue_int, routerinfo->partinterval_int,
-                                    routerinfo->partnparts, (int64)value_int32, qualtype);
+		elog(ERROR, "internal error: pruning_opexpr:partitioned table has no partitions");
+	}
+	
+	if(partidx == PARTITION_ROUTER_RESULT_FULL)
+		return get_full_pruning_result(rel);
+	else if(partidx == PARTITION_ROUTER_RESULT_NULL)
+		return NULL;
+	else if(partidx >= 0)
+	{
+		char *partname = NULL;
+		Oid partoid = InvalidOid;
+
+		switch(qualtype)
+		{
+			case QULIFICATION_TYPE_LS:				
+			case QULIFICATION_TYPE_LE:
+				{
+					int i;
+					for(i = 0; i <= partidx; i++)
+					{
+						partname = GetPartitionName(RelationGetRelid(rel), i, false);
+						partoid = get_relname_relid(partname, RelationGetNamespace(rel));
+						if(partoid)
+						{
+							result = bms_add_member(result, i);
+						}
+					}
             }
             break;
-        case INT8OID: /* int8 */
+			case QULIFICATION_TYPE_EQUAL:
             {
-                partidx = find_partidx_by_int(routerinfo->partstartvalue_int, routerinfo->partinterval_int,
-                                routerinfo->partnparts, DatumGetInt64(arg_const->constvalue), qualtype);
+					partname = GetPartitionName(RelationGetRelid(rel), partidx, false);
+					partoid = get_relname_relid(partname, RelationGetNamespace(rel));
+					if(partoid)
+					{
+					    result = bms_make_singleton(partidx);
+					}
             }
             break;
-        case TIMESTAMPOID: /* timestamp */
-            partidx = find_partidx_by_timestamp(routerinfo->partstartvalue_ts, routerinfo->partinterval_int,
-                                routerinfo->partinterval_type,
-                                routerinfo->partnparts, DatumGetTimestamp(arg_const->constvalue), qualtype);
+			case QULIFICATION_TYPE_GE:
+			case QULIFICATION_TYPE_GT:
+				{
+					int i;
+					for(i = partidx; i < npart; i++)
+					{
+						partname = GetPartitionName(RelationGetRelid(rel), i, false);
+						partoid = get_relname_relid(partname, RelationGetNamespace(rel));
+						if(partoid)
+						{
+						    result = bms_add_member(result, i);
+						}
+					}
+				}
             break;
         default:
-            elog(ERROR, "unsupported const type:[%u]", arg_const->consttype);
+				//nerver occur
+				elog(ERROR, "internal error: pruning_opexpr: invalid QulificationType[%d]", qualtype);
+		}
+	}
+
+	return result;
+}
+
+static Bitmapset *
+pruning_scalar_array_opexpr(Relation rel, ScalarArrayOpExpr *expr)
+{
+	Bitmapset 	*result = NULL;
+	char		*opname = NULL;
+	Node		*leftarg = NULL;
+	Node		*rightarg = NULL;
+	Var			*arg_var = NULL;
+	Const		*arg_const = NULL;
+	bool		isswap = false;
+	int			npart;
+	int 		partidx;
+	AttrNumber 	partkey;
+	QulificationType 	qualtype = QULIFICATION_TYPE_EQUAL;
+	Form_pg_partition_interval routerinfo;
+	ArrayType  *arrayval;
+	int16		elmlen;
+	bool		elmbyval;
+	char		elmalign;
+	int			num_elems;
+	Datum	   *elem_values;
+	int         elem_type;
+	bool	   *elem_nulls;
+	int         i;
+	
+	partkey = RelationGetPartitionColumnIndex(rel);
+	
+	if(list_length(expr->args) != 2)
+		return get_full_pruning_result(rel);
+	
+	leftarg = (Node *)list_nth(expr->args,0);
+	rightarg = (Node *)list_nth(expr->args,1);
+	
+	if (IsA(leftarg,Var))
+	{
+		arg_var = (Var *)leftarg;
+		arg_const = (Const *)rightarg;
+	}
+	else if (IsA(rightarg,Var))
+	{
+		arg_var = (Var *)rightarg;
+		arg_const = (Const *)leftarg;
+		isswap = true;
+	}
+	else
+	{
+		return get_full_pruning_result(rel);
+	}
+	
+	if (arg_const == NULL ||
+	    (!IsA(arg_const, Const)) ||
+	    arg_var->varattno != partkey)
+	{
+		return get_full_pruning_result(rel);
+	}
+	
+	opname = get_opname(expr->opno);
+	
+	if(strcmp("<",opname) == 0)
+	{
+		if(!isswap)
+			qualtype = QULIFICATION_TYPE_LS;
+		else
+			qualtype = QULIFICATION_TYPE_GT;
+	}
+	else if(strcmp("<=",opname) == 0)
+	{
+		if(!isswap)
+			qualtype = QULIFICATION_TYPE_LE;
+		else
+			qualtype = QULIFICATION_TYPE_GE;
+	}
+	else if(strcmp("=",opname) == 0)
+	{
+		qualtype = QULIFICATION_TYPE_EQUAL;
+	}
+	else if(strcmp(">=",opname) == 0)
+	{
+		if(!isswap)
+			qualtype = QULIFICATION_TYPE_GE;
+		else
+			qualtype = QULIFICATION_TYPE_LE;
+	}
+	else if(strcmp(">",opname) == 0)
+	{
+		if(!isswap)
+			qualtype = QULIFICATION_TYPE_GT;
+		else
+			qualtype = QULIFICATION_TYPE_LS;
+	}
+	else
+	{
+		/* any other case, get full partitions */
+		return get_full_pruning_result(rel);
+	}
+	
+	routerinfo = rel->rd_partitions_info;
+	
+	if(!routerinfo)
+	{
+		elog(ERROR, "relation[%s] is not a partitioned table", RelationGetRelationName(rel));
+	}
+	
+	switch(arg_const->consttype)
+	{
+		case INT2ARRAYOID:  /* int2 */
+			elem_type = INT2OID;
+			break;
+		case INT4ARRAYOID: /* int4 */
+			elem_type = INT4OID;
+			break;
+		case INT8ARRAYOID: /* int8 */
+			elem_type = INT8OID;
+			break;
+		case TIMESTAMPARRAYOID: /* timestamp */
+			elem_type = TIMESTAMPOID;
+			break;
+		default:
+			return get_full_pruning_result(rel);
     }
 
     npart = RelationGetNParts(rel);
@@ -12417,6 +12632,19 @@ pruning_opexpr(Relation rel, OpExpr *expr)
         elog(ERROR, "internal error: pruning_opexpr:partitioned table has no partitions");
     }
     
+	arrayval = DatumGetArrayTypeP(arg_const->constvalue);
+	/* We could cache this data, but not clear it's worth it */
+	get_typlenbyvalalign(ARR_ELEMTYPE(arrayval),
+	                     &elmlen, &elmbyval, &elmalign);
+	deconstruct_array(arrayval,
+	                  ARR_ELEMTYPE(arrayval),
+	                  elmlen, elmbyval, elmalign,
+	                  &elem_values, &elem_nulls, &num_elems);
+	
+	for (i = 0; i < num_elems; i++)
+	{
+		partidx = find_partidx_by_const(elem_values[i], elem_type, routerinfo, qualtype);
+		
     if(partidx == PARTITION_ROUTER_RESULT_FULL)
         return get_full_pruning_result(rel);
     else if(partidx == PARTITION_ROUTER_RESULT_NULL)
@@ -12431,7 +12659,6 @@ pruning_opexpr(Relation rel, OpExpr *expr)
             case QULIFICATION_TYPE_LS:                
             case QULIFICATION_TYPE_LE:
                 {
-                    int i;
                     for(i = 0; i <= partidx; i++)
 					{
 						partname = GetPartitionName(RelationGetRelid(rel), i, false);
@@ -12449,14 +12676,13 @@ pruning_opexpr(Relation rel, OpExpr *expr)
 					partoid = get_relname_relid(partname, RelationGetNamespace(rel));
 					if(partoid)
 					{
-					    result = bms_make_singleton(partidx);
+						result = bms_add_member(result, partidx);
 					}
                 }
                 break;
             case QULIFICATION_TYPE_GE:
             case QULIFICATION_TYPE_GT:
                 {
-                    int i;
                     for(i = partidx; i < npart; i++)
 					{
 						partname = GetPartitionName(RelationGetRelid(rel), i, false);
@@ -12473,6 +12699,7 @@ pruning_opexpr(Relation rel, OpExpr *expr)
                 elog(ERROR, "internal error: pruning_opexpr: invalid QulificationType[%d]", qualtype);
         }
     }
+	}
 
     return result;
 }
