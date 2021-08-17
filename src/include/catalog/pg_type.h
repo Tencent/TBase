@@ -538,6 +538,7 @@ DATA(insert OID = 1013 (  _oidvector PGNSP PGUID -1 f b A f t \054 0    30 0 arr
 DATA(insert OID = 1014 (  _bpchar     PGNSP PGUID -1 f b A f t \054 0 1042 0 array_in array_out array_recv array_send bpchartypmodin bpchartypmodout array_typanalyze i x f 0 -1 0 100 _null_ _null_ _null_ ));
 DATA(insert OID = 1015 (  _varchar     PGNSP PGUID -1 f b A f t \054 0 1043 0 array_in array_out array_recv array_send varchartypmodin varchartypmodout array_typanalyze i x f 0 -1 0 100 _null_ _null_ _null_ ));
 DATA(insert OID = 1016 (  _int8         PGNSP PGUID -1 f b A f t \054 0    20 0 array_in array_out array_recv array_send - - array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define INT8ARRAYOID        1016
 DATA(insert OID = 1017 (  _point     PGNSP PGUID -1 f b A f t \054 0 600 0 array_in array_out array_recv array_send - - array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
 DATA(insert OID = 1018 (  _lseg         PGNSP PGUID -1 f b A f t \054 0 601 0 array_in array_out array_recv array_send - - array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
 DATA(insert OID = 1019 (  _path         PGNSP PGUID -1 f b A f t \054 0 602 0 array_in array_out array_recv array_send - - array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
@@ -579,12 +580,14 @@ DATA(insert OID = 1114 ( timestamp     PGNSP PGUID    8 FLOAT8PASSBYVAL b D f t 
 DESCR("date and time");
 #define TIMESTAMPOID    1114
 DATA(insert OID = 1115 ( _timestamp  PGNSP PGUID    -1 f b A f t \054 0 1114 0 array_in array_out array_recv array_send timestamptypmodin timestamptypmodout array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define TIMESTAMPARRAYOID	1115
 DATA(insert OID = 1182 ( _date         PGNSP PGUID    -1 f b A f t \054 0 1082 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DATA(insert OID = 1183 ( _time         PGNSP PGUID    -1 f b A f t \054 0 1083 0 array_in array_out array_recv array_send timetypmodin timetypmodout array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
 DATA(insert OID = 1184 ( timestamptz PGNSP PGUID    8 FLOAT8PASSBYVAL b D t t \054 0    0 1185 timestamptz_in timestamptz_out timestamptz_recv timestamptz_send timestamptztypmodin timestamptztypmodout - d p f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("date and time with time zone");
 #define TIMESTAMPTZOID    1184
 DATA(insert OID = 1185 ( _timestamptz PGNSP PGUID -1 f b A f t \054 0    1184 0 array_in array_out array_recv array_send timestamptztypmodin timestamptztypmodout array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define TIMESTAMPTZARRAYOID	1185
 DATA(insert OID = 1186 ( interval     PGNSP PGUID 16 f b T t t \054 0    0 1187 interval_in interval_out interval_recv interval_send intervaltypmodin intervaltypmodout - d p f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("@ <number> <units>, time interval");
 #define INTERVALOID        1186

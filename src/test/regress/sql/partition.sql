@@ -438,3 +438,22 @@ truncate table int_drop partition for(5);
 truncate table int_drop partition for(1000);
 truncate table int_drop partition for(370);
 drop table int_drop;
+
+-- IN expr partition pruning
+create table t_in_test(a int, b int, c timestamp)
+partition by range (c) begin
+(timestamp without time zone '2017-09-01 0:0:0')
+step (interval '1 month') partitions (12)
+distribute by shard (a)
+to group default_group;
+
+insert into t_in_test values(1,1,'20170901');
+insert into t_in_test values(2,2,'20171001');
+insert into t_in_test values(3,3,'20171101');
+insert into t_in_test values(3,3,'20171201');
+
+explain (costs off) select * from t_in_test where c in ('20171001', '20171201');
+set enable_fast_query_shipping to off;
+explain (costs off) select * from t_in_test where c in ('20170901', '20171101');
+reset enable_fast_query_shipping;
+drop table t_in_test;
