@@ -346,7 +346,7 @@ static int add_sort_column(AttrNumber colIdx, Oid sortOp, Oid coll,
 static double GetPlanRows(Plan *plan);
 static bool set_plan_parallel(Plan *plan);
 static void set_plan_nonparallel(Plan *plan);
-static bool contain_hashjon_walker(Plan *node);
+static bool contain_node_walker(Plan *node, NodeTag type, bool search_nonparallel);
 
 #endif
 static RemoteSubplan *find_push_down_plan(Plan *plan, bool force);
@@ -1961,6 +1961,7 @@ create_gather_plan(PlannerInfo *root, GatherPath *best_path)
     Plan       *subplan;
     List       *tlist;
     bool reset = false;
+    bool contain_nonparallel_hashjoin = false;
 
     /* if child_of_gather is false, set child_of_gather true, and reset the value before return */
     if (!child_of_gather)
@@ -1977,9 +1978,12 @@ create_gather_plan(PlannerInfo *root, GatherPath *best_path)
 
     tlist = build_path_tlist(root, &best_path->path);
 
+	/* if contain nonparallel hashjoin, set num_workers to 1 */
+    contain_nonparallel_hashjoin = contain_node_walker(subplan, T_HashJoin, true);
+
     gather_plan = make_gather(tlist,
                               NIL,
-                              best_path->num_workers,
+                              (contain_nonparallel_hashjoin) ? 1 : best_path->num_workers,
                               best_path->single_copy,
                               subplan);
 
@@ -6458,10 +6462,19 @@ make_remotesubplan(PlannerInfo *root,
             Gather *gather = (Gather *)lefttree;
             int nWorkers = gather->num_workers;
             Plan *leftplan = lefttree->lefttree;
+            /* if contain nonparallel hashjoin, set num_workers to 1 */
+            bool contain_nonparallel_hashjoin = contain_node_walker(leftplan, T_HashJoin, true);
+            if (contain_nonparallel_hashjoin)
+            {
+                gather->num_workers = 1;
+            }
+            else
+            {
 			/* rows estimate is cut down to per data nodes, set it to all nodes for parallel estimate. */
 			double rows = GetPlanRows(leftplan) * nodes;
             int    heap_parallel_threshold = 0;
             int    heap_parallel_workers = 1;
+                bool contain_gather = contain_node_walker(leftplan, T_Gather, false);
 
 			heap_parallel_threshold = Max(min_parallel_rows_size, 1);
             while (rows >= (heap_parallel_threshold * 3))
@@ -6473,8 +6486,10 @@ make_remotesubplan(PlannerInfo *root,
             }
 
             heap_parallel_workers = Min(heap_parallel_workers, max_parallel_workers_per_gather);
-
-			gather->num_workers = Min(Max(heap_parallel_workers, nWorkers), min_workers_of_hashjon_gather);
+                heap_parallel_workers = Max(heap_parallel_workers, nWorkers);
+                /* if contain gather, need compare the workers with min_workers_of_hashjon_gather */
+                gather->num_workers = (contain_gather) ? Min(heap_parallel_workers, min_workers_of_hashjon_gather) : heap_parallel_workers;
+            }
         }
         else
         {
@@ -6485,8 +6500,15 @@ make_remotesubplan(PlannerInfo *root,
             double inner_rows              = lefttree->righttree ? lefttree->righttree->plan_rows : 0;
             double rows                    = outer_rows > inner_rows ? 
                                              outer_rows : inner_rows;
+            bool contain_nonparallel_hashjoin = contain_node_walker(lefttree, T_HashJoin, true);
             bool   need_parallel           = true;
             int parallel_workers           = 0;
+
+            /* if contain nonparallel hashjoin, don't add gather plan */
+			if (contain_nonparallel_hashjoin)
+            {
+                need_parallel = false;
+            }
 
             /* only add gather to remote_subplan at top */
             if (need_parallel && distributionType == LOCATOR_TYPE_NONE)
@@ -8272,7 +8294,7 @@ make_gather(List *qptlist,
 	/*
 	 * if there has hashjoin in the lower layer, write down the smallest workers
 	 */
-    if (min_workers_of_hashjon_gather > nworkers && contain_hashjon_walker(subplan))
+    if (min_workers_of_hashjon_gather > nworkers && contain_node_walker(subplan, T_HashJoin, false))
     {
         min_workers_of_hashjon_gather = nworkers;
     }
@@ -8943,10 +8965,12 @@ contain_remote_subplan_walker(Node *node, void *context, bool include_cte)
 }
 
 /*
- * check if contain hashjon in the plan
+ * check if contain the type node in the plan, only support
+ * T_HashJoin and T_Gather now
+ * search_nonparallel only work if type is T_HashJoin
  */
 static bool
-contain_hashjon_walker(Plan *node)
+contain_node_walker(Plan *node, NodeTag type, bool search_nonparallel)
 {
     Plan *plan = node;
 
@@ -8955,14 +8979,33 @@ contain_hashjon_walker(Plan *node)
         return false;
     }
 
-    if (IsA(node, RemoteSubplan) || IsA(node, RemoteQuery) || IsA(plan, Gather))
+    if (IsA(node, RemoteSubplan) || IsA(node, RemoteQuery))
     {
         return false;
     }
 
+    if (type == T_HashJoin)
+    {
     if (IsA(node, HashJoin))
     {
+            if (search_nonparallel)
+            {
+                /* return if contain non parallel hashjoin */
+                HashJoin *join_plan = (HashJoin *) node;
+                return !join_plan->join.plan.parallel_aware;
+            }
+            else
+            {
         return true;
+    }
+        }
+    }
+    else if (type == T_Gather)
+    {
+        if (IsA(node, Gather))
+        {
+            return true;
+        }
     }
 
     if (IsA(node, SubqueryScan))
@@ -8980,7 +9023,7 @@ contain_hashjon_walker(Plan *node)
         {
             Plan *appendplan = (Plan *)lfirst(lc);
 
-            if (appendplan && contain_hashjon_walker(appendplan))
+            if (appendplan && contain_node_walker(appendplan, type, search_nonparallel))
             {
                 return true;
             }
@@ -8997,7 +9040,7 @@ contain_hashjon_walker(Plan *node)
         {
             Plan *mergeappendplan = (Plan *)lfirst(lc);
 
-            if (mergeappendplan && contain_hashjon_walker(mergeappendplan))
+            if (mergeappendplan && contain_node_walker(mergeappendplan, type, search_nonparallel))
             {
                 return true;
             }
@@ -9008,7 +9051,7 @@ contain_hashjon_walker(Plan *node)
 
     if (outerPlan(plan))
     {
-        if (contain_hashjon_walker(outerPlan(plan)))
+        if (contain_node_walker(outerPlan(plan), type, search_nonparallel))
         {
             return true;
         }
@@ -9016,7 +9059,7 @@ contain_hashjon_walker(Plan *node)
 
     if (innerPlan(plan))
     {
-        if (contain_hashjon_walker(innerPlan(plan)))
+        if (contain_node_walker(innerPlan(plan), type, search_nonparallel))
         {
             return true;
         }
