@@ -4840,16 +4840,14 @@ pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle)
 
     stat_transaction(conn_count);
 
-        if (!temp_object_included && !PersistentConnections)
+    /* do not cleanup remote session for subtrans */
+    if (!temp_object_included && !PersistentConnections && need_release_handle)
         {
             /* Clean up remote sessions */
 		pgxc_node_remote_cleanup_all(txn_type == TXN_TYPE_CommitSubTxn ||
 		                             txn_type == TXN_TYPE_RollbackSubTxn);
-        if (need_release_handle)
-        {
             release_handles(false);
         }
-    }
 
     clear_handles();
 }
@@ -5925,26 +5923,15 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
     }
 #endif    
     
-	if (need_release_handle)
-	{
-	if (!temp_object_included)
+	/* do not cleanup remote session for subtrans */
+	if (!temp_object_included && need_release_handle)
         {
             /* Clean up remote sessions */
 		pgxc_node_remote_cleanup_all(txn_type == TXN_TYPE_CommitSubTxn ||
 		                             txn_type == TXN_TYPE_RollbackSubTxn);
 			release_handles(false);
         }
-    }
-	else
-	{
-		/* in subtxn, we just cleanup the connections. not release the handles. */
-		if (!temp_object_included)
-		{
-            /* Clean up remote sessions */
-            pgxc_node_remote_cleanup_all(txn_type == TXN_TYPE_CommitSubTxn ||
-                                         txn_type == TXN_TYPE_RollbackSubTxn);
-		}
-	}
+
     clear_handles();
     pfree_pgxc_all_handles(handles);
 
