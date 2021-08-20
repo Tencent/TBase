@@ -180,3 +180,69 @@ BEGIN
 	str = 'execute direct on (' || node_name || ') $$ ' || query || ' $$'  ;
 	execute str;
 END $D$ language plpgsql;
+
+-- subtransaction guc check
+drop table if exists t_abort;
+create table t_abort(a int);
+insert into t_abort select generate_series(1,20);
+select count(*) from t_abort;
+Reset TimeZone;
+show TimeZone;
+set TimeZone to 'PRC';
+create or replace procedure subtransaction_guc_check()
+as
+$$
+declare
+    names refcursor;
+    results1 refcursor;
+    results2 refcursor;
+    results3 refcursor;
+    guc_result varchar;
+    node_names varchar;
+    node varchar :='';
+    cmd1 varchar;
+    cmd2 varchar;
+BEGIN
+      open names for execute 'select node_name from pgxc_node where node_type=''D'' limit 1';
+      fetch names into node_names;
+      cmd1 := 'execute direct on(' || node_names || ') ''select setting from pg_settings where name=''''TimeZone''''''';
+            BEGIN
+                  raise notice '%',cmd1;
+                open results1 for EXECUTE cmd1;
+                fetch results1 into guc_result;
+                raise notice 'TimeZone = %',guc_result;
+                EXCEPTION when others then
+                    raise notice 'ERROR: (%)', SQLERRM;
+                close results1;
+            end;
+
+            BEGIN
+                  raise notice '%',cmd1;
+                open results2 for EXECUTE cmd1;
+                fetch results2 into guc_result;
+                raise notice 'TimeZone = %',guc_result;
+                cmd2 := 'select a from t_abort';
+                EXECUTE cmd2;
+                EXCEPTION when others then
+                    raise notice 'ERROR: (%)', SQLERRM;
+                close results2;
+            Rollback;
+             end;
+            
+        -- check twice, shoud be same.
+        raise notice '%',cmd1;
+        open results3 for EXECUTE cmd1;
+                fetch results3 into guc_result;
+                raise notice 'TimeZone = %',guc_result;
+                EXCEPTION when others then
+                    raise notice 'ERROR: (%)', SQLERRM;
+                close results3;
+        close names;
+end;
+$$
+language plpgsql;
+call subtransaction_guc_check();
+Show TimeZone;
+Reset TimeZone;
+Show TimeZone;
+drop table t_abort;
