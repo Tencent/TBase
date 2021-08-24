@@ -832,9 +832,13 @@ refresh_by_match_merge(Oid matviewOid, Oid tempOid, Oid relowner,
 
     /* Analyze the diff table. */
     resetStringInfo(&querybuf);
-    appendStringInfo(&querybuf, "ANALYZE %s", diffname);
+    /* 
+     * Materialized view is stored on CN, use "(COORDINATOR)" option to force
+     * vacuum analyzing "diff table" on CN.
+     */
+    appendStringInfo(&querybuf, "ANALYZE (COORDINATOR) %s", diffname);
     if (SPI_exec(querybuf.data, 0) != SPI_OK_UTILITY)
-        elog(ERROR, "SPI_exec failed: %s", querybuf.data);
+        elog(ERROR, "SPI_exec failed: %s", querybuf.data);;
 
     OpenMatViewIncrementalMaintenance();
 
