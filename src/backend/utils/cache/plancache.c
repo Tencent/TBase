@@ -2112,6 +2112,11 @@ SetRemoteSubplan(CachedPlanSource *plansource, const char *plan_string)
      */
     PG_TRY();
     {
+	    /*
+	     * Check for shared-cache-inval messages before restoring query plan,
+	     * avoid oid conversion and other operations to find old data.
+	     */
+        AcceptInvalidationMessages();
         set_portable_input(true);
         rstmt = (RemoteStmt *) stringToNode((char *) plan_string);
     }
