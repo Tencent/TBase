@@ -1781,3 +1781,43 @@ drop table my_table;
 drop function dump_insert();
 drop function dump_update();
 drop function dump_delete();
+
+-- trigger support subtransaction
+drop table if exists tb1 cascade;
+drop table if exists tb3 cascade;
+drop function if exists fun_fbjfyj();
+create table tb1(a int, b int, c1 varchar(50), c2 varchar(50) COLLATE "pg_catalog"."default", primary key(c1));
+create table tb3(
+    a int,
+    d1 varchar(18) COLLATE "pg_catalog"."default",
+    d2 varchar(600) COLLATE "pg_catalog"."default"
+);
+CREATE OR REPLACE FUNCTION fun_fbjfyj()
+  RETURNS trigger AS $BODY$
+    DECLARE
+        TF              integer :=0;
+    BEGIN
+        begin
+            select NVL2(MAX(a), '1', '0') INTO TF from tb1 where a = 7;
+            IF TF = '1' THEN RETURN new; END IF;
+            new.d1 := '11';
+            new.d2 := '111';
+            insert into tb1 values(12, 12, new.d1, new.d2);
+        end;
+        RETURN new;
+exception
+    when others then
+    return new;
+    END
+$BODY$
+LANGUAGE plpgsql VOLATILE
+COST 100;
+create trigger tb3_insert after insert on tb3
+FOR EACH ROW
+EXECUTE PROCEDURE fun_fbjfyj();
+insert into tb3 values(1, '11', '111'), (2, '22', '222'), (3,'33','333');
+insert into tb3 values(1, '11', '111'), (2, '22', '222'), (3,'33','333');
+select count(*) from tb3;
+drop table tb1 cascade;
+drop table tb3 cascade;
+drop function fun_fbjfyj();
