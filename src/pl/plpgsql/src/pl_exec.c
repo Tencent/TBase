@@ -1313,6 +1313,7 @@ exec_stmt_block(PLpgSQL_execstate *estate, PLpgSQL_stmt_block *block)
          */
         stmt_mcontext = get_stmt_mcontext(estate);
 
+		SetEnterPlpgsqlFunc();
         BeginInternalSubTransaction(NULL);
         /* Want to run statements inside function's memory context */
         MemoryContextSwitchTo(oldcontext);
@@ -1468,6 +1469,8 @@ exec_stmt_block(PLpgSQL_execstate *estate, PLpgSQL_stmt_block *block)
             /* If no match found, re-throw the error */
             if (e == NULL)
                 ReThrowError(edata);
+			 else
+				FreeErrorData(edata);
 
             /* Restore stmt_mcontext stack and release the error data */
             pop_stmt_mcontext(estate);
@@ -1477,6 +1480,7 @@ exec_stmt_block(PLpgSQL_execstate *estate, PLpgSQL_stmt_block *block)
         }
         PG_END_TRY();
 
+		SetExitPlpgsqlFunc();
         Assert(save_cur_error == estate->cur_error);
     }
     else

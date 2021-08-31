@@ -3644,7 +3644,7 @@ pgxc_node_begin(int conn_count, PGXCNodeHandle **connections,
 			if ('T' != connections[i]->transaction_status)
 			{
 				elog(PANIC, "[PLPGSQL] pgxc_node_begin need_begin_sub_txn wrong"
-						"transaction_status");
+						"transaction_status[%c]", connections[i]->transaction_status);
 			}
 		}
 
