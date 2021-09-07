@@ -3970,6 +3970,8 @@ QueryRewriteCTAS(Query *parsetree)
     CreateTableAsStmt *stmt;
     IntoClause *into;
     ListCell *lc;
+	const int InvalidLevel = -1;
+	int old_level = InvalidLevel;
 
     if (parsetree->commandType != CMD_UTILITY ||
         !IsA(parsetree->utilityStmt, CreateTableAsStmt))
@@ -4114,12 +4116,25 @@ QueryRewriteCTAS(Query *parsetree)
 
 	/* Use new snapshot for insert and update the snapshot status. */
 	if (ActiveSnapshotSet())
+	{
+		old_level = GetActiveSnapshotLevel();
         PopActiveSnapshot();
+	}
+	
     PushActiveSnapshot(GetTransactionSnapshot());
 	UpdateActiveSnapshotStatus(S_FOR_CTAS);
 
 
     /*
+	 * Only snapshot replacement is performed to prevent abnormal snapshot clearing caused by sub-transactions.
+	 * Active snapshots set by this subtransaction will be cleared.
+	 */
+	if (old_level != InvalidLevel)
+	{
+		SetActiveSnapshotLevel(old_level);
+	}
+
+	/*
      * Now fold the CTAS statement into an INSERT INTO statement. The
      * utility is no more required.
      */

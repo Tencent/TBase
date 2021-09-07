@@ -96,6 +96,8 @@ extern void PushCopiedSnapshot(Snapshot snapshot);
 extern void UpdateActiveSnapshotCommandId(void);
 void UpdateActiveSnapshotStatus(SnapshotStatus new_status);
 SnapshotStatus GetActiveSnapshotStatus(void);
+extern int GetActiveSnapshotLevel(void);
+extern void SetActiveSnapshotLevel(int level);
 extern void PopActiveSnapshot(void);
 extern Snapshot GetActiveSnapshot(void);
 extern bool ActiveSnapshotSet(void);

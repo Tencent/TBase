@@ -975,6 +975,20 @@ GetActiveSnapshotStatus(void)
 	return ActiveSnapshot->status;
 }
 
+int
+GetActiveSnapshotLevel(void)
+{
+	Assert(ActiveSnapshot != NULL);
+	return ActiveSnapshot->as_level;
+}
+
+void
+SetActiveSnapshotLevel(int level)
+{
+	Assert(ActiveSnapshot != NULL);
+	ActiveSnapshot->as_level = level;
+}
+
 /*
  * PopActiveSnapshot
  *
