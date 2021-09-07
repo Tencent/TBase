@@ -49,6 +49,7 @@
 #include "miscadmin.h"
 #include "pg_trace.h"
 #include "postmaster/autovacuum.h"
+#include "postmaster/clean2pc.h"
 #include "postmaster/fork_process.h"
 #include "postmaster/postmaster.h"
 #include "replication/walsender.h"
@@ -2902,6 +2903,16 @@ pgstat_bestart(void)
             /* Autovacuum Worker */
             beentry->st_backendType = B_AUTOVAC_WORKER;
         }
+		else if (IsClean2pcLauncher())
+		{
+			/* Clean 2pc Launcher */
+			beentry->st_backendType = B_CLEAN_2PC_LAUNCHER;
+		}
+		else if (IsClean2pcWorker())
+		{
+			/* Clean 2pc Worker */
+			beentry->st_backendType = B_CLEAN_2PC_WORKER;
+		}
         else if (am_walsender)
         {
             /* Wal sender */
@@ -4191,6 +4202,12 @@ pgstat_get_backend_desc(BackendType backendType)
         case B_PGXL_CLUSTER_MONITOR:
             backendDesc = "cluster monitor";
             break;
+		case B_CLEAN_2PC_LAUNCHER:
+			backendDesc = "2pc clean launcher";
+			break;
+		case B_CLEAN_2PC_WORKER:
+			backendDesc = "2pc clean worker";
+			break;
     }
 
     return backendDesc;

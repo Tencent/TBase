@@ -76,4 +76,5 @@ DualWriteLock                       58
 #ifdef __TBASE__
 AnalyzeInfoLock                     59
 UserAuthLock						60
+Clean2pcLock						61
 #endif

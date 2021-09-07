@@ -42,6 +42,7 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "postmaster/autovacuum.h"
+#include "postmaster/clean2pc.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #include "pgxc/poolmgr.h"
@@ -62,6 +63,10 @@
 #ifdef __TBASE__
 #include "storage/lock.h"
 #endif
+
+#define AUTOVAC_LAUNCHER_NUM    1
+#define CLEAN_2PC_LAUNCHER_NUM  1
+#define CLEAN_2PC_WORKER_NUM    3
 
 /* GUC variables */
 int            DeadlockTimeout = 1000;
@@ -187,6 +192,7 @@ InitProcGlobal(void)
     ProcGlobal->freeProcs = NULL;
     ProcGlobal->autovacFreeProcs = NULL;
     ProcGlobal->bgworkerFreeProcs = NULL;
+	ProcGlobal->clean2pcFreeProcs = NULL;
     ProcGlobal->startupProc = NULL;
     ProcGlobal->startupProcPid = 0;
     ProcGlobal->startupBufferPinWaitBufId = -1;
@@ -256,13 +262,21 @@ InitProcGlobal(void)
             ProcGlobal->freeProcs = &procs[i];
             procs[i].procgloballist = &ProcGlobal->freeProcs;
         }
-        else if (i < MaxConnections + autovacuum_max_workers + 1)
+		else if (i < MaxConnections + autovacuum_max_workers + AUTOVAC_LAUNCHER_NUM)
         {
             /* PGPROC for AV launcher/worker, add to autovacFreeProcs list */
             procs[i].links.next = (SHM_QUEUE *) ProcGlobal->autovacFreeProcs;
             ProcGlobal->autovacFreeProcs = &procs[i];
             procs[i].procgloballist = &ProcGlobal->autovacFreeProcs;
         }
+		else if (i < MaxConnections + autovacuum_max_workers + AUTOVAC_LAUNCHER_NUM
+						+ CLEAN_2PC_LAUNCHER_NUM + CLEAN_2PC_WORKER_NUM)
+		{
+			/* PGPROC for clean 2pc, add to clean2pcFreeProcs list */
+			procs[i].links.next = (SHM_QUEUE *) ProcGlobal->clean2pcFreeProcs;
+			ProcGlobal->clean2pcFreeProcs = &procs[i];
+			procs[i].procgloballist = &ProcGlobal->clean2pcFreeProcs;
+		}
         else if (i < MaxBackends)
         {
             /* PGPROC for bgworker, add to bgworkerFreeProcs list */
@@ -314,6 +328,8 @@ InitProcess(void)
         procgloballist = &ProcGlobal->autovacFreeProcs;
     else if (IsBackgroundWorker)
         procgloballist = &ProcGlobal->bgworkerFreeProcs;
+	else if (IsAnyClean2pcProcess())
+		procgloballist = &ProcGlobal->clean2pcFreeProcs;
     else
         procgloballist = &ProcGlobal->freeProcs;
 
@@ -362,7 +378,7 @@ InitProcess(void)
      * cleaning up.  (XXX autovac launcher currently doesn't participate in
      * this; it probably should.)
      */
-    if (IsUnderPostmaster && !IsAutoVacuumLauncherProcess())
+	if (IsUnderPostmaster && !IsAutoVacuumLauncherProcess() && !IsAnyClean2pcProcess())
         MarkPostmasterChildActive();
 
     /*
@@ -921,7 +937,7 @@ ProcKill(int code, Datum arg)
      * way, so tell the postmaster we've cleaned up acceptably well. (XXX
      * autovac launcher should be included here someday)
      */
-    if (IsUnderPostmaster && !IsAutoVacuumLauncherProcess())
+	if (IsUnderPostmaster && !IsAutoVacuumLauncherProcess() && !IsAnyClean2pcProcess())
         MarkPostmasterChildInactive();
 
     /* wake autovac launcher if needed -- see comments in FreeWorkerInfo */

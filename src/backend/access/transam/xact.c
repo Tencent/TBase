@@ -32,6 +32,7 @@
 #include "pgxc/pause.h"
 /* PGXC_DATANODE */
 #include "postmaster/autovacuum.h"
+#include "postmaster/clean2pc.h"
 #include "libpq/pqformat.h"
 #include "libpq/libpq.h"
 #endif
@@ -65,6 +66,7 @@
 #include "storage/condition_variable.h"
 #include "storage/fd.h"
 #include "storage/lmgr.h"
+#include "storage/pmsignal.h"
 #include "storage/predicate.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
@@ -101,6 +103,13 @@
 #include "tcop/utility.h"
 #include "utils/relcryptmap.h"
 #endif
+
+#ifdef __TWO_PHASE_TESTS__
+#define TWO_PHASE_TEST_NOT_STOP    1
+#define TWO_PHASE_TEST_STOP_DN     2
+#define TWO_PHASE_TEST_STOP_ALL    3
+#endif
+
 /*
  *    User-tweakable parameters
  */
@@ -394,6 +403,10 @@ static char *saveNodeString = NULL;
 static bool XactLocalNodePrepared;
 static bool  XactReadLocalNode;
 static bool  XactWriteLocalNode;
+
+#ifdef __TWO_PHASE_TRANS__
+bool enable_2pc_error_stop = false;
+#endif
 
 /*
  * Some commands want to force synchronous commit.
@@ -3743,13 +3756,17 @@ AbortTransaction(void)
     TransactionState s = CurrentTransactionState;
     TransactionId latestXid;
     bool        is_parallel_worker;
+	bool		can_abort = true;
 
 #ifdef __TWO_PHASE_TRANS__
     StringInfoData errormsg;
     
-    if (
 #ifdef __TWO_PHASE_TESTS__
+    bool test_stop = (complish && run_pg_clean);
+#endif
     
+    can_abort = !(
+#ifdef __TWO_PHASE_TESTS__
       (complish && run_pg_clean) ||
 #endif
       TWO_PHASE_COMMITTING == g_twophase_state.state ||
@@ -3758,17 +3775,75 @@ AbortTransaction(void)
       TWO_PHASE_ABORT_END == g_twophase_state.state ||
       TWO_PHASE_UNKNOW_STATUS == g_twophase_state.state ||
         (TWO_PHASE_PREPARED == g_twophase_state.state &&
-        false == g_twophase_state.is_start_node))
-    {
+        false == g_twophase_state.is_start_node));
         
+    if (!can_abort)
+    {
         if (false == g_twophase_state.isprinted)
         {
             print_twophase_state(&errormsg, false);    
+
+            if (enable_2pc_error_stop)
+            {
             elog(STOP, "errormsg in AbortTransaction:\n %s", errormsg.data);
+        }
+#ifdef __TWO_PHASE_TESTS__
+            else if (test_stop)
+            {
+                switch (run_pg_clean)
+                {
+                case TWO_PHASE_TEST_NOT_STOP:
+                    break;
+                case TWO_PHASE_TEST_STOP_DN:
+                    if (IS_PGXC_LOCAL_COORDINATOR)
+                    {
+                        break;
+                    }
+                case TWO_PHASE_TEST_STOP_ALL:
+                    elog(STOP, "in test, in AbortTransaction:\n %s", errormsg.data);
+                    break;
+                default:
+                    break;
+                }
+                elog(WARNING, "in test, in AbortTransaction:\n %s", errormsg.data);
+            }
+#endif
+            else
+            {
+                elog(WARNING, "errormsg in AbortTransaction:\n %s", errormsg.data);
+            }
         }
         else
         {
+            if (enable_2pc_error_stop)
+            {
             elog(STOP, "STOP postmaster in AbortTransaction");
+        }
+#ifdef __TWO_PHASE_TESTS__
+            else if (test_stop)
+            {
+                switch (run_pg_clean)
+                {
+                case TWO_PHASE_TEST_NOT_STOP:
+                    break;
+                case TWO_PHASE_TEST_STOP_DN:
+                    if (IS_PGXC_LOCAL_COORDINATOR)
+                    {
+                        break;
+                    }
+                case TWO_PHASE_TEST_STOP_ALL:
+                    elog(STOP, "in test, postmaster in AbortTransaction");
+                    break;
+                default:
+                    break;
+                }
+                elog(WARNING, "in test, postmaster in AbortTransaction");
+            }
+#endif
+            else
+            {
+                elog(WARNING, "WARNING postmaster in AbortTransaction");
+            }
         }
     }
 
@@ -3786,8 +3861,12 @@ AbortTransaction(void)
      * Cleanup the files created during database/tablespace operations.
      * This must happen before we release locks, because we want to hold the
      * locks acquired initially while we cleanup the files.
+	 * If can_abort is false, needn't do DBCleanup, Createdb, movedb, createtablespace e.g.
      */
+	if (can_abort)
+	{
     AtEOXact_DBCleanup(false);
+	}
 
 #ifdef __TBASE__
     SqueueProducerExit();
@@ -3798,6 +3877,17 @@ AbortTransaction(void)
      * transaction at the GTM at thr end
      */
     s->topGlobalTransansactionId = s->transactionId;
+
+#ifdef __TWO_PHASE_TRANS__
+	if (IS_PGXC_LOCAL_COORDINATOR && g_twophase_state.state != TWO_PHASE_INITIALTRANS)
+	{
+		elog(LOG, "send signal to clean 2pc launcher, gid: %s", g_twophase_state.gid);
+		SendPostmasterSignal(PMSIGNAL_WAKEN_CLEAN_2PC_TRIGGER);
+	}
+#endif
+
+	if (can_abort)
+	{
     /*
      * Handle remote abort first.
      */
@@ -3820,13 +3910,11 @@ AbortTransaction(void)
         FinishPreparedTransaction(savePrepareGID, false);
         XactLocalNodePrepared = false;
     }
-    else
-    {
+	}
+
 #ifdef __TWO_PHASE_TRANS__
-        g_twophase_state.state = TWO_PHASE_ABORTTED;
         ClearLocalTwoPhaseState();
 #endif
-    }
 
     if(enable_distri_debug && is_distri_report && IS_PGXC_COORDINATOR)
     {
@@ -4003,7 +4091,10 @@ AbortTransaction(void)
 #endif
             latestXid = RecordTransactionAbort(false);
 #ifdef __TBASE__
+		if (can_abort)
+		{
         FinishSeqOp(false);
+		}
 #endif
     }
     else
@@ -4049,7 +4140,10 @@ AbortTransaction(void)
 
         /* See comments in CommitTransaction */
 #ifdef XCP
+		if (can_abort)
+		{
         AtEOXact_GlobalTxn(false);
+		}
 #endif
 
         ResourceOwnerRelease(TopTransactionResourceOwner,
@@ -7839,6 +7933,7 @@ IsPGXCNodeXactDatanodeDirect(void)
            (IsPostmasterEnvironment || !useLocalXid) &&
            IsNormalProcessingMode() &&
            !IsAutoVacuumLauncherProcess() &&
+		   !IsClean2pcLauncher() &&
 #ifdef XCP
            !IsConnFromDatanode() &&
 #endif

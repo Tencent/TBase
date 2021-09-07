@@ -90,6 +90,7 @@
 #include "postmaster/clustermon.h"
 #endif
 #include "postmaster/autovacuum.h"
+#include "postmaster/clean2pc.h"
 #include "postmaster/clustermon.h"
 #include "postmaster/bgworker_internals.h"
 #include "postmaster/bgwriter.h"
@@ -245,6 +246,7 @@ CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         size = add_size(size, ReplicationOriginShmemSize());
         size = add_size(size, WalSndShmemSize());
         size = add_size(size, WalRcvShmemSize());
+		size = add_size(size, Clean2pcShmemSize());
 #ifdef XCP
         if (IS_PGXC_DATANODE)
             size = add_size(size, SharedQueueShmemSize());
@@ -420,6 +422,8 @@ CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     WalSndShmemInit();
     WalRcvShmemInit();
     ApplyLauncherShmemInit();
+
+	Clean2pcShmemInit();
 
 #ifdef XCP
     /*

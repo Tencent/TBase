@@ -331,6 +331,8 @@ typedef struct PROC_HDR
     PGPROC       *autovacFreeProcs;
     /* Head of list of bgworker free PGPROC structures */
     PGPROC       *bgworkerFreeProcs;
+	/* Head of list of clean 2pc process free PGPROC structures */
+	PGPROC	   *clean2pcFreeProcs;
     /* First pgproc waiting for group XID clear */
     pg_atomic_uint32 procArrayGroupFirst;
     /* WALWriter process's latch */

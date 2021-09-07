@@ -59,6 +59,10 @@ extern bool XactReadOnly;
 extern bool GTM_ReadOnly;
 #endif
 
+#ifdef __TWO_PHASE_TRANS__
+extern bool enable_2pc_error_stop;
+#endif
+
 /*
  * Xact is deferrable -- only meaningful (currently) for read only
  * SERIALIZABLE transactions

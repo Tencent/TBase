@@ -85,6 +85,7 @@
 #include "postmaster/autovacuum.h"
 #include "postmaster/bgworker_internals.h"
 #include "postmaster/bgwriter.h"
+#include "postmaster/clean2pc.h"
 #include "postmaster/postmaster.h"
 #include "postmaster/syslogger.h"
 #include "postmaster/walwriter.h"
@@ -2726,7 +2727,26 @@ static struct config_bool ConfigureNamesBool[] =
 		false,
 		NULL, NULL, NULL
 	},
+	{
+		{"enable_2pc_error_stop", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("Enable 2PC stop when commit prepared error."),
+			NULL
+		},
+		&enable_2pc_error_stop,
+		false,
+		NULL, NULL, NULL
+	},
 #endif
+
+	{
+		{"enable_clean_2pc_launcher", PGC_POSTMASTER, CUSTOM_OPTIONS,
+			gettext_noop("Enable clean 2PC launcher."),
+			NULL
+		},
+		&enable_clean_2pc_launcher,
+		true,
+		NULL, NULL, NULL
+	},
 
 #ifdef __TBASE__
 	{
@@ -4710,7 +4730,7 @@ static struct config_int ConfigureNamesInt[] =
             NULL
         },
         &run_pg_clean,
-        0, 0, 1,
+        0, 0, 10,
         NULL, NULL, NULL
     },
 #endif
@@ -4832,6 +4852,28 @@ static struct config_int ConfigureNamesInt[] =
         NULL, NULL, NULL
     },
 #endif
+
+	{
+		{"auto_clean_2pc_interval", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("auto clean 2pc interval"),
+			NULL,
+			GUC_UNIT_S
+		},
+		&auto_clean_2pc_interval,
+		30, 1, 3600,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"auto_clean_2pc_delay", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("auto clean 2pc delay"),
+			NULL,
+			GUC_UNIT_S
+		},
+		&auto_clean_2pc_delay,
+		3, 1, 600,
+		NULL, NULL, NULL
+	},
 
 	{
 		{"reconnect_gtm_retry_times", PGC_USERSET, CUSTOM_OPTIONS,

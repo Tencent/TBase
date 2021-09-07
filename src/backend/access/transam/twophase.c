@@ -4051,7 +4051,7 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
         }
         else
         {
-			elog(PANIC, "[%s] could not open file %s, errMsg: %s",
+			elog(ERROR, "[%s] could not open file %s, errMsg: %s",
 				__FUNCTION__, path, strerror(errno));
         }
         return;

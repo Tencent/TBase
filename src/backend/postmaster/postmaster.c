@@ -120,6 +120,7 @@
 #include "pgstat.h"
 #include "postmaster/autovacuum.h"
 #include "postmaster/bgworker_internals.h"
+#include "postmaster/clean2pc.h"
 #include "postmaster/fork_process.h"
 #include "postmaster/pgarch.h"
 #include "postmaster/postmaster.h"
@@ -312,6 +313,7 @@ static pid_t StartupPID = 0,
             WalWriterPID = 0,
             WalReceiverPID = 0,
             AutoVacPID = 0,
+			Clean2pcPID = 0,
             PgArchPID = 0,
             PgStatPID = 0,
 #ifdef __TBASE__
@@ -2025,6 +2027,12 @@ ServerLoop(void)
                 start_autovac_launcher = false; /* signal processed */
         }
 
+		if (IS_PGXC_COORDINATOR && Clean2pcPID == 0 &&
+				pmState == PM_RUN && enable_clean_2pc_launcher)
+		{
+			Clean2pcPID = StartClean2pcLauncher();
+		}
+
         /* If we have lost the stats collector, try to start a new one */
         if (PgStatPID == 0 &&
             (pmState == PM_RUN || pmState == PM_HOT_STANDBY))
@@ -2861,6 +2869,8 @@ SIGHUP_handler(SIGNAL_ARGS)
             signal_child(WalReceiverPID, SIGHUP);
         if (AutoVacPID != 0)
             signal_child(AutoVacPID, SIGHUP);
+		if (Clean2pcPID != 0)
+			signal_child(Clean2pcPID, SIGHUP);
         if (PgArchPID != 0)
             signal_child(PgArchPID, SIGHUP);
         if (SysLoggerPID != 0)
@@ -2966,6 +2976,9 @@ pmdie(SIGNAL_ARGS)
                 /* and the autovac launcher too */
                 if (AutoVacPID != 0)
                     signal_child(AutoVacPID, SIGTERM);
+				/* and the clean 2pc launcher too */
+				if (Clean2pcPID != 0)
+					signal_child(Clean2pcPID, SIGTERM);
                 /* and the bgwriter too */
                 if (BgWriterPID != 0)
                     signal_child(BgWriterPID, SIGTERM);
@@ -3093,6 +3106,9 @@ pmdie(SIGNAL_ARGS)
                 /* and the autovac launcher too */
                 if (AutoVacPID != 0)
                     signal_child(AutoVacPID, SIGTERM);
+				/* and the clean 2pc launcher too */
+				if (Clean2pcPID != 0)
+					signal_child(Clean2pcPID, SIGTERM);
                 /* and the walwriter too */
                 if (WalWriterPID != 0)
                     signal_child(WalWriterPID, SIGTERM);
@@ -3272,6 +3288,9 @@ reaper(SIGNAL_ARGS)
              */
             if (!IsBinaryUpgrade && AutoVacuumingActive() && AutoVacPID == 0)
                 AutoVacPID = StartAutoVacLauncher();
+			if (IS_PGXC_COORDINATOR && Clean2pcPID == 0 &&
+					pmState == PM_RUN && enable_clean_2pc_launcher)
+				Clean2pcPID = StartClean2pcLauncher();
             if (PgArchStartupAllowed() && PgArchPID == 0)
                 PgArchPID = pgarch_start();
             if (PgStatPID == 0)
@@ -3431,6 +3450,21 @@ reaper(SIGNAL_ARGS)
         }
 
         /*
+		 * Was it the clean 2pc launcher?	Normal exit can be ignored; we'll
+		 * start a new one at the next iteration of the postmaster's main
+		 * loop, if necessary.  Any other exit condition is treated as a
+		 * crash.
+		 */
+		if (pid == Clean2pcPID)
+		{
+			Clean2pcPID = 0;
+			if (!EXIT_STATUS_0(exitstatus))
+				HandleChildCrash(pid, exitstatus,
+								 _("clean 2pc launcher process"));
+			continue;
+		}
+
+		/*
          * Was it the archiver?  If so, just try to start a new one; no need
          * to force reset of the rest of the system.  (If fail, we'll try
          * again in future cycles of the main loop.).  Unless we were waiting
@@ -4001,6 +4035,18 @@ HandleChildCrash(int pid, int exitstatus, const char *procname)
         signal_child(AutoVacPID, (SendStop ? SIGSTOP : SIGQUIT));
     }
 
+	/* Take care of the clean 2pc process too */
+	if (pid == Clean2pcPID)
+		Clean2pcPID = 0;
+	else if (Clean2pcPID != 0 && take_action)
+	{
+		ereport(DEBUG2,
+				(errmsg_internal("sending %s to process %d",
+								 (SendStop ? "SIGSTOP" : "SIGQUIT"),
+								 (int) Clean2pcPID)));
+		signal_child(Clean2pcPID, (SendStop ? SIGSTOP : SIGQUIT));
+	}
+
 #ifdef PGXC
     /* Take care of the pool manager too */
     if (pid == PgPoolerPID)
@@ -4237,6 +4283,7 @@ PostmasterStateMachine(void)
             (CheckpointerPID == 0 ||
              (!FatalError && Shutdown < ImmediateShutdown)) &&
             WalWriterPID == 0 &&
+			Clean2pcPID == 0 &&
             AutoVacPID == 0)
         {
             if (Shutdown >= ImmediateShutdown || FatalError)
@@ -4345,6 +4392,7 @@ PostmasterStateMachine(void)
             Assert(CheckpointerPID == 0);
             Assert(WalWriterPID == 0);
             Assert(AutoVacPID == 0);
+			Assert(Clean2pcPID == 0);
             /* syslogger is not considered here */
             pmState = PM_NO_CHILDREN;
         }
@@ -4558,6 +4606,8 @@ TerminateChildren(int signal)
         signal_child(WalReceiverPID, signal);
     if (AutoVacPID != 0)
         signal_child(AutoVacPID, signal);
+	if (Clean2pcPID != 0)
+		signal_child(Clean2pcPID, signal);
     if (PgArchPID != 0)
         signal_child(PgArchPID, signal);
     if (PgStatPID != 0)
@@ -5417,6 +5467,12 @@ SubPostmasterMain(int argc, char *argv[])
     if (strcmp(argv[1], "--forkavworker") == 0)
         AutovacuumWorkerIAm();
 
+	/* clean 2pc needs this set before calling InitProcess */
+	if (strcmp(argv[1], "--forkclean2pclauncher") == 0)
+		Clean2pcLauncherIAm();
+	if (strcmp(argv[1], "--forkclean2pcworker") == 0)
+		Clean2pcWorkerIAm();
+
     /*
      * Start our win32 signal implementation. This has to be done after we
      * read the backend variables, because we need to pick up the signal pipe
@@ -5534,6 +5590,32 @@ SubPostmasterMain(int argc, char *argv[])
 
         AutoVacWorkerMain(argc - 2, argv + 2);    /* does not return */
     }
+	if (strcmp(argv[1], "--forkclean2pclauncher") == 0)
+	{
+		/* Restore basic shared memory pointers */
+		InitShmemAccess(UsedShmemSegAddr);
+
+		/* Need a PGPROC to run CreateSharedMemoryAndSemaphores */
+		InitProcess();
+
+		/* Attach process to shared data structures */
+		CreateSharedMemoryAndSemaphores(false, 0);
+
+		Clean2pcLauncherMain(argc - 2, argv + 2);	/* does not return */
+	}
+	if (strcmp(argv[1], "--forkclean2pcworker") == 0)
+	{
+		/* Restore basic shared memory pointers */
+		InitShmemAccess(UsedShmemSegAddr);
+
+		/* Need a PGPROC to run CreateSharedMemoryAndSemaphores */
+		InitProcess();
+
+		/* Attach process to shared data structures */
+		CreateSharedMemoryAndSemaphores(false, 0);
+
+		Clean2pcWorkerMain(argc - 2, argv + 2);	/* does not return */
+	}
     if (strncmp(argv[1], "--forkbgworker=", 15) == 0)
     {
         int            shmem_slot;
@@ -5781,6 +5863,20 @@ sigusr1_handler(SIGNAL_ARGS)
         /* The autovacuum launcher wants us to start a worker process. */
         StartAutovacuumWorker();
     }
+
+	if (CheckPostmasterSignal(PMSIGNAL_WAKEN_CLEAN_2PC_TRIGGER) &&
+		Shutdown == NoShutdown && Clean2pcPID != 0)
+	{
+		/* send SIGUSR2 to clean 2pc launcher to trigger clean */
+		signal_child(Clean2pcPID, SIGUSR2);
+	}
+
+	if (CheckPostmasterSignal(PMSIGNAL_START_CLEAN_2PC_WORKER) &&
+		Shutdown == NoShutdown)
+	{
+		/* The clean 2pc launcher wants us to start a worker process. */
+		StartClean2pcWorker();
+	}
 
     if (CheckPostmasterSignal(PMSIGNAL_START_WALRECEIVER))
     {
