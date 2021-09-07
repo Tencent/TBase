@@ -22,6 +22,7 @@
 #include "pgxc/pgxc.h"
 #include "gtm/gtm_c.h"
 #include "postmaster/autovacuum.h"
+#include "postmaster/clean2pc.h"
 #include "postmaster/clustermon.h"
 #include "storage/backendid.h"
 #include "tcop/tcopprot.h"
@@ -1336,6 +1337,10 @@ try_connect_gtm:
 			elog(LOG, "Autovacuum launcher: connection established to GTM with string %s", conn_str);
 		else if (IsClusterMonitorProcess() && GTMDebugPrint)
 			elog(LOG, "Cluster monitor: connection established to GTM with string %s", conn_str);
+		else if (IsClean2pcWorker() && GTMDebugPrint)
+			elog(LOG, "Clean 2pc worker: connection established to GTM with string %s", conn_str);
+		else if (IsClean2pcLauncher() && GTMDebugPrint)
+			elog(LOG, "Clean 2pc launcher: connection established to GTM with string %s", conn_str);
 		else if(GTMDebugPrint)
 			elog(LOG, "Postmaster child: connection established to GTM with string %s", conn_str);
 	}
@@ -1424,6 +1429,10 @@ CloseGTM(void)
         elog(DEBUG1, "Autovacuum launcher: connection to GTM closed");
     else if (IsClusterMonitorProcess())
         elog(DEBUG1, "Cluster monitor: connection to GTM closed");
+	else if (IsClean2pcWorker())
+		elog(DEBUG1, "Clean 2pc worker: connection to GTM closed");
+	else if (IsClean2pcLauncher())
+		elog(DEBUG1, "Clean 2pc launcher: connection to GTM closed");
     else
         elog(DEBUG1, "Postmaster child: connection to GTM closed");
 }

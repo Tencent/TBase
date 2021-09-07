@@ -63,17 +63,17 @@ int  transaction_threshold = 200000;
 #define MAXIMUM_OUTPUT_FILE 1000
 #define XIDPREFIX "_$XC$"
 #define DEFAULT_CLEAN_TIME_INTERVAL 120000000
-#ifdef __TWO_PHASE_TESTS__
-#define LEAST_CLEAN_TIME_INTERVAL 10000000 /* in pg_clean test_mode should not clean twophase trans prepared in ten seconds or commit in ten seconds */
-#else
-#define LEAST_CLEAN_TIME_INTERVAL 60000000 /* should not clean twophase trans prepared in a minite or commit in a minite */
-#endif
-GlobalTimestamp clean_time_interval = DEFAULT_CLEAN_TIME_INTERVAL;
+#define LEAST_CLEAN_TIME_INTERVAL   1000000 /* should not clean twophase trans prepared in 1s or commit in 1s */
 
+GlobalTimestamp clean_time_interval = DEFAULT_CLEAN_TIME_INTERVAL;
 
 PG_MODULE_MAGIC;
 
-#define MAX_GID 50
+#define MAX_GID               64
+
+#define CLEAN_CHECK_TIMES     3
+#define CLEAN_CHECK_INTERVAL  10000
+
 #define MAX_DBNAME	64
 #define GET_START_XID "startxid:"
 #define GET_COMMIT_TIMESTAMP "global_commit_timestamp:"
@@ -2397,6 +2397,7 @@ bool check_2pc_belong_node(txn_info * txn)
     int node_index = 0;
     char node_type;
     node_index = find_node_index(abnormal_nodeoid);
+    Assert(InvalidOid != abnormal_nodeoid);
     if (abnormal_nodeoid == txn->origcoord)
     {
         txn->belong_abnormal_node = true;
@@ -2413,6 +2414,60 @@ bool check_2pc_belong_node(txn_info * txn)
         txn->belong_abnormal_node = true;
         return true;
     }
+
+    if (InvalidOid == txn->origcoord)
+    {
+        char *startnode = NULL;
+        int   node_oid  = InvalidOid;
+        char  gid[MAX_GID];
+
+        if (!IsXidImplicit(txn->gid))
+        {
+            txn->belong_abnormal_node = true;
+            return true;
+        }
+
+        Assert(IsXidImplicit(txn->gid));
+
+        /* get start node from gid */
+        strcpy(gid, txn->gid);
+        startnode = strtok(gid, ":");
+        if (NULL == startnode)
+        {
+            elog(WARNING, "get startnode(%s) from gid(%s) failed",
+                startnode, gid);
+            txn->belong_abnormal_node = false;
+            return false;
+        }
+
+        startnode = strtok(NULL, ":");
+        if (NULL == startnode)
+        {
+            elog(WARNING, "get startnode(%s) from gid(%s) failed",
+                startnode, gid);
+            txn->belong_abnormal_node = false;
+            return false;
+        }
+
+        node_oid = get_pgxc_nodeoid(startnode);
+        if (NULL == startnode)
+        {
+            elog(WARNING, "get invalid oid for startnode(%s) from gid(%s)",
+                startnode, gid);
+            txn->belong_abnormal_node = false;
+            return false;
+        }
+
+        elog(DEBUG5, "get oid(%d) for startnode(%s) from gid(%s)",
+            node_oid, startnode, gid);
+
+        if (abnormal_nodeoid == node_oid)
+        {
+            txn->belong_abnormal_node = true;
+            return true;
+        }
+    }
+
     txn->belong_abnormal_node = false;
     return false;
 }
@@ -2432,6 +2487,10 @@ bool check_node_participate(txn_info * txn, int node_idx)
 
 void recover2PC(txn_info * txn)
 {
+	int i = 0;
+	bool check_ok = false;
+	MemoryContext current_context = NULL;
+	ErrorData* edata = NULL;
 	TXN_STATUS txn_stat;
 	txn_stat = check_txn_global_status(txn);
 	txn->global_txn_stat = txn_stat;
@@ -2470,12 +2529,40 @@ void recover2PC(txn_info * txn)
             {
     			txn->op = COMMIT;
     			/* check whether all nodes can commit prepared */
+				for (i = 0; i < CLEAN_CHECK_TIMES; i++)
+				{
+					check_ok = true;
+					current_context = CurrentMemoryContext;
+					PG_TRY();
+					{
     			if (!clean_2PC_iscommit(txn, true, true))
     			{
+							check_ok = false;
+							elog(LOG, "check commit 2PC transaction %s failed",
+								txn->gid);
+						}
+					}
+					PG_CATCH();
+					{
+						(void)MemoryContextSwitchTo(current_context);
+						edata = CopyErrorData();
+						FlushErrorState();
+
+						check_ok = false;
+						elog(WARNING, "check commit 2PC transaction %s error: %s",
+							txn->gid, edata->message);
+					}
+					PG_END_TRY();
+
+					if (!check_ok)
+					{
     				txn->op_issuccess = false;
-    				elog(LOG, "check commit 2PC transaction %s failed", txn->gid);
     				return;
     			}
+
+					pg_usleep(CLEAN_CHECK_INTERVAL);
+				}
+
     			/* send commit prepared to all nodes */
     			if (!clean_2PC_iscommit(txn, true, false))
     			{
@@ -2491,12 +2578,40 @@ void recover2PC(txn_info * txn)
 		case TXN_STATUS_ABORTED:
 			txn->op = ABORT;
 			/* check whether all nodes can rollback prepared */
+			for (i = 0; i < CLEAN_CHECK_TIMES; i++)
+			{
+				check_ok = true;
+				current_context = CurrentMemoryContext;
+				PG_TRY();
+				{
 			if (!clean_2PC_iscommit(txn, false, true))
 			{
+						check_ok = false;
+						elog(LOG, "check rollback 2PC transaction %s failed",
+							txn->gid);
+					}
+				}
+				PG_CATCH();
+				{
+					check_ok = false;
+					(void)MemoryContextSwitchTo(current_context);
+					edata = CopyErrorData();
+					FlushErrorState();
+
+					elog(WARNING, "check rollback 2PC transaction %s error: %s",
+						txn->gid, edata->message);
+				}
+				PG_END_TRY();
+
+				if (!check_ok)
+				{
 				txn->op_issuccess = false;
-				elog(LOG, "check rollback 2PC transaction %s failed", txn->gid);
 				return;
 			}
+
+				pg_usleep(CLEAN_CHECK_INTERVAL);
+			}
+
 			/* send rollback prepared to all nodes */
 			if (!clean_2PC_iscommit(txn, false, false))
 			{
@@ -2620,7 +2735,6 @@ TXN_STATUS check_txn_global_status(txn_info *txn)
     {
         node_idx = find_node_index(abnormal_nodeoid);
         if (!check_2pc_belong_node(txn) || 
-           !check_node_participate(txn, node_idx) ||
             abnormal_time < txn->prepare_timestamp[node_idx])
         {
             return TXN_STATUS_INPROGRESS;

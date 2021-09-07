@@ -8384,6 +8384,17 @@ FinishRemotePreparedTransaction(char *prepareGID, bool commit)
     GlobalTransactionId        gxid, prepare_gxid;
     bool                    prepared_local = false;
 
+#ifdef __TWO_PHASE_TRANS__
+	/*
+	 * Since g_twophase_state is cleared after prepare phase,
+	 * g_twophase_state shoud be assigned here
+	 */
+	strncpy(g_twophase_state.gid, prepareGID, GIDSIZE);
+	strncpy(g_twophase_state.start_node_name, PGXCNodeName, NAMEDATALEN);
+	g_twophase_state.state = TWO_PHASE_PREPARED;
+	g_twophase_state.is_start_node = true;
+#endif
+
     /*
      * Get the list of nodes involved in this transaction.
      *
@@ -8441,7 +8452,6 @@ FinishRemotePreparedTransaction(char *prepareGID, bool commit)
 #endif
 
 #ifdef __TWO_PHASE_TRANS__
-     
     /* 
      * not allowed user commit residual transaction in xc_maintenance_mode, 
      * since we need commit them in unified timestamp
@@ -8450,19 +8460,11 @@ FinishRemotePreparedTransaction(char *prepareGID, bool commit)
     {
         elog(ERROR, "can not commit transaction '%s' in xc_maintainence_mode", prepareGID);
     }
-    /* 
-     *since g_twophase_state is cleared after prepare phase 
-     *g_twophase_state shoud be assigned here
-     */
-    strncpy(g_twophase_state.gid, prepareGID, GIDSIZE);
-    strncpy(g_twophase_state.start_node_name, PGXCNodeName, NAMEDATALEN);
-    g_twophase_state.state = TWO_PHASE_PREPARED;
-    g_twophase_state.is_start_node = true;
+
     if (nodestring)
     {
         strncpy(g_twophase_state.participants, nodestring,((NAMEDATALEN+1) * (TBASE_MAX_DATANODE_NUMBER + TBASE_MAX_COORDINATOR_NUMBER)));
     }
-    
 #endif
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__

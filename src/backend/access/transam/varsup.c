@@ -24,6 +24,7 @@
 #include "commands/dbcommands.h"
 #include "miscadmin.h"
 #include "postmaster/autovacuum.h"
+#include "postmaster/clean2pc.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
 #include "utils/syscache.h"
@@ -356,6 +357,7 @@ GetNewTransactionId(bool isSubXact)
         (!IsConnFromCoord() ||
         IsAutoVacuumWorkerProcess() ||
         IsAutoVacuumLauncherProcess() ||
+		IsAnyClean2pcProcess() ||
         GetForceXidFromGTM() ||
         (IsInitProcessingMode() && IsPostmasterEnvironment)))
     {

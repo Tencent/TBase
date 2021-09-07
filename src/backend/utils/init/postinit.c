@@ -42,6 +42,7 @@
 #include "postmaster/clustermon.h"
 #endif
 #include "postmaster/autovacuum.h"
+#include "postmaster/clean2pc.h"
 #include "postmaster/clustermon.h"
 #include "postmaster/postmaster.h"
 #include "replication/walsender.h"
@@ -333,7 +334,7 @@ CheckMyDatabase(const char *name, bool am_superuser)
      *
      * We do not enforce them for autovacuum worker processes either.
      */
-    if (IsUnderPostmaster && !IsAutoVacuumWorkerProcess())
+	if (IsUnderPostmaster && !IsAutoVacuumWorkerProcess() && !IsClean2pcWorker())
     {
         /*
          * Check that the database is currently allowing connections.
@@ -691,7 +692,7 @@ InitPostgres(const char *in_dbname, Oid dboid, const char *username,
     before_shmem_exit(ShutdownPostgres, 0);
 
     /* The autovacuum launcher is done here */
-    if (IsAutoVacuumLauncherProcess() || IsClusterMonitorProcess())
+	if (IsAutoVacuumLauncherProcess() || IsClusterMonitorProcess() || IsClean2pcLauncher())
     {
         /* report this backend in the PgBackendStatus array */
         pgstat_bestart();
@@ -731,7 +732,7 @@ InitPostgres(const char *in_dbname, Oid dboid, const char *username,
      * In standalone mode and in autovacuum worker processes, we use a fixed
      * ID, otherwise we figure it out from the authenticated user name.
      */
-    if (bootstrap || IsAutoVacuumWorkerProcess())
+	if (bootstrap || IsAutoVacuumWorkerProcess() || IsClean2pcWorker())
     {
         InitializeSessionUserIdStandalone();
         am_superuser = true;
@@ -1020,7 +1021,7 @@ InitPostgres(const char *in_dbname, Oid dboid, const char *username,
      */
     RelationCacheInitializePhase3();
 #ifdef _MLS_    
-    if (bootstrap || IsAutoVacuumWorkerProcess() || !IsUnderPostmaster || IsBackgroundWorker)
+    if (bootstrap || IsAutoVacuumWorkerProcess() || IsClean2pcWorker() || !IsUnderPostmaster || IsBackgroundWorker)
     {
         ;
     }
