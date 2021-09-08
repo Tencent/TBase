@@ -93,7 +93,8 @@ GetForceXidFromGTM(void)
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
 static TransactionId local_xid = InvalidTransactionId;
 static TransactionId local_subxids[PGPROC_MAX_CACHED_SUBXIDS] = {};
-static int local_nsub;
+static int local_nsub = 0;
+static bool local_overflowed = false;
 /* exported information about parallel workers, see xact.c */
 extern int nParallelCurrentXids;
 extern TransactionId *ParallelCurrentXids;
@@ -129,7 +130,8 @@ StoreGlobalXid(const char *globalXid)
     else if(IsConnFromDatanode())
     {
         
-		local_xid = GetLocalTransactionId(globalXid, local_subxids, &local_nsub);
+		local_xid = GetLocalTransactionId(globalXid,
+						local_subxids, &local_nsub, &local_overflowed);
         if(enable_distri_print)
         {
 			elog (LOG, " global xid %s to local xid %d, %d subxids", globalXid, local_xid, local_nsub);
@@ -192,8 +194,6 @@ GetSubTransactions(void)
 bool
 TransactIdIsCurentGlobalTransacId(TransactionId xid)
 {
-	int i;
-	
     if(enable_distri_print)
     {
         elog(LOG, "is current transaction xid %u local xid %d", xid, local_xid);
@@ -205,10 +205,30 @@ TransactIdIsCurentGlobalTransacId(TransactionId xid)
 	if (TransactionIdEquals(xid, local_xid))
 		return true;
 	
+	if (!local_overflowed)
+	{
 	/* check subxids */
+		int i;
 	for (i = 0; i < local_nsub; i++)
 	{
 		if (TransactionIdEquals(local_subxids[i], xid))
+			return true;
+	}
+	}
+	else
+	{
+		TransactionId topxid = SubTransGetTopmostTransaction(xid);
+		Assert(local_nsub == PGPROC_MAX_CACHED_SUBXIDS);
+		if(enable_distri_print)
+		{
+			elog(LOG, "subtransaction overflowed: xid=%d, topxid=%d, local_xid=%d",
+					xid, topxid, local_xid);
+		}
+
+		if (!TransactionIdIsValid(topxid))
+			return false;
+
+		if (TransactionIdEquals(topxid, local_xid))
 			return true;
 	}
 	

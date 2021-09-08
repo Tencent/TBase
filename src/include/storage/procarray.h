@@ -123,7 +123,8 @@ extern bool TransactionIdIsInProgress(TransactionId xid);
 extern bool TransactionIdIsPrepared(TransactionId xid, Snapshot snapshot, GlobalTimestamp *prepare_ts);
 #endif
 #ifdef __TBASE__
-extern TransactionId GetLocalTransactionId(const char *globalXid, TransactionId *subxids, int *nsub);
+extern TransactionId GetLocalTransactionId(const char *globalXid,
+					TransactionId *subxids, int *nsub, bool *overflowed);
 #endif
 extern char *GetGlobalTransactionId(const TransactionId pid);
 extern bool TransactionIdIsActive(TransactionId xid);
