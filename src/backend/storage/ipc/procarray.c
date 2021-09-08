@@ -1963,7 +1963,8 @@ GetMaxSnapshotSubxidCount(void)
 }
 
 #ifdef __TBASE__
-TransactionId GetLocalTransactionId(const char *globalXid, TransactionId *subxids, int *nsub)
+TransactionId GetLocalTransactionId(const char *globalXid,
+				TransactionId *subxids, int *nsub, bool *overflowed)
 {
     
     ProcArrayStruct *arrayP = procArray;
@@ -1995,6 +1996,8 @@ TransactionId GetLocalTransactionId(const char *globalXid, TransactionId *subxid
         }
         
 		result = pgxact->xid;
+		
+		*overflowed = pgxact->overflowed;
 		
 		/* look for max xid in subtrans */
 		*nsub = pgxact->nxids;
