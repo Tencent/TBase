@@ -3914,7 +3914,7 @@ plantree_walk_initplans(List *plans,
 		Plan    *splan = (Plan *) list_nth(subplans,
 		                                   (lfirst_node(SubPlan, lc))->plan_id - 1);
 		
-		if (walker(splan, context))
+		if (walker(splan, subplans, context))
 			return true;
 	}
 	
