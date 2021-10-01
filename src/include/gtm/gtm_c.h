@@ -58,7 +58,7 @@ typedef enum GTM_PGXCNodeType
     GTM_NODE_DATANODE = 4,
     GTM_NODE_GTM = 5,
 #ifdef __TBASE__
-    GTM_NODE_GTM_CTL   = 6,    /* gtm ctl will never register and unregister. */
+	GTM_NODE_GTM_CTL   = 6,	/* gtm ctl will never register and unregister, maybe used by gtm_ctl or pgxc_ctl */
 #endif
     GTM_NODE_DEFAULT/* In case nothing is associated to connection */
 } GTM_PGXCNodeType;
