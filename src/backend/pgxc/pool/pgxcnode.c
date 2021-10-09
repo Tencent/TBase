@@ -5877,6 +5877,7 @@ delete_leadercn_handle(PGXCNodeAllHandles *pgxc_connections,
 {
 	int co_conn_count = 0;
 	int i = 0;
+	bool find_leader_handle = false;
 
 	if (!pgxc_connections || !leader_cn_handle)
 		return;
@@ -5884,14 +5885,18 @@ delete_leadercn_handle(PGXCNodeAllHandles *pgxc_connections,
 	co_conn_count = pgxc_connections->co_conn_count;
 	for (i = 0; i < co_conn_count; i++)
 	{
-		if (pgxc_connections->coord_handles[i] == leader_cn_handle)
+		if (pgxc_connections->coord_handles[i] == leader_cn_handle || find_leader_handle)
 		{
 			if (i+1 < co_conn_count)
 				pgxc_connections->coord_handles[i] = pgxc_connections->coord_handles[i+1];
 			else
 				pgxc_connections->coord_handles[i] = NULL;
+
+			if (!find_leader_handle)
+			{
 			pgxc_connections->co_conn_count--;
-			break;
+				find_leader_handle = true;
+			}
 		}
 	}
 }
