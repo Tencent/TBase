@@ -18,6 +18,7 @@ extern bool enable_clean_2pc_launcher;
 
 extern int auto_clean_2pc_interval;
 extern int auto_clean_2pc_delay;
+extern int auto_clean_2pc_timeout;
 
 extern bool IsClean2pcLauncher(void);
 extern bool IsClean2pcWorker(void);

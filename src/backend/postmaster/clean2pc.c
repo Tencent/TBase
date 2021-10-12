@@ -58,6 +58,7 @@ bool enable_clean_2pc_launcher = true;
 
 int auto_clean_2pc_interval = 10;
 int auto_clean_2pc_delay    = 3;
+int auto_clean_2pc_timeout  = 0;
 
 static volatile sig_atomic_t got_SIGTERM = false;
 static volatile sig_atomic_t got_SIGHUP  = false;
@@ -79,11 +80,11 @@ Clean2pcLauncherMain(int argc, char *argv[]) pg_attribute_noreturn();
 NON_EXEC_STATIC void
 Clean2pcWorkerMain(int argc, char *argv[]) pg_attribute_noreturn();
 
-static void	start_query_worker(void);
+static void	start_query_worker(TimestampTz clean_time);
 static void	start_clean_worker(int count);
 
-static void do_query_2pc(void);
-static void do_clean_2pc(void);
+static void do_query_2pc(TimestampTz clean_time);
+static void do_clean_2pc(TimestampTz clean_time);
 
 static void clean_2pc_sigterm_handler(SIGNAL_ARGS);
 static void clean_2pc_sighup_handler(SIGNAL_ARGS);
@@ -103,6 +104,8 @@ typedef struct Clean2pcDBInfo
 
 typedef struct
 {
+	TimestampTz clean_time;
+
 	bool worker_running;
 	Oid  worker_db;
 
@@ -157,6 +160,7 @@ NON_EXEC_STATIC void
 Clean2pcLauncherMain(int argc, char *argv[])
 {
 	int wait_time = 0;
+	TimestampTz clean_time = GetCurrentTimestamp();
 
 	am_clean_2pc_launcher = true;
 
@@ -239,13 +243,15 @@ Clean2pcLauncherMain(int argc, char *argv[])
 
 		if (got_SIGUSR2)
 		{
-			elog(LOG, "2pc clean launcher got SIGUSR2");
 			got_SIGUSR2 = false;
+			clean_time = GetCurrentTimestamp();
 			wait_time = auto_clean_2pc_delay;
+			elog(LOG, "2pc clean launcher got SIGUSR2, clean_time: "
+				INT64_FORMAT, clean_time);
 			continue;
 		}
 
-		start_query_worker();
+		start_query_worker(clean_time);
 
 		if (got_SIGTERM || got_SIGHUP || got_SIGUSR2)
 		{
@@ -371,13 +377,13 @@ Clean2pcWorkerMain(int argc, char *argv[])
 	if (Clean2pcShmem->db_count == 0)
 	{
 		elog(DEBUG5, "query 2pc from db: %s", db_name);
-		do_query_2pc();
+		do_query_2pc(Clean2pcShmem->clean_time);
 		clean_db_count = Clean2pcShmem->db_count;
 	}
 	else
 	{
 		elog(LOG, "clean 2pc for db: %s", db_name);
-		do_clean_2pc();
+		do_clean_2pc(Clean2pcShmem->clean_time);
 	}
 
 	Clean2pcShmem->worker_running = false;
@@ -394,7 +400,7 @@ Clean2pcWorkerMain(int argc, char *argv[])
 }
 
 static void
-do_query_2pc(void)
+do_query_2pc(TimestampTz clean_time)
 {
 	int                  i = 0;
 	int                  count_db = 0;
@@ -412,6 +418,8 @@ do_query_2pc(void)
 	TupleTableSlot      *result = NULL;
 	Var                 *dummy = NULL;
 	int                  attr_num = 4;
+	int64                check_time = 0;
+	TimestampTz          curr_time = GetCurrentTimestamp();
 	static const char   *attr_name[] = {"gid", "database",
 							"global_transaction_status",
 							"transaction_status_on_allnodes"};
@@ -419,10 +427,25 @@ do_query_2pc(void)
 	Assert(result_str != NULL);
 	resetStringInfo(result_str);
 
-	snprintf(query, SQL_CMD_LEN, "select * FROM pg_clean_check_txn(%d) "
-			"order by database limit 1000;", auto_clean_2pc_delay);
+	check_time = (curr_time - clean_time)/USECS_PER_SEC;
 
-	elog(DEBUG2, "node(%d) query: %s", PGXCNodeId, query);
+	if (check_time < 0)
+	{
+		elog(WARNING, "Invalid check_time: " INT64_FORMAT
+			", curr_time: " INT64_FORMAT ", clean_time: " INT64_FORMAT,
+			check_time, curr_time, clean_time);
+		return;
+	}
+
+	if (check_time > INT32_MAX)
+	{
+		check_time = INT32_MAX;
+	}
+
+	snprintf(query, SQL_CMD_LEN, "select * FROM pg_clean_check_txn("
+		INT64_FORMAT ") order by database limit 1000;", check_time);
+
+	elog(DEBUG1, "node(%d) query: %s", PGXCNodeId, query);
 
 	StartTransactionCommand();
 
@@ -544,7 +567,7 @@ do_query_2pc(void)
 }
 
 static void
-do_clean_2pc(void)
+do_clean_2pc(TimestampTz clean_time)
 {
 	int                  i = 0;
 	int                  count = 0;
@@ -558,12 +581,9 @@ do_clean_2pc(void)
 	int                  attr_num = 4;
 	static const char   *attr_name[] = {"gid", "global_transaction_status",
 								"operation", "operation_status"};
-	TimestampTz			 clean_time = 0;
 
 	Assert(result_str != NULL);
 	resetStringInfo(result_str);
-
-	clean_time = GetCurrentTimestamp() - USECS_PER_SEC * auto_clean_2pc_delay;
 
 	snprintf(query, SQL_CMD_LEN, "select * FROM pg_clean_execute_on_node('%s', %ld)"
 			" limit 1000;", PGXCNodeName, clean_time);
@@ -798,7 +818,7 @@ get_default_database(void)
  * start query worker to query 2pc
  */
 static void
-start_query_worker(void)
+start_query_worker(TimestampTz clean_time)
 {
 	Oid db_oid = get_default_database();
 	if (!OidIsValid(db_oid))
@@ -809,7 +829,18 @@ start_query_worker(void)
 
 	Assert(OidIsValid(db_oid));
 
+	if (auto_clean_2pc_timeout != 0)
+	{
+		TimestampTz curr_time = GetCurrentTimestamp();
+		if (curr_time - clean_time > auto_clean_2pc_timeout * USECS_PER_SEC)
+		{
+			clean_time = curr_time - auto_clean_2pc_timeout * USECS_PER_SEC;
+		}
+	}
+
 	LWLockAcquire(Clean2pcLock, LW_EXCLUSIVE);
+
+	Clean2pcShmem->clean_time = clean_time;
 
 	while (Clean2pcShmem->worker_running)
 	{
