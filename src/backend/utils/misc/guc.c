@@ -4876,6 +4876,17 @@ static struct config_int ConfigureNamesInt[] =
 	},
 
 	{
+		{"auto_clean_2pc_timeout", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("auto clean 2pc timeout"),
+			NULL,
+			GUC_UNIT_S
+		},
+		&auto_clean_2pc_timeout,
+		0, 0, INT_MAX,
+		NULL, NULL, NULL
+	},
+
+	{
 		{"reconnect_gtm_retry_times", PGC_USERSET, CUSTOM_OPTIONS,
 			gettext_noop("reconnect gtm retry times"),
 			NULL
