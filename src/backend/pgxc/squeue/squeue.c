@@ -2868,6 +2868,14 @@ SEND_DATA:
                         //LWLockRelease(sqsync->sqs_consumer_sync[i].cs_lwlock);
                     }
 
+					/*
+					 * Check sq_error status to avoid endless loop here
+					 */
+                    if (squeue->sq_error)
+                    {
+                        elog(ERROR, "SharedQueueFinish: shared_queue %s error because of query-cancel.", squeue->sq_key);
+                    }
+
                     if (unfinish_tuplestore)
                     {
                         pg_usleep(1000L);
