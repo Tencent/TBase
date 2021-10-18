@@ -3677,7 +3677,6 @@ EvalPlanQualEnd(EPQState *epqstate)
 
     /* Mark EPQState idle */
     epqstate->estate = NULL;
-	epqstate->parentestate = NULL;
     epqstate->planstate = NULL;
     epqstate->origslot = NULL;
 }
