@@ -12079,6 +12079,34 @@ RelationGetAllPartitions(Relation rel)
 }
 
 int
+GetAllPartitionIntervalCount(Oid parent_oid)
+{
+	int count = 0;
+	List *children = NULL; 
+	Relation rel = heap_open(parent_oid, NoLock);
+
+	children = RelationGetAllPartitions(rel);
+
+	if(children)
+	{
+		count = children->length;
+		list_free(children);
+	}
+
+	heap_close(rel, NoLock);
+
+	return count;
+}
+
+Datum
+partitions_number(PG_FUNCTION_ARGS)
+{
+	Oid parent_oid = PG_GETARG_OID(0);
+	int ret = GetAllPartitionIntervalCount(parent_oid);
+	PG_RETURN_INT32(ret);
+}
+
+int
 RelationGetChildIndex(Relation rel, Oid childoid)
 {
     int nparts = 0;

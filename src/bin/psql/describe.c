@@ -3219,7 +3219,7 @@ describeOneTableDetails(const char *schemaname,
         if (verbose && pset.sversion >= 90500 && tableinfo.relkind == 'r' && tableinfo.relpartkind == 'p')
         {
             printfPQExpBuffer(&buf,
-                        "SELECT 'RANGE(' || a.attname || ')', p.partnparts,"
+						"SELECT 'RANGE(' || a.attname || ')', partitions_number(c.oid),"
                             "p.partdatatype, p.partstartvalue_ts :: date, p.partstartvalue_int,"
                             "CASE WHEN p.partinterval_type=5  THEN p.partinterval_int || ' MONTH' "
                                 "WHEN p.partinterval_type=4 THEN p.partinterval_int || ' DAY' "
@@ -3239,7 +3239,7 @@ describeOneTableDetails(const char *schemaname,
             {
                 char * partdatatype;
                 const char *part_by = _("Partition By");
-                const char *nparts = _("# Of Partitions");
+				const char *nparts = _("Partitions number");
                 const char *start_with = _("Start With");
                 const char *interv = _("Interval Of Partition");
     

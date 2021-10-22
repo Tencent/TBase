@@ -5720,6 +5720,9 @@ DESCR("get top-most partition root parent");
 
 DATA(insert OID = 4690 ( pg_partition_ancestors PGNSP PGUID 12 1 10 0 0 f f f f t t v s 1 0 2205 "2205" "{2205,2205}" "{i,o}" "{partitionid,relid}" _null_ _null_ pg_partition_ancestors _null_ _null_ _null_ ));
 DESCR("view ancestors of the partition");
+/* get partition interval children count */
+DATA(insert OID = 4691 ( partitions_number PGNSP PGUID 12 1 0 0 0 f f f f t f i s 1 0 2205 "2205" _null_ _null_ _null_ _null_ _null_ partitions_number _null_ _null_ _null_ ));
+DESCR("get partition interval children count ");
 DATA(insert OID = 3410 (  pg_extent_info                PGNSP PGUID 12 10 20 0 0 f f f f f t v s 1 0 2249 "2205" "{23,16,23,23,23,23,23,23,23}" "{o,o,o,o,o,o,o,o,o}" "{eid,is_occupied,shardid,freespace_cat,hwm,scan_next,scan_prev,alloc_next,alloc_prev}" _null_ _null_ pg_extent_info_oid _null_ _null_ _null_ ));
 DESCR("get extent info of a relation");
 DATA(insert OID = 3411 (  pg_shard_scan_list            PGNSP PGUID 12 10 20 0 0 f f f f f t v s 2 0 2249 "2205 23" "{23,16,23,23,23,23}" "{o,o,o,o,o,o}" "{eid,is_occupied,shardid,freespace_cat,hwm,scan_next}" _null_ _null_ pg_shard_scan_list_oid _null_ _null_ _null_ ));
