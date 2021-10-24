@@ -276,7 +276,7 @@ explain (verbose on, costs off) delete from tab1_replicated where val = 7;
 select * from tab1_replicated where val = 7;
 
 -- Constant subquery
-create table subquery_fqs(id int, a varchar, c int);
+create table subquery_fqs(id int, a varchar, c int) distribute by shard(id);
 insert into subquery_fqs values(1,'gd', 2);
 insert into subquery_fqs values(1,'zj', 2);
 insert into subquery_fqs values(1,'sz', 2);
@@ -284,14 +284,25 @@ explain select * from subquery_fqs t join (select 1 id, 'gd' a, 2 c from dual un
 select * from subquery_fqs t join (select 1 id, 'gd' a, 2 c from dual union select 1 id, 'sz' a, 2 c union select 1 id, 'zj' a, 2 c from dual) t2 ON (t.id = t2.id and t.a = t2.a);
 
 -- Support subquery FQS only if subquery distributed on same DN with main query(only 1 DN node)
-explain select * from subquery_fqs t1 where t1.id = 1 and t1.c IN (select c from subquery_fqs t2 where t2.id=1);
+explain  (num_nodes on, verbose on, nodes off, costs off) select * from subquery_fqs t1 where t1.id = 1 and t1.c IN (select c from subquery_fqs t2 where t2.id=1);
 select * from subquery_fqs t1 where t1.id = 1 and t1.c IN (select c from subquery_fqs t2 where t2.id=1);
-explain select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select c from subquery_fqs t2 where t2.id=1 order by c limit 1);
+explain  (num_nodes on, verbose on, nodes off, costs off) select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select c from subquery_fqs t2 where t2.id=1 order by c limit 1);
 select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select c from subquery_fqs t2 where t2.id=1 order by c limit 1);
-explain select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select max(c) from subquery_fqs t2 where t2.id=1);
+explain  (num_nodes on, verbose on, nodes off, costs off) select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select max(c) from subquery_fqs t2 where t2.id=1);
 select * from subquery_fqs t1 where t1.id = 1 and t1.c = (select max(c) from subquery_fqs t2 where t2.id=1);
-explain select * from (select * from subquery_fqs where id = 1 order by c limit 1) where c = 2;
+explain  (num_nodes on, verbose on, nodes off, costs off) select * from (select * from subquery_fqs where id = 1 order by c limit 1) where c = 2;
 select * from (select * from subquery_fqs where id = 1 order by c limit 1) where c = 2;
+
+set enable_oracle_compatible to true;
+explain  (num_nodes on, verbose on, nodes off, costs off) select * from subquery_fqs t1 where t1.id in (1 ,1);
+explain   select * from subquery_fqs t1 where t1.id in (1 ,1);
+explain   select * from subquery_fqs t1 where t1.id in (1 ,1);
+explain   select * from subquery_fqs t1 where t1.id in (1 ,1);
+explain   select * from subquery_fqs t1 where t1.id in (1 ,1);
+explain   select * from subquery_fqs t1 where t1.id in (1 ,1);
+explain   select * from subquery_fqs t1 where t1.id in (1 ,1);
+set enable_oracle_compatible to false;
+explain  (num_nodes on, verbose on, nodes off, costs off) select * from subquery_fqs t1 where t1.id in (1 ,3);
 
 drop table tab1_rr;
 drop table tab1_hash;
