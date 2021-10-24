@@ -117,8 +117,6 @@ static bool pgxc_is_func_shippable(Oid funcid);
 /* Check equijoin conditions on given relations */
 static Expr *pgxc_find_dist_equijoin_qual(Relids varnos_1, Relids varnos_2,
                                 Oid distcol_type, Node *quals, List *rtable);
-/* Merge given execution nodes based on join shippability conditions */
-static ExecNodes *pgxc_merge_exec_nodes(ExecNodes *en1, ExecNodes *en2);
 /* Check if given Query includes distribution column */
 static bool pgxc_query_has_distcolgrouping(Query *query);
 
@@ -2485,7 +2483,7 @@ pgxc_find_dist_equi_nodes(Relids varnos_1,
  * exec_node corresponds to the JOIN of respective relations.
  * If both exec_nodes can not be merged, it returns NULL.
  */
-static ExecNodes *
+ExecNodes *
 pgxc_merge_exec_nodes(ExecNodes *en1, ExecNodes *en2)
 {// #lizard forgives
     ExecNodes    *merged_en = makeNode(ExecNodes);

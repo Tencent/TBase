@@ -41,6 +41,7 @@
 #include "utils/varbit.h"
 #include "nodes/nodes.h"
 #include "optimizer/clauses.h"
+#include "optimizer/pgxcship.h"
 #include "parser/parse_coerce.h"
 #include "pgxc/nodemgr.h"
 #include "pgxc/locator.h"
@@ -51,13 +52,19 @@
 #include "catalog/pgxc_node.h"
 #include "catalog/namespace.h"
 #include "access/hash.h"
+
 #ifdef XCP
+
 #include "utils/date.h"
 #include "utils/memutils.h"
+
 #ifdef __COLD_HOT__
+
 #include "catalog/pgxc_key_values.h"
 #include "pgxc/shardmap.h"
+
 #endif
+
 /*
  * Locator details are private
  */
@@ -73,6 +80,7 @@ struct _Locator
                                Datum secValue, bool secIsNull,
 #endif
                                 bool *hasprimary);
+
     Oid            dataType;         /* values of that type are passed to locateNodes function */
     LocatorListType listType;
     bool        primary;
@@ -100,6 +108,7 @@ struct _Locator
     void       *nodeMap; /* map index to node reference according to listType */
     void       *results; /* array to output results */
 };
+
 #endif
 
 #ifdef __COLD_HOT__
@@ -116,38 +125,47 @@ int        num_preferred_data_nodes = 0;
 Oid        preferred_data_node[MAX_PREFERRED_NODES];
 
 #ifdef XCP
+
 static int modulo_value_len(Oid dataType);
+
 static int locate_static(Locator *self, Datum value, bool isnull,
 #ifdef __COLD_HOT__
                 Datum secValue, bool secIsNull,
 #endif
                 bool *hasprimary);
+
 static int locate_roundrobin(Locator *self, Datum value, bool isnull,
 #ifdef __COLD_HOT__
                        Datum secValue, bool secIsNull,
 #endif
                        bool *hasprimary);
+
 static int locate_modulo_random(Locator *self, Datum value, bool isnull,
 #ifdef __COLD_HOT__
                               Datum secValue, bool secIsNull,
 #endif
                               bool *hasprimary);
+
 static int locate_hash_insert(Locator *self, Datum value, bool isnull,
 #ifdef __COLD_HOT__
                         Datum secValue, bool secIsNull,
 #endif
                         bool *hasprimary);
+
 static int locate_hash_select(Locator *self, Datum value, bool isnull,
 #ifdef __COLD_HOT__
                         Datum secValue, bool secIsNull,
 #endif
                         bool *hasprimary);
+
 #ifdef _MIGRATE_
+
 static int locate_shard_insert(Locator *self, Datum value, bool isnull,
 #ifdef __COLD_HOT__
                                     Datum secValue, bool secIsNull,
 #endif
                                     bool *hasprimary);
+
 static int locate_shard_select(Locator *self, Datum value, bool isnull,
 #ifdef __COLD_HOT__
                             Datum secValue, bool secIsNull,
@@ -155,22 +173,26 @@ static int locate_shard_select(Locator *self, Datum value, bool isnull,
                             bool *hasprimary);
                    
 #endif
+
 static int locate_modulo_insert(Locator *self, Datum value, bool isnull,
 #ifdef __COLD_HOT__
                            Datum secValue, bool secIsNull,
 #endif 
                            bool *hasprimary);
+
 static int locate_modulo_select(Locator *self, Datum value, bool isnull,
 #ifdef __COLD_HOT__
                             Datum secValue, bool secIsNull,
 #endif
                             bool *hasprimary);
+
 static Expr * pgxc_find_distcol_expr(Index varno,
                        AttrNumber attrNum,
                        Node *quals);
 
 
 #ifdef __COLD_HOT__
+
 static List * pgxc_find_distcol_exprs(Index varno,
                                      AttrNumber attrNum,
                                     Node *quals);
@@ -189,6 +211,7 @@ static ExecNodes *GetRelationTimeStampRangeNodes(RelationLocInfo *rel_loc_info,
 static bool IsConstAligned(Oid reloid, Datum constvalue, AttrNumber secAttr);
 
 static bool TimeStampRange(Oid op);
+
 #endif
 #endif
 
@@ -218,14 +241,20 @@ GetPreferredReplicationNode(List *relNodes)
         {
             if (PGXCNodeGetNodeId(preferred_data_node[cnt_nodes],
                                   &nodetype) == lfirst_int(item))
+			{
                 nodeid = lfirst_int(item);
         }
+		}
         if (nodeid >= 0)
+		{
             break;
     }
+	}
     if (nodeid < 0)
+	{
         return list_make1_int(list_nth_int(relNodes,
                     ((unsigned int) random()) % list_length(relNodes)));
+	}
 
     return list_make1_int(nodeid);
 }
@@ -249,15 +278,19 @@ GetAnyDataNode(Bitmapset *nodes)
 
         /* OK, found one */
         if (bms_is_member(nodeid, nodes))
+		{
             preferred = bms_add_member(preferred, nodeid);
     }
+	}
 
     /*
      * If no preferred data nodes or they are not in the desired set, pick up
      * from the original set.
      */
     if (bms_is_empty(preferred))
+	{
         preferred = bms_copy(nodes);
+	}
 
     /*
      * Load balance.
@@ -269,7 +302,9 @@ GetAnyDataNode(Bitmapset *nodes)
 
     /* If there is a single member nothing to balance */
     if (nmembers == 1)
+	{
         return members[0];
+	}
 
     /*
      * In general, the set may contain any number of nodes, and if we save
@@ -307,12 +342,15 @@ char *pColName;
 
     pColName = GetRelationHashColumn(rel_loc_info);
     if (pColName == NULL)
+	{
         pColName = GetRelationModuloColumn(rel_loc_info);
+	}
 
     return pColName;
 }
 
 #ifdef _MIGRATE_
+
 /*
  * IsTypeDistributable
  * Returns whether the data type is distributable using a column value.
@@ -350,10 +388,13 @@ IsTypeDistributable(Oid col_type)
     || col_type == NVARCHAR2OID
 #endif
     )
+	{
         return true;
+	}
 
     return false;
 }
+
 #endif
 
 /*
@@ -377,9 +418,13 @@ GetRelationHashColumn(RelationLocInfo * rel_loc_info)
     char       *column_str = NULL;
 
     if (rel_loc_info == NULL)
+	{
         column_str = NULL;
+	}
     else if (rel_loc_info->locatorType != LOCATOR_TYPE_HASH)
+	{
         column_str = NULL;
+	}
     else
     {
         int            len = strlen(rel_loc_info->partAttrName);
@@ -402,15 +447,21 @@ IsDistColumnForRelId(Oid relid, char *part_col_name)
 
     /* if no column is specified, we're done */
     if (!part_col_name)
+	{
         return false;
+	}
 
     /* if no locator, we're done too */
     if (!(rel_loc_info = GetRelationLocInfo(relid)))
+	{
         return false;
+	}
 
     /* is the table distributed by column value */
     if (!IsRelationDistributedByValue(rel_loc_info))
+	{
         return false;
+	}
 
     /* does the column name match the distribution column */
     return !strcmp(part_col_name, rel_loc_info->partAttrName);
@@ -438,9 +489,13 @@ GetRelationModuloColumn(RelationLocInfo * rel_loc_info)
     char       *column_str = NULL;
 
     if (rel_loc_info == NULL)
+	{
         column_str = NULL;
+	}
     else if (rel_loc_info->locatorType != LOCATOR_TYPE_MODULO)
+	{
         column_str = NULL;
+	}
     else
     {
         int    len = strlen(rel_loc_info->partAttrName);
@@ -471,10 +526,14 @@ GetRoundRobinNode(Oid relid)
 
     /* Move round robin indicator to next node */
     if (rel->rd_locator_info->roundRobinNode->next != NULL)
+	{
         rel->rd_locator_info->roundRobinNode = rel->rd_locator_info->roundRobinNode->next;
+	}
     else
+	{
         /* reset to first one */
         rel->rd_locator_info->roundRobinNode = rel->rd_locator_info->rl_nodeList->head;
+	}
 
     relation_close(rel, AccessShareLock);
 
@@ -494,14 +553,18 @@ IsTableDistOnPrimary(RelationLocInfo *rel_loc_info)
     if (!OidIsValid(primary_data_node) ||
         rel_loc_info == NULL ||
         list_length(rel_loc_info->rl_nodeList = 0))
+	{
         return false;
+	}
 
     foreach(item, rel_loc_info->rl_nodeList)
     {
         char ntype = PGXC_NODE_DATANODE;
         if (PGXCNodeGetNodeId(primary_data_node, &ntype) == lfirst_int(item))
+		{
             return true;
     }
+	}
     return false;
 }
 
@@ -521,20 +584,28 @@ IsLocatorInfoEqual(RelationLocInfo *rel_loc_info1, RelationLocInfo *rel_loc_info
 
     /* Same relation? */
     if (rel_loc_info1->relid != rel_loc_info2->relid)
+	{
         return false;
+	}
 
     /* Same locator type? */
     if (rel_loc_info1->locatorType != rel_loc_info2->locatorType)
+	{
         return false;
+	}
 
     /* Same attribute number? */
     if (rel_loc_info1->partAttrNum != rel_loc_info2->partAttrNum)
+	{
         return false;
+	}
 
     /* Same node list? */
     if (list_difference_int(nodeList1, nodeList2) != NIL ||
         list_difference_int(nodeList2, nodeList1) != NIL)
+	{
         return false;
+	}
 
     /* Everything is equal */
     return true;
@@ -592,7 +663,9 @@ GetLocatorType(Oid relid)
     RelationLocInfo *ret_loc_info = GetRelationLocInfo(relid);
 
     if (ret_loc_info != NULL)
+	{
         ret = ret_loc_info->locatorType;
+	}
 
     return ret;
 }
@@ -634,8 +707,10 @@ GetAllCoordNodes(void)
          */
 
         if (i != PGXCNodeId - 1)
+		{
             nodeList = lappend_int(nodeList, i);
     }
+	}
 
     return nodeList;
 }
@@ -727,7 +802,8 @@ RelationBuildLocator(Relation rel)
     curr_nodeoid = get_pgxc_nodeoid_extend(PGXCNodeName, PGXCMainClusterName);
     if (InvalidOid == curr_nodeoid)
     {
-        elog(ERROR, "no such node:%s on PGXCMainClusterName %s PGXCClustername %s", PGXCNodeName, PGXCMainClusterName, PGXCClusterName);
+		elog(ERROR, "no such node:%s on PGXCMainClusterName %s PGXCClustername %s", PGXCNodeName, PGXCMainClusterName,
+		     PGXCClusterName);
     }
     
     node_in_group = DatanodeInGroup(&(pgxc_class->nodeoids), curr_nodeoid);
@@ -761,7 +837,8 @@ RelationBuildLocator(Relation rel)
                     GetShardNodes(pgxc_class->pcoldgroup, &datanodes, &dn_num, NULL);
                     for(j = 0; j < dn_num; j++)
                     {                
-                        relationLocInfo->rl_nodeList = list_append_unique_int(relationLocInfo->rl_nodeList, datanodes[j]);
+						relationLocInfo->rl_nodeList = list_append_unique_int(relationLocInfo->rl_nodeList,
+						                                                      datanodes[j]);
                     }
                     pfree(datanodes);
                 }
@@ -780,7 +857,8 @@ RelationBuildLocator(Relation rel)
                     GetShardNodes(groups[i], &datanodes, &dn_num, NULL);
                     for(j = 0; j < dn_num; j++)
                     {                
-                        relationLocInfo->rl_nodeList = list_append_unique_int(relationLocInfo->rl_nodeList, datanodes[j]);
+						relationLocInfo->rl_nodeList = list_append_unique_int(relationLocInfo->rl_nodeList,
+						                                                      datanodes[j]);
                     }
                     pfree(datanodes);
                 }
@@ -849,7 +927,9 @@ GetRelationLocInfo(Oid relid)
     Assert(rel->rd_isvalid);
 
     if (rel->rd_locator_info)
+	{
         ret_loc_info = CopyRelationLocInfo(rel->rd_locator_info);
+	}
 
     relation_close(rel, AccessShareLock);
 
@@ -864,7 +944,9 @@ GetRelationLocType(Oid relid)
 {
     RelationLocInfo *locinfo = GetRelationLocInfo(relid);
     if (!locinfo)
+	{
         return LOCATOR_TYPE_NONE;
+	}
 
     return locinfo->locatorType;
 }
@@ -885,7 +967,9 @@ CopyRelationLocInfo(RelationLocInfo * src_info)
     dest_info->locatorType = src_info->locatorType;
     dest_info->partAttrNum = src_info->partAttrNum;
     if (src_info->partAttrName)
+	{
         dest_info->partAttrName = pstrdup(src_info->partAttrName);
+	}
 #ifdef _MIGRATE_
     dest_info->groupId     = src_info->groupId;
 #endif
@@ -898,7 +982,9 @@ CopyRelationLocInfo(RelationLocInfo * src_info)
     }
 #endif
     if (src_info->rl_nodeList)
+	{
         dest_info->rl_nodeList = list_copy(src_info->rl_nodeList);
+	}
     /* Note, for round robin, we use the relcache entry */
 
     return dest_info;
@@ -914,11 +1000,15 @@ FreeRelationLocInfo(RelationLocInfo *relationLocInfo)
     if (relationLocInfo)
     {
         if (relationLocInfo->partAttrName)
+		{
             pfree(relationLocInfo->partAttrName);
+		}
 
 #ifdef __COLD_HOT__
 		if (relationLocInfo->secAttrName)
+		{
 			pfree(relationLocInfo->secAttrName);
+		}
 #endif
 
 		list_free(relationLocInfo->rl_nodeList);
@@ -937,7 +1027,9 @@ FreeExecNodes(ExecNodes **exec_nodes)
 
     /* Nothing to do */
     if (!tmp_en)
+	{
         return;
+	}
     list_free(tmp_en->primarynodelist);
     list_free(tmp_en->nodeList);
     pfree(tmp_en);
@@ -946,6 +1038,7 @@ FreeExecNodes(ExecNodes **exec_nodes)
 
 
 #ifdef XCP
+
 /*
  * Determine value length in bytes for specified type for a module locator.
  * Return -1 if module locator is not supported for the type.
@@ -1038,6 +1131,7 @@ hash_func_ptr(Oid dataType)
 }
 
 #ifdef _MIGRATE_
+
 Locator *
 createLocator(char locatorType, RelationAccessType accessType,
               Oid dataType, LocatorListType listType, int nodeCount,
@@ -1103,8 +1197,7 @@ createLocator(char locatorType, RelationAccessType accessType,
                 int *intptr;
                 nodeMap = palloc(locator->nodeCount * sizeof(int));
                 intptr = (int *) nodeMap;
-                foreach(lc, l)
-                    *intptr++ = lfirst_int(lc);
+				foreach(lc, l) *intptr++ = lfirst_int(lc);
                 locator->listType = LOCATOR_LIST_INT;
             }
             else if (IsA(l, OidList))
@@ -1112,8 +1205,7 @@ createLocator(char locatorType, RelationAccessType accessType,
                 Oid *oidptr;
                 nodeMap = palloc(locator->nodeCount * sizeof(Oid));
                 oidptr = (Oid *) nodeMap;
-                foreach(lc, l)
-                    *oidptr++ = lfirst_oid(lc);
+				foreach(lc, l) *oidptr++ = lfirst_oid(lc);
                 locator->listType = LOCATOR_LIST_OID;
             }
             else if (IsA(l, List))
@@ -1121,8 +1213,7 @@ createLocator(char locatorType, RelationAccessType accessType,
                 void **voidptr;
                 nodeMap = palloc(locator->nodeCount * sizeof(void *));
                 voidptr = (void **) nodeMap;
-                foreach(lc, l)
-                    *voidptr++ = lfirst(lc);
+				foreach(lc, l) *voidptr++ = lfirst(lc);
                 locator->listType = LOCATOR_LIST_POINTER;
             }
             else
@@ -1478,7 +1569,9 @@ createLocator(char locatorType, RelationAccessType accessType,
     }
 
     if (result)
+	{
         *result = locator->results;
+	}
 
     return locator;
 }
@@ -1493,7 +1586,9 @@ freeLocator(Locator *locator)
      * do not free it twice
      */
     if (locator->results != locator->nodeMap)
+	{
         pfree(locator->results);
+	}
     pfree(locator);
 }
 
@@ -1510,7 +1605,9 @@ locate_static(Locator *self, Datum value, bool isnull,
 {
     /* TODO */
     if (hasprimary)
+	{
         *hasprimary = false;
+	}
     return self->nodeCount;
 }
 
@@ -1527,9 +1624,13 @@ locate_roundrobin(Locator *self, Datum value, bool isnull,
 {// #lizard forgives
     /* TODO */
     if (hasprimary)
+	{
         *hasprimary = false;
+	}
     if (++self->roundRobinNode >= self->nodeCount)
+	{
         self->roundRobinNode = 0;
+	}
     switch (self->listType)
     {
         case LOCATOR_LIST_NONE:
@@ -1570,7 +1671,9 @@ locate_modulo_random(Locator *self, Datum value, bool isnull,
     int offset;
 
     if (hasprimary)
+	{
         *hasprimary = false;
+	}
 
     Assert(self->nodeCount > 0);
     offset = compute_modulo(abs(rand()), self->nodeCount);
@@ -1611,9 +1714,13 @@ locate_hash_insert(Locator *self, Datum value, bool isnull,
 {// #lizard forgives
     int index;
     if (hasprimary)
+	{
         *hasprimary = false;
+	}
     if (isnull)
+	{
         index = 0;
+	}
     else
     {
         unsigned int hash32;
@@ -1645,6 +1752,7 @@ locate_hash_insert(Locator *self, Datum value, bool isnull,
 }
 
 #ifdef _MIGRATE_
+
 static int locate_shard_insert(Locator *self, Datum value, bool isnull,
 #ifdef __COLD_HOT__
                                     Datum secValue, bool secIsNull,
@@ -1922,6 +2030,7 @@ static int locate_shard_select(Locator *self, Datum value, bool isnull,
         }
     }
 }
+
 #endif
 
 
@@ -1937,7 +2046,9 @@ locate_hash_select(Locator *self, Datum value, bool isnull,
                         bool *hasprimary)
 {// #lizard forgives
     if (hasprimary)
+	{
         *hasprimary = false;
+	}
     if (isnull)
     {
         int i;
@@ -2010,23 +2121,37 @@ locate_modulo_insert(Locator *self, Datum value, bool isnull,
 {// #lizard forgives
     int index;
     if (hasprimary)
+	{
         *hasprimary = false;
+	}
     if (isnull)
+	{
         index = 0;
+	}
     else
     {
         uint64 val;
 
         if (self->valuelen == 8)
+		{
             val = (uint64) (GET_8_BYTES(value));
+		}
         else if (self->valuelen == 4)
+		{
             val = (uint64) (GET_4_BYTES(value));
+		}
         else if (self->valuelen == 2)
+		{
             val = (uint64) (GET_2_BYTES(value));
+		}
         else if (self->valuelen == 1)
+		{
             val = (uint64) (GET_1_BYTE(value));
+		}
         else
+		{
             val = 0;
+		}
 
         index = compute_modulo(val, self->nodeCount);
     }
@@ -2065,7 +2190,9 @@ locate_modulo_select(Locator *self, Datum value, bool isnull,
                             bool *hasprimary)
 {// #lizard forgives
     if (hasprimary)
+	{
         *hasprimary = false;
+	}
     if (isnull)
     {
         int i;
@@ -2100,15 +2227,25 @@ locate_modulo_select(Locator *self, Datum value, bool isnull,
         int     index;
 
         if (self->valuelen == 8)
+		{
             val = (uint64) (GET_8_BYTES(value));
+		}
         else if (self->valuelen == 4)
+		{
             val = (unsigned int) (GET_4_BYTES(value));
+		}
         else if (self->valuelen == 2)
+		{
             val = (unsigned int) (GET_2_BYTES(value));
+		}
         else if (self->valuelen == 1)
+		{
             val = (unsigned int) (GET_1_BYTE(value));
+		}
         else
+		{
             val = 0;
+		}
 
         index = compute_modulo(val, self->nodeCount);
 
@@ -2151,6 +2288,7 @@ GET_NODES(Locator *self, Datum value, bool isnull,
 }
 
 #ifdef __TBASE__
+
 char
 getLocatorDisType(Locator *self)
 {
@@ -2179,7 +2317,9 @@ int
 calcDistReplications(char distributionType, Bitmapset *nodes)
 {
 	if (!nodes)
+	{
 		return 1;
+	}
 
 	if (IsLocatorReplicated(distributionType) ||
 		IsLocatorNone(distributionType))
@@ -2189,6 +2329,7 @@ calcDistReplications(char distributionType, Bitmapset *nodes)
 
 	return 1;
 }
+
 #endif
 
 void *
@@ -2210,6 +2351,7 @@ getLocatorNodeCount(Locator *self)
 {
     return self->nodeCount;
 }
+
 #endif
 
 /*
@@ -2248,7 +2390,9 @@ GetRelationNodes(RelationLocInfo *rel_loc_info, Datum valueForDistCol,
 #endif
 
     if (rel_loc_info == NULL)
+	{
         return NULL;
+	}
 
 
     if (IsLocatorDistributedByValue(rel_loc_info->locatorType))
@@ -2339,7 +2483,7 @@ GetRelationNodesByQuals(Oid reloid, RelationLocInfo *rel_loc_info,
 {// #lizard forgives
 #define ONE_SECOND_DATUM 1000000
     Expr            *distcol_expr = NULL;
-    ExecNodes        *exec_nodes;
+	ExecNodes *exec_nodes = NULL;
     Datum            distcol_value;
     bool            distcol_isnull;
 #ifdef __COLD_HOT__
@@ -2352,6 +2496,15 @@ GetRelationNodesByQuals(Oid reloid, RelationLocInfo *rel_loc_info,
     Oid             distcol_type = InvalidOid;
     Oid                *opArray            = NULL;
     bool            *isswapArray       = NULL;
+	Oid disttype;
+	int32 disttypmod;
+
+	if (enable_distri_debug)
+	{
+		int r = 1;
+		while(r)
+		;
+	}
 
     if (dis_qual)
     {
@@ -2365,15 +2518,18 @@ GetRelationNodesByQuals(Oid reloid, RelationLocInfo *rel_loc_info,
 #endif
 
     if (!rel_loc_info)
+	{
         return NULL;
+	}
     /*
      * If the table distributed by value, check if we can reduce the Datanodes
      * by looking at the qualifiers for this relation
      */
+	disttype = get_atttype(reloid, rel_loc_info->partAttrNum);
+	disttypmod = get_atttypmod(reloid, rel_loc_info->partAttrNum);
+
     if (IsRelationDistributedByValue(rel_loc_info))
     {
-        Oid        disttype = get_atttype(reloid, rel_loc_info->partAttrNum);
-        int32    disttypmod = get_atttypmod(reloid, rel_loc_info->partAttrNum);
         distcol_expr = pgxc_find_distcol_expr(varno, rel_loc_info->partAttrNum,
                                                     quals);
         /*
@@ -2382,7 +2538,7 @@ GetRelationNodesByQuals(Oid reloid, RelationLocInfo *rel_loc_info,
          * will happen in case of inserting that type of expression value as the
          * distribution column value.
          */
-        if (distcol_expr)
+		if (distcol_expr && !IsA(distcol_expr, ArrayExpr))
         {
             distcol_expr = (Expr *)coerce_to_target_type(NULL,
                                                     (Node *)distcol_expr,
@@ -2553,7 +2709,9 @@ GetRelationNodesByQuals(Oid reloid, RelationLocInfo *rel_loc_info,
                         if (isswapArray[i])
                         {
                             /* const <= var */
-                            minStamp = minStamp ? ((const_expr->constvalue >= minStamp) ? minStamp : const_expr->constvalue) : const_expr->constvalue;
+							minStamp = minStamp ? ((const_expr->constvalue >= minStamp) ? minStamp
+							                                                            : const_expr->constvalue)
+							                    : const_expr->constvalue;
                             seccol_type = const_expr->consttype;
                             equal_min = true;
                         }
@@ -2577,7 +2735,9 @@ GetRelationNodesByQuals(Oid reloid, RelationLocInfo *rel_loc_info,
                         else
                         {
                             /* var >= const */
-                            minStamp = minStamp ? ((const_expr->constvalue >= minStamp) ? minStamp : const_expr->constvalue) : const_expr->constvalue;
+							minStamp = minStamp ? ((const_expr->constvalue >= minStamp) ? minStamp
+							                                                            : const_expr->constvalue)
+							                    : const_expr->constvalue;
                             seccol_type = const_expr->consttype;
                             equal_min = true;
                         }
@@ -2677,9 +2837,68 @@ GetRelationNodesByQuals(Oid reloid, RelationLocInfo *rel_loc_info,
             }
         }
 #endif
+
+		return GetRelationNodes(rel_loc_info, distcol_value,
+		                        distcol_isnull,
+		                        seccol_value, seccol_isnull,
+		                        relaccess);
+	}
+	else if (distcol_expr && IsA(distcol_expr, ArrayExpr) &&
+	         rel_loc_info->locatorType == LOCATOR_TYPE_SHARD && !seccol_list)
+	{
+		ArrayExpr *arrayExpr = (ArrayExpr *) distcol_expr;
+		ListCell *lc;
+		bool success = true;
+		Const *const_expr;
+		ExecNodes *temp;
+
+		foreach(lc, arrayExpr->elements)
+		{
+			Node *expr = (Node *) lfirst(lc);
+
+			/* convert to distribute column type */
+			expr = coerce_to_target_type(NULL,
+			                             (Node *) expr,
+			                             exprType((Node *) expr),
+			                             disttype, disttypmod,
+			                             COERCION_ASSIGNMENT,
+			                             COERCE_IMPLICIT_CAST, -1);
+			expr = eval_const_expressions(NULL,
+			                              (Node *) expr);
+			if (!expr || !IsA(expr, Const))
+			{
+				success = false;
+				break;
+			}
+
+			const_expr = castNode(Const, expr);
+			temp = GetRelationNodes(rel_loc_info, const_expr->constvalue,
+			                        const_expr->constisnull,
+			                        seccol_value, seccol_isnull,
+			                        relaccess);
+			if (!temp)
+			{
+				success = false;
+				break;
+			}
+
+			if (exec_nodes)
+			{
+				exec_nodes->nodeList = list_concat_unique(exec_nodes->nodeList,
+				                                          temp->nodeList);
     }
     else
     {
+				exec_nodes = temp;
+			}
+		}
+
+		if (success)
+		{
+			return exec_nodes;
+		}
+	}
+
         distcol_value = (Datum) 0;
         distcol_isnull = true;
 #ifdef __TBASE__
@@ -2734,7 +2953,6 @@ GetRelationNodesByQuals(Oid reloid, RelationLocInfo *rel_loc_info,
             }
         }
 #endif
-    }
 
     exec_nodes = GetRelationNodes(rel_loc_info, distcol_value,
                                                 distcol_isnull,
@@ -2754,32 +2972,43 @@ GetRelationDistribColumn(RelationLocInfo *locInfo)
 {
     /* No relation, so simply leave */
     if (!locInfo)
+	{
         return NULL;
+	}
 
     /* No distribution column if relation is not distributed with a key */
     if (!IsRelationDistributedByValue(locInfo))
+	{
         return NULL;
+	}
 
     /* Return column name */
     return get_attname(locInfo->relid, locInfo->partAttrNum);
 }
 
 #ifdef __COLD_HOT__
+
 char *
 GetRelationSecDistribColumn(RelationLocInfo *locInfo)
 {
     /* No relation, so simply leave */
     if (!locInfo)
+	{
         return NULL;
+	}
 
     /* No distribution column if relation is not distributed with a key */
     if (!IsRelationDistributedByValue(locInfo))
+	{
         return NULL;
+	}
 
     /* Return column name */
     return get_attname(locInfo->relid, locInfo->secAttrNum);
 }
+
 #endif
+
 /*
  * pgxc_find_distcol_expr
  * Search through the quals provided and find out an expression which will give
@@ -2802,13 +3031,19 @@ pgxc_find_distcol_expr(Index varno,
 
     /* If no quals, no distribution column expression */
     if (!quals)
+	{
         return NULL;
+	}
 
     /* Convert the qualification into List if it's not already so */
     if (!IsA(quals, List))
+	{
         lquals = make_ands_implicit((Expr *)quals);
+	}
     else
+	{
         lquals = (List *)quals;
+	}
 
     /*
      * For every ANDed expression, check if that expression is of the form
@@ -2817,21 +3052,45 @@ pgxc_find_distcol_expr(Index varno,
     foreach(qual_cell, lquals)
     {
         Expr *qual_expr = (Expr *)lfirst(qual_cell);
-        OpExpr *op;
         Expr *lexpr;
         Expr *rexpr;
         Var *var_expr;
         Expr *distcol_expr;
+		Oid opno;
 
-        if (!IsA(qual_expr, OpExpr))
-            continue;
+		if (IsA(qual_expr, OpExpr))
+		{
+			OpExpr *op;
+
         op = (OpExpr *)qual_expr;
+
         /* If not a binary operator, it can not be '='. */
         if (list_length(op->args) != 2)
+			{
             continue;
+			}
 
         lexpr = linitial(op->args);
         rexpr = lsecond(op->args);
+			opno = op->opno;
+		}
+		else if (IsA(qual_expr, ScalarArrayOpExpr))
+		{
+			ScalarArrayOpExpr *arrayOpExpr = (ScalarArrayOpExpr *) qual_expr;
+
+			if (list_length(arrayOpExpr->args) != 2)
+			{
+				continue;
+			}
+
+			lexpr = linitial(arrayOpExpr->args);
+			rexpr = lsecond(arrayOpExpr->args);
+			opno = arrayOpExpr->opno;
+		}
+		else
+		{
+			continue;
+		}
 
         /*
          * If either of the operands is a RelabelType, extract the Var in the RelabelType.
@@ -2842,9 +3101,13 @@ pgxc_find_distcol_expr(Index varno,
          * should be shipped to one of the nodes only
          */
         if (IsA(lexpr, RelabelType))
+		{
             lexpr = ((RelabelType*)lexpr)->arg;
+		}
         if (IsA(rexpr, RelabelType))
+		{
             rexpr = ((RelabelType*)rexpr)->arg;
+		}
 
         /*
          * If either of the operands is a Var expression, assume the other
@@ -2862,32 +3125,43 @@ pgxc_find_distcol_expr(Index varno,
             distcol_expr = lexpr;
         }
         else
+		{
             continue;
+		}
+
         /*
          * If Var found is not the distribution column of required relation,
          * check next qual
          */
         if (var_expr->varno != varno || var_expr->varattno != attrNum)
+		{
             continue;
+		}
+
         /*
          * If the operator is not an assignment operator, check next
          * constraint. An operator is an assignment operator if it's
          * mergejoinable or hashjoinable. Beware that not every assignment
          * operator is mergejoinable or hashjoinable, so we might leave some
-         * oportunity. But then we have to rely on the opname which may not
+		 * opportunity. But then we have to rely on the opname which may not
          * be something we know to be equality operator as well.
          */
-        if (!op_mergejoinable(op->opno, exprType((Node *)lexpr)) &&
-            !op_hashjoinable(op->opno, exprType((Node *)lexpr)))
+		if (!op_mergejoinable(opno, exprType((Node *) var_expr)) &&
+		    !op_hashjoinable(opno, exprType((Node *) var_expr)))
+		{
             continue;
+		}
+
         /* Found the distribution column expression return it */
         return distcol_expr;
+
     }
     /* Exhausted all quals, but no distribution column expression */
     return NULL;
 }
 
 #ifdef __COLD_HOT__
+
 static bool IsConstAligned(Oid reloid, Datum constvalue, AttrNumber secAttr)
 {// #lizard forgives
     bool    isalign = false;
@@ -2974,13 +3248,19 @@ pgxc_find_distcol_exprs(Index varno,
 
     /* If no quals, no distribution column expression */
     if (!quals)
+	{
         return NULL;
+	}
 
     /* Convert the qualification into List if it's not already so */
     if (!IsA(quals, List))
+	{
         lquals = make_ands_implicit((Expr *)quals);
+	}
     else
+	{
         lquals = (List *)quals;
+	}
 
     /*
      * For every ANDed expression, check if that expression is of the form
@@ -3005,11 +3285,15 @@ pgxc_find_distcol_exprs(Index varno,
         }
 
         if (!IsA(qual_expr, OpExpr))
+		{
             continue;
+		}
         op = (OpExpr *)qual_expr;
         /* If not a binary operator, it can not be '='. */
         if (list_length(op->args) != 2)
+		{
             continue;
+		}
 
         lexpr = linitial(op->args);
         rexpr = lsecond(op->args);
@@ -3023,9 +3307,13 @@ pgxc_find_distcol_exprs(Index varno,
          * should be shipped to one of the nodes only
          */
         if (IsA(lexpr, RelabelType))
+		{
             lexpr = ((RelabelType*)lexpr)->arg;
+		}
         if (IsA(rexpr, RelabelType))
+		{
             rexpr = ((RelabelType*)rexpr)->arg;
+		}
 
         /*
          * If either of the operands is a Var expression, assume the other
@@ -3044,13 +3332,17 @@ pgxc_find_distcol_exprs(Index varno,
             isswap = true;
         }
         else
+		{
             continue;
+		}
         /*
          * If Var found is not the distribution column of required relation,
          * check next qual
          */
         if (var_expr->varno != varno || var_expr->varattno != attrNum)
+		{
             continue;
+		}
         /*
          * If the operator is not an assignment operator, check next
          * constraint. An operator is an assignment operator if it's
@@ -3100,7 +3392,9 @@ GetRelationTimeStampRangeNodes(RelationLocInfo *rel_loc_info,
     ExecNodes    *exec_nodes;
 
     if (rel_loc_info == NULL)
+	{
         return NULL;
+	}
 
     
     switch (rel_loc_info->locatorType)
@@ -3262,7 +3556,8 @@ GetRelationGroupsByQuals(Oid reloid, RelationLocInfo *rel_loc_info, Node *sec_qu
                 if (isswapArray[i])
                 {
                     /* const <= var */
-                    minStamp = minStamp ? ((const_expr->constvalue >= minStamp) ? minStamp : const_expr->constvalue) : const_expr->constvalue;
+					minStamp = minStamp ? ((const_expr->constvalue >= minStamp) ? minStamp : const_expr->constvalue)
+					                    : const_expr->constvalue;
                     seccol_type = const_expr->consttype;
                 }
                 else
@@ -3283,7 +3578,8 @@ GetRelationGroupsByQuals(Oid reloid, RelationLocInfo *rel_loc_info, Node *sec_qu
                 else
                 {
                     /* var >= const */
-                    minStamp = minStamp ? ((const_expr->constvalue >= minStamp) ? minStamp : const_expr->constvalue) : const_expr->constvalue;
+					minStamp = minStamp ? ((const_expr->constvalue >= minStamp) ? minStamp : const_expr->constvalue)
+					                    : const_expr->constvalue;
                     seccol_type = const_expr->consttype;
                 }
             }
@@ -3348,16 +3644,19 @@ GetRelationGroupsByQuals(Oid reloid, RelationLocInfo *rel_loc_info, Node *sec_qu
         List *oids = NULL;
         if (minStamp && maxStamp)
         {            
-            if (IsHotData(minStamp, RELATION_ACCESS_READ, partitionStrategy, interval_step, start_timestamp) && IsHotData(maxStamp, RELATION_ACCESS_READ, partitionStrategy, interval_step, start_timestamp))
+			if (IsHotData(minStamp, RELATION_ACCESS_READ, partitionStrategy, interval_step, start_timestamp) &&
+			    IsHotData(maxStamp, RELATION_ACCESS_READ, partitionStrategy, interval_step, start_timestamp))
             {    /* all hot data */
                 oids = lappend_oid(oids, rel_loc_info->groupId);                                
             }
-            else if (!IsHotData(minStamp, RELATION_ACCESS_READ, partitionStrategy, interval_step, start_timestamp) && !IsHotData(maxStamp, RELATION_ACCESS_READ, partitionStrategy, interval_step, start_timestamp))
+			else if (!IsHotData(minStamp, RELATION_ACCESS_READ, partitionStrategy, interval_step, start_timestamp) &&
+			         !IsHotData(maxStamp, RELATION_ACCESS_READ, partitionStrategy, interval_step, start_timestamp))
             {
                 /* all cold data */
                 oids = lappend_oid(oids, rel_loc_info->coldGroupId);
             }
-            else if(!IsHotData(minStamp, RELATION_ACCESS_READ, partitionStrategy, interval_step, start_timestamp) && IsHotData(maxStamp, RELATION_ACCESS_READ, partitionStrategy, interval_step, start_timestamp))
+			else if (!IsHotData(minStamp, RELATION_ACCESS_READ, partitionStrategy, interval_step, start_timestamp) &&
+			         IsHotData(maxStamp, RELATION_ACCESS_READ, partitionStrategy, interval_step, start_timestamp))
             {
                 /* range across cold and hot group */
                 oids = lappend_oid(oids, rel_loc_info->groupId);
@@ -3407,10 +3706,12 @@ GetRelationGroupsByQuals(Oid reloid, RelationLocInfo *rel_loc_info, Node *sec_qu
         return oids;
     }
 }
+
 #endif
 
 #ifdef _MLS_
 extern char* g_default_locator_type;
+
 char get_default_locator_type(void)
 {
     if (strlen(g_default_locator_type) == 0)
@@ -3440,6 +3741,7 @@ char get_default_locator_type(void)
     return LOCATOR_TYPE_HASH;
 
 }
+
 int get_default_distype(void)
 {
     if (strlen(g_default_locator_type) == 0)
