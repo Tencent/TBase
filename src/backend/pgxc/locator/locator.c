@@ -2499,13 +2499,6 @@ GetRelationNodesByQuals(Oid reloid, RelationLocInfo *rel_loc_info,
 	Oid disttype;
 	int32 disttypmod;
 
-	if (enable_distri_debug)
-	{
-		int r = 1;
-		while(r)
-		;
-	}
-
     if (dis_qual)
     {
         *dis_qual = NULL;
@@ -2843,6 +2836,7 @@ GetRelationNodesByQuals(Oid reloid, RelationLocInfo *rel_loc_info,
 		                        seccol_value, seccol_isnull,
 		                        relaccess);
 	}
+	/* Only for shard table without cold hot seperation */
 	else if (distcol_expr && IsA(distcol_expr, ArrayExpr) &&
 	         rel_loc_info->locatorType == LOCATOR_TYPE_SHARD && !seccol_list)
 	{
@@ -2884,7 +2878,8 @@ GetRelationNodesByQuals(Oid reloid, RelationLocInfo *rel_loc_info,
 
 			if (exec_nodes)
 			{
-				exec_nodes->nodeList = list_concat_unique(exec_nodes->nodeList,
+				Assert(exec_nodes->baselocatortype == temp->baselocatortype);
+				exec_nodes->nodeList = list_concat_unique_int(exec_nodes->nodeList,
 				                                          temp->nodeList);
     }
     else
