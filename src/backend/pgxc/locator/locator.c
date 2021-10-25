@@ -2525,6 +2525,15 @@ GetRelationNodesByQuals(Oid reloid, RelationLocInfo *rel_loc_info,
     {
         distcol_expr = pgxc_find_distcol_expr(varno, rel_loc_info->partAttrNum,
                                                     quals);
+
+		if (distcol_expr && IsA(distcol_expr, ArrayCoerceExpr) &&
+		    IsA(((ArrayCoerceExpr *)distcol_expr)->arg, ArrayExpr))
+		{
+			ArrayCoerceExpr *arrayCoerceExpr = (ArrayCoerceExpr *) distcol_expr;
+
+			distcol_expr = arrayCoerceExpr->arg;
+		}
+
         /*
          * If the type of expression used to find the Datanode, is not same as
          * the distribution column type, try casting it. This is same as what
