@@ -3603,8 +3603,7 @@ pgxc_node_begin(int conn_count, PGXCNodeHandle **connections,
             need_send_begin = true;
         }
 
-		if (connections[i]->plpgsql_need_begin_txn &&
-			connections[i]->plpgsql_need_begin_sub_txn &&
+		if (connections[i]->plpgsql_need_begin_sub_txn &&
 			'I' == connections[i]->transaction_status)
 		{
 			need_send_begin = true;
