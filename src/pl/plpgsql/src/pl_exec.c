@@ -1318,6 +1318,8 @@ exec_stmt_block(PLpgSQL_execstate *estate, PLpgSQL_stmt_block *block)
         /* Want to run statements inside function's memory context */
         MemoryContextSwitchTo(oldcontext);
 
+        estate->handle_exceptions = false;
+
         PG_TRY();
         {
             /*
@@ -1374,7 +1376,6 @@ exec_stmt_block(PLpgSQL_execstate *estate, PLpgSQL_stmt_block *block)
         {
             ErrorData  *edata;
             ListCell   *e;
-            SetEnterPlpgsqlFunc();
 
             estate->err_text = gettext_noop("during exception cleanup");
 
@@ -1382,6 +1383,9 @@ exec_stmt_block(PLpgSQL_execstate *estate, PLpgSQL_stmt_block *block)
             MemoryContextSwitchTo(stmt_mcontext);
             edata = CopyErrorData();
             FlushErrorState();
+
+			/* Mark handling exceptions */
+            estate->handle_exceptions = true;
 
             /* Abort the inner transaction */
             RollbackAndReleaseCurrentSubTransaction();
@@ -1455,6 +1459,8 @@ exec_stmt_block(PLpgSQL_execstate *estate, PLpgSQL_stmt_block *block)
 
                     rc = exec_stmts(estate, exception->action);
 
+					estate->handle_exceptions = false;
+
                     break;
                 }
             }
@@ -1468,15 +1474,16 @@ exec_stmt_block(PLpgSQL_execstate *estate, PLpgSQL_stmt_block *block)
 
             /* If no match found, re-throw the error */
             if (e == NULL)
+            {
+                SetExitPlpgsqlFunc();
                 ReThrowError(edata);
+            }
 			 else
 				FreeErrorData(edata);
 
             /* Restore stmt_mcontext stack and release the error data */
             pop_stmt_mcontext(estate);
             MemoryContextReset(stmt_mcontext);
-
-			SetExitPlpgsqlFunc();
         }
         PG_END_TRY();
 
@@ -3450,6 +3457,8 @@ plpgsql_estate_setup(PLpgSQL_execstate *estate,
     estate->cur_error = NULL;
 
     estate->tuple_store = NULL;
+    estate->handle_exceptions = false;
+
     if (rsi)
     {
         estate->tuple_store_cxt = rsi->econtext->ecxt_per_query_memory;
@@ -4382,9 +4391,14 @@ exec_stmt_close(PLpgSQL_execstate *estate, PLpgSQL_stmt_close *stmt)
 
     portal = SPI_cursor_find(curname);
     if (portal == NULL)
+    {
+        if (estate->handle_exceptions)
+            return PLPGSQL_RC_OK;
+
         ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_CURSOR),
                  errmsg("cursor \"%s\" does not exist", curname)));
+    }
 
     /* ----------
      * And close it.
