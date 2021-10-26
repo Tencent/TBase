@@ -38,6 +38,5 @@ extern bool pgxc_is_trigger_shippable(Trigger *trigger);
 extern Node *get_var_from_arg(Node *arg);
 
 extern bool is_var_distribute_column(Var *var, List *rtable);
-extern ExecNodes *pgxc_merge_exec_nodes(ExecNodes *en1, ExecNodes *en2);
 #endif
 #endif
