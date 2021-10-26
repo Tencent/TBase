@@ -2535,12 +2535,15 @@ GetRelationNodesByQuals(Oid reloid, RelationLocInfo *rel_loc_info,
         distcol_expr = pgxc_find_distcol_expr(varno, rel_loc_info->partAttrNum,
                                                     quals);
 
-		if (distcol_expr && IsA(distcol_expr, ArrayCoerceExpr) &&
-		    IsA(((ArrayCoerceExpr *)distcol_expr)->arg, ArrayExpr))
+		/* Remove ArrayCoerceExpr at first */
+		if (distcol_expr && IsA(distcol_expr, ArrayCoerceExpr))
 		{
-			ArrayCoerceExpr *arrayCoerceExpr = (ArrayCoerceExpr *) distcol_expr;
+			ArrayCoerceExpr *arrayCoerceExpr = castNode(ArrayCoerceExpr, distcol_expr);
 
+			if (arrayCoerceExpr->arg && IsA(arrayCoerceExpr->arg, ArrayExpr))
+			{
 			distcol_expr = arrayCoerceExpr->arg;
+		}
 		}
 
         /*
