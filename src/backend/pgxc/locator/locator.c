@@ -1197,7 +1197,10 @@ createLocator(char locatorType, RelationAccessType accessType,
                 int *intptr;
                 nodeMap = palloc(locator->nodeCount * sizeof(int));
                 intptr = (int *) nodeMap;
-				foreach(lc, l) *intptr++ = lfirst_int(lc);
+				foreach(lc, l)
+				{
+					*intptr++ = lfirst_int(lc);
+				}
                 locator->listType = LOCATOR_LIST_INT;
             }
             else if (IsA(l, OidList))
@@ -1205,7 +1208,10 @@ createLocator(char locatorType, RelationAccessType accessType,
                 Oid *oidptr;
                 nodeMap = palloc(locator->nodeCount * sizeof(Oid));
                 oidptr = (Oid *) nodeMap;
-				foreach(lc, l) *oidptr++ = lfirst_oid(lc);
+				foreach(lc, l)
+				{
+					*oidptr++ = lfirst_oid(lc);
+				}
                 locator->listType = LOCATOR_LIST_OID;
             }
             else if (IsA(l, List))
@@ -1213,7 +1219,10 @@ createLocator(char locatorType, RelationAccessType accessType,
                 void **voidptr;
                 nodeMap = palloc(locator->nodeCount * sizeof(void *));
                 voidptr = (void **) nodeMap;
-				foreach(lc, l) *voidptr++ = lfirst(lc);
+				foreach(lc, l)
+				{
+					*voidptr++ = lfirst(lc);
+				}
                 locator->listType = LOCATOR_LIST_POINTER;
             }
             else
