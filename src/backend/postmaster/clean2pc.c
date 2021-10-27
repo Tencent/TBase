@@ -32,6 +32,7 @@
 #include "storage/pmsignal.h"
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
+#include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/timeout.h"
@@ -56,9 +57,10 @@ typedef enum
 
 bool enable_clean_2pc_launcher = true;
 
-int auto_clean_2pc_interval = 10;
-int auto_clean_2pc_delay    = 3;
-int auto_clean_2pc_timeout  = 0;
+int auto_clean_2pc_interval        = 30;
+int auto_clean_2pc_delay           = 10;
+int auto_clean_2pc_timeout         = 300;
+int auto_clean_2pc_max_check_time  = 300;
 
 static volatile sig_atomic_t got_SIGTERM = false;
 static volatile sig_atomic_t got_SIGHUP  = false;
@@ -420,6 +422,9 @@ do_query_2pc(TimestampTz clean_time)
 	int                  attr_num = 4;
 	int64                check_time = 0;
 	TimestampTz          curr_time = GetCurrentTimestamp();
+	Oid                  node_oid = 0;
+	char                 node_type = PGXC_NODE_COORDINATOR;
+	int                  node_index = 0;
 	static const char   *attr_name[] = {"gid", "database",
 							"global_transaction_status",
 							"transaction_status_on_allnodes"};
@@ -442,19 +447,37 @@ do_query_2pc(TimestampTz clean_time)
 		check_time = INT32_MAX;
 	}
 
+	if (auto_clean_2pc_max_check_time != 0)
+	{
+		if (check_time > auto_clean_2pc_max_check_time)
+		{
+			check_time = auto_clean_2pc_max_check_time;
+		}
+	}
+
 	snprintf(query, SQL_CMD_LEN, "select * FROM pg_clean_check_txn("
 		INT64_FORMAT ") order by database limit 1000;", check_time);
 
-	elog(DEBUG1, "node(%d) query: %s", PGXCNodeId, query);
-
 	StartTransactionCommand();
+
+	InitMultinodeExecutor(false);
+
+	node_oid = get_pgxc_nodeoid(PGXCNodeName);
+	if (!OidIsValid(node_oid))
+	{
+		elog(ERROR, "get node(%s) oid failed", PGXCNodeName);
+		return;
+	}
+	node_index = PGXCNodeGetNodeId(node_oid, &node_type);
+
+	elog(DEBUG1, "node(%d) query: %s", node_index, query);
 
 	plan = makeNode(RemoteQuery);
 	plan->combine_type = COMBINE_TYPE_NONE;
 	plan->exec_nodes = makeNode(ExecNodes);
 	plan->exec_type = EXEC_ON_COORDS;
 
-	plan->exec_nodes->nodeList = lappend_int(plan->exec_nodes->nodeList, PGXCNodeId);
+	plan->exec_nodes->nodeList = lappend_int(plan->exec_nodes->nodeList, node_index);
 
 	plan->sql_statement = (char*)query;
 	plan->force_autocommit = false;
@@ -469,8 +492,6 @@ do_query_2pc(TimestampTz clean_time)
 		plan->scan.plan.targetlist = lappend(plan->scan.plan.targetlist,
 										makeTargetEntry((Expr *) dummy, i, NULL, false));
 	}
-
-	InitMultinodeExecutor(false);
 
 	/* prepare to execute */
 	estate = CreateExecutorState();
@@ -561,8 +582,9 @@ do_query_2pc(TimestampTz clean_time)
 	if (count_2pc > 0)
 	{
 		Assert(result_str->data != NULL);
-		elog(LOG, "query remain 2pc count(%d), db count(%d):\n%s",
-			count_2pc, count_db, result_str->data);
+		elog(LOG, "query remain 2pc count(%d), db count(%d), sql: %s",
+			count_2pc, count_db, query);
+		elog(DEBUG1, "remain 2pc:\n%s", result_str->data);
 	}
 }
 
@@ -579,6 +601,9 @@ do_clean_2pc(TimestampTz clean_time)
 	TupleTableSlot      *result = NULL;
 	Var                 *dummy = NULL;
 	int                  attr_num = 4;
+	Oid                  node_oid = 0;
+	char                 node_type = PGXC_NODE_COORDINATOR;
+	int                  node_index = 0;
 	static const char   *attr_name[] = {"gid", "global_transaction_status",
 								"operation", "operation_status"};
 
@@ -588,16 +613,26 @@ do_clean_2pc(TimestampTz clean_time)
 	snprintf(query, SQL_CMD_LEN, "select * FROM pg_clean_execute_on_node('%s', %ld)"
 			" limit 1000;", PGXCNodeName, clean_time);
 
-	elog(DEBUG2, "node(%d) query: %s", PGXCNodeId, query);
-
 	StartTransactionCommand();
+
+	InitMultinodeExecutor(false);
+
+	node_oid = get_pgxc_nodeoid(PGXCNodeName);
+	if (!OidIsValid(node_oid))
+	{
+		elog(ERROR, "get node(%s) oid failed", PGXCNodeName);
+		return;
+	}
+	node_index = PGXCNodeGetNodeId(node_oid, &node_type);
+
+	elog(DEBUG1, "node(%d) query: %s", node_index, query);
 
 	plan = makeNode(RemoteQuery);
 	plan->combine_type = COMBINE_TYPE_NONE;
 	plan->exec_nodes = makeNode(ExecNodes);
 	plan->exec_type = EXEC_ON_COORDS;
 
-	plan->exec_nodes->nodeList = lappend_int(plan->exec_nodes->nodeList, PGXCNodeId);
+	plan->exec_nodes->nodeList = lappend_int(plan->exec_nodes->nodeList, node_index);
 
 	plan->sql_statement = (char*)query;
 	plan->force_autocommit = false;
@@ -612,8 +647,6 @@ do_clean_2pc(TimestampTz clean_time)
 		plan->scan.plan.targetlist = lappend(plan->scan.plan.targetlist,
 										makeTargetEntry((Expr *) dummy, i, NULL, false));
 	}
-
-	InitMultinodeExecutor(false);
 
 	/* prepare to execute */
 	estate = CreateExecutorState();
@@ -648,7 +681,8 @@ do_clean_2pc(TimestampTz clean_time)
 	if (count > 0)
 	{
 		Assert(NULL != result_str->data);
-		elog(LOG, "clean 2pc count(%d):\n%s", count, result_str->data);
+		elog(LOG, "clean 2pc count(%d), sql: %s", count, query);
+		elog(LOG, "clean 2pc:\n%s", result_str->data);
 	}
 }
 

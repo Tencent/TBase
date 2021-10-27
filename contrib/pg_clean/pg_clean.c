@@ -62,17 +62,21 @@ int  transaction_threshold = 200000;
 #define MAXIMUM_CLEAR_FILE 10000
 #define MAXIMUM_OUTPUT_FILE 1000
 #define XIDPREFIX "_$XC$"
-#define DEFAULT_CLEAN_TIME_INTERVAL 120000000
-#define LEAST_CLEAN_TIME_INTERVAL   1000000 /* should not clean twophase trans prepared in 1s or commit in 1s */
+#define DEFAULT_CLEAN_TIME_INTERVAL 120
+#define LEAST_CLEAN_TIME_INTERVAL     3 /* should not clean twophase trans prepared in 3s */
+#define LEAST_CHECK_TIME_INTERVAL     1 /* should not check twophase trans prepared in 1s */
 
-GlobalTimestamp clean_time_interval = DEFAULT_CLEAN_TIME_INTERVAL;
+GlobalTimestamp clean_time_interval = DEFAULT_CLEAN_TIME_INTERVAL * USECS_PER_SEC;
 
 PG_MODULE_MAGIC;
 
 #define MAX_GID               64
 
-#define CLEAN_CHECK_TIMES     3
-#define CLEAN_CHECK_INTERVAL  10000
+#define CLEAN_CHECK_TIMES_DEFAULT    3
+#define CLEAN_CHECK_INTERVAL_DEFAULT 100000
+
+#define CLEAN_NODE_CHECK_TIMES       5
+#define CLEAN_NODE_CHECK_INTERVAL    500000
 
 #define MAX_DBNAME	64
 #define GET_START_XID "startxid:"
@@ -316,6 +320,8 @@ bool send_query_clean_transaction(PGXCNodeHandle * conn, txn_info * txn, const c
 bool check_2pc_belong_node(txn_info * txn);
 bool check_node_participate(txn_info * txn, int node_idx);
 
+bool check_2pc_start_from_node(txn_info *txn);
+
 void recover2PC(txn_info * txn);
 TXN_STATUS 
 	 check_txn_global_status(txn_info *txn);
@@ -395,11 +401,15 @@ Datum	pg_clean_execute(PG_FUNCTION_ARGS)
         /*clear Global*/
         ResetGlobalVariables();
         execute = true;
-        clean_time_interval = PG_GETARG_INT32(0) * 1000000;
+
+        clean_time_interval = PG_GETARG_INT32(0);
         if (LEAST_CLEAN_TIME_INTERVAL > clean_time_interval)
         {
+            elog(WARNING, "least clean time interval is %ds",
+                LEAST_CLEAN_TIME_INTERVAL);
             clean_time_interval = LEAST_CLEAN_TIME_INTERVAL;
         }
+        clean_time_interval *= USECS_PER_SEC;
         
 		/*get node list*/
 		PgxcNodeGetOids(&cn_node_list, &dn_node_list, 
@@ -538,9 +548,11 @@ Datum	pg_clean_execute_on_node(PG_FUNCTION_ARGS)
         }
         abnormal_time = PG_GETARG_INT64(1);
         current_time = GetCurrentTimestamp();
-        if (abnormal_time >= current_time)
+        if (abnormal_time >= current_time - LEAST_CLEAN_TIME_INTERVAL * USECS_PER_SEC)
         {
-            elog(ERROR, "pg_clean_execute_on_node, abnormal time "INT64_FORMAT" must before current_time "INT64_FORMAT, abnormal_time, current_time);
+            elog(ERROR, "pg_clean_execute_on_node, least clean time interval is %ds, "
+                "abnormal time: " INT64_FORMAT ", current_time: " INT64_FORMAT,
+                LEAST_CLEAN_TIME_INTERVAL, abnormal_time, current_time);
         }
         
 		/*get node list*/
@@ -668,11 +680,15 @@ Datum	pg_clean_check_txn(PG_FUNCTION_ARGS)
         /*clear Global*/
         ResetGlobalVariables();
         
-        clean_time_interval = PG_GETARG_INT32(0) * 1000000;
-        if (LEAST_CLEAN_TIME_INTERVAL > clean_time_interval)
+        clean_time_interval = PG_GETARG_INT32(0);
+        if (LEAST_CHECK_TIME_INTERVAL > clean_time_interval)
         {
-            clean_time_interval = LEAST_CLEAN_TIME_INTERVAL;
+            elog(WARNING, "least check time interval is %ds",
+				LEAST_CHECK_TIME_INTERVAL);
+            clean_time_interval = LEAST_CHECK_TIME_INTERVAL;
         }
+        clean_time_interval *= USECS_PER_SEC;
+
 		/*get node list*/
 		PgxcNodeGetOids(&cn_node_list, &dn_node_list, 
 						&cn_nodes_num, &dn_nodes_num, true);
@@ -1636,7 +1652,7 @@ char *get2PCInfo(const char *tid)
         return result;
     }
 
-    elog(LOG, "try to get 2pc info from disk, tid: %s", tid);
+    elog(DEBUG1, "try to get 2pc info from disk, tid: %s", tid);
     
     snprintf(path, MAXPGPATH, TWOPHASE_RECORD_DIR "/%s", tid);
     if(access(path, F_OK) == 0)
@@ -2489,11 +2505,19 @@ void recover2PC(txn_info * txn)
 {
 	int i = 0;
 	bool check_ok = false;
+	int check_times = CLEAN_CHECK_TIMES_DEFAULT;
+	int check_interval = CLEAN_CHECK_INTERVAL_DEFAULT;
 	MemoryContext current_context = NULL;
 	ErrorData* edata = NULL;
 	TXN_STATUS txn_stat;
 	txn_stat = check_txn_global_status(txn);
 	txn->global_txn_stat = txn_stat;
+
+	if (clear_2pc_belong_node)
+	{
+		check_times = CLEAN_NODE_CHECK_TIMES;
+		check_interval = CLEAN_NODE_CHECK_INTERVAL;
+	}
 
 #ifdef DEBUG_EXECABORT
 	txn_stat = TXN_STATUS_ABORTED;
@@ -2529,7 +2553,7 @@ void recover2PC(txn_info * txn)
             {
     			txn->op = COMMIT;
     			/* check whether all nodes can commit prepared */
-				for (i = 0; i < CLEAN_CHECK_TIMES; i++)
+				for (i = 0; i < check_times; i++)
 				{
 					check_ok = true;
 					current_context = CurrentMemoryContext;
@@ -2560,7 +2584,7 @@ void recover2PC(txn_info * txn)
     				return;
     			}
 
-					pg_usleep(CLEAN_CHECK_INTERVAL);
+					pg_usleep(check_interval);
 				}
 
     			/* send commit prepared to all nodes */
@@ -2578,7 +2602,7 @@ void recover2PC(txn_info * txn)
 		case TXN_STATUS_ABORTED:
 			txn->op = ABORT;
 			/* check whether all nodes can rollback prepared */
-			for (i = 0; i < CLEAN_CHECK_TIMES; i++)
+			for (i = 0; i < check_times; i++)
 			{
 				check_ok = true;
 				current_context = CurrentMemoryContext;
@@ -2609,7 +2633,7 @@ void recover2PC(txn_info * txn)
 				return;
 			}
 
-				pg_usleep(CLEAN_CHECK_INTERVAL);
+				pg_usleep(check_interval);
 			}
 
 			/* send rollback prepared to all nodes */
@@ -2733,10 +2757,39 @@ TXN_STATUS check_txn_global_status(txn_info *txn)
 #endif                
     if (clear_2pc_belong_node)
     {
-        node_idx = find_node_index(abnormal_nodeoid);
-        if (!check_2pc_belong_node(txn) || 
-            abnormal_time < txn->prepare_timestamp[node_idx])
+        if (!check_2pc_belong_node(txn))
         {
+            return TXN_STATUS_INPROGRESS;
+        }
+
+        if (!check_2pc_start_from_node(txn))
+        {
+            return TXN_STATUS_INPROGRESS;
+        }
+
+        node_idx = find_node_index(abnormal_nodeoid);
+        if (node_idx >= 0)
+        {
+            if (abnormal_time < txn->prepare_timestamp[node_idx])
+            {
+                elog(WARNING, "gid: %s, abnormal time: " INT64_FORMAT
+                    ", prepare timestamp[%d]: " INT64_FORMAT, txn->gid,
+                    abnormal_time, node_idx, txn->prepare_timestamp[node_idx]);
+
+                return TXN_STATUS_INPROGRESS;
+            }
+        }
+        else
+        {
+            elog(WARNING, "gid: %s, node_idx: %d", txn->gid, node_idx);
+        }
+
+        if (abnormal_time < prepared_time)
+        {
+            elog(WARNING, "gid: %s, abnormal time: " INT64_FORMAT
+                ", prepared time: " INT64_FORMAT, txn->gid,
+                abnormal_time, prepared_time);
+
             return TXN_STATUS_INPROGRESS;
         }
     }
@@ -3310,3 +3363,71 @@ void get_node_handles(PGXCNodeAllHandles **pgxc_handles, Oid nodeoid)
 	*pgxc_handles = get_handles(nodelist, coordlist, false, true, true);
 }
 
+
+bool check_2pc_start_from_node(txn_info *txn)
+{
+	char node_type;
+
+	Assert(InvalidOid != abnormal_nodeoid);
+
+	if (abnormal_nodeoid == txn->origcoord)
+	{
+		return true;
+	}
+
+	node_type = get_pgxc_nodetype(abnormal_nodeoid);
+	if (node_type == 'D')
+	{
+		return false;
+	}
+
+	if (InvalidOid == txn->origcoord)
+	{
+		char *startnode = NULL;
+		int   node_oid  = InvalidOid;
+		char  gid[MAX_GID];
+
+		if (!IsXidImplicit(txn->gid))
+		{
+			return true;
+		}
+
+		Assert(IsXidImplicit(txn->gid));
+
+		/* get start node from gid */
+		strcpy(gid, txn->gid);
+		startnode = strtok(gid, ":");
+		if (NULL == startnode)
+		{
+			elog(WARNING, "get startnode(%s) from gid(%s) failed",
+				startnode, gid);
+			return false;
+		}
+
+		startnode = strtok(NULL, ":");
+		if (NULL == startnode)
+		{
+			elog(WARNING, "get startnode(%s) from gid(%s) failed",
+				startnode, gid);
+			return false;
+		}
+
+		node_oid = get_pgxc_nodeoid(startnode);
+		if (NULL == startnode)
+		{
+			elog(WARNING, "get invalid oid for startnode(%s) from gid(%s)",
+				startnode, gid);
+			return false;
+		}
+
+		elog(DEBUG1, "get oid(%d) for startnode(%s) from gid(%s)",
+			node_oid, startnode, gid);
+
+		if (abnormal_nodeoid == node_oid)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
