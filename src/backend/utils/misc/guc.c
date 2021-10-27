@@ -4860,7 +4860,7 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_S
 		},
 		&auto_clean_2pc_interval,
-		30, 1, 3600,
+		30, 10, INT_MAX,
 		NULL, NULL, NULL
 	},
 
@@ -4871,7 +4871,7 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_S
 		},
 		&auto_clean_2pc_delay,
-		3, 1, 600,
+		10, 3, INT_MAX,
 		NULL, NULL, NULL
 	},
 
@@ -4882,7 +4882,18 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_S
 		},
 		&auto_clean_2pc_timeout,
-		0, 0, INT_MAX,
+		300, 0, INT_MAX,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"auto_clean_2pc_max_check_time", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("auto clean 2pc max check time"),
+			NULL,
+			GUC_UNIT_S
+		},
+		&auto_clean_2pc_max_check_time,
+		300, 0, INT_MAX,
 		NULL, NULL, NULL
 	},
 
