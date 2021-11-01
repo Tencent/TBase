@@ -11600,6 +11600,7 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
     int  ret             = false;
     int  i                  = 0;
     bool need_loop_check = false;
+    bool need_sync = true;
 
     if (all_handles)
     {                
@@ -11688,11 +11689,16 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
                     if (handle->state != DN_CONNECTION_STATE_IDLE || !node_ready_for_query(handle) || pgxc_node_is_data_enqueued(handle))
                     {
                         elog(DEBUG1, "pgxc_abort_connections recheck node:%s not ready for query, status:%d, sync", handle->nodename, handle->state);
-                        ret = pgxc_node_send_sync(handle);
-                        if (!ret)
+                        
+						if (need_sync)
                         {
-                            need_loop_check = true;
+                            ret = pgxc_node_send_sync(handle);
+                            if (ret != 0)
+                                elog(WARNING, "pgxc_abort_connections failed to send sync to node %s", handle->nodename);
                         }
+                        
+                        need_loop_check = true;
+
 						if (proc_exit_inprogress)
 						{
 							handle->state = DN_CONNECTION_STATE_IDLE;
@@ -11729,11 +11735,16 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
                     if (handle->state != DN_CONNECTION_STATE_IDLE || !node_ready_for_query(handle) || pgxc_node_is_data_enqueued(handle))
                     {
                         elog(DEBUG1, "pgxc_abort_connections recheck node:%s not ready for query, status:%d, sync", handle->nodename, handle->state);
-                        ret = pgxc_node_send_sync(handle);
-                        if (!ret)
+                        
+						if (need_sync)
                         {
-                            need_loop_check = true;
+                            ret = pgxc_node_send_sync(handle);
+                            if (ret != 0)
+                                elog(WARNING, "pgxc_abort_connections failed to send sync to node %s", handle->nodename);
                         }
+
+                        need_loop_check = true;
+
 						if (proc_exit_inprogress)
 						{
 							handle->state = DN_CONNECTION_STATE_IDLE;
@@ -11758,6 +11769,7 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
                 }
             }
 
+            need_sync = false; 
             /* no need to recheck, break the loop. */
             if (!need_loop_check)
             {
