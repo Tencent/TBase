@@ -211,5 +211,6 @@ extern bool index_is_interval(Oid indexId);
 #endif
 
 extern void IndexSetParentIndex(Relation idx, Oid parentOid);
+extern void IndexCreateSetValid(Oid index, Oid rel);
 
 #endif                            /* INDEX_H */
