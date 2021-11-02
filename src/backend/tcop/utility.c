@@ -1648,6 +1648,9 @@ ProcessUtilityPost(PlannedStmt *pstmt,
                 auto_commit = stmt->concurrent;
                 if (stmt->isconstraint)
                     exec_type = EXEC_ON_NONE;
+				
+				if (exec_type == EXEC_ON_ALL_NODES && stmt->concurrent)
+					exec_type = EXEC_ON_DATANODES;
             }
             break;
 
@@ -1793,8 +1796,76 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 #endif
 
     if (IS_PGXC_LOCAL_COORDINATOR)
+	{
         ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, auto_commit,
                 exec_type, is_temp, add_context);
+		
+		if (IsA(parsetree, IndexStmt) &&
+		    ((IndexStmt *) parsetree)->concurrent)
+		{
+			/*
+			 * When we get here, all DN have done with index creation, time to set index
+			 * valid on CN.
+			 */
+			IndexStmt *stmt = (IndexStmt *) parsetree;
+			Oid        indexid = InvalidOid;
+			Relation   rel = relation_openrv_extended(stmt->relation, NoLock, true);
+			
+			/* exec_type can't be EXEC_ON_ALL_NODES, as changed in "switch case" above */
+			Assert(exec_type != EXEC_ON_ALL_NODES);
+			
+			if (rel == NULL)
+			{
+				/*
+				 * Failed to get enough message from stmt, have to guess a namespace.
+				 * This should not happen but ...
+				 */
+				indexid = RelnameGetRelid(stmt->idxname);
+				CommitTransactionCommand();
+				StartTransactionCommand();
+				
+				IndexCreateSetValid(indexid, InvalidOid);
+			}
+			else
+			{
+				Oid relid = RelationGetRelid(rel);
+				Oid namespace = RelationGetNamespace(rel);
+				int nParts = 0;
+				int i;
+				Oid child_index;
+				Oid child_rel;
+				
+				indexid = get_relname_relid(stmt->idxname, namespace);
+				
+				if (rel != NULL && RELATION_IS_INTERVAL(rel))
+					nParts = RelationGetNParts(rel);
+				relation_close(rel, NoLock);
+				
+				CommitTransactionCommand();
+				StartTransactionCommand();
+				IndexCreateSetValid(indexid, relid);
+				
+				/* if there are interval partitions, do the same thing */
+				for (i = 0; i < nParts; i++)
+				{
+					child_index = get_relname_relid(GetPartitionName(indexid, i, true), namespace);
+					child_rel = get_relname_relid(GetPartitionName(relid, i, false), namespace);
+					
+					IndexCreateSetValid(child_index, child_rel);
+				}
+				
+				/*
+				 * Notice: community version of partition table is not allow to build
+				 * index concurrently, so don't bother here.
+				 */
+			}
+			
+			/* finally, tell other CN to create an index */
+			if (exec_type != EXEC_ON_NONE)
+				ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, auto_commit,
+				                       EXEC_ON_COORDS, is_temp, add_context);
+		}
+	}
 }
 
 #ifdef __TBASE__
@@ -4374,16 +4445,6 @@ ProcessUtilitySlow(ParseState *pstate,
                             }
 
                             MemoryContextDelete(temp);
-
-                            if (stmt->concurrent)
-                            {
-                                /*
-                                 * Commit this transaction to make the indisready update visible.
-                                 */
-                                CommitTransactionCommand();
-                                StartTransactionCommand();
-                                index_set_state_flags(indexOid, INDEX_CREATE_SET_VALID);
-                            }
                         }
                         else if (RELATION_IS_CHILD(rel))
                         {

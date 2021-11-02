@@ -1341,17 +1341,35 @@ DefineIndex(Oid relationId,
      * Index can now be marked valid -- update its pg_index entry
      */
 #ifdef __TBASE__
-    rel = heap_open(relationId, NoLock);
-    
-    if (!RELATION_IS_INTERVAL(rel))
+	/*
+	 * local coordinator set this after command sent to DN and other CN
+	 * see ProcessUtilityPost.
+	 */
+	if (!IS_PGXC_LOCAL_COORDINATOR)
     {
 #endif
-    index_set_state_flags(indexRelationId, INDEX_CREATE_SET_VALID);
+	IndexCreateSetValid(indexRelationId, heaprelid.relId);
 #ifdef __TBASE__
     }
-
-    heap_close(rel, NoLock);
 #endif
+
+	/*
+	 * Last thing to do is release the session-level lock on the parent table.
+	 */
+	UnlockRelationIdForSession(&heaprelid, ShareUpdateExclusiveLock);
+
+	return address;
+}
+
+/*
+ * Set index in pg_index as valid called after 3 phase of concurrent index
+ * creation. Remember to call it on CN AFTER DN dose
+ */
+void
+IndexCreateSetValid(Oid index, Oid rel)
+{
+	index_set_state_flags(index, INDEX_CREATE_SET_VALID);
+	
     /*
      * The pg_index update will cause backends (including this one) to update
      * relcache entries for the index itself, but we should also send a
@@ -1360,14 +1378,8 @@ DefineIndex(Oid relationId,
      * would be useful.  (Note that our earlier commits did not create reasons
      * to replan; so relcache flush on the index itself was sufficient.)
      */
-    CacheInvalidateRelcacheByRelid(heaprelid.relId);
-
-    /*
-     * Last thing to do is release the session-level lock on the parent table.
-     */
-    UnlockRelationIdForSession(&heaprelid, ShareUpdateExclusiveLock);
-
-    return address;
+	if (OidIsValid(rel))
+		CacheInvalidateRelcacheByRelid(rel);
 }
 
 
