@@ -57,10 +57,10 @@ typedef enum
 
 bool enable_clean_2pc_launcher = true;
 
-int auto_clean_2pc_interval        = 30;
-int auto_clean_2pc_delay           = 10;
-int auto_clean_2pc_timeout         = 300;
-int auto_clean_2pc_max_check_time  = 300;
+int auto_clean_2pc_interval        = 60;
+int auto_clean_2pc_delay           = 300;
+int auto_clean_2pc_timeout         = 1200;
+int auto_clean_2pc_max_check_time  = 1200;
 
 static volatile sig_atomic_t got_SIGTERM = false;
 static volatile sig_atomic_t got_SIGHUP  = false;

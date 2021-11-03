@@ -4860,7 +4860,7 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_S
 		},
 		&auto_clean_2pc_interval,
-		30, 10, INT_MAX,
+		60, 10, INT_MAX,
 		NULL, NULL, NULL
 	},
 
@@ -4871,7 +4871,7 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_S
 		},
 		&auto_clean_2pc_delay,
-		10, 3, INT_MAX,
+		300, 3, INT_MAX,
 		NULL, NULL, NULL
 	},
 
@@ -4882,7 +4882,7 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_S
 		},
 		&auto_clean_2pc_timeout,
-		300, 0, INT_MAX,
+		1200, 0, INT_MAX,
 		NULL, NULL, NULL
 	},
 
@@ -4893,7 +4893,7 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_S
 		},
 		&auto_clean_2pc_max_check_time,
-		300, 0, INT_MAX,
+		1200, 0, INT_MAX,
 		NULL, NULL, NULL
 	},
 
