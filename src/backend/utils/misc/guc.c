@@ -2501,9 +2501,15 @@ static struct config_bool ConfigureNamesBool[] =
         false,
         NULL, NULL, NULL
     },
-
-    
-
+    {
+        {"allow_distri_query_on_standby_node", PGC_POSTMASTER, CUSTOM_OPTIONS,
+         gettext_noop("allow distributed query on main plane standby node"),
+         NULL
+        },
+        &g_allow_distri_query_on_standby_node,
+        false,
+        NULL, NULL, NULL
+    },
     {
         {"enable_committs_print", PGC_SUSET, CUSTOM_OPTIONS,
             gettext_noop("enable commit ts debug print"),
