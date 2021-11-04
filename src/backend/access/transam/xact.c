@@ -757,7 +757,7 @@ AssignGlobalXidInternal(void)
     globalXidVersion++;
     if(enable_distri_print)
     {
-        elog(LOG, "assign global xid %s prono %d seq " UINT64_FORMAT UINT64_FORMAT, 
+		elog(LOG, "assign global xid %s prono %d seq " UINT64_FORMAT" "UINT64_FORMAT,
             str.data, MyProc->pgprocno, seq, globalXidVersion);
     }
 

@@ -67,6 +67,9 @@
 #include "port.h"
 #include <math.h>
 #include <sys/timeb.h>
+#ifdef __TBASE__
+#include "access/xlog.h"
+#endif
 
 /* the mini use conut of a connection */
 #define  MINI_USE_COUNT    10
@@ -409,6 +412,9 @@ static void pooler_subthread_write_log(int elevel, int lineno, const char *filen
 #define MAX_THREAD_LOG_PIPE_LEN         (2 * 1024)                                     /* length of thread log pipe */
 #define DEFAULT_LOG_BUF_LEN             (1024)                                         /* length of thread log length */
 PGPipe  *g_ThreadLogQueue = NULL;
+#ifdef __TBASE__
+bool g_allow_distri_query_on_standby_node = false;
+#endif
 
 static inline void RebuildAgentIndex(void);
 
@@ -1829,6 +1835,19 @@ PoolManagerGetConnections(List *datanodelist, List *coordlist, bool raise_error,
     int         pool_recvfds_ret;
 
     int         j = 0;
+
+#ifdef __TBASE__
+	/*
+	 * if it is the standby node of the main plane, the distributed query will be connected to
+	 * the main data node, and the standby cn may generate the same global xid as the main cn,
+	 * so disable the distributed query of the standby node on the main plane
+	 */
+	if (g_allow_distri_query_on_standby_node == false &&
+	            IsPGXCMainCluster && RecoveryInProgress())
+    {
+        elog(ERROR, "can't do distributed query because it is the main plane standby node.");
+    }
+#endif
 
     HOLD_POOLER_RELOAD();
     

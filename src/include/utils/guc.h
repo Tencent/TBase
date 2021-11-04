@@ -312,6 +312,11 @@ extern bool g_allow_dml_on_datanode;
 extern bool g_allow_force_ddl;
 extern bool trace_extent;
 #endif
+
+#ifdef __TBASE__
+extern bool g_allow_distri_query_on_standby_node;
+#endif
+
 #ifdef XCP
 extern char *global_session_string;
 #endif
