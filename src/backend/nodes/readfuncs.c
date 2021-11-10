@@ -2231,7 +2231,14 @@ _readRangeTblFunction(void)
     READ_NODE_FIELD(funcexpr);
     READ_INT_FIELD(funccolcount);
     READ_NODE_FIELD(funccolnames);
+    if (portable_input)
+    {
+        READ_TYPID_LIST_FIELD(funccoltypes);
+    }
+    else
+    {
     READ_NODE_FIELD(funccoltypes);
+    }
     READ_NODE_FIELD(funccoltypmods);
     READ_NODE_FIELD(funccolcollations);
     READ_BITMAPSET_FIELD(funcparams);
