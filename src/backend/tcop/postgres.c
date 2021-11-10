@@ -2452,6 +2452,17 @@ exec_bind_message(StringInfo input_message)
     /* Copy the plan's query string into the portal */
     query_string = pstrdup(psrc->query_string);
 
+#ifdef __AUDIT_FGA__
+    if (portal && portal->commandTag)
+    {
+        g_commandTag = pnstrdup(portal->commandTag, strlen(portal->commandTag));
+    }
+    else
+    {
+        g_commandTag = NULL;
+    }
+#endif
+
     /* Likewise make a copy of the statement name, unless it's unnamed */
     if (stmt_name[0])
         saved_stmt_name = pstrdup(stmt_name);
