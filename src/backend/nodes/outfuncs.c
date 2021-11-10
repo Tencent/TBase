@@ -4538,7 +4538,14 @@ _outRangeTblFunction(StringInfo str, const RangeTblFunction *node)
     WRITE_NODE_FIELD(funcexpr);
     WRITE_INT_FIELD(funccolcount);
     WRITE_NODE_FIELD(funccolnames);
+    if (portable_output)
+    {
+        WRITE_TYPID_LIST_FIELD(funccoltypes);
+    }
+    else
+    {
     WRITE_NODE_FIELD(funccoltypes);
+    }
     WRITE_NODE_FIELD(funccoltypmods);
     WRITE_NODE_FIELD(funccolcollations);
     WRITE_BITMAPSET_FIELD(funcparams);
