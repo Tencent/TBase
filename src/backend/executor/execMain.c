@@ -3188,12 +3188,7 @@ EvalPlanQualInit(EPQState *epqstate, EState *estate,
     epqstate->planstate = NULL;
     epqstate->origslot = NULL;
     /* ... and remember data that EvalPlanQualBegin will need */
-	epqstate->plan = copyObject(subplan);
-	/* Reset cursor name of remote subplans if any */
-	ResetRemoteSubplanCursor(epqstate->plan,
-	                         (estate->es_plannedstmt ?
-	                          estate->es_plannedstmt->subplans : NULL),
-	                         "epq");
+	epqstate->plan = subplan;
     epqstate->arowMarks = auxrowmarks;
     epqstate->epqParam = epqParam;
 }
@@ -3209,12 +3204,7 @@ EvalPlanQualSetPlan(EPQState *epqstate, Plan *subplan, List *auxrowmarks)
     /* If we have a live EPQ query, shut it down */
     EvalPlanQualEnd(epqstate);
     /* And set/change the plan pointer */
-	epqstate->plan = copyObject(subplan);
-	/* Reset cursor name of remote subplans if any */
-	ResetRemoteSubplanCursor(epqstate->plan,
-	                         (epqstate->parentestate->es_plannedstmt ?
-	                          epqstate->parentestate->es_plannedstmt->subplans : NULL),
-	                         "epq");
+	epqstate->plan = subplan;
     /* The rowmarks depend on the plan, too */
     epqstate->arowMarks = auxrowmarks;
 }
@@ -3448,7 +3438,7 @@ EvalPlanQualBegin(EPQState *epqstate, EState *parentestate)
     if (estate == NULL)
     {
         /* First time through, so create a child EState */
-        EvalPlanQualStart(epqstate, parentestate, epqstate->plan);
+		EvalPlanQualStart(epqstate, parentestate, copyObject(epqstate->plan));
     }
     else
     {
@@ -3522,9 +3512,15 @@ EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *planTree)
     estate->es_snapshot = parentestate->es_snapshot;
     estate->es_crosscheck_snapshot = parentestate->es_crosscheck_snapshot;
     estate->es_range_table = parentestate->es_range_table;
-    estate->es_plannedstmt = parentestate->es_plannedstmt;
+	estate->es_plannedstmt = copyObject(parentestate->es_plannedstmt);
     estate->es_junkFilter = parentestate->es_junkFilter;
     estate->es_output_cid = parentestate->es_output_cid;
+	
+	ResetRemoteSubplanCursor(planTree,
+	                         (estate->es_plannedstmt ?
+	                          estate->es_plannedstmt->subplans : NULL),
+	                         "epq");
+	
     if (parentestate->es_num_result_relations > 0)
     {
         int            numResultRelations = parentestate->es_num_result_relations;

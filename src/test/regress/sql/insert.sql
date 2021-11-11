@@ -585,3 +585,44 @@ execute p0(1, 'abc', 1);
 execute p1(1, 'abc', 1);
 execute p2(1, 'abc', 1);
 execute p3(1, 'abc', 1);
+
+-- test complex INSERT
+CREATE TABLE ods_time_record (
+    id character(8),
+    mintime character varying(50),
+    describe character varying(50),
+    systemtime timestamp(6) without time zone DEFAULT orcl_sysdate(),
+    remarks character varying(255),
+    total numeric(255,0)
+)
+DISTRIBUTE BY SHARD (id) to GROUP default_group;
+CREATE TABLE ods_today_st_river_r (
+    stcd character(8) NOT NULL,
+    tm timestamp(6) without time zone NOT NULL,
+    z numeric(7,3),
+    q numeric(9,3),
+    xsa numeric(9,3),
+    xsavv numeric(5,3),
+    xsmxv numeric(5,3),
+    flwchrcd character(1),
+    wptn character(1),
+    msqmt character(1),
+    msamt character(1),
+    msvmt character(1),
+    moditime timestamp(6) without time zone
+)
+DISTRIBUTE BY SHARD (stcd) to GROUP default_group;
+COPY ods_time_record (id, mintime, describe, systemtime, remarks, total) FROM stdin;
+1       	2021-11-04 00:00:00	st_river_r	2021-11-04 00:00:00	河道水情表	0
+1       	2021-11-04 00:00:00	st_river_r	2021-11-04 00:00:00	河道水情表	0
+\.
+COPY ods_today_st_river_r (stcd, tm, z, q, xsa, xsavv, xsmxv, flwchrcd, wptn, msqmt, msamt, msvmt, moditime) FROM stdin;
+30702300	2021-11-11 12:30:00	96.710	1.150	\N	\N	0.000	\N	5	1	\N	\N	2021-11-11 12:31:54
+41400990	2021-11-11 12:25:00	1.020	\N	\N	\N	0.000	\N	6	\N	\N	\N	2021-11-11 12:31:54
+\.
+ALTER TABLE ONLY ods_today_st_river_r
+ADD CONSTRAINT ods_today_st_river_r_pkey PRIMARY KEY (tm, stcd);
+insert into ods_time_record ("id",mintime,"describe",remarks,total)
+select '1' as "id",max(moditime) as mintime ,'河道' as "describe" ,'st_river_r' as remarks,
+(select count(1) from ods_today_st_river_r  ) as total from ods_today_st_river_r;
+drop table ods_today_st_river_r, ods_time_record;

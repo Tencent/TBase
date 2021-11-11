@@ -10869,8 +10869,22 @@ encode_epqcontext(PlanState *planstate, char **result)
 	
 	for (i = 0; i < ntuples; i++)
 	{
-		ItemPointerData tid = estate->es_epqTuple[i]->t_self;
-		int             rtidx = i + 1;
+		ItemPointerData tid;
+		int16           rtidx;
+		int             nodeid;
+		
+		if (estate->es_epqTuple[i] == NULL)
+		{
+			memset(&tid, 0, sizeof(ItemPointerData));
+			rtidx = 0;
+			nodeid = 0;
+		}
+		else
+		{
+			tid = estate->es_epqTuple[i]->t_self;
+			rtidx = i + 1;
+			nodeid = estate->es_epqTuple[i]->t_xc_node_id;
+		}
 		
 		n16 = htons(rtidx);
 		appendBinaryStringInfo(&buf, (char *) &n16, 2);
@@ -10880,7 +10894,7 @@ encode_epqcontext(PlanState *planstate, char **result)
 		appendBinaryStringInfo(&buf, (char *) &n16, 2);
 		n16 = htons(tid.ip_posid);
 		appendBinaryStringInfo(&buf, (char *) &n16, 2);
-		n32 = htonl(estate->es_epqTuple[i]->t_xc_node_id);
+		n32 = htonl(nodeid);
 		appendBinaryStringInfo(&buf, (char *) &n32, 4);
 	}
 	
