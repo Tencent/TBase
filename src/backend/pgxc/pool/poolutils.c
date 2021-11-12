@@ -111,9 +111,11 @@ pgxc_pool_reload(PG_FUNCTION_ARGS)
     if (PgxcNodeRefresh())
         PG_RETURN_BOOL(true);
 #endif
+#if 0
+    /* TODO: disable node refresh now, consider the handle fd state and enable refresh later */
     /* Always send reload msg to pooler */
     PgxcNodeRefresh();
-
+#endif
     /* Session is being reloaded, drop prepared and temporary objects */
     DropAllPreparedStatements();
 
