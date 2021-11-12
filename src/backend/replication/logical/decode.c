@@ -1381,6 +1381,9 @@ DecodeMultiInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
             header->t_infomask = xlhdr->t_infomask;
             header->t_infomask2 = xlhdr->t_infomask2;
             header->t_hoff = xlhdr->t_hoff;
+#ifdef __STORAGE_SCALABLE__
+			header->t_shardid = xlhdr->t_shardid;
+#endif
         }
 
         /*
