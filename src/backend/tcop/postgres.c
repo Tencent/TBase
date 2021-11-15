@@ -1138,6 +1138,19 @@ pg_plan_queries(List *querytrees, int cursorOptions, ParamListInfo boundParams)
     return stmt_list;
 }
 
+static bool
+ch_is_space(char ch)
+{
+	if (ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r' || ch == '\f')
+	{
+	    return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+
 /*
  * get myself query string from original query string,
  * if the query string contain multi stmt
