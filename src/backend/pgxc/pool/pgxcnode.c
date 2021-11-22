@@ -149,7 +149,7 @@ static bool DoRefreshRemoteHandles(void);
 
 #ifdef XCP
 static void pgxc_node_init(PGXCNodeHandle *handle, int sock,
-        bool global_session, int pid);
+		bool global_session, int pid, bool is_reset_handle);
 #else
 static void pgxc_node_init(PGXCNodeHandle *handle, int sock);
 #endif
@@ -667,8 +667,8 @@ pgxc_node_all_free(void)
  * Structure stores state info and I/O buffers
  */
 static void
-pgxc_node_init(PGXCNodeHandle *handle, int sock, bool global_session, int pid)
-{// #lizard forgives
+pgxc_node_init(PGXCNodeHandle *handle, int sock, bool global_session, int pid, bool is_reset_handle)
+{
     char *init_str;
 
     handle->sock = sock;
@@ -701,9 +701,20 @@ pgxc_node_init(PGXCNodeHandle *handle, int sock, bool global_session, int pid)
     if (global_session)
     {
         init_str = PGXCNodeGetSessionParamStr();
-        if (init_str)
+		if (init_str && pgxc_node_set_query(handle, init_str))
+		{
+            if (is_reset_handle)
+            {
+                /* if it is a reset handle, do not throw error, just set handle as error state */
+                PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_ERROR_FATAL);
+                elog(WARNING, "pgxc_node_set_query send %s to node %s, pid:%d failed", init_str,
+                     handle->nodename, handle->backend_pid);
+            }
+            else
         {
-            pgxc_node_set_query(handle, init_str);
+                elog(ERROR, "pgxc_node_set_query send %s to node %s, pid:%d failed", init_str,
+                     handle->nodename, handle->backend_pid);
+            }
         }
     }
 
@@ -1546,6 +1557,7 @@ release_handles(bool force)
 
 /*
  * Reset all Datanode and Coordinator connections occupied memory.
+ * TODO： fix implicit transaction do not commit on dn and remove reset_handles
  */
 void
 reset_handles(void)
@@ -1570,7 +1582,7 @@ reset_handles(void)
 
 		if (handle->sock != NO_SOCKET)
 		{
-			pgxc_node_init(handle, handle->sock, true, handle->backend_pid);
+			pgxc_node_init(handle, handle->sock, true, handle->backend_pid, true);
 		}
 	}
 
@@ -1580,7 +1592,7 @@ reset_handles(void)
 
 		if (handle->sock != NO_SOCKET)
 		{
-			pgxc_node_init(handle, handle->sock, true, handle->backend_pid);
+			pgxc_node_init(handle, handle->sock, true, handle->backend_pid, true);
 		}
 	}
 
@@ -1593,10 +1605,16 @@ reset_handles(void)
 
 			if (handle->sock != NO_SOCKET)
 			{
-				pgxc_node_init(handle, handle->sock, true, handle->backend_pid);
+				pgxc_node_init(handle, handle->sock, true, handle->backend_pid, true);
 			}
 		}
 	}
+
+    if (validate_handles())
+    {
+        elog(LOG, "found bad remote node connections, force release handles now");
+        release_handles(true);
+    }
 }
 
 /*
@@ -3727,7 +3745,7 @@ get_any_handle(List *datanodelist)
                     
                     
                     node_handle = &dn_handles[node];
-                    pgxc_node_init(node_handle, fds[0], true, pids[0]);
+					pgxc_node_init(node_handle, fds[0], true, pids[0], false);
                     datanode_count++;
 
                     elog(DEBUG1, "Established a connection with datanode \"%s\","
@@ -4003,7 +4021,7 @@ get_handles(List *datanodelist, List *coordlist, bool is_coord_only_query, bool 
 					continue;
 				}
 				
-                pgxc_node_init(node_handle, fdsock, is_global_session, be_pid);
+				pgxc_node_init(node_handle, fdsock, is_global_session, be_pid, false);
                 dn_handles[node] = *node_handle;
                 datanode_count++;
 
@@ -4068,7 +4086,7 @@ get_handles(List *datanodelist, List *coordlist, bool is_coord_only_query, bool 
 					continue;
 				}
 				
-                pgxc_node_init(node_handle, fdsock, is_global_session, be_pid);
+				pgxc_node_init(node_handle, fdsock, is_global_session, be_pid, false);
                 co_handles[node] = *node_handle;
                 coord_count++;
 
@@ -5094,14 +5112,18 @@ PGXCNodeGetTransactionParamStr(void)
 /*
  * Send down specified query, read and discard all responses until ReadyForQuery
  */
-void
+int
 pgxc_node_set_query(PGXCNodeHandle *handle, const char *set_query)
 {
 	if (pgxc_node_send_query(handle, set_query) != 0)
 	{
-		ereport(ERROR,
+	    /*
+	     * print log only and decide whether to throw an error at the place where it is called
+	     */
+		ereport(LOG,
 				(errcode(ERRCODE_INTERNAL_ERROR),
 						errmsg("Failed to send query %s",set_query)));
+		return EOF;
 	}
     /*
      * Now read responses until ReadyForQuery.
@@ -5142,8 +5164,11 @@ pgxc_node_set_query(PGXCNodeHandle *handle, const char *set_query)
         {
                         PGXCNodeHandleError(handle, msg, msglen);
                         PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_ERROR_FATAL);
-                        elog(ERROR,"pgxc_node_set_query: %s",handle->error);
-            break;
+            /*
+             * print log only and decide whether to throw an error at the place where it is called
+             */
+            elog(LOG,"pgxc_node_set_query: %s",handle->error);
+			return EOF;
         }
 
         if (msgtype == 'Z') /* ReadyForQuery */
@@ -5154,6 +5179,8 @@ pgxc_node_set_query(PGXCNodeHandle *handle, const char *set_query)
             break;
         }
     }
+
+	return 0;
 }
 
 
