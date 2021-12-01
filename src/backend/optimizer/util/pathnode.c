@@ -4649,6 +4649,34 @@ create_merge_append_path(PlannerInfo *root,
     return pathnode;
 }
 
+QualPath *
+create_qual_path(PlannerInfo *root, Path *subpath, List *quals)
+{
+	QualPath   *pathnode = makeNode(QualPath);
+	RelOptInfo *rel = subpath->parent;
+	QualCost    qual_cost;
+	Cost        run_cost;
+	
+	cost_qual_eval(&qual_cost, quals, root);
+	
+	pathnode->path.pathtype = T_Result;
+	pathnode->path.parent = rel;
+	pathnode->path.pathtarget = subpath->pathtarget;
+	pathnode->path.parallel_safe = rel->consider_parallel;
+	
+	pathnode->quals = quals;
+	pathnode->subpath = subpath;
+	
+	pathnode->path.rows = subpath->rows;
+	run_cost = subpath->total_cost - subpath->startup_cost;
+	run_cost += (cpu_operator_cost + qual_cost.per_tuple) * pathnode->path.rows;
+	
+	pathnode->path.startup_cost = subpath->startup_cost + qual_cost.startup;
+	pathnode->path.total_cost = subpath->total_cost + run_cost;
+	
+	return pathnode;
+}
+
 /*
  * create_result_path
  *      Creates a path representing a Result-and-nothing-else plan.

@@ -133,6 +133,7 @@ extern MergeAppendPath *create_merge_append_path(PlannerInfo *root,
                           List *pathkeys,
                           Relids required_outer,
                           List *partitioned_rels);
+extern QualPath *create_qual_path(PlannerInfo *root, Path *subpath, List *quals);
 extern ResultPath *create_result_path(PlannerInfo *root, RelOptInfo *rel,
                     PathTarget *target, List *resconstantqual);
 extern MaterialPath *create_material_path(RelOptInfo *rel, Path *subpath);
