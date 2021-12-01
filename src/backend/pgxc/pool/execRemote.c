@@ -7903,11 +7903,6 @@ PreAbort_Remote(TranscationType txn_type, bool need_release_handle)
         }
     }
 
-    
-#if PGXC_CANCEL_DELAY > 0
-    pg_usleep(PGXC_CANCEL_DELAY * 1000);
-#endif
-
     /*
      * Now read and discard any data from the connections found "dirty"
      */
@@ -11765,10 +11760,6 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
             {
                 break;
             }
-            /* Sleep a while. */
-#if PGXC_CANCEL_DELAY > 0
-            pg_usleep(PGXC_CANCEL_DELAY * 1000);
-#endif
         }
     }
 }
