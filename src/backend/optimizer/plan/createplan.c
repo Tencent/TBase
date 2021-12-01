@@ -132,6 +132,7 @@ static RemoteSubplan *create_remotescan_plan(PlannerInfo *root,
                        RemoteSubPath *best_path);
 //static char *get_internal_cursor(void);
 #endif
+static Result *create_qual_plan(PlannerInfo *root, QualPath *best_path);
 static ProjectSet *create_project_set_plan(PlannerInfo *root, ProjectSetPath *best_path);
 static Material *create_material_plan(PlannerInfo *root, MaterialPath *best_path,
                      int flags);
@@ -325,7 +326,7 @@ static SetOp *make_setop(SetOpCmd cmd, SetOpStrategy strategy, Plan *lefttree,
            List *distinctList, AttrNumber flagColIdx, int firstFlag,
            long numGroups);
 static LockRows *make_lockrows(Plan *lefttree, List *rowMarks, int epqParam);
-static Result *make_result(List *tlist, Node *resconstantqual, Plan *subplan);
+static Result *make_result(List *tlist, Node *resconstantqual, Plan *subplan, List *qual);
 static ProjectSet *make_project_set(List *tlist, Plan *subplan);
 static ModifyTable *make_modifytable(PlannerInfo *root,
                  CmdType operation, bool canSetTag,
@@ -479,6 +480,10 @@ create_plan_recurse(PlannerInfo *root, Path *best_path, int flags)
                 plan = (Plan *) create_minmaxagg_plan(root,
                                                       (MinMaxAggPath *) best_path);
             }
+			else if (IsA(best_path, QualPath))
+			{
+				plan = (Plan *) create_qual_plan(root, (QualPath *) best_path);
+			}
             else
             {
                 Assert(IsA(best_path, ResultPath));
@@ -1048,7 +1053,7 @@ create_scan_plan(PlannerInfo *root, Path *best_path, int flags)
 /*
         if (need_projection)
         {
-            plan = (Plan *)make_result(outtlist, NULL, plan);
+			plan = (Plan *)make_result(outtlist, NULL, plan, NULL);
             plan->parallel_aware = best_path->parallel_aware;
         }
 */
@@ -1259,7 +1264,7 @@ create_gating_plan(PlannerInfo *root, Path *path, Plan *plan,
      */
     gplan = (Plan *) make_result(build_path_tlist(root, path),
                                  (Node *) gating_quals,
-                                 plan);
+								 plan, NULL);
 
     /*
      * Notice that we don't change cost or size estimates when doing gating.
@@ -1374,7 +1379,7 @@ create_append_plan(PlannerInfo *root, AppendPath *best_path)
         plan = (Plan *) make_result(tlist,
                                     (Node *) list_make1(makeBoolConst(false,
                                                                       false)),
-                                    NULL);
+									NULL, NULL);
 
         copy_generic_path_info(plan, (Path *) best_path);
 
@@ -1545,7 +1550,29 @@ create_result_plan(PlannerInfo *root, ResultPath *best_path)
     /* best_path->quals is just bare clauses */
     quals = order_qual_clauses(root, best_path->quals);
 
-    plan = make_result(tlist, (Node *) quals, NULL);
+	plan = make_result(tlist, (Node *) quals, NULL, NULL);
+
+	copy_generic_path_info(&plan->plan, (Path *) best_path);
+
+	return plan;
+}
+
+static Result *
+create_qual_plan(PlannerInfo *root, QualPath *best_path)
+{
+	Result	   *plan;
+	Plan	   *subplan;
+	List	   *tlist;
+	List	   *quals;
+	
+	subplan = create_plan_recurse(root, best_path->subpath, 0);
+	
+	tlist = build_path_tlist(root, &best_path->path);
+	
+	/* best_path->quals is just bare clauses */
+	quals = order_qual_clauses(root, best_path->quals);
+	
+	plan = make_result(tlist, NULL, subplan, quals);
 
     copy_generic_path_info(&plan->plan, (Path *) best_path);
 
@@ -2142,7 +2169,7 @@ create_projection_plan(PlannerInfo *root, ProjectionPath *best_path)
     else
     {
         /* We need a Result node */
-        plan = (Plan *) make_result(tlist, NULL, subplan);
+		plan = (Plan *) make_result(tlist, NULL, subplan, NULL);
 
         copy_generic_path_info(plan, (Path *) best_path);
     }
@@ -2166,7 +2193,7 @@ inject_projection_plan(Plan *subplan, List *tlist, bool parallel_safe)
 {
     Plan       *plan;
 
-    plan = (Plan *) make_result(tlist, NULL, subplan);
+	plan = (Plan *) make_result(tlist, NULL, subplan, NULL);
 
     /*
      * In principle, we should charge tlist eval cost plus cpu_per_tuple per
@@ -2626,7 +2653,7 @@ create_minmaxagg_plan(PlannerInfo *root, MinMaxAggPath *best_path)
     /* Generate the output plan --- basically just a Result */
     tlist = build_path_tlist(root, &best_path->path);
 
-    plan = make_result(tlist, (Node *) best_path->quals, NULL);
+	plan = make_result(tlist, (Node *) best_path->quals, NULL, NULL);
 
     copy_generic_path_info(&plan->plan, (Path *) best_path);
 
@@ -6842,7 +6869,7 @@ make_remotesubplan(PlannerInfo *root,
 						{
 							List *newtlist = list_copy(leftchild->targetlist);
 							newtlist = lappend(newtlist, newtle);
-							leftchild = (Plan *) make_result(newtlist, NULL, leftchild);
+							leftchild = (Plan *) make_result(newtlist, NULL, leftchild, NULL);
 							lefttree->lefttree = leftchild;
 						}
 					}
@@ -6853,7 +6880,7 @@ make_remotesubplan(PlannerInfo *root,
                     /* Use Result node to calculate expression */
                     List *newtlist = list_copy(lefttree->targetlist);
                     newtlist = lappend(newtlist, newtle);
-                    lefttree = (Plan *) make_result(newtlist, NULL, lefttree);
+					lefttree = (Plan *) make_result(newtlist, NULL, lefttree, NULL);
                 }
 
                 node->distributionKey = newtle->resno;
@@ -7071,7 +7098,7 @@ make_remotesubplan(PlannerInfo *root,
                     {
                         /* copy needed so we don't modify input's tlist below */
                         tlist = copyObject(tlist);
-                        lefttree = (Plan *) make_result(tlist, NULL, lefttree);
+						lefttree = (Plan *) make_result(tlist, NULL, lefttree, NULL);
                     }
 
                     /*
@@ -8416,13 +8443,14 @@ make_limit(Plan *lefttree, Node *limitOffset, Node *limitCount,
 static Result *
 make_result(List *tlist,
             Node *resconstantqual,
-            Plan *subplan)
-{// #lizard forgives
+			Plan *subplan,
+			List *qual)
+{
     Result       *node = makeNode(Result);
     Plan       *plan = &node->plan;
 
     plan->targetlist = tlist;
-    plan->qual = NIL;
+	plan->qual = qual;
     plan->lefttree = subplan;
     plan->righttree = NULL;
     node->resconstantqual = resconstantqual;

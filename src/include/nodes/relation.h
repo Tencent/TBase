@@ -1639,6 +1639,13 @@ typedef struct ProjectionPath
     bool        dummypp;        /* true if no separate Result is needed */
 } ProjectionPath;
 
+typedef struct QualPath
+{
+	Path        path;
+	Path       *subpath;
+	List       *quals;
+} QualPath;
+
 /*
  * ProjectSetPath represents evaluation of a targetlist that includes
  * set-returning function(s), which will need to be implemented by a
