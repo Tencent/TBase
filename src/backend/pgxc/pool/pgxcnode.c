@@ -2696,6 +2696,7 @@ pgxc_node_flush_read(PGXCNodeHandle *handle)
 {// #lizard forgives
     bool    is_ready= false;
     int    read_result;
+	int	wait_time = 1;
 
     if (handle == NULL)
     {
@@ -2704,9 +2705,6 @@ pgxc_node_flush_read(PGXCNodeHandle *handle)
 
     while(true)
     {        
-#if PGXC_CANCEL_DELAY > 0
-        pg_usleep(PGXC_CANCEL_DELAY * 1000);
-#endif
         /* consume all data */
         while (HAS_MESSAGE_BUFFERED(handle))
         {
@@ -2733,6 +2731,21 @@ pgxc_node_flush_read(PGXCNodeHandle *handle)
             elog(LOG, "pgxc_node_flush_read node:%s read failure.", handle->nodename);
             break;
         }
+
+		if (PGXC_CANCEL_DELAY > 0)
+		{
+			elog(DEBUG5, "pgxc_node_flush_read sleep %dus", wait_time);
+			pg_usleep(wait_time);
+
+			if (wait_time < PGXC_CANCEL_DELAY)
+			{
+				wait_time *= 2;
+			}
+			if (wait_time > PGXC_CANCEL_DELAY)
+			{
+				wait_time = PGXC_CANCEL_DELAY;
+			}
+		}
     }
 }
 
