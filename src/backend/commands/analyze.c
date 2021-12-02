@@ -1258,6 +1258,7 @@ acquire_sample_rows(Relation onerel, int elevel,
         {
             ItemId        itemid;
             HeapTupleData targtuple;
+			HeapTuple   newTuple = &targtuple;
             bool        sample_it = false;
 
             itemid = PageGetItemId(targpage, targoffset);
@@ -1351,6 +1352,59 @@ acquire_sample_rows(Relation onerel, int elevel,
             if (sample_it)
             {
                 /*
+                 * If connection is from Coordinator on datanodes, we discard TOAST fields in sample,
+                 * which will lighten the load of memory usage on coordinator.
+                 */
+			    if (IS_PGXC_DATANODE && IsConnFromCoord())
+			    {
+			        Datum       *values;
+			        bool        *nulls;
+			        TupleDesc   tupdesc = NULL;
+			        int     nattrs;
+			        Form_pg_attribute   *attrs;
+			        int     i;
+
+			        tupdesc = RelationGetDescr(onerel);
+			        nattrs = tupdesc->natts;
+			        attrs = tupdesc->attrs;
+
+			        values = (Datum *) palloc0(nattrs * sizeof(Datum));
+			        nulls = (bool *) palloc0(nattrs * sizeof(bool));
+
+			        heap_deform_tuple(&targtuple, tupdesc, values, nulls);
+
+			        for (i = 0; i < nattrs; i++)
+			        {
+			            if (!attrs[i]->attbyval && attrs[i]->attlen == -1)
+			            {
+			                /* varlena */
+			                Pointer     val = DatumGetPointer(values[i]);
+			                if (val == NULL || VARATT_IS_EXTERNAL(val) || VARATT_IS_COMPRESSED(val))
+			                {
+			                    nulls[i] = true;
+			                }
+			            }
+			        }
+
+			        newTuple = heap_form_tuple(tupdesc, values, nulls);
+
+			        pfree(values);
+			        pfree(nulls);
+
+                    /*
+                     * copy the identification info of the old tuple: t_ctid, t_self, and OID
+                     * (if any)
+                     */
+                    newTuple->t_data->t_ctid = targtuple.t_data->t_ctid;
+                    newTuple->t_self = targtuple.t_self;
+                    newTuple->t_tableOid = targtuple.t_tableOid;
+#ifdef PGXC
+                    newTuple->t_xc_node_id = targtuple.t_xc_node_id;
+#endif
+                    if (tupdesc->tdhasoid)
+                        HeapTupleSetOid(newTuple, HeapTupleGetOid(&targtuple));
+			    }
+				/*
                  * The first targrows sample rows are simply copied into the
                  * reservoir. Then we start replacing tuples in the sample
                  * until we reach the end of the relation.  This algorithm is
@@ -1363,7 +1417,7 @@ acquire_sample_rows(Relation onerel, int elevel,
                  * the relation we're done.
                  */
                 if (numrows < targrows)
-                    rows[numrows++] = heap_copytuple(&targtuple);
+					rows[numrows++] = heap_copytuple(newTuple);
                 else
                 {
                     /*
@@ -1385,7 +1439,7 @@ acquire_sample_rows(Relation onerel, int elevel,
 
                         Assert(k >= 0 && k < targrows);
                         heap_freetuple(rows[k]);
-                        rows[k] = heap_copytuple(&targtuple);
+						rows[k] = heap_copytuple(newTuple);
                     }
 
                     rowstoskip -= 1;
