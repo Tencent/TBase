@@ -3390,6 +3390,8 @@ handle_response(PGXCNodeHandle *conn, ResponseCombiner *combiner)
                 conn->transaction_status = msg[0];
                 PGXCNodeSetConnectionState(conn, DN_CONNECTION_STATE_IDLE);
                 conn->combiner = NULL;
+
+				elog(DEBUG5, "remote_node %s remote_pid %d, conn->transaction_status %c", conn->nodename, conn->backend_pid, conn->transaction_status);
 #ifdef DN_CONNECTION_DEBUG
                 conn->have_row_desc = false;
 #endif
@@ -5661,6 +5663,7 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
                     /* Read responses from these */
                     sync_connections[sync_conn_count++] = conn;
                     result = EOF;
+					elog(DEBUG5, "send SYNC command to CN nodename %s, backend_pid %d", conn->nodename, conn->backend_pid);
                 }
             }
         }
@@ -5695,6 +5698,7 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
                     /* Read responses from these */
                     sync_connections[sync_conn_count++] = conn;
                     result = EOF;
+					elog(DEBUG5, "send SYNC command to DN nodename %s, backend_pid %d", conn->nodename, conn->backend_pid);
                 }
             }
         }
@@ -5934,13 +5938,13 @@ pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle)
             {
                 ereport(LOG,
                         (errcode(ERRCODE_INTERNAL_ERROR),
-                         errmsg("Failed to send SYNC to on one or more nodes errmsg:%s", combiner.errorMessage)));
+						 errmsg("Failed to send ROLLBACK to on one or more nodes errmsg:%s", combiner.errorMessage)));
             }
             else
             {
                 ereport(LOG,
                         (errcode(ERRCODE_INTERNAL_ERROR),
-                         errmsg("Failed to send SYNC to on one or more nodes")));
+						 errmsg("Failed to send ROLLBACK to on one or more nodes")));
             }
         }
         CloseCombiner(&combiner);
