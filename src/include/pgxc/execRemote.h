@@ -367,7 +367,7 @@ extern RemoteQueryState *ExecInitRemoteQuery(RemoteQuery *node, EState *estate, 
 extern TupleTableSlot* ExecRemoteQuery(PlanState *pstate);
 extern void ExecReScanRemoteQuery(RemoteQueryState *node);
 extern void ExecEndRemoteQuery(RemoteQueryState *step);
-extern void RemoteSubplanMakeUnique(Node *plan, int unique);
+extern void RemoteSubplanMakeUnique(Node *plan, int unique, int pid);
 extern RemoteSubplanState *ExecInitRemoteSubplan(RemoteSubplan *node, EState *estate, int eflags);
 extern void ExecFinishInitRemoteSubplan(RemoteSubplanState *node);
 extern TupleTableSlot* ExecRemoteSubplan(PlanState *pstate);

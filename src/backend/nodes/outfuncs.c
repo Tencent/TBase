@@ -99,6 +99,10 @@ static void outChar(StringInfo str, char c);
 #define WRITE_UINT_FIELD(fldname) \
     appendStringInfo(str, " :" CppAsString(fldname) " %u", node->fldname)
 
+/* Write an int64 field (anything written as ":fldname %d") */
+#define WRITE_INT64_FIELD(fldname) \
+	appendStringInfo(str, " :" CppAsString(fldname) " "INT64_FORMAT, node->fldname)
+
 #ifdef XCP
 /* Only allow output OIDs in not portable mode */
 #define WRITE_OID_FIELD(fldname) \
@@ -1700,7 +1704,7 @@ _outRemoteSubplan(StringInfo str, const RemoteSubplan *node)
     WRITE_BOOL_FIELD(execOnAll);
     WRITE_NODE_FIELD(sort);
     WRITE_STRING_FIELD(cursor);
-    WRITE_INT_FIELD(unique);
+	WRITE_INT64_FIELD(unique);
     WRITE_BOOL_FIELD(parallelWorkerSendTuple);
 	WRITE_BITMAPSET_FIELD(initPlanParams);
 

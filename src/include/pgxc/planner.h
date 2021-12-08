@@ -247,7 +247,7 @@ typedef struct
     bool         execOnAll;
     SimpleSort *sort;
     char       *cursor;
-    int            unique;
+    int64       unique;
 #ifdef __TBASE__
     /*
       * if gather is under remotesubplan, parallel worker can send tuples 

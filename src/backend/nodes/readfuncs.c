@@ -116,6 +116,12 @@ set_portable_input(bool value)
     token = pg_strtok(&length);        /* get field value */ \
     local_node->fldname = atoui(token)
 
+/* Read an integer field (anything written as ":fldname %d") */
+#define READ_INT64_FIELD(fldname) \
+	token = pg_strtok(&length);		/* skip :fldname */ \
+	token = pg_strtok(&length);		/* get field value */ \
+	local_node->fldname = atoll(token)
+
 #ifdef XCP
 /* Read a long integer field (anything written as ":fldname %ld") */
 #define READ_LONG_FIELD(fldname) \
@@ -3812,7 +3818,7 @@ _readRemoteSubplan(void)
     READ_BOOL_FIELD(execOnAll);
     READ_NODE_FIELD(sort);
     READ_STRING_FIELD(cursor);
-    READ_INT_FIELD(unique);
+    READ_INT64_FIELD(unique);
     READ_BOOL_FIELD(parallelWorkerSendTuple);
 	READ_BITMAPSET_FIELD(initPlanParams);
 

@@ -1082,8 +1082,8 @@ SharedQueueBind(const char *sqname, List *consNodes,
 #endif
             Assert(consMap);
 
-            elog(DEBUG1, "Bind node %s to squeue of step %s as a producer",
-                 PGXC_PARENT_NODE, sqname);
+			elog(DEBUG1, "Bind node %s to squeue of step %s as a producer, parentPGXCNode %s, parentPGXCPid %d",
+				 PGXC_PARENT_NODE, sqname, parentPGXCNode, parentPGXCPid);
 
             /* Initialize the shared queue */
             sq->sq_pid = MyProcPid;
@@ -1328,7 +1328,7 @@ SharedQueueBind(const char *sqname, List *consNodes,
 
         elog(DEBUG1, "SQueue %s has a bound producer from node %d, pid %d",
                 sqname, sq->sq_nodeid, sq->sq_pid);
-        elog(DEBUG1, "Bind node %s to SQueue %s as a consumer %d", PGXC_PARENT_NODE, sqname, sq->sq_pid);
+		elog(DEBUG1, "Bind node %s to SQueue %s as a consumer %d, parentPGXCNode %s, parentPGXCPid %d", PGXC_PARENT_NODE, sqname, sq->sq_pid, parentPGXCNode, parentPGXCPid);
 
         /* Sanity checks */
         Assert(myindex);
