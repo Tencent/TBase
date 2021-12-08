@@ -9706,8 +9706,8 @@ ExecEndRemoteQuery(RemoteQueryState *node)
  * take writable copy of the plan tree.
  */
 void
-RemoteSubplanMakeUnique(Node *plan, int unique)
-{// #lizard forgives
+RemoteSubplanMakeUnique(Node *plan, int unique, int pid)
+{
     if (plan == NULL)
         return;
 
@@ -9716,7 +9716,7 @@ RemoteSubplanMakeUnique(Node *plan, int unique)
         ListCell *lc;
         foreach(lc, (List *) plan)
         {
-            RemoteSubplanMakeUnique(lfirst(lc), unique);
+			RemoteSubplanMakeUnique(lfirst(lc), unique, pid);
         }
         return;
     }
@@ -9726,34 +9726,37 @@ RemoteSubplanMakeUnique(Node *plan, int unique)
      */
     if (IsA(plan, RemoteSubplan))
     {
-	    int old = ((RemoteSubplan *)plan)->unique;
-		((RemoteSubplan *)plan)->unique = old * MAX_NODES_NUMBER + unique;
+	    /*
+	     * add node information and pid to make it unique
+	     */
+        ((RemoteSubplan *)plan)->unique = ((int64)unique << 32) | pid;
     }
+
     /* Otherwise it is a Plan descendant */
-    RemoteSubplanMakeUnique((Node *) ((Plan *) plan)->lefttree, unique);
-    RemoteSubplanMakeUnique((Node *) ((Plan *) plan)->righttree, unique);
+	RemoteSubplanMakeUnique((Node *) ((Plan *) plan)->lefttree, unique, pid);
+	RemoteSubplanMakeUnique((Node *) ((Plan *) plan)->righttree, unique, pid);
     /* Tranform special cases */
     switch (nodeTag(plan))
     {
         case T_Append:
             RemoteSubplanMakeUnique((Node *) ((Append *) plan)->appendplans,
-                                    unique);
+									unique, pid);
             break;
         case T_MergeAppend:
             RemoteSubplanMakeUnique((Node *) ((MergeAppend *) plan)->mergeplans,
-                                    unique);
+									unique, pid);
             break;
         case T_BitmapAnd:
             RemoteSubplanMakeUnique((Node *) ((BitmapAnd *) plan)->bitmapplans,
-                                    unique);
+									unique, pid);
             break;
         case T_BitmapOr:
             RemoteSubplanMakeUnique((Node *) ((BitmapOr *) plan)->bitmapplans,
-                                    unique);
+									unique, pid);
             break;
         case T_SubqueryScan:
             RemoteSubplanMakeUnique((Node *) ((SubqueryScan *) plan)->subplan,
-                                    unique);
+									unique, pid);
             break;
         default:
             break;
@@ -10290,7 +10293,7 @@ ExecInitRemoteSubplan(RemoteSubplan *node, EState *estate, int eflags)
              * traverse the subtree and change SharedQueue name to make it
              * unique.
              */
-            RemoteSubplanMakeUnique((Node *) outerPlan(node), PGXCNodeId);
+			RemoteSubplanMakeUnique((Node *) outerPlan(node), PGXCNodeId - 1, MyProcPid);
             elog(DEBUG3, "RemoteSubplanMakeUnique for LOCATOR_TYPE_NONE unique: %d, cursor: %s",
                  PGXCNodeId, node->cursor);
         }
@@ -10577,7 +10580,7 @@ ExecFinishInitRemoteSubplan(RemoteSubplanState *node)
     Assert(plan->cursor);
 
     if (plan->unique)
-        snprintf(cursor, NAMEDATALEN, "%s_%d", plan->cursor, plan->unique);
+		snprintf(cursor, NAMEDATALEN, "%s_"INT64_FORMAT, plan->cursor, plan->unique);
     else
         strncpy(cursor, plan->cursor, NAMEDATALEN);
 
@@ -10988,7 +10991,7 @@ primary_mode_phase_two:
         {
             fetch = PGXLRemoteFetchSize;
             if (plan->unique)
-                snprintf(cursor, NAMEDATALEN, "%s_%d", plan->cursor, plan->unique);
+				snprintf(cursor, NAMEDATALEN, "%s_"INT64_FORMAT, plan->cursor, plan->unique);
             else
                 strncpy(cursor, plan->cursor, NAMEDATALEN);
         }
@@ -11411,7 +11414,7 @@ ExecFinishRemoteSubplan(RemoteSubplanState *node)
         if (plan->cursor)
         {
             if (plan->unique)
-                snprintf(cursor, NAMEDATALEN, "%s_%d", plan->cursor, plan->unique);
+				snprintf(cursor, NAMEDATALEN, "%s_"INT64_FORMAT, plan->cursor, plan->unique);
             else
                 strncpy(cursor, plan->cursor, NAMEDATALEN);
         }
@@ -11496,7 +11499,7 @@ ExecDisconnectRemoteSubplan(RemoteSubplanState *node)
             if (plan->cursor)
             {
                 if (plan->unique)
-                    snprintf(cursor, NAMEDATALEN, "%s_%d", plan->cursor, plan->unique);
+					snprintf(cursor, NAMEDATALEN, "%s_"INT64_FORMAT, plan->cursor, plan->unique);
                 else
                     strncpy(cursor, plan->cursor, NAMEDATALEN);
             }
@@ -11888,7 +11891,7 @@ ExecEndRemoteSubplan(RemoteSubplanState *node)
         if (plan->cursor)
         {
             if (plan->unique)
-                snprintf(cursor, NAMEDATALEN, "%s_%d", plan->cursor, plan->unique);
+				snprintf(cursor, NAMEDATALEN, "%s_"INT64_FORMAT, plan->cursor, plan->unique);
             else
                 strncpy(cursor, plan->cursor, NAMEDATALEN);
         }

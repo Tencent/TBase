@@ -1244,7 +1244,7 @@ ExplainNode(PlanState *planstate, List *ancestors,
                                 if (rsubplan->cursor)
                                 {
                                     if (rsubplan->unique)
-                                        snprintf(cursor, NAMEDATALEN, "%s_%d", rsubplan->cursor, rsubplan->unique);
+										snprintf(cursor, NAMEDATALEN, "%s_"INT64_FORMAT, rsubplan->cursor, rsubplan->unique);
                                     else
                                         strncpy(cursor, rsubplan->cursor, NAMEDATALEN);
                                 }

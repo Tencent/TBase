@@ -812,7 +812,7 @@ PortalStart(Portal portal, ParamListInfo params,
                      */
                     RemoteSubplanMakeUnique(
                             (Node *) queryDesc->plannedstmt->planTree,
-                            PGXC_PARENT_NODE_ID);
+							PGXC_PARENT_NODE_ID, parentPGXCPid);
 
                     elog(DEBUG3, "RemoteSubplanMakeUnique for PARAM_EXEC unique: %d, portal: %s",
                          PGXC_PARENT_NODE_ID, portal->name);
