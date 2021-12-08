@@ -1648,6 +1648,13 @@ validate_handles(void)
                     return true;
                 }                
             }
+			
+			if(handle->transaction_status == 'E')
+			{
+				elog(LOG, "Remote node \"%s\", running with pid %d transaction_status %c is bad",
+							handle->nodename, handle->backend_pid, handle->transaction_status);
+				return true;
+			}
         }
     }
 
@@ -1674,6 +1681,13 @@ validate_handles(void)
                 }
                 
             }
+			
+			if(handle->transaction_status == 'E')
+			{
+				elog(LOG, "Remote node \"%s\", running with pid %d transaction_status %c is bad",
+							handle->nodename, handle->backend_pid, handle->transaction_status);
+				return true;
+			}
         }    
     }
 
@@ -1701,6 +1715,13 @@ validate_handles(void)
                         return true;
                     }
                 }
+
+				if(handle->transaction_status == 'E')
+				{
+					elog(LOG, "Remote node \"%s\", running with pid %d transaction_status %c is bad",
+								handle->nodename, handle->backend_pid, handle->transaction_status);
+					return true;
+				}
             }
         }
     }
