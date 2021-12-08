@@ -204,7 +204,7 @@ cursorCollectWalker(PlanState *planstate, StringInfo str)
 		{
 			appendStringInfoString(str, plan->cursor);
 			if (plan->unique)
-				appendStringInfo(str, "_%d", plan->unique);
+				appendStringInfo(str, "_"INT64_FORMAT, plan->unique);
 			/* add a space as delimiter */
 			appendStringInfoString(str, " ");
 		}
