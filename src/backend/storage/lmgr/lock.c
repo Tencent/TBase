@@ -3784,6 +3784,13 @@ GetBlockerStatusData(int blocked_pid)
     data->waiter_pids = (int *) palloc(sizeof(int) * data->maxpids);
 
     /*
+     * Acquire lock on the entire shared lock data structure.  See notes
+     * in GetLockStatusData().
+     */
+    for (i = 0; i < NUM_LOCK_PARTITIONS; i++)
+        LWLockAcquire(LockHashPartitionLockByIndex(i), LW_SHARED);
+
+	/*
      * In order to search the ProcArray for blocked_pid and assume that that
      * entry won't immediately disappear under us, we must hold ProcArrayLock.
      * In addition, to examine the lock grouping fields of any other backend,
@@ -3801,13 +3808,6 @@ GetBlockerStatusData(int blocked_pid)
     /* Nothing to do if it's gone */
     if (proc != NULL)
     {
-        /*
-         * Acquire lock on the entire shared lock data structure.  See notes
-         * in GetLockStatusData().
-         */
-        for (i = 0; i < NUM_LOCK_PARTITIONS; i++)
-            LWLockAcquire(LockHashPartitionLockByIndex(i), LW_SHARED);
-
         if (proc->lockGroupLeader == NULL)
         {
             /* Easy case, proc is not a lock group member */
@@ -3827,16 +3827,16 @@ GetBlockerStatusData(int blocked_pid)
             }
         }
 
+		Assert(data->nprocs <= data->maxprocs);
+	}
+
+	LWLockRelease(ProcArrayLock);
+
         /*
          * And release locks.  See notes in GetLockStatusData().
          */
         for (i = NUM_LOCK_PARTITIONS; --i >= 0;)
             LWLockRelease(LockHashPartitionLockByIndex(i));
-
-        Assert(data->nprocs <= data->maxprocs);
-    }
-
-    LWLockRelease(ProcArrayLock);
 
     return data;
 }
