@@ -190,7 +190,7 @@ typedef struct Cache2pcInfo
 
 } Cache2pcInfo;
 
-inline void check_entry_key(const char *tid, const char *key);
+static inline void check_entry_key(const char *tid, const char *key);
 
 bool add_2pc_info(const char *tid, const char *info);
 
@@ -3319,7 +3319,7 @@ PrepareRedoRemove(TransactionId xid, bool giveWarning)
 /*
  * check_entry_key: check the entry key in the hash table whether is same with tid.
  */
-inline void check_entry_key(const char *tid, const char *key)
+static inline void check_entry_key(const char *tid, const char *key)
 {
 	if (enable_2pc_entry_key_check)
 	{
