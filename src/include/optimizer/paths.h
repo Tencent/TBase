@@ -236,4 +236,7 @@ extern PathKey *make_canonical_pathkey(PlannerInfo *root,
 #ifdef __TBASE__
 extern double path_count_datanodes(Path *path);
 #endif
+
+extern void prune_interval_base_rel(PlannerInfo *root);
+
 #endif							/* PATHS_H */

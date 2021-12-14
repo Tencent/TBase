@@ -4226,61 +4226,6 @@ set_baserel_size_estimates(PlannerInfo *root, RelOptInfo *rel)
     /* Should only be applied to base relations */
     Assert(rel->relid > 0);
 
-#ifdef __TBASE__
-    if(rel->intervalparent && !rel->isdefault)
-    {
-        RangeTblEntry *rte;
-        Relation relation;
-
-        rte = rt_fetch(rel->relid, root->parse->rtable);
-        relation = heap_open(rte->relid, AccessShareLock);
-
-        //pruning
-        rel->childs = RelationGetPartitionsByQuals(relation, rel->baserestrictinfo);
-
-#ifdef __COLD_HOT__
-        /* only datanode and SELECT command need to prune hot data */
-        if (CMD_SELECT == root->parse->commandType && g_EnableDualWrite && IS_PGXC_DATANODE)
-        {
-            /* prune hot data */
-            PruneHotData(RelationGetRelid(relation), rel->childs);
-        }
-#endif
-        
-        if(bms_num_members(rel->childs) == 1)
-        {
-            Oid     partoid = InvalidOid;
-            Relids    *attr_needed = rel->attr_needed;
-            int32    *attr_widths = rel->attr_widths;
-            Bitmapset * bmscopy = bms_copy(rel->childs);
-            rel->estimate_partidx = bms_first_member(bmscopy);
-            partoid = RelationGetPartition(relation, rel->estimate_partidx, false);
-
-            //degrate from parent to a child of parent
-            rte->relid = partoid;
-            rel->intervalparent = false;
-            rel->isdefault = false;
-            if(rel->childs)
-            {
-                bms_free(rel->childs);
-                rel->childs = NULL;
-            }
-            rel->estimate_partidx = -1;
-            rel->indexlist = NULL;
-            LockRelationOid(partoid,AccessShareLock);
-            get_relation_info(root, partoid, false, rel);
-            rel->attr_needed = attr_needed;
-            rel->attr_widths = attr_widths;
-            check_index_predicates(root, rel);
-            //UnlockRelationOid(partoid,AccessShareLock);
-
-            bms_free(bmscopy);
-        }
-
-        heap_close(relation, AccessShareLock);
-    }
-#endif
-
     nrows = rel->tuples *
         clauselist_selectivity(root,
                                rel->baserestrictinfo,

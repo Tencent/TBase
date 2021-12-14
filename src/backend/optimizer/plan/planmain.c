@@ -225,6 +225,8 @@ query_planner(PlannerInfo *root, List *tlist,
      */
     extract_restriction_or_clauses(root);
 
+	prune_interval_base_rel(root);
+
     /*
      * We should now have size estimates for every actual table involved in
      * the query, and we also know which if any have been deleted from the
