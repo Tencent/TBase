@@ -47,12 +47,14 @@
 #include "parser/parsetree.h"
 #include "partitioning/partprune.h"
 #include "pgxc/nodemgr.h"
+#include "storage/lmgr.h"
 #ifdef PGXC
 #include "nodes/makefuncs.h"
 #include "miscadmin.h"
 #endif /* PGXC */
 #include "rewrite/rewriteManip.h"
 #include "utils/lsyscache.h"
+#include "utils/ruleutils.h"
 
 
 /* results of subquery_is_pushdown_safe */
@@ -3855,3 +3857,96 @@ debug_print_rel(PlannerInfo *root, RelOptInfo *rel)
 }
 
 #endif                            /* OPTIMIZER_DEBUG */
+
+/*
+ * Prune children of interval partition table by qual, this happens
+ * before path generation phase, and adjust rel->pages and rel->tuples
+ * for a better cost evaluation.
+ */
+void
+prune_interval_base_rel(PlannerInfo *root)
+{
+	Index		rti;
+	
+	for (rti = 1; rti < root->simple_rel_array_size; rti++)
+	{
+		RelOptInfo *rel = root->simple_rel_array[rti];
+		
+		if (rel == NULL)
+			continue;
+		
+		Assert(rel->relid == rti); /* sanity check on array */
+		
+		if (IS_DUMMY_REL(rel))
+			continue;
+		
+		if (IS_SIMPLE_REL(rel) && rel->intervalparent && !rel->isdefault)
+		{
+			RangeTblEntry *rte;
+			Relation    relation;
+			Oid         partoid = InvalidOid;
+			Bitmapset   *tmpset;
+			
+			rte = rt_fetch(rel->relid, root->parse->rtable);
+			relation = heap_open(rte->relid, AccessShareLock);
+			
+			/* pruning by qual */
+			rel->childs = RelationGetPartitionsByQuals(relation, rel->baserestrictinfo);
+
+#ifdef __COLD_HOT__
+			/* only datanode and SELECT command need to prune hot data */
+			if (CMD_SELECT == root->parse->commandType && g_EnableDualWrite && IS_PGXC_DATANODE)
+			{
+				/* prune hot data */
+				PruneHotData(RelationGetRelid(relation), rel->childs);
+			}
+#endif
+			
+			tmpset = bms_copy(rel->childs);
+			
+			if (bms_num_members(tmpset) == 1)
+			{
+				Relids	*attr_needed = rel->attr_needed;
+				int32	*attr_widths = rel->attr_widths;
+				rel->estimate_partidx = bms_first_member(tmpset);
+				partoid = RelationGetPartition(relation, rel->estimate_partidx, false);
+				
+				/* degrate from parent to a child of parent */
+				rte->relid = partoid;
+				rel->intervalparent = false;
+				rel->isdefault = false;
+				rel->estimate_partidx = -1;
+				rel->indexlist = NULL;
+				LockRelationOid(partoid, AccessShareLock);
+				get_relation_info(root, partoid, false, rel);
+				rel->attr_needed = attr_needed;
+				rel->attr_widths = attr_widths;
+				check_index_predicates(root, rel);
+				
+				bms_free(rel->childs);
+				rel->childs = NULL;
+			}
+			else
+			{
+				int         i;
+				Relation    child;
+				
+				rel->pages = 0;
+				rel->tuples = 0;
+				
+				while ((i = bms_first_member(tmpset)) >= 0)
+				{
+					partoid = RelationGetPartition(relation, i, false);
+					
+					child = heap_open(partoid, AccessShareLock);
+					rel->pages += child->rd_rel->relpages;
+					rel->tuples += child->rd_rel->reltuples;
+					heap_close(child, AccessShareLock);
+				}
+			}
+			
+			bms_free(tmpset);
+			heap_close(relation, AccessShareLock);
+		}
+	}
+}
