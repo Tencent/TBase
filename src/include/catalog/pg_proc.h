@@ -1303,7 +1303,7 @@ DATA(insert OID = 1080 (  hashbpchar       PGNSP PGUID 12 1 0 0 0 f f f f t f i 
 DESCR("hash");
 DATA(insert OID = 1081 (  format_type       PGNSP PGUID 12 1 0 0 0 f f f f f f s s 2 0 25 "26 23" _null_ _null_ _null_ _null_ _null_ format_type _null_ _null_ _null_ ));
 DESCR("format a type oid and atttypmod to canonical SQL");
-DATA(insert OID = 4676 (  hashbpcharextended PGNSP PGUID 12 1 0 0 0 f f f f f t f i s 2 0 20 "1042 20" _null_ _null_ _null_ _null_ _null_    hashbpcharextended _null_ _null_ _null_ ));
+DATA(insert OID = 4676 (  hashbpcharextended PGNSP PGUID 12 1 0 0 0 f f f f t f i s 2 0 20 "1042 20" _null_ _null_ _null_ _null_ _null_    hashbpcharextended _null_ _null_ _null_ ));
 DESCR("hash");
 DATA(insert OID = 1084 (  date_in           PGNSP PGUID 12 1 0 0 0 f f f f t f s s 1 0 1082 "2275" _null_ _null_ _null_ _null_ _null_ date_in _null_ _null_ _null_ ));
 DESCR("I/O");
@@ -3261,7 +3261,7 @@ DATA(insert OID = 2039 (  timestamp_hash    PGNSP PGUID 12 1 0 0 0 f f f f t f i
 DESCR("hash");
 DATA(insert OID = 2041 ( overlaps            PGNSP PGUID 12 1 0 0 0 f f f f f f i s 4 0 16 "1114 1114 1114 1114" _null_ _null_ _null_ _null_ _null_    overlaps_timestamp _null_ _null_ _null_ ));
 DESCR("intervals overlap?");
-DATA(insert OID = 4680 (  timestamp_hash_extended PGNSP PGUID 12 1 0 0 0 f f f f f t f i s 2 0 20 "1114 20" _null_ _null_ _null_ _null_ _null_ timestamp_hash_extended _null_ _null_ _null_ ));
+DATA(insert OID = 4680 (  timestamp_hash_extended PGNSP PGUID 12 1 0 0 0 f f f f t f i s 2 0 20 "1114 20" _null_ _null_ _null_ _null_ _null_ timestamp_hash_extended _null_ _null_ _null_ ));
 DESCR("hash");
 DATA(insert OID = 2042 ( overlaps            PGNSP PGUID 14 1 0 0 0 f f f f f f i s 4 0 16 "1114 1186 1114 1186" _null_ _null_ _null_ _null_ _null_ "select ($1, ($1 + $2)) overlaps ($3, ($3 + $4))" _null_ _null_ _null_ ));
 DESCR("intervals overlap?");
@@ -4782,7 +4782,7 @@ DATA(insert OID = 3515 (  hashenum        PGNSP PGUID 12 1 0 0 0 f f f f t f i s
 DESCR("hash");
 DATA(insert OID = 3524 (  enum_smaller    PGNSP PGUID 12 1 0 0 0 f f f f t f i s 2 0 3500 "3500 3500" _null_ _null_ _null_ _null_ _null_ enum_smaller _null_ _null_ _null_ ));
 DESCR("smaller of two");
-DATA(insert OID = 4683 (  hashenumextended PGNSP PGUID 12 1 0 0 0 f f f f f t f i s 2 0 20 "3500 20" _null_ _null_ _null_ _null_ _null_ hashenumextended _null_ _null_ _null_ ));
+DATA(insert OID = 4683 (  hashenumextended PGNSP PGUID 12 1 0 0 0 f f f f t f i s 2 0 20 "3500 20" _null_ _null_ _null_ _null_ _null_ hashenumextended _null_ _null_ _null_ ));
 DESCR("hash");
 DATA(insert OID = 3525 (  enum_larger    PGNSP PGUID 12 1 0 0 0 f f f f t f i s 2 0 3500 "3500 3500" _null_ _null_ _null_ _null_ _null_ enum_larger _null_ _null_ _null_ ));
 DESCR("larger of two");
