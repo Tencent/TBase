@@ -1505,6 +1505,14 @@ GetGlobalTimestampGTM(void)
     }
     elog(DEBUG7, "get global timestamp gts " INT64_FORMAT, gts_result.gts);
 
+	if (retry_cnt >= reconnect_gtm_retry_times &&
+		!GlobalTimestampIsValid(gts_result.gts))
+	{
+		elog(WARNING, "retry %d times, get a invalid global timestamp, "
+			"ResetGTMConnection", retry_cnt);
+		ResetGTMConnection();
+	}
+
     if (log_gtm_stats)
         ShowUsageCommon("BeginTranGTM", &start_r, &start_t);
 
