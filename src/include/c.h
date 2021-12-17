@@ -377,7 +377,6 @@ typedef unsigned long long int uint64;
 
 /*
  * 128-bit signed and unsigned integers
-
  *		There currently is only limited support for such types.
  *		E.g. 128bit literals and snprintf are not supported; but math is.
  *		Also, because we exclude such types when choosing MAXIMUM_ALIGNOF,
