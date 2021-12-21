@@ -81,34 +81,34 @@ select length(stringu1) from tenk1 group by length(stringu1);
 
 explain (costs off)
 	select stringu1, count(*) from tenk1 group by stringu1 order by stringu1;
-                        QUERY PLAN                         
------------------------------------------------------------
- Finalize GroupAggregate
-   Group Key: stringu1
-   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-         ->  Sort
-               Sort Key: stringu1
-               ->  Partial HashAggregate
-                     Group Key: stringu1
-                     ->  Gather
-                           Workers Planned: 4
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Sort
+   Sort Key: stringu1
+   ->  Finalize HashAggregate
+         Group Key: stringu1
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               ->  Gather
+                     Workers Planned: 4
+                     ->  Partial HashAggregate
+                           Group Key: stringu1
                            ->  Parallel Seq Scan on tenk1
 (10 rows)
 
 explain (costs off)
 	select count(stringu1) as num, (CASE WHEN length(stringu1) > 5 THEN 'LONG' ELSE 'SHORT' END) as islong
 		from tenk1 group by islong order by num;
-                                                     QUERY PLAN                                                     
---------------------------------------------------------------------------------------------------------------------
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
  Sort
    Sort Key: (count(stringu1))
    ->  Finalize HashAggregate
          Group Key: CASE WHEN (length((stringu1)::text) > 5) THEN 'LONG'::text ELSE 'SHORT'::text END
          ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-               ->  Partial HashAggregate
-                     Group Key: (CASE WHEN (length((stringu1)::text) > 5) THEN 'LONG'::text ELSE 'SHORT'::text END)
-                     ->  Gather
-                           Workers Planned: 4
+               ->  Gather
+                     Workers Planned: 4
+                     ->  Partial HashAggregate
+                           Group Key: CASE WHEN (length((stringu1)::text) > 5) THEN 'LONG'::text ELSE 'SHORT'::text END
                            ->  Parallel Seq Scan on tenk1
 (10 rows)
 
@@ -378,8 +378,10 @@ SELECT xc_node_id != 0 FROM t_worker_identifier;
 (1 row)
 
 -- provoke error in worker
+SAVEPOINT settings;
 select stringu1::int2 from tenk1 where unique1 = 1;
 ERROR:  invalid input syntax for integer: "BAAAAA"
+ROLLBACK TO SAVEPOINT settings;
 -- test interaction with set-returning functions
 SAVEPOINT settings;
 -- multiple subqueries under a single Gather node
@@ -389,16 +391,17 @@ EXPLAIN (COSTS OFF)
 SELECT unique1 FROM tenk1 WHERE fivethous = tenthous + 1
 UNION ALL
 SELECT unique1 FROM tenk1 WHERE fivethous = tenthous + 1;
-                     QUERY PLAN                     
-----------------------------------------------------
- Gather
-   Workers Planned: 4
-   ->  Parallel Append
-         ->  Parallel Seq Scan on tenk1
-               Filter: (fivethous = (tenthous + 1))
-         ->  Parallel Seq Scan on tenk1 tenk1_1
-               Filter: (fivethous = (tenthous + 1))
-(7 rows)
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   ->  Gather
+         Workers Planned: 4
+         ->  Append
+               ->  Parallel Seq Scan on tenk1
+                     Filter: (fivethous = (tenthous + 1))
+               ->  Parallel Seq Scan on tenk1 tenk1_1
+                     Filter: (fivethous = (tenthous + 1))
+(8 rows)
 
 ROLLBACK TO SAVEPOINT settings;
 -- can't use multiple subqueries under a single Gather node due to initPlans
@@ -409,34 +412,33 @@ UNION ALL
 SELECT unique1 FROM tenk1 WHERE fivethous =
    (SELECT unique2 FROM tenk1 WHERE fivethous = 1 LIMIT 1)
 ORDER BY 1;
-                             QUERY PLAN                             
---------------------------------------------------------------------
- Sort
-   Sort Key: tenk1.unique1
-   ->  Append
-         ->  Gather
-               Workers Planned: 4
-               Params Evaluated: $1
-               InitPlan 1 (returns $1)
-                 ->  Limit
-                       ->  Gather
-                             Workers Planned: 4
-                             ->  Parallel Seq Scan on tenk1 tenk1_2
-                                   Filter: (fivethous = 1)
-               ->  Parallel Seq Scan on tenk1
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)
+   ->  Sort
+         Sort Key: tenk1.unique1
+         ->  Append
+               ->  Seq Scan on tenk1
+                     Filter: (fivethous = $0)
+                     InitPlan 1 (returns $0)
+                       ->  Limit
+                             ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                   ->  Limit
+                                         ->  Gather
+                                               Workers Planned: 4
+                                               ->  Parallel Seq Scan on tenk1 tenk1_2
+                                                     Filter: (fivethous = 1)
+               ->  Seq Scan on tenk1 tenk1_1
                      Filter: (fivethous = $1)
-         ->  Gather
-               Workers Planned: 4
-               Params Evaluated: $3
-               InitPlan 2 (returns $3)
-                 ->  Limit
-                       ->  Gather
-                             Workers Planned: 4
-                             ->  Parallel Seq Scan on tenk1 tenk1_3
-                                   Filter: (fivethous = 1)
-               ->  Parallel Seq Scan on tenk1 tenk1_1
-                     Filter: (fivethous = $3)
-(25 rows)
+                     InitPlan 2 (returns $1)
+                       ->  Limit
+                             ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+                                   ->  Limit
+                                         ->  Gather
+                                               Workers Planned: 4
+                                               ->  Parallel Seq Scan on tenk1 tenk1_3
+                                                     Filter: (fivethous = 1)
+(24 rows)
 
 -- test interaction with SRFs
 SELECT * FROM information_schema.foreign_data_wrapper_options

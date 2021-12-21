@@ -333,7 +333,7 @@ ERROR:  cannot use constant expression as partition key
 DROP FUNCTION const_func();
 -- only accept valid partitioning strategy
 CREATE TABLE partitioned (
-	a int
+    a int
 ) PARTITION BY MAGIC (a);
 ERROR:  unrecognized partitioning strategy "magic"
 -- specified column must be present in the table
@@ -427,10 +427,10 @@ Partition key: RANGE (a oid_ops, plusone(b), c, d COLLATE "C")
 Number of partitions: 0
 
 \d+ partitioned2
-            Table "public.partitioned2"
- Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+                                Table "public.partitioned2"
+ Column |  Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
 --------+---------+-----------+----------+---------+----------+--------------+-------------
- a      | integer |           |          |         | plain   |              | 
+ a      | integer |           |          |         | plain    |              | 
  b      | text    |           |          |         | extended |              | 
 Partition key: RANGE (((a + 1)), substr(b, 1, 5))
 Number of partitions: 0

@@ -523,7 +523,7 @@ select sum(tenthous) as s1, sum(tenthous) + random()*0 as s2
                                  ->  Remote Subquery Scan on all (datanode_1,datanode_2)
                                        Output: thousand, PARTIAL sum(tenthous)
                                        Distribute results by H: thousand
-                                       ->  Partial GroupAggregate
+                                       ->  Partial HashAggregate
                                              Output: thousand, PARTIAL sum(tenthous)
                                              Group Key: tenk1.thousand
                                              ->  Index Only Scan using tenk1_thous_tenthous on public.tenk1

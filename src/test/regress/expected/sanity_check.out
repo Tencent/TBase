@@ -39,6 +39,8 @@ date_tbl|f
 default_tbl|f
 defaultexpr_tbl|f
 dept|f
+donothingbrtrig_test1|f
+donothingbrtrig_test2|f
 dupindexcols|t
 e_star|f
 emp|f

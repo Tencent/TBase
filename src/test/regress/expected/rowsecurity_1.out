@@ -2074,7 +2074,7 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Seq Scan on z1
                Filter: (((a % 2) = 0) AND f_leak(b))
-         ->  CTE Scan on q
+   ->  CTE Scan on q
 (8 rows)
 
 SET ROLE regress_rls_group1;
@@ -2125,7 +2125,7 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Seq Scan on z1
                Filter: (((a % 2) = 0) AND f_leak(b))
-         ->  CTE Scan on q
+   ->  CTE Scan on q
 (8 rows)
 
 SET SESSION AUTHORIZATION regress_rls_carol;
@@ -2176,7 +2176,7 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Seq Scan on z1
                Filter: (((a % 2) = 1) AND f_leak(b))
-         ->  CTE Scan on q
+   ->  CTE Scan on q
 (8 rows)
 
 SET ROLE regress_rls_group2;
@@ -2227,7 +2227,7 @@ EXPLAIN (COSTS OFF) EXECUTE plancache_test3;
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Seq Scan on z1
                Filter: (((a % 2) = 1) AND f_leak(b))
-         ->  CTE Scan on q
+   ->  CTE Scan on q
 (8 rows)
 
 --

@@ -876,15 +876,13 @@ update mlparted_tab mlp set c = 'xxx'
 from
   (select a from some_tab union all select a+1 from some_tab) ss (a)
 where (mlp.a = ss.a and mlp.b = 'b') or mlp.a = 3;
-ERROR:  could not plan this distributed update
-DETAIL:  correlated UPDATE or updating distribution column currently not supported in Postgres-XL.
 select tableoid::regclass::text as relname, mlparted_tab.* from mlparted_tab order by 1,2;
-       relname       | a | b | c 
----------------------+---+---+---
+       relname       | a | b |  c  
+---------------------+---+---+-----
  mlparted_tab_part1  | 1 | a | 
  mlparted_tab_part2a | 2 | a | 
- mlparted_tab_part2b | 2 | b | 
- mlparted_tab_part3  | 3 | a | 
+ mlparted_tab_part2b | 2 | b | xxx
+ mlparted_tab_part3  | 3 | a | xxx
 (4 rows)
 
 drop table mlparted_tab;
@@ -1022,18 +1020,18 @@ select NULL::derived::base;
 
 -- remove redundant conversions.
 explain (verbose on, costs off) select row(i, b)::more_derived::derived::base from more_derived;
-                QUERY PLAN                 
+                                          QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
  Remote Fast Query Execution
    Output: ((ROW(more_derived.i, more_derived.b)::more_derived)::derived)::base
    Node/s: datanode_1, datanode_2
    Remote query: SELECT ((ROW(i, b)::more_derived)::derived)::base AS "row" FROM more_derived
    ->  Seq Scan on public.more_derived
-   Output: (ROW(i, b)::more_derived)::base
+         Output: (ROW(i, b)::more_derived)::base
 (6 rows)
 
 explain (verbose on, costs off) select (1, 2)::more_derived::derived::base;
-      QUERY PLAN       
+                QUERY PLAN                 
 -------------------------------------------
  Result
    Output: (ROW(1, 2)::more_derived)::base
@@ -2199,7 +2197,7 @@ create table mcrparted3 partition of mcrparted for values from (11, 1, 1) to (20
 create table mcrparted4 partition of mcrparted for values from (20, 10, 10) to (20, 20, 20);
 create table mcrparted5 partition of mcrparted for values from (20, 20, 20) to (maxvalue, maxvalue, maxvalue);
 explain (costs off) select * from mcrparted where a = 0;	-- scans mcrparted0, mcrparted_def
-             QUERY PLAN             
+              QUERY PLAN               
 ---------------------------------------
  Remote Fast Query Execution
    Node/s: datanode_2
@@ -2237,7 +2235,7 @@ explain (costs off) select * from mcrparted where a = 10 and abs(b) = 5;	-- scan
 (9 rows)
 
 explain (costs off) select * from mcrparted where abs(b) = 5;	-- scans all partitions
-             QUERY PLAN             
+              QUERY PLAN               
 ---------------------------------------
  Remote Fast Query Execution
    Node/s: datanode_1, datanode_2

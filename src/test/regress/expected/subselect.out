@@ -2043,8 +2043,8 @@ select * from x;
                                Output: x_1.a
                        ->  CTE Scan on z
                              Output: z.a
-                             ->  CTE Scan on z z1
-                                   Output: z1.a
+                       ->  CTE Scan on z z1
+                             Output: z1.a
 (18 rows)
 
 with recursive x(a) as
