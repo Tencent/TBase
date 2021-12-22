@@ -4063,7 +4063,7 @@ ExplainRemoteQuery(RemoteQuery *plan, PlanState *planstate, List *ancestors, Exp
         step->exec_type = EXEC_ON_DATANODES;
 
         dummy = makeVar(1, 1, TEXTOID, -1, InvalidOid, 0);
-        plan->scan.plan.targetlist = lappend(plan->scan.plan.targetlist,
+        step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
                 makeTargetEntry((Expr *) dummy, 1, "QUERY PLAN", false));
 
         estate = planstate->state;
