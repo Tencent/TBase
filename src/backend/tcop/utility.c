@@ -2455,6 +2455,7 @@ standard_ProcessUtility(PlannedStmt *pstmt,
         case T_DropdbStmt:
             {
 				char prepareQuery[STRINGLENGTH];
+                char query[STRINGLENGTH];
                 DropdbStmt *stmt = (DropdbStmt *) parsetree;
 				if (!stmt->prepare)
 				{
@@ -2478,10 +2479,16 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 
 						if (OidIsValid(db_oid))
 						{
+                            snprintf(query, STRINGLENGTH, "CLEAN CONNECTION TO ALL FOR DATABASE %s;",
+                                     quote_identifier(stmt->dbname));
+
 							snprintf(prepareQuery, STRINGLENGTH, "DROP DATABASE PREPARE %s;",
 						        			quote_identifier(stmt->dbname));
 							if (!is_ddl_leader_cn(leaderCnHandle->nodename))
+                            {
+                                SendLeaderCNUtility(query, false);
 								SendLeaderCNUtility(prepareQuery, false);
+							}
 							else
 								dropdb_prepare(stmt->dbname, false);
 							ExecUtilityStmtOnNodes(parsetree, prepareQuery,

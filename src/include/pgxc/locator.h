@@ -225,6 +225,7 @@ extern ExecNodes *GetRelationNodesByQuals(Oid reloid,
 extern bool IsTypeHashDistributable(Oid col_type);
 extern List *GetAllDataNodes(void);
 extern List *GetAllCoordNodes(void);
+extern List *GetEntireCoordNodes(void);
 extern int GetAnyDataNode(Bitmapset *nodes);
 extern void RelationBuildLocator(Relation rel);
 extern void FreeRelationLocInfo(RelationLocInfo *relationLocInfo);
