@@ -715,6 +715,25 @@ GetAllCoordNodes(void)
     return nodeList;
 }
 
+/*
+ * Return a list of all Coordinators.
+ * Including local Coordinator.
+ * This is used to clean up pooler connections.
+ */
+List *
+GetEntireCoordNodes(void)
+{
+    int i;
+    List *nodeList = NIL;
+
+    for (i = 0; i < NumCoords; i++)
+    {
+        nodeList = lappend_int(nodeList, i);
+    }
+
+    return nodeList;
+}
+
 
 static bool DatanodeInGroup(oidvector* nodeoids, Oid nodeoid)
 {

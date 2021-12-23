@@ -354,7 +354,7 @@ CleanConnection(CleanConnStmt *stmt)
         dn_list = stmt_nodes;
     else
     {
-        co_list = GetAllCoordNodes();
+		co_list = GetEntireCoordNodes();
         dn_list = GetAllDataNodes();
     }
 
@@ -388,7 +388,7 @@ CleanConnection(CleanConnStmt *stmt)
 void
 DropDBCleanConnection(char *dbname)
 {
-    List    *co_list = GetAllCoordNodes();
+	List	*co_list = GetEntireCoordNodes();
     List    *dn_list = GetAllDataNodes();
 
     /* Check permissions for this database */
