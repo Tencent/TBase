@@ -39,6 +39,8 @@ SUBDIRS = \
                 pgrowlocks      \
                 pgstattuple     \
                 pgxc_clean      \
+                pg_clean        \
+                pg_unlock       \
                 pgxc_ctl        \
                 pgxc_monitor \
                 pg_visibility   \
@@ -55,6 +57,7 @@ SUBDIRS = \
                 unaccent        \
                 vacuumlo        \
                 stormstats		\
+                tbase_subscription  \
 				tbase_pooler_stat \
                 pg_stat_cluster_activity
 

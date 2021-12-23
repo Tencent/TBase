@@ -1,0 +1,5 @@
+# 2PC transaction recovering extention
+comment = 'tools for clean all the remaining 2PC transactions'
+default_version = '1.0'
+module_pathname = '$libdir/pg_clean'
+relocatable = true

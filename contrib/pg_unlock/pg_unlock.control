@@ -1,0 +1,5 @@
+# deadlock detect extention
+comment = 'tools for detect and unlock all the deadlocks'
+default_version = '1.0'
+module_pathname = '$libdir/pg_unlock'
+relocatable = true

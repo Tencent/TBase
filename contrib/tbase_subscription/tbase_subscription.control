@@ -1,0 +1,5 @@
+# tbase_subscription extension
+comment = 'support for hot and cold subscriptions and two-way subscriptions'
+default_version = '1.0'
+module_pathname = '$libdir/tbase_subscription'
+relocatable = true
