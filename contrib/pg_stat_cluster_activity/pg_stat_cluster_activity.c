@@ -154,6 +154,41 @@ PG_FUNCTION_INFO_V1(pg_signal_session);
 PG_FUNCTION_INFO_V1(pg_terminate_session);
 PG_FUNCTION_INFO_V1(pg_cancel_session);
 
+
+static ParamListInfo
+EvaluateSessionIDParam(const char *sessionid)
+{
+	int num_params = 1;
+	ParamListInfo paramLI = (ParamListInfo)
+		palloc0(offsetof(ParamListInfoData, params) +
+		        num_params * sizeof(ParamExternData));
+	
+	ParamExternData *prm;
+	
+	/* we have static list of params, so no hooks needed */
+	paramLI->paramFetch = NULL;
+	paramLI->paramFetchArg = NULL;
+	paramLI->parserSetup = NULL;
+	paramLI->parserSetupArg = NULL;
+	paramLI->numParams = num_params;
+	paramLI->paramMask = NULL;
+	
+	prm = &paramLI->params[0];
+	prm->ptype = TEXTOID;
+	prm->pflags = PARAM_FLAG_CONST;
+	if (sessionid != NULL)
+	{
+		prm->value = CStringGetTextDatum(sessionid);
+		prm->isnull = false;
+	}
+	else
+	{
+		prm->isnull = true;
+	}
+	
+	return paramLI;
+}
+
 /*
  * walk through planstate tree and gets cursors it contains in
  * RemoteSubplan node, formed as a single string delimited each
@@ -529,7 +564,7 @@ pgstat_fetch_stat_local_csentry(int beid)
  * ----------
  */
 static void
-pg_stat_get_remote_activity(const char *sessionid, bool coordonly, Tuplestorestate *tupstore)
+pg_stat_get_remote_activity(const char *sessionid, bool coordonly, Tuplestorestate *tupstore, TupleDesc tupdesc)
 {
 #define QUERY_LEN 1024
 	char    query[QUERY_LEN];
@@ -545,10 +580,7 @@ pg_stat_get_remote_activity(const char *sessionid, bool coordonly, Tuplestoresta
 	 * Here we call pg_stat_get_cluster_activity in remote with args:
 	 * coordonly = false, localonly = true, to prevent recursive calls in remote nodes.
 	 */
-	if (sessionid == NULL)
-		snprintf(query, QUERY_LEN, "select * from pg_stat_get_cluster_activity(NULL, false, true)");
-	else
-		snprintf(query, QUERY_LEN, "select * from pg_stat_get_cluster_activity('%s', false, true)", sessionid);
+	snprintf(query, QUERY_LEN, "select * from pg_stat_get_cluster_activity($1, false, true)");
 	
 	plan = makeNode(RemoteQuery);
 	plan->combine_type = COMBINE_TYPE_NONE;
@@ -569,22 +601,13 @@ pg_stat_get_remote_activity(const char *sessionid, bool coordonly, Tuplestoresta
 		plan->exec_type = EXEC_ON_COORDS;
 	}
 	
-	/*
-	 * We only need the target entry to determine result data type.
-	 * So create dummy even if real expression is a function.
-	 */
-	for (i = 1; i <= PG_STAT_GET_ClUSTER_ACTIVITY_COLS; i++)
-	{
-		dummy = makeVar(1, i, TEXTOID, 0, InvalidOid, 0);
-		plan->scan.plan.targetlist = lappend(plan->scan.plan.targetlist,
-		                                     makeTargetEntry((Expr *) dummy, i, NULL, false));
-	}
-	
 	/* prepare to execute */
 	estate = CreateExecutorState();
 	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
 	estate->es_snapshot = GetActiveSnapshot();
+	estate->es_param_list_info = EvaluateSessionIDParam(sessionid);
 	pstate = ExecInitRemoteQuery(plan, estate, 0);
+	ExecAssignResultType((PlanState *) pstate, tupdesc);
 	MemoryContextSwitchTo(oldcontext);
 	
 	result = ExecRemoteQuery((PlanState *) pstate);
@@ -598,7 +621,7 @@ pg_stat_get_remote_activity(const char *sessionid, bool coordonly, Tuplestoresta
 	}
 	
 	ExecEndRemoteQuery(pstate);
-	return;
+	FreeExecutorState(estate);
 }
 
 /* ----------
@@ -660,7 +683,7 @@ pg_stat_get_cluster_activity(PG_FUNCTION_ARGS)
 	
 	/* dispatch query to remote if needed */
 	if (!localonly && IS_PGXC_COORDINATOR)
-		pg_stat_get_remote_activity(sessionid, coordonly, tupstore);
+		pg_stat_get_remote_activity(sessionid, coordonly, tupstore, tupdesc);
 	
 	/* 1-based index */
 	for (curr_backend = 1; curr_backend <= num_backends; curr_backend++)
@@ -948,7 +971,7 @@ pgcs_signal_session_remote(const char *sessionid, int signal)
 	Var 				*dummy;
 	TupleTableSlot		*result = NULL;
 	
-	snprintf(query, QUERY_LEN, "select pg_signal_session('%s', %d, true)", sessionid, signal);
+	snprintf(query, QUERY_LEN, "select pg_signal_session($1, %d, true)", signal);
 	
 	plan = makeNode(RemoteQuery);
 	plan->combine_type = COMBINE_TYPE_NONE;
@@ -973,6 +996,7 @@ pgcs_signal_session_remote(const char *sessionid, int signal)
 	estate = CreateExecutorState();
 	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
 	estate->es_snapshot = GetActiveSnapshot();
+	estate->es_param_list_info = EvaluateSessionIDParam(sessionid);
 	pstate = ExecInitRemoteQuery(plan, estate, 0);
 	MemoryContextSwitchTo(oldcontext);
 	
@@ -984,6 +1008,7 @@ pgcs_signal_session_remote(const char *sessionid, int signal)
 		return false;
 	}
 	
+	FreeExecutorState(estate);
 	return true;
 }
 
