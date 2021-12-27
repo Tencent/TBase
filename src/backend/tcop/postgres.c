@@ -2800,7 +2800,7 @@ exec_bind_message(StringInfo input_message)
     }
 
 	/* Get epq context, only datanodes need them */
-	if (IS_PGXC_DATANODE && (IsConnFromCoord() || IsConnFromDatanode()))
+	if (IsConnFromCoord() || IsConnFromDatanode())
 	{
         num_epq_tuple = pq_getmsgint(input_message, 2);
         if (num_epq_tuple > 0)
