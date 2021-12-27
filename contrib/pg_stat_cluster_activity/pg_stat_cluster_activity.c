@@ -568,12 +568,10 @@ pg_stat_get_remote_activity(const char *sessionid, bool coordonly, Tuplestoresta
 {
 #define QUERY_LEN 1024
 	char    query[QUERY_LEN];
-	int     i;
 	EState              *estate;
 	MemoryContext		oldcontext;
 	RemoteQuery 		*plan;
 	RemoteQueryState    *pstate;
-	Var 				*dummy;
 	TupleTableSlot		*result = NULL;
 	
 	/*
