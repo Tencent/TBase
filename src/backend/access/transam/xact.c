@@ -2710,7 +2710,6 @@ StartTransaction(void)
     if (g_twophase_state.state != TWO_PHASE_INITIALTRANS)
     {
         ClearLocalTwoPhaseState();
-        elog(LOG, "clear g_twophase_state when start transaction");
     }
     ShowTransactionState("StartTransaction");
 }
