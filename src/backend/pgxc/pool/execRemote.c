@@ -6826,11 +6826,13 @@ pgxc_start_command_on_connection(PGXCNodeHandle *connection,
          * exist */
 		if (exec_nodes && exec_nodes->need_rewrite == true)
 			prepared = false;
-		else if (step->statement)
+		if (step->statement)
             prepared =
                 ActivateDatanodeStatementOnNode(step->statement,
                         PGXCNodeGetNodeId(connection->nodeoid,
                             &nodetype));
+		if (prepared && exec_nodes && exec_nodes->need_rewrite == true)
+			prepared = false;
 
         /*
          * execute and fetch rows only if they will be consumed
