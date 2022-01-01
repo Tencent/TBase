@@ -78,7 +78,7 @@
 #include "utils/builtins.h"
 
 
-#define TBASE_VERSION_STR "TBase_V2.0.0_release"
+#define TBASE_VERSION_STR "TBase_V2.3.0_release"
 
 Datum
 pgsql_version(PG_FUNCTION_ARGS)
