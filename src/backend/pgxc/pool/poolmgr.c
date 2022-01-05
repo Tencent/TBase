@@ -1842,8 +1842,7 @@ PoolManagerGetConnections(List *datanodelist, List *coordlist, bool raise_error,
 	 * the main data node, and the standby cn may generate the same global xid as the main cn,
 	 * so disable the distributed query of the standby node on the main plane
 	 */
-	if (g_allow_distri_query_on_standby_node == false &&
-	            IsPGXCMainCluster && RecoveryInProgress())
+	if (g_allow_distri_query_on_standby_node == false && IS_PGXC_MAINCLUSTER_SLAVENODE)
     {
         elog(ERROR, "can't do distributed query because it is the main plane standby node.");
     }
