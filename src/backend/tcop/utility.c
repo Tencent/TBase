@@ -7799,7 +7799,9 @@ IsStmtAllowedInLockedMode(Node *parsetree, const char *queryString)
 		case T_LockNodeStmt:
 #endif
 			return ALLOW;
-
+        case T_AlterSystemStmt:
+            /* allow if it's main cluster slave */
+            return (IS_PGXC_MAINCLUSTER_SLAVENODE) ? ALLOW : DISALLOW;
         default:
             return DISALLOW;
     }

@@ -120,6 +120,8 @@ extern Datum xc_lockForBackupKey2;
     (IS_PGXC_COORDINATOR && !IsConnFromCoord())
 #define IS_PGXC_REMOTE_COORDINATOR    \
     (IS_PGXC_COORDINATOR && IsConnFromCoord())
+#define IS_PGXC_MAINCLUSTER_SLAVENODE \
+    (IsPGXCMainCluster && RecoveryInProgress())
 
 #define PGXC_PARENT_NODE parentPGXCNode
 #define PGXC_PARENT_NODE_ID    parentPGXCNodeId
