@@ -2455,7 +2455,7 @@ standard_ProcessUtility(PlannedStmt *pstmt,
         case T_DropdbStmt:
             {
 				char prepareQuery[STRINGLENGTH];
-                char query[STRINGLENGTH];
+                char cleanQuery[STRINGLENGTH];
                 DropdbStmt *stmt = (DropdbStmt *) parsetree;
 				if (!stmt->prepare)
 				{
@@ -2479,14 +2479,14 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 
 						if (OidIsValid(db_oid))
 						{
-                            snprintf(query, STRINGLENGTH, "CLEAN CONNECTION TO ALL FOR DATABASE %s;",
+                            snprintf(cleanQuery, STRINGLENGTH, "CLEAN CONNECTION TO ALL FOR DATABASE %s;",
                                      quote_identifier(stmt->dbname));
 
 							snprintf(prepareQuery, STRINGLENGTH, "DROP DATABASE PREPARE %s;",
 						        			quote_identifier(stmt->dbname));
 							if (!is_ddl_leader_cn(leaderCnHandle->nodename))
                             {
-                                SendLeaderCNUtility(query, false);
+                                SendLeaderCNUtility(cleanQuery, false);
 								SendLeaderCNUtility(prepareQuery, false);
 							}
 							else
@@ -2858,6 +2858,13 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 					 */
 					if (!is_leader_cn)
 					{
+                        if (OBJECT_DATABASE == stmt->renameType) {
+                            char cleanQuery[STRINGLENGTH];
+                            snprintf(cleanQuery, STRINGLENGTH, "CLEAN CONNECTION TO ALL FOR DATABASE %s;",
+                                     quote_identifier(stmt->subname));
+                            SendLeaderCNUtility(cleanQuery, false);
+                        }
+
 						SendLeaderCNUtility(queryString, is_temp);
 					}
 					ExecRenameStmt(stmt);
