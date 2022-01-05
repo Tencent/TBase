@@ -2720,7 +2720,7 @@ pgxc_node_flush_read(PGXCNodeHandle *handle)
         /* break, only if the connection is ready for query. */
         if (is_ready)
         {
-            elog(LOG, "pgxc_node_flush_read node:%s ready for query.", handle->nodename);
+			elog(DEBUG1, "pgxc_node_flush_read node:%s ready for query.", handle->nodename);
             break;
         }        
 
@@ -2728,7 +2728,7 @@ pgxc_node_flush_read(PGXCNodeHandle *handle)
         read_result = pgxc_node_read_data(handle, true);
         if (read_result <= 0)
         {
-            elog(LOG, "pgxc_node_flush_read node:%s read failure.", handle->nodename);
+			elog(DEBUG1, "pgxc_node_flush_read node:%s read failure.", handle->nodename);
             break;
         }
 
