@@ -2858,7 +2858,8 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 					 */
 					if (!is_leader_cn)
 					{
-                        if (OBJECT_DATABASE == stmt->renameType) {
+                        if (OBJECT_DATABASE == stmt->renameType)
+                        {
                             char cleanQuery[STRINGLENGTH];
                             snprintf(cleanQuery, STRINGLENGTH, "CLEAN CONNECTION TO ALL FOR DATABASE %s;",
                                      quote_identifier(stmt->subname));
