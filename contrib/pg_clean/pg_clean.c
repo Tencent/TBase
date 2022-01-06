@@ -1033,6 +1033,21 @@ void getTxnInfoOnNode(Oid node)
 												ObjectIdGetDatum(InvalidOid),
 												Int32GetDatum(-1)));
 			
+			if (gid == NULL)
+			{
+				elog(ERROR, "node(%d) gid is null, xid: %d", node, xid);
+			}
+			else if (owner == NULL)
+			{
+				elog(ERROR, "node(%d) owner is null, xid: %d, gid: %s",
+					node, xid, gid);
+			}
+			else if (datname == NULL)
+			{
+				elog(ERROR, "node(%d) db name is null, xid: %d, gid: %s, owner: %s",
+					node, xid, gid, owner);
+			}
+
 			/*add txn to database*/
 			add_txn_info(datname, node, xid, gid, owner, prepared_time, TXN_STATUS_PREPARED);
             if (total_twopc_txn >= MAX_TWOPC_TXN)
