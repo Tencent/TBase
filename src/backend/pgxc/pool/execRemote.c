@@ -7289,9 +7289,9 @@ PGXCNodeCleanAndRelease(int code, Datum arg)
     stat_log();
 }
 
-void
-ExecCloseRemoteStatement(const char *stmt_name, List *nodelist)
-{// #lizard forgives
+static void
+ExecCloseRemoteStatementInternal(const char *stmt_name, List *nodelist)
+{
     PGXCNodeAllHandles *all_handles;
     PGXCNodeHandle      **connections;
     ResponseCombiner    combiner;
@@ -7377,6 +7377,28 @@ ExecCloseRemoteStatement(const char *stmt_name, List *nodelist)
 
     ValidateAndCloseCombiner(&combiner);
     pfree_pgxc_all_handles(all_handles);
+}
+
+/*
+ * close remote statement needs to be inside a transaction so that syscache can be accessed
+ */
+void
+ExecCloseRemoteStatement(const char *stmt_name, List *nodelist)
+{
+    bool need_abort = false;
+
+    if (IsTransactionIdle())
+    {
+        StartTransactionCommand();
+        need_abort = true;
+    }
+
+    ExecCloseRemoteStatementInternal(stmt_name, nodelist);
+
+    if (need_abort)
+    {
+        AbortCurrentTransaction();
+    }
 }
 
 /*
