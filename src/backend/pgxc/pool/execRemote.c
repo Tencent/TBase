@@ -150,7 +150,6 @@ pgxc_node_remote_prefinish(char *prepareGID, char *nodestring);
 static void pgxc_abort_connections(PGXCNodeAllHandles *all_handles);
 static void pgxc_node_remote_commit(TranscationType txn_type, bool need_release_handle);
 static void pgxc_node_remote_abort(TranscationType txn_type, bool need_release_handle);
-static bool SetSnapshot(EState *state);
 static int pgxc_node_remote_commit_internal(PGXCNodeAllHandles *handles, TranscationType txn_type);
 #endif
 
@@ -12943,7 +12942,7 @@ SubTranscation_PreAbort_Remote(void)
     
 }
 
-static bool
+bool
 SetSnapshot(EState *state)
 {
     bool result = false;
