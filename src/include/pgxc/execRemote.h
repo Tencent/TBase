@@ -418,6 +418,7 @@ extern void SetCurrentHandlesReadonly(void);
 extern TupleDesc create_tuple_desc(char *msg_body, size_t len);
 
 extern void ExecFinishRemoteSubplan(RemoteSubplanState *node);
+extern bool SetSnapshot(EState *state);
 #endif
 
 #ifdef __SUBSCRIPTION__
