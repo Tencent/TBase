@@ -661,6 +661,15 @@ ExecInitParallelPlan(PlanState *planstate, EState *estate, int nworkers)
     }
 #endif
 
+#ifdef __TBASE__
+	/* set snapshot as needed */
+	if (!g_set_global_snapshot && !ActiveSnapshotSet())
+	{
+		SetSnapshot(estate);
+	}
+#endif
+
+
     /* Everyone's had a chance to ask for space, so now create the DSM. */
     InitializeParallelDSM(pcxt);
 
