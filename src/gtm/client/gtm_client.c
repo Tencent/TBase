@@ -179,7 +179,13 @@ begin_replication_initial_sync(GTM_Conn *conn)
         goto receive_failed;
 
     if (res->gr_status == GTM_RESULT_OK)
+    {
         Assert(res->gr_type == NODE_BEGIN_REPLICATION_INIT_RESULT);
+        if (res->gr_type != NODE_BEGIN_REPLICATION_INIT_RESULT)
+        {
+            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, NODE_BEGIN_REPLICATION_INIT_RESULT);
+        }
+    }
     else
         return 0;
 
@@ -226,7 +232,13 @@ end_replication_initial_sync(GTM_Conn *conn)
         goto receive_failed;
 
     if (res->gr_status == GTM_RESULT_OK)
+    {
         Assert(res->gr_type == NODE_END_REPLICATION_INIT_RESULT);
+        if (res->gr_type != NODE_END_REPLICATION_INIT_RESULT)
+        {
+            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, NODE_END_REPLICATION_INIT_RESULT);
+        }
+    }
 
     return 1;
 
@@ -270,6 +282,15 @@ get_node_list(GTM_Conn *conn, GTM_PGXCNodeInfo *data, size_t maxlen)
     if ((res = GTMPQgetResult(conn)) == NULL)
         goto receive_failed;
 
+    if (res->gr_status == GTM_RESULT_OK)
+    {
+        Assert(res->gr_type == NODE_LIST_RESULT);
+        if (res->gr_type != NODE_LIST_RESULT)
+        {
+            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, NODE_LIST_RESULT);
+        }
+    }
+
     /*
      * Do something here.
      */
@@ -286,9 +307,6 @@ get_node_list(GTM_Conn *conn, GTM_PGXCNodeInfo *data, size_t maxlen)
     {
         memcpy(&data[i], res->gr_resdata.grd_node_list.nodeinfo[i], sizeof(GTM_PGXCNodeInfo));
     }
-
-    if (res->gr_status == GTM_RESULT_OK)
-        Assert(res->gr_type == NODE_LIST_RESULT);
 
     return num_node;
 
@@ -337,7 +355,13 @@ get_next_gxid(GTM_Conn *conn)
     next_gxid = res->gr_resdata.grd_next_gxid;
 
     if (res->gr_status == GTM_RESULT_OK)
+    {
         Assert(res->gr_type == TXN_GET_NEXT_GXID_RESULT);
+        if (res->gr_type != TXN_GET_NEXT_GXID_RESULT)
+        {
+            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_GET_NEXT_GXID_RESULT);
+        }
+    }
 
     /* FIXME: should be a number of gxids */
     return next_gxid;
@@ -382,7 +406,13 @@ get_txn_gxid_list(GTM_Conn *conn, GTM_Transactions *txn)
         goto receive_failed;
 
     if (res->gr_status == GTM_RESULT_OK)
+    {
         Assert(res->gr_type == TXN_GXID_LIST_RESULT);
+        if (res->gr_type != TXN_GXID_LIST_RESULT)
+        {
+            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_GXID_LIST_RESULT);
+        }
+    }
 
     txn_count = gtm_deserialize_transactions(txn,
                          res->gr_resdata.grd_txn_gid_list.ptr,
@@ -431,7 +461,13 @@ get_sequence_list(GTM_Conn *conn, GTM_SeqInfo **seq_list)
         goto receive_failed;
 
     if (res->gr_status == GTM_RESULT_OK)
+    {
         Assert(res->gr_type == SEQUENCE_LIST_RESULT);
+        if (res->gr_type != SEQUENCE_LIST_RESULT)
+        {
+            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, SEQUENCE_LIST_RESULT);
+        }
+    }
 
     *seq_list = res->gr_resdata.grd_seq_list.seq;
 
@@ -951,6 +987,10 @@ retry:
         {
             Assert(res->gr_type == TXN_COMMIT_RESULT);
             Assert(res->gr_resdata.grd_gxid == gxid);
+            if (res->gr_type != TXN_COMMIT_RESULT)
+            {
+                elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_COMMIT_RESULT);
+            }
 
             if (waited_xid_count > 0)
             {
@@ -1064,6 +1104,11 @@ retry:
         {
             Assert(res->gr_type == TXN_COMMIT_PREPARED_RESULT);
             Assert(res->gr_resdata.grd_gxid == gxid);
+            if (res->gr_type != TXN_COMMIT_PREPARED_RESULT)
+            {
+                elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_COMMIT_PREPARED_RESULT);
+            }
+
             if (waited_xid_count > 0)
             {
                 if (res->gr_resdata.grd_eof_txn.status == STATUS_DELAYED)
@@ -1138,6 +1183,10 @@ abort_transaction_internal(GTM_Conn *conn, GlobalTransactionId gxid, bool is_bac
         {
             Assert(res->gr_type == TXN_ROLLBACK_RESULT);
             Assert(res->gr_resdata.grd_gxid == gxid);
+            if (res->gr_type != TXN_ROLLBACK_RESULT)
+            {
+                elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_ROLLBACK_RESULT);
+            }
         }
 
         return res->gr_status;
@@ -1211,6 +1260,10 @@ start_prepared_transaction_internal(GTM_Conn *conn, GlobalTransactionId gxid, ch
     {
         Assert(res->gr_type == TXN_START_PREPARED_RESULT);
         Assert(res->gr_resdata.grd_gxid == gxid);
+        if (res->gr_type != TXN_START_PREPARED_RESULT)
+        {
+            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_START_PREPARED_RESULT);
+        }
     }
 
     return res->gr_status;
@@ -1311,6 +1364,10 @@ log_commit_transaction_internal(GTM_Conn *conn,
     {
         Assert(res->gr_type == TXN_LOG_TRANSACTION_RESULT);
         Assert(res->gr_resdata.grd_gxid == gxid);
+        if (res->gr_type != TXN_LOG_TRANSACTION_RESULT)
+        {
+            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_LOG_TRANSACTION_RESULT);
+        }
     }
 
     return res->gr_status;
@@ -1398,6 +1455,10 @@ log_scan_transaction_internal(GTM_Conn *conn,
     {
         Assert(res->gr_type == TXN_LOG_SCAN_RESULT);
         Assert(res->gr_resdata.grd_gxid == gxid);
+        if (res->gr_type != TXN_LOG_SCAN_RESULT)
+        {
+            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_LOG_SCAN_RESULT);
+        }
     }
 
     return res->gr_status;
@@ -1458,6 +1519,10 @@ prepare_transaction_internal(GTM_Conn *conn, GlobalTransactionId gxid, bool is_b
         {
             Assert(res->gr_type == TXN_PREPARE_RESULT);
             Assert(res->gr_resdata.grd_gxid == gxid);
+            if (res->gr_type != TXN_PREPARE_RESULT)
+            {
+                elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_PREPARE_RESULT);
+            }
         }
 
         return res->gr_status;
@@ -1651,7 +1716,13 @@ get_storage_file(GTM_Conn *conn, char **data)
         goto receive_failed;
 
     if (res->gr_status == GTM_RESULT_OK)
+    {
         Assert(res->gr_type == STORAGE_TRANSFER_RESULT);
+        if (res->gr_type != STORAGE_TRANSFER_RESULT)
+        {
+            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, STORAGE_TRANSFER_RESULT);
+        }
+    }
 
 #ifdef __XLOG__
     *start_pos  = res->grd_storage_data.start_pos;
@@ -1921,6 +1992,10 @@ get_snapshot(GTM_Conn *conn, GlobalTransactionId gxid, bool canbe_grouped)
     if (res->gr_status == GTM_RESULT_OK)
     {
         Assert(res->gr_type == res_type);
+        if (res->gr_type != res_type)
+        {
+            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, res_type);
+        }
         /*
          * !!FIXME - The following assertion fails when snapshots are requested
          * in non-grouping mode. We did some investigations and it appears that
@@ -2691,6 +2766,10 @@ static int node_register_worker(GTM_Conn *conn,
         {
             Assert(res->gr_resdata.grd_node.type == type);
             Assert((strcmp(res->gr_resdata.grd_node.node_name,node_name) == 0));
+            if (res->gr_type != NODE_REGISTER_RESULT)
+            {
+                elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, NODE_REGISTER_RESULT);
+            }
         }
 
         return res->gr_status;
