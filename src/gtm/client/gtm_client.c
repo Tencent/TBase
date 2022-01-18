@@ -183,7 +183,8 @@ begin_replication_initial_sync(GTM_Conn *conn)
         Assert(res->gr_type == NODE_BEGIN_REPLICATION_INIT_RESULT);
         if (res->gr_type != NODE_BEGIN_REPLICATION_INIT_RESULT)
         {
-            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, NODE_BEGIN_REPLICATION_INIT_RESULT);
+            fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, NODE_BEGIN_REPLICATION_INIT_RESULT);
+            goto receive_failed;
         }
     }
     else
@@ -236,7 +237,8 @@ end_replication_initial_sync(GTM_Conn *conn)
         Assert(res->gr_type == NODE_END_REPLICATION_INIT_RESULT);
         if (res->gr_type != NODE_END_REPLICATION_INIT_RESULT)
         {
-            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, NODE_END_REPLICATION_INIT_RESULT);
+            fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, NODE_END_REPLICATION_INIT_RESULT);
+            goto receive_failed;
         }
     }
 
@@ -287,7 +289,8 @@ get_node_list(GTM_Conn *conn, GTM_PGXCNodeInfo *data, size_t maxlen)
         Assert(res->gr_type == NODE_LIST_RESULT);
         if (res->gr_type != NODE_LIST_RESULT)
         {
-            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, NODE_LIST_RESULT);
+            fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, NODE_LIST_RESULT);
+            goto receive_failed;
         }
     }
 
@@ -359,7 +362,8 @@ get_next_gxid(GTM_Conn *conn)
         Assert(res->gr_type == TXN_GET_NEXT_GXID_RESULT);
         if (res->gr_type != TXN_GET_NEXT_GXID_RESULT)
         {
-            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_GET_NEXT_GXID_RESULT);
+            fprintf(stderr,"res->gr_type %d not match, expected %d.\n", res->gr_type, TXN_GET_NEXT_GXID_RESULT);
+            goto receive_failed;
         }
     }
 
@@ -410,7 +414,8 @@ get_txn_gxid_list(GTM_Conn *conn, GTM_Transactions *txn)
         Assert(res->gr_type == TXN_GXID_LIST_RESULT);
         if (res->gr_type != TXN_GXID_LIST_RESULT)
         {
-            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_GXID_LIST_RESULT);
+            fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, TXN_GXID_LIST_RESULT);
+            goto receive_failed;
         }
     }
 
@@ -465,7 +470,8 @@ get_sequence_list(GTM_Conn *conn, GTM_SeqInfo **seq_list)
         Assert(res->gr_type == SEQUENCE_LIST_RESULT);
         if (res->gr_type != SEQUENCE_LIST_RESULT)
         {
-            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, SEQUENCE_LIST_RESULT);
+            fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, SEQUENCE_LIST_RESULT);
+            goto receive_failed;
         }
     }
 
@@ -989,7 +995,8 @@ retry:
             Assert(res->gr_resdata.grd_gxid == gxid);
             if (res->gr_type != TXN_COMMIT_RESULT)
             {
-                elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_COMMIT_RESULT);
+                fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, TXN_COMMIT_RESULT);
+                goto receive_failed;
             }
 
             if (waited_xid_count > 0)
@@ -1106,7 +1113,8 @@ retry:
             Assert(res->gr_resdata.grd_gxid == gxid);
             if (res->gr_type != TXN_COMMIT_PREPARED_RESULT)
             {
-                elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_COMMIT_PREPARED_RESULT);
+                fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, TXN_COMMIT_PREPARED_RESULT);
+                goto receive_failed;
             }
 
             if (waited_xid_count > 0)
@@ -1185,7 +1193,8 @@ abort_transaction_internal(GTM_Conn *conn, GlobalTransactionId gxid, bool is_bac
             Assert(res->gr_resdata.grd_gxid == gxid);
             if (res->gr_type != TXN_ROLLBACK_RESULT)
             {
-                elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_ROLLBACK_RESULT);
+                fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, TXN_ROLLBACK_RESULT);
+                goto receive_failed;
             }
         }
 
@@ -1262,7 +1271,8 @@ start_prepared_transaction_internal(GTM_Conn *conn, GlobalTransactionId gxid, ch
         Assert(res->gr_resdata.grd_gxid == gxid);
         if (res->gr_type != TXN_START_PREPARED_RESULT)
         {
-            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_START_PREPARED_RESULT);
+            fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, TXN_START_PREPARED_RESULT);
+            goto receive_failed;
         }
     }
 
@@ -1366,7 +1376,8 @@ log_commit_transaction_internal(GTM_Conn *conn,
         Assert(res->gr_resdata.grd_gxid == gxid);
         if (res->gr_type != TXN_LOG_TRANSACTION_RESULT)
         {
-            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_LOG_TRANSACTION_RESULT);
+            fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, TXN_LOG_TRANSACTION_RESULT);
+            goto receive_failed;
         }
     }
 
@@ -1457,7 +1468,8 @@ log_scan_transaction_internal(GTM_Conn *conn,
         Assert(res->gr_resdata.grd_gxid == gxid);
         if (res->gr_type != TXN_LOG_SCAN_RESULT)
         {
-            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_LOG_SCAN_RESULT);
+            fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, TXN_LOG_SCAN_RESULT);
+            goto receive_failed;
         }
     }
 
@@ -1521,7 +1533,8 @@ prepare_transaction_internal(GTM_Conn *conn, GlobalTransactionId gxid, bool is_b
             Assert(res->gr_resdata.grd_gxid == gxid);
             if (res->gr_type != TXN_PREPARE_RESULT)
             {
-                elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, TXN_PREPARE_RESULT);
+                fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, TXN_PREPARE_RESULT);
+                goto receive_failed;
             }
         }
 
@@ -1720,7 +1733,8 @@ get_storage_file(GTM_Conn *conn, char **data)
         Assert(res->gr_type == STORAGE_TRANSFER_RESULT);
         if (res->gr_type != STORAGE_TRANSFER_RESULT)
         {
-            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, STORAGE_TRANSFER_RESULT);
+            fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, STORAGE_TRANSFER_RESULT);
+            goto receive_failed;
         }
     }
 
@@ -1994,7 +2008,8 @@ get_snapshot(GTM_Conn *conn, GlobalTransactionId gxid, bool canbe_grouped)
         Assert(res->gr_type == res_type);
         if (res->gr_type != res_type)
         {
-            elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, res_type);
+            fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, res_type);
+            goto receive_failed;
         }
         /*
          * !!FIXME - The following assertion fails when snapshots are requested
@@ -2768,7 +2783,8 @@ static int node_register_worker(GTM_Conn *conn,
             Assert((strcmp(res->gr_resdata.grd_node.node_name,node_name) == 0));
             if (res->gr_type != NODE_REGISTER_RESULT)
             {
-                elog(ERROR, "res->gr_type %d not match, expected %d.", res->gr_type, NODE_REGISTER_RESULT);
+                fprintf(stderr, "res->gr_type %d not match, expected %d.\n", res->gr_type, NODE_REGISTER_RESULT);
+                goto receive_failed;
             }
         }
 
