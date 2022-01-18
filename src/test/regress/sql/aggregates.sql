@@ -844,3 +844,21 @@ create aggregate my_half_sum(int4)
 select my_sum(one),my_half_sum(one) from (values(1),(2),(3),(4)) t(one);
 
 rollback;
+
+-- test coverage for aggregate combine/serial/deserial functions
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+
+SET parallel_setup_cost = 0;
+SET parallel_tuple_cost = 0;
+SET min_parallel_table_scan_size = 0;
+SET max_parallel_workers_per_gather = 4;
+SET enable_indexonlyscan = off;
+
+-- variance(int4) covers numeric_poly_combine
+-- sum(int8) covers int8_avg_combine
+EXPLAIN (COSTS OFF)
+  SELECT variance(unique1::int4), sum(unique1::int8) FROM tenk1;
+
+SELECT variance(unique1::int4), sum(unique1::int8) FROM tenk1;
+
+ROLLBACK;

@@ -190,7 +190,7 @@ typedef struct Cache2pcInfo
 
 } Cache2pcInfo;
 
-static inline void check_entry_key(const char *tid, const char *key);
+static void check_entry_key(const char *tid, const char *key);
 
 bool add_2pc_info(const char *tid, const char *info);
 
