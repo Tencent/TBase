@@ -430,6 +430,7 @@ typedef struct ParallelSendDataQueue
     size_t           send_data_len;
     size_t           write_data_len;
     bool             long_tuple;
+	bool             wait_free_space;
     DataPumpSndStatus     status;      /* status of the data sending */
     bool             stuck;
     bool             last_send;
@@ -633,7 +634,7 @@ static void *ParallelSenderThreadMain(void *arg);
 static void ParallelSenderSendData(ParallelSendThreadControl *threadControl, bool last_send);
 static bool SendNodeData(ParallelSendNodeControl *node, bool last_send);
 static char *GetNodeData(ParallelSendDataQueue *buf, uint32 *uiLen, bool *long_tuple);
-static uint32 NodeDataSize(ParallelSendDataQueue *buf, bool *long_tuple);
+static uint32 NodeDataSize(ParallelSendDataQueue *buf, bool *long_tuple, bool *wait_free_space);
 static void  IncNodeDataOff(ParallelSendDataQueue *buf, uint32 uiLen);
 static int RawSendNodeData(ParallelSendNodeControl *node, int32 sock, char * data, int32 len, int32 * reason);
 static int32 SetNodeSocket(void *sndctl, int32 nodeindex, int32 nodeId,  int32 socket);
@@ -647,7 +648,7 @@ static void SendNodeDataRemote(SharedQueue squeue, ParallelWorkerControl *contro
                            TupleTableSlot *slot, Tuplestorestate **tuplestore, MemoryContext tmpcxt);
 static bool ParallelSendDataRow(ParallelWorkerControl *control, ParallelSendDataQueue *buf, char *data, size_t len, int32 consumerIdx);
 static uint32 BufferFreeSpace(ParallelSendDataQueue *buf);
-static void SetBufferBorder(ParallelSendDataQueue *buf, bool long_tuple);
+static void SetBufferBorderAndWaitFlag(ParallelSendDataQueue *buf, bool long_tuple, bool wait_free_space);
 static void PutNodeData(ParallelSendDataQueue *buf, char *data, uint32 len);
 static char *GetBufferWriteOff(ParallelSendDataQueue *buf, uint32 *uiLen);
 static void IncBufferWriteOff(ParallelSendDataQueue *buf, uint32 uiLen);
@@ -6649,6 +6650,7 @@ InitParallelSendSharedData(SharedQueue sq, ParallelSendControl *senderControl, i
             buffer->send_data_len  = 0;
             buffer->write_data_len = 0;
             buffer->long_tuple     = 0;
+			buffer->wait_free_space = false;
             buffer->status         = DataPumpSndStatus_no_socket;
             buffer->stuck          = false;
             buffer->last_send      = false;
@@ -6956,6 +6958,7 @@ SendNodeData(ParallelSendNodeControl *node, bool last_send)
 {// #lizard forgives
     bool   should_send   = false;
     bool   long_tuple    = false;
+	bool   wait_free_space = false;
     int    i             = 0;
     uint32 len           = 0;
     int32  ret           = 0;
@@ -6992,10 +6995,13 @@ SendNodeData(ParallelSendNodeControl *node, bool last_send)
 
             if (!should_send)
             {
-                data_size = NodeDataSize(buffer, &long_tuple);
+				data_size = NodeDataSize(buffer, &long_tuple, &wait_free_space);
 
-                /* too small to send */
-                if (data_size < g_SndBatchSize * 1024)
+				/* 
+				 * If wait_free_space is true, sender thread should send data to free buffer space,
+				 * else wait until data_size reach to batch threshold.
+				 */
+				if (!wait_free_space && data_size < g_SndBatchSize * 1024)
                 {
                     node->current_buffer = (node->current_buffer + 1) % node->numParallelWorkers;
 
@@ -7072,7 +7078,7 @@ SendNodeData(ParallelSendNodeControl *node, bool last_send)
                     }
 
                     /* get left data length */
-                    len = NodeDataSize(buffer, &long_tuple);
+					len = NodeDataSize(buffer, &long_tuple, &wait_free_space);
 
                     if (len == 0)
                     {
@@ -7114,7 +7120,8 @@ GetNodeData(ParallelSendDataQueue *buf, uint32 *uiLen, bool *long_tuple)
     char  *data;
     if (buf)
     {
-        if (0 == NodeDataSize(buf, long_tuple))
+		bool wait_flag = false;
+		if (0 == NodeDataSize(buf, long_tuple, &wait_flag))
         {
             *uiLen = 0;
             return NULL;
@@ -7166,7 +7173,7 @@ GetNodeData(ParallelSendDataQueue *buf, uint32 *uiLen, bool *long_tuple)
 
 /* Return total data size in buffer */
 static uint32 
-NodeDataSize(ParallelSendDataQueue *buf, bool *long_tuple)
+NodeDataSize(ParallelSendDataQueue *buf, bool *long_tuple, bool *wait_free_space)
 {
     uint32 border = 0;
     uint32 tail   = 0;
@@ -7177,6 +7184,7 @@ NodeDataSize(ParallelSendDataQueue *buf, bool *long_tuple)
         tail   = buf->bufTail;
         border = buf->bufBorder;
         *long_tuple = buf->long_tuple;
+		*wait_free_space = buf->wait_free_space;
         spinlock_unlock(&(buf->bufLock));
         
         if (INVALID_BORDER == border)
@@ -7882,9 +7890,10 @@ ParallelSendDataRow(ParallelWorkerControl *control, ParallelSendDataQueue *buf, 
     /* no space left, */
     if (BufferFreeSpace(buf) < (uint32)tuple_len)
     {
+		/* Set flag to notice sender thread send data without waiting batch size threshold */
         if (!long_tuple)
         {
-            SetBufferBorder(buf, false);
+			SetBufferBorderAndWaitFlag(buf, false, true);
             pg_usleep(50L);
             return false;
         }
@@ -7906,7 +7915,7 @@ ParallelSendDataRow(ParallelWorkerControl *control, ParallelSendDataQueue *buf, 
         /* Data */
         PutNodeData(buf, data, len);
 
-        SetBufferBorder(buf, false);
+		SetBufferBorderAndWaitFlag(buf, false, false);
     }
     else
     {
@@ -7923,7 +7932,7 @@ ParallelSendDataRow(ParallelWorkerControl *control, ParallelSendDataQueue *buf, 
         /* put message 'D' */
         while (data_len < header_len)
         {
-            SetBufferBorder(buf, false);
+			SetBufferBorderAndWaitFlag(buf, false, true);
             pg_usleep(100L);
             data_len = BufferFreeSpace(buf);
 
@@ -7962,7 +7971,7 @@ ParallelSendDataRow(ParallelWorkerControl *control, ParallelSendDataQueue *buf, 
             }
             else
             {
-                SetBufferBorder(buf, true);
+				SetBufferBorderAndWaitFlag(buf, true, true);
                 pg_usleep(100L);
 
                 if (buf->status == DataPumpSndStatus_error)
@@ -7972,7 +7981,7 @@ ParallelSendDataRow(ParallelWorkerControl *control, ParallelSendDataQueue *buf, 
             }
         }
 
-        SetBufferBorder(buf, false);
+		SetBufferBorderAndWaitFlag(buf, false, false);
     }
 
     buf->ntuples++;
@@ -8011,14 +8020,14 @@ BufferFreeSpace(ParallelSendDataQueue *buf)
 }
 
 static void
-SetBufferBorder(ParallelSendDataQueue *buf, bool long_tuple)
+SetBufferBorderAndWaitFlag(ParallelSendDataQueue *buf, bool long_tuple, bool wait_free_space)
 {
     spinlock_lock(&(buf->bufLock));
     buf->bufBorder = buf->bufHead;
     buf->long_tuple = long_tuple;
+	buf->wait_free_space = wait_free_space;
     spinlock_unlock(&(buf->bufLock));
 }
-
 
 /* Send data into buffer */
 static void 
@@ -8568,7 +8577,7 @@ ParallelFastSendDatarow(ParallelSendDataQueue *buf, TupleTableSlot *slot, void *
                 }
                 else
                 {
-                    SetBufferBorder(buf, true);
+					SetBufferBorderAndWaitFlag(buf, true, true);
                     pg_usleep(50L);
 
                     if (buf->status == DataPumpSndStatus_error)
@@ -8596,11 +8605,11 @@ ParallelFastSendDatarow(ParallelSendDataQueue *buf, TupleTableSlot *slot, void *
                 }
             }
 
-            SetBufferBorder(buf, false);
+			SetBufferBorderAndWaitFlag(buf, false, false);
         }
         else
         {            
-            SetBufferBorder(buf, false);        
+			SetBufferBorderAndWaitFlag(buf, false, false);
         }
 
         
@@ -8628,7 +8637,7 @@ ParallelFastSendDatarow(ParallelSendDataQueue *buf, TupleTableSlot *slot, void *
 #if 1
         /* Not enough space, wakeup sender. */
         //ParallelSendWakeupSender(control, buf, nodeindex);
-        SetBufferBorder(buf, false);
+		SetBufferBorderAndWaitFlag(buf, false, true);
         //pg_usleep(50L);
 #endif
         return false;
