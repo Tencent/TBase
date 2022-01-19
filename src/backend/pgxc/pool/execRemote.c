@@ -12504,6 +12504,7 @@ SetDataRowParams(ModifyTableState *mtstate, RemoteQueryState *node, TupleTableSl
     int                numatts = tdesc->natts;
     ResponseCombiner *combiner = (ResponseCombiner *) node;
     RemoteQuery    *step = (RemoteQuery *) combiner->ss.ps.plan;
+	Oid            *param_types = step->rq_param_types;
     Form_pg_attribute att;
     Oid         typeOutput;
     bool        typIsVarlena;
@@ -12532,7 +12533,7 @@ SetDataRowParams(ModifyTableState *mtstate, RemoteQueryState *node, TupleTableSl
                 uint32 n32;
                 Assert(attindex < numparams);
 
-                if (dataSlot->tts_isnull[attindex])
+				if (dataSlot->tts_isnull[attindex] || !OidIsValid(param_types[attindex]))
                 {
                     n32 = htonl(-1);
                     appendBinaryStringInfo(&buf, (char *) &n32, 4);
@@ -12627,7 +12628,7 @@ SetDataRowParams(ModifyTableState *mtstate, RemoteQueryState *node, TupleTableSl
                 uint32 n32;
                 Assert(attindex < numparams);
 
-                if (dataSlot->tts_isnull[attindex])
+				if (dataSlot->tts_isnull[attindex] || !OidIsValid(param_types[attindex]))
                 {
                     n32 = htonl(-1);
                     appendBinaryStringInfo(&buf, (char *) &n32, 4);
