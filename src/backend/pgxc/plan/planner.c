@@ -844,7 +844,10 @@ pgxc_build_upsert_statement(PlannerInfo *root, CmdType cmdtype,
 
         /* Make sure the column has not been dropped */
         if (get_rte_attribute_is_dropped(res_rel, col_att))
+		{
+			rqplan->rq_param_types[rqplan->rq_num_params++] = InvalidOid;
             continue;
+		}
 
         type = exprType((Node *) tle->expr);
 
@@ -948,13 +951,17 @@ pgxc_build_upsert_statement(PlannerInfo *root, CmdType cmdtype,
     
     natts = get_relnatts(res_rel->relid);
 
-    rqplan->su_param_types = (Oid *)palloc(natts * sizeof(Oid));
+	/* natts + 1(xc_node_id) + 1(ctid) */
+	rqplan->su_param_types = (Oid *)palloc((natts + 2) * sizeof(Oid));
 
     for (attnum = 1; attnum <= natts; attnum++)
     {
         /* Make sure the column has not been dropped */
         if (get_rte_attribute_is_dropped(res_rel, attnum))
+		{
+			rqplan->rq_param_types[rqplan->rq_num_params++] = InvalidOid;
             continue;
+		}
 
         type = get_atttype(res_rel->relid, attnum);
         pgxc_add_param_as_tle(query_to_deparse, attnum,
@@ -1212,7 +1219,10 @@ pgxc_build_dml_statement(PlannerInfo *root, CmdType cmdtype,
         {
             /* Make sure the column has not been dropped */
             if (get_rte_attribute_is_dropped(res_rel, col_att))
+			{
+				rqplan->rq_param_types[rqplan->rq_num_params++] = InvalidOid;
                 continue;
+			}
 
             /*
              * Create the param to be used for VALUES caluse ($1, $2 ...)
@@ -1254,14 +1264,21 @@ pgxc_build_dml_statement(PlannerInfo *root, CmdType cmdtype,
         Oid         type;
         int            natts = get_relnatts(res_rel->relid);
         int            attnum;
+		int         appendix = 0;
 
-        rqplan->rq_param_types = (Oid *)palloc(natts * sizeof(Oid));
+		/* count origin attrs and ctid, nodeid */
+		appendix += node_id_found ? 1 : 0;
+		appendix += ctid_found ? 1 : 0;
+		rqplan->rq_param_types = (Oid *)palloc((natts + appendix) * sizeof(Oid));
 
         for (attnum = 1; attnum <= natts; attnum++)
         {
             /* Make sure the column has not been dropped */
             if (get_rte_attribute_is_dropped(res_rel, attnum))
+			{
+				rqplan->rq_param_types[rqplan->rq_num_params++] = InvalidOid;
                 continue;
+			}
 
             type = get_atttype(res_rel->relid, attnum);
             pgxc_add_param_as_tle(query_to_deparse, attnum,

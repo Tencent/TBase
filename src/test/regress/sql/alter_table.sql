@@ -2546,3 +2546,20 @@ alter table at_test_sql_partop attach partition at_test_sql_partop_1 for values 
 drop table at_test_sql_partop;
 drop operator class at_test_sql_partop using btree;
 drop function at_test_sql_partop;
+-- remote dml with dropped column
+create table dropped_col_remote_dml (a int, b int, c int) distribute by shard(a);
+insert into dropped_col_remote_dml values(1,1,1);
+create or replace function dropped_col_remote_dml_func() returns trigger as
+$$
+begin
+    raise notice 'this is a test';
+    return new;
+end;
+$$
+    language plpgsql;
+create trigger tga after update on dropped_col_remote_dml for each row
+execute PROCEDURE dropped_col_remote_dml_func();
+alter table dropped_col_remote_dml drop column c;
+update dropped_col_remote_dml set b = 2;
+drop table dropped_col_remote_dml cascade;
+drop function dropped_col_remote_dml_func;
