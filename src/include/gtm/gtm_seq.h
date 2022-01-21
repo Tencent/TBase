@@ -119,6 +119,7 @@ void ProcessSequenceAlterCommand(Port *myport, StringInfo message, bool is_backu
 void ProcessSequenceListCommand(Port *myport, StringInfo message);
 void ProcessSequenceCleanCommand(Port *myport, StringInfo message, bool is_backup);
 void ProcessDBSequenceRenameCommand(Port *myport, StringInfo message, bool is_backup);
+void ProcessCopyDataBaseSequenceCommand(Port *myport, StringInfo message);
 
 void decode_seq_key(char* value, GTM_SequenceKey seqkey);
 void GTM_SaveSeqInfo(FILE *ctlf);

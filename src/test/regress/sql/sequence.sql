@@ -433,4 +433,36 @@ DROP SEQUENCE my_seq;
 DROP SEQUENCE my_seq;
 CREATE SEQUENCE my_seq;
 DROP SEQUENCE my_seq;
+
+-- Test sequece when drop database
+\c db_seq1
+create table t1(f1 serial,f2 int);
+create table t2(f1 serial,f2 int);
+create table t3(f1 serial,f2 int);
+insert into t1(f2) values(1);
+insert into t2(f2) values(2);
+insert into t3(f2) values(3);
+create database db_seq1_bak;
+
+\c db_seq1_bak
+create table t1(f1 serial,f2 int);
+create table t2(f1 serial,f2 int);
+create table t3(f1 serial,f2 int);
+insert into t1(f2) values(1);
+insert into t2(f2) values(2);
+insert into t3(f2) values(3);
+drop database db_seq1;
+
+\c db_seq1_bak
+insert into t1(f2) values(4);
+insert into t2(f2) values(5);
+insert into t3(f2) values(6);
+select gsk_key from pg_list_storage_sequence() where gsk_key like '%db_seq1_bak.%';
 \q
+<<<<<<< HEAD
+=======
+
+
+
+
+>>>>>>> 85b5350be... fix gtm seq bug when create databse or drop databse http://tapd.woa.com/10092131/bugtrace/bugs/view?bug_id=1010092131096383437&jump_count=1 and http://tapd.woa.com/pgxz/bugtrace/bugs/view/1010092131087562597 (merge request !1132)

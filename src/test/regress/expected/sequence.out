@@ -851,4 +851,33 @@ DROP SEQUENCE my_seq;
 DROP SEQUENCE my_seq;
 CREATE SEQUENCE my_seq;
 DROP SEQUENCE my_seq;
+-- Test sequece when drop database
+\c db_seq1
+create table t1(f1 serial,f2 int);
+create table t2(f1 serial,f2 int);
+create table t3(f1 serial,f2 int);
+insert into t1(f2) values(1);
+insert into t2(f2) values(2);
+insert into t3(f2) values(3);
+create database db_seq1_bak;
+\c db_seq1_bak
+create table t1(f1 serial,f2 int);
+create table t2(f1 serial,f2 int);
+create table t3(f1 serial,f2 int);
+insert into t1(f2) values(1);
+insert into t2(f2) values(2);
+insert into t3(f2) values(3);
+drop database db_seq1;
+\c db_seq1_bak
+insert into t1(f2) values(4);
+insert into t2(f2) values(5);
+insert into t3(f2) values(6);
+select gsk_key from pg_list_storage_sequence() where gsk_key like '%db_seq1_bak.%';
+           gsk_key            
+------------------------------
+ db_seq1_bak.public.t1_f1_seq
+ db_seq1_bak.public.t2_f1_seq
+ db_seq1_bak.public.t3_f1_seq
+(3 rows)
+
 \q

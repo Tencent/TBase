@@ -3401,7 +3401,8 @@ int32 GTM_StoreDropAllSeqInDatabase(GTM_SequenceKey seq_database_key)
         {
             seq_info = GetSeqStore(bucket_handle);
 
-            if(strncmp(seq_database_key->gsk_key,seq_info->gs_key.gsk_key,seq_database_key->gsk_keylen - 1) != 0)
+            if(!(strncmp(seq_database_key->gsk_key,seq_info->gs_key.gsk_key,seq_database_key->gsk_keylen - 1) == 0 &&
+                 seq_info->gs_key.gsk_key[seq_database_key->gsk_keylen - 1] == '.'))
             {
                 bucket_handle = seq_info->gs_next;
                 continue;
@@ -4386,4 +4387,21 @@ void GTM_StoreGetSeqKey(GTMStorageHandle handle, char *key)
     
     seq_info = GetSeqStore(handle);
     snprintf(key, SEQ_KEY_MAX_LENGTH, "%s", seq_info->gs_key.gsk_key);
+}
+
+/*
+ * get seq create info
+ */
+void GTM_StoreGetSeqCreateInfo(GTMStorageHandle handle, GTM_SeqCreateInfo *create_info)
+{
+    GTM_StoredSeqInfo  *seq_info = NULL;
+
+    seq_info = GetSeqStore(handle);
+    snprintf(create_info->seqkey, SEQ_KEY_MAX_LENGTH, "%s", seq_info->gs_key.gsk_key);
+    create_info->increment_by = seq_info->gs_increment_by;
+    create_info->minval = seq_info->gs_min_value;
+    create_info->maxval = seq_info->gs_max_value;
+    /* get gs_value as new sequence's startval */
+    create_info->startval = seq_info->gs_value;
+    create_info->cycle = seq_info->gs_cycle;
 }

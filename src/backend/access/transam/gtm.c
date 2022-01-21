@@ -2134,6 +2134,24 @@ RenameSequenceGTM(char *seqname, const char *newseqname)
     return conn ? rename_sequence(conn, &seqkey, &newseqkey,
             GetTopTransactionId()) : -1;
 }
+
+/*
+ * Copy the database sequences from src database
+ */
+int
+CopyDataBaseSequenceGTM(char *src_dbname, char *dest_dbname)
+{
+    GTM_SequenceKeyData src_seqkey, dest_seqkey;
+    CheckConnection();
+    src_seqkey.gsk_keylen = strlen(src_dbname) + 1;
+    src_seqkey.gsk_key = src_dbname;
+
+    dest_seqkey.gsk_keylen = strlen(dest_dbname) + 1;
+    dest_seqkey.gsk_key = (char *) dest_dbname;
+    return conn ? copy_database_sequence(conn, &src_seqkey, &dest_seqkey,
+                                  GetTopTransactionId()) : -1;
+}
+
 /*
  * Register Given Node
  * Connection for registering is just used once then closed

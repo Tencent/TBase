@@ -4035,6 +4035,7 @@ ProcessCommand(Port *myport, StringInfo input_message)
 #ifdef __TBASE__
         case MSG_DB_SEQUENCE_RENAME:
         case MSG_BKUP_DB_SEQUENCE_RENAME:    
+		case MSG_SEQUENCE_COPY:
 #endif
             ProcessSequenceCommand(myport, mtype, input_message);
             break;
@@ -4797,6 +4798,9 @@ ProcessSequenceCommand(Port *myport, GTM_MessageType mtype, StringInfo message)
             ProcessSequenceCleanCommand(myport, message, false);
             break;
 
+        case MSG_SEQUENCE_COPY:
+            ProcessCopyDataBaseSequenceCommand(myport, message);
+            break;
         default:
             Assert(0);            /* Shouldn't come here.. keep compiler quite */
     }

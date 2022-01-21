@@ -2304,6 +2304,50 @@ send_failed:
     return -1;
 }
 
+/*
+ * Copy the database sequences from src database
+ */
+int
+copy_database_sequence(GTM_Conn *conn, GTM_SequenceKey src_key, GTM_SequenceKey dest_key,
+                         GlobalTransactionId gxid)
+{
+    GTM_Result *res = NULL;
+    time_t finish_time;
+
+    /* Start the message. */
+    if (gtmpqPutMsgStart('C', true, conn) ||
+        gtmpqPutInt(MSG_SEQUENCE_COPY, sizeof (GTM_MessageType), conn) ||
+        gtmpqPutInt(src_key->gsk_keylen, 4, conn) ||
+        gtmpqPutnchar(src_key->gsk_key, src_key->gsk_keylen, conn)||
+        gtmpqPutInt(dest_key->gsk_keylen, 4, conn) ||
+        gtmpqPutnchar(dest_key->gsk_key, dest_key->gsk_keylen, conn) ||
+        gtmpqPutnchar((char *)&gxid, sizeof (GlobalTransactionId), conn))
+        goto send_failed;
+
+    /* Finish the message. */
+    if (gtmpqPutMsgEnd(conn))
+        goto send_failed;
+
+    /* Flush to ensure backend gets it. */
+    if (gtmpqFlush(conn))
+        goto send_failed;
+
+    finish_time = time(NULL) + CLIENT_GTM_TIMEOUT;
+    if (gtmpqWaitTimed(true, false, conn, finish_time) ||
+        gtmpqReadData(conn) < 0)
+        goto receive_failed;
+
+    if ((res = GTMPQgetResult(conn)) == NULL)
+        goto receive_failed;
+
+    return res->gr_status;
+
+receive_failed:
+send_failed:
+    conn->result = makeEmptyResultIfIsNull(conn->result);
+    conn->result->gr_status = GTM_RESULT_COMM_ERROR;
+    return -1;
+}
 
 /*
  * Request from GTM current value of the specified sequence in the specified

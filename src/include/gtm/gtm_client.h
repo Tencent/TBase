@@ -443,6 +443,8 @@ int close_sequence(GTM_Conn *conn, GTM_SequenceKey key, GlobalTransactionId gxid
 int bkup_close_sequence(GTM_Conn *conn, GTM_SequenceKey key, GlobalTransactionId gxid);
 int rename_sequence(GTM_Conn *conn, GTM_SequenceKey key,
 						GTM_SequenceKey newkey, GlobalTransactionId gxid);
+int copy_database_sequence(GTM_Conn *conn, GTM_SequenceKey key, GTM_SequenceKey newkey,
+                           GlobalTransactionId gxid);
 int bkup_rename_sequence(GTM_Conn *conn, GTM_SequenceKey key,
 						GTM_SequenceKey newkey, GlobalTransactionId gxid);
 int get_current(GTM_Conn *conn, GTM_SequenceKey key,
