@@ -3619,4 +3619,110 @@ ProcessDBSequenceRenameCommand(Port *myport, StringInfo message, bool is_backup)
     /* FIXME: need to check errors */
 }
 
+/*
+ * Process MSG_SEQUENCE_COPY message.
+ */
+void
+ProcessCopyDataBaseSequenceCommand(Port *myport, StringInfo message)
+{
+    GTM_SequenceKeyData src_seqkey, dest_seqkey;
+    StringInfoData buf;
+    int errcode;
+    MemoryContext oldContext;
+    const char *data;
+    GlobalTransactionId gxid;
+    GTMStorageHandle  *handles = NULL;
+    int32			   i       = 0;
+    int32              count   = 0;
+
+    if (Recovery_IsStandby())
+    {
+        if (myport->remote_type != GTM_NODE_GTM)
+        {
+            elog(ERROR, "gtm standby can't provide sequence to datanodes or coordinators.");
+        }
+    }
+
+    /* get src database name */
+    src_seqkey.gsk_keylen = pq_getmsgint(message, sizeof (src_seqkey.gsk_keylen));
+    src_seqkey.gsk_key = (char *)pq_getmsgbytes(message, src_seqkey.gsk_keylen);
+
+    /* get dest database name */
+    dest_seqkey.gsk_keylen = pq_getmsgint(message, sizeof (dest_seqkey.gsk_keylen));
+    dest_seqkey.gsk_key = (char *)pq_getmsgbytes(message, dest_seqkey.gsk_keylen);
+
+    data = pq_getmsgbytes(message, sizeof (gxid));
+    if (data == NULL)
+        ereport(ERROR,
+                (EPROTO,
+                        errmsg("Message does not contain valid GXID")));
+    memcpy(&gxid, data, sizeof (gxid));
+
+
+    /*
+     * As when creating a sequence, we must use the TopMostMemoryContext
+     * because the sequence information is not bound to a thread and
+     * can outlive any of the thread specific contextes.
+     */
+    oldContext = MemoryContextSwitchTo(TopMostMemoryContext);
+
+    handles = GTM_StoreGetAllSeqInDatabase(&src_seqkey, &count);
+    if (handles)
+    {
+        for (i = 0; i < count; i++)
+        {
+            GTM_SeqCreateInfo  create_info;
+            GTM_SequenceKeyData newseqkey;
+            char new_key[SEQ_KEY_MAX_LENGTH];
+
+            GTM_StoreGetSeqCreateInfo(handles[i], &create_info);
+            /* generate new sequence key name in dest database */
+            newseqkey.gsk_keylen = strlen(create_info.seqkey) - strlen(src_seqkey.gsk_key) + strlen(dest_seqkey.gsk_key) + 1;
+            if (newseqkey.gsk_keylen > SEQ_KEY_MAX_LENGTH)
+            {
+                ereport(ERROR,
+                        (errcode,
+                                errmsg("sequence:%s is too long to copy to database %s", create_info.seqkey, dest_seqkey.gsk_key)));
+            }
+            snprintf(new_key, SEQ_KEY_MAX_LENGTH, "%s%s", dest_seqkey.gsk_key, create_info.seqkey + strlen(src_seqkey.gsk_key));
+            newseqkey.gsk_key = new_key;
+
+            errcode = GTM_SeqOpen(&newseqkey, create_info.increment_by, create_info.minval, create_info.maxval, create_info.startval,
+                                      create_info.cycle, gxid);
+            if (errcode)
+            {
+                ereport(ERROR,
+                        (errcode,
+                                errmsg("Failed to create new sequence:%s for:%s", newseqkey.gsk_key,strerror(errcode))));
+            }
+        }
+        pfree(handles);
+    }
+
+    MemoryContextSwitchTo(oldContext);
+
+    pq_getmsgend(message);
+
+    BeforeReplyToClientXLogTrigger();
+
+    /* Send a SUCCESS message back to the client */
+    pq_beginmessage(&buf, 'S');
+    pq_sendint(&buf, SEQUENCE_COPY_RESULT, 4);
+    if (myport->remote_type == GTM_NODE_GTM_PROXY)
+    {
+        GTM_ProxyMsgHeader proxyhdr;
+        proxyhdr.ph_conid = myport->conn_id;
+        pq_sendbytes(&buf, (char *)&proxyhdr, sizeof (GTM_ProxyMsgHeader));
+    }
+    pq_sendint(&buf, dest_seqkey.gsk_keylen, 4);
+    pq_sendbytes(&buf, dest_seqkey.gsk_key, dest_seqkey.gsk_keylen);
+    pq_endmessage(myport, &buf);
+
+    if (myport->remote_type != GTM_NODE_GTM_PROXY)
+    {
+        pq_flush(myport);
+    }
+
+}
+
 #endif

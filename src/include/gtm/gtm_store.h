@@ -175,4 +175,5 @@ extern bool GTM_StoreGetSysInfo(int64 *identifier, int64 *lsn, GlobalTimestamp *
 extern void GTM_PrintControlHeader(void);
 extern GTMStorageHandle *GTM_StoreGetAllSeqInDatabase(GTM_SequenceKey seq_database_key, int32 *number);
 extern void GTM_StoreGetSeqKey(GTMStorageHandle handle, char *key);
+extern void GTM_StoreGetSeqCreateInfo(GTMStorageHandle handle, GTM_SeqCreateInfo *seq_info);
 #endif

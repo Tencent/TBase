@@ -125,6 +125,7 @@ typedef enum GTM_MessageType
     MSG_GET_STATISTICS,
     MSG_GET_ERRORLOG,
 #endif
+    MSG_SEQUENCE_COPY,
 
 	/*
 	 * Must be at the end
@@ -212,6 +213,7 @@ typedef enum GTM_ResultType
     MSG_GET_GTM_STATISTICS_RESULT,
     MSG_GET_GTM_ERRORLOG_RESULT,
 #endif
+    SEQUENCE_COPY_RESULT,
 	RESULT_TYPE_COUNT
 } GTM_ResultType;
 

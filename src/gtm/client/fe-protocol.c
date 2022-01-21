@@ -679,6 +679,7 @@ break;
         case SEQUENCE_RESET_RESULT:
         case SEQUENCE_CLOSE_RESULT:
         case SEQUENCE_RENAME_RESULT:
+        case SEQUENCE_COPY_RESULT:
         case SEQUENCE_ALTER_RESULT:
         case SEQUENCE_SET_VAL_RESULT:
         case MSG_DB_SEQUENCE_RENAME_RESULT:
@@ -1511,6 +1512,7 @@ gtmpqFreeResultResource(GTM_Result *result)
         case SEQUENCE_RESET_RESULT:
         case SEQUENCE_CLOSE_RESULT:
         case SEQUENCE_RENAME_RESULT:
+        case SEQUENCE_COPY_RESULT:
         case SEQUENCE_ALTER_RESULT:
         case SEQUENCE_SET_VAL_RESULT:
         case MSG_DB_SEQUENCE_RENAME_RESULT:

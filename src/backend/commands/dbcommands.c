@@ -717,6 +717,24 @@ createdb(ParseState *pstate, const CreatedbStmt *stmt)
                           sizeof(fparms.dest_dboid));
 #endif
 
+    if (IS_PGXC_LOCAL_COORDINATOR)
+    {
+        /*
+         * If we use another database as the template database, and there are
+         * sequences in the template database, we need to create the sequences
+         * from template database in gtm as well, it's safe because the source
+         * database can't being accessed by other now.
+         */
+        RegisterSeqCreate(dbname, GTM_SEQ_DB_NAME);
+
+        if (CopyDataBaseSequenceGTM((char*)dbtemplate, dbname) < 0)
+        {
+            ereport(ERROR,
+                    (errcode(ERRCODE_CONNECTION_FAILURE),
+                            errmsg("GTM error, could not create sequences for database %s from %s", dbname, dbtemplate)));
+        }
+    }
+
     return dboid;
 }
 

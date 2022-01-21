@@ -170,6 +170,7 @@ extern int AlterSequenceGTM(char *seqname, GTM_Sequence increment,
                             GTM_Sequence lastval, bool cycle, bool is_restart);
 extern int DropSequenceGTM(char *name, GTM_SequenceKeyType type);
 extern int RenameSequenceGTM(char *seqname, const char *newseqname);
+extern int CopyDataBaseSequenceGTM(char *src_dbname, char *dest_dbname);
 extern void CleanGTMSeq(void);
 /* Barrier */
 extern int ReportBarrierGTM(const char *barrier_id);

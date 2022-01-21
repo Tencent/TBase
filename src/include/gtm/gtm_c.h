@@ -269,6 +269,16 @@ typedef struct GTM_StoredSeqInfo
     pg_crc32c                        gs_crc;                /* crc check value */
 }GTM_StoredSeqInfo;
 
+typedef struct GTM_SeqCreateInfo
+{
+    char seqkey[SEQ_KEY_MAX_LENGTH];
+    GTM_Sequence increment_by;
+    GTM_Sequence minval;
+    GTM_Sequence maxval;
+    GTM_Sequence startval;
+    bool cycle;
+} GTM_SeqCreateInfo;
+
 typedef struct GTM_StoredTransactionInfo
 {
     char                        gti_gid[GTM_MAX_SESSION_ID_LEN];    
