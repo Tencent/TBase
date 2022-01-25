@@ -268,7 +268,7 @@ extern int	pgxc_node_is_data_enqueued(PGXCNodeHandle *conn);
 
 extern int	send_some(PGXCNodeHandle * handle, int len);
 extern int	pgxc_node_flush(PGXCNodeHandle *handle);
-extern void	pgxc_node_flush_read(PGXCNodeHandle *handle);
+extern int	pgxc_node_flush_read(PGXCNodeHandle *handle);
 
 extern char get_message(PGXCNodeHandle *conn, int *len, char **msg);
 

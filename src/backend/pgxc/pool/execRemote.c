@@ -11625,6 +11625,7 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
     int  i                  = 0;
     bool need_loop_check = false;
     bool need_sync = true;
+	int read_status;
 
     if (all_handles)
     {                
@@ -11642,7 +11643,17 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
                         elog(DEBUG1, "pgxc_abort_connections node:%s not ready for query, status:%d", handle->nodename, handle->state);
 						if (handle->sock != NO_SOCKET)
                         {
-                            pgxc_node_flush_read(handle);
+							read_status = pgxc_node_flush_read(handle);
+							if (read_status == EOF || read_status < 0)
+							{
+								/* Can not read - no more actions, just discard connection */
+								handle->state = DN_CONNECTION_STATE_ERROR_FATAL;
+								add_error_message(handle, "unexpected EOF on datanode connection.");
+								elog(LOG, "unexpected EOF on node:%s pid:%d, read_status:%d, EOF:%d",
+										handle->nodename, handle->backend_pid, read_status, EOF);
+								return;
+							}
+
                             handle->state = DN_CONNECTION_STATE_IDLE;
                         }                
                         /* Clear any previous error messages */
@@ -11679,7 +11690,17 @@ void pgxc_abort_connections(PGXCNodeAllHandles *all_handles)
                     if (handle->state != DN_CONNECTION_STATE_IDLE || !node_ready_for_query(handle) || pgxc_node_is_data_enqueued(handle))
                     {
                         elog(DEBUG1, "pgxc_abort_connections node:%s not ready for query, status:%d", handle->nodename, handle->state);
-                        pgxc_node_flush_read(handle);
+						read_status = pgxc_node_flush_read(handle);
+						if (read_status == EOF || read_status < 0)
+						{
+							/* Can not read - no more actions, just discard connection */
+							handle->state = DN_CONNECTION_STATE_ERROR_FATAL;
+							add_error_message(handle, "unexpected EOF on datanode connection.");
+							elog(LOG, "unexpected EOF on node:%s pid:%d, read_status:%d, EOF:%d",
+									handle->nodename, handle->backend_pid, read_status, EOF);
+							return;
+						}
+
                         handle->state = DN_CONNECTION_STATE_IDLE;
                                         
                         /* Clear any previous error messages */
