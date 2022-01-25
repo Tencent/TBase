@@ -2690,8 +2690,10 @@ pgxc_node_flush(PGXCNodeHandle *handle)
 /*
  * This method won't return until network buffer is empty or error occurs
  * To ensure all data in network buffers is read and wasted
+  *
+  * There are only two possible returns. Return 0 is ok, return is an EOF error when the link is broken.
  */
-void
+int
 pgxc_node_flush_read(PGXCNodeHandle *handle)
 {// #lizard forgives
     bool    is_ready= false;
@@ -2700,7 +2702,7 @@ pgxc_node_flush_read(PGXCNodeHandle *handle)
 
     if (handle == NULL)
     {
-        return;
+		return 0;
     }    
 
     while(true)
@@ -2726,11 +2728,19 @@ pgxc_node_flush_read(PGXCNodeHandle *handle)
 
         /* break, only if the connection is broken. */
         read_result = pgxc_node_read_data(handle, true);
-        if (read_result <= 0)
+
+		/* If no data can be received, the normal break returns success */
+		if (read_result == 0)
         {
 			elog(DEBUG1, "pgxc_node_flush_read node:%s read failure.", handle->nodename);
             break;
         }
+		/* If the link breaks, an EOF error is returned */
+		else if (read_result == EOF || read_result < 0)
+		{
+			elog(LOG, "pgxc_node_flush_read unexpected EOF on node:%s", handle->nodename);
+			return EOF;
+		}
 
 		if (PGXC_CANCEL_DELAY > 0)
 		{
@@ -2747,6 +2757,8 @@ pgxc_node_flush_read(PGXCNodeHandle *handle)
 			}
 		}
     }
+
+	return 0;
 }
 
 /*
