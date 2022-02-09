@@ -592,6 +592,10 @@ ExecFinishGather(PlanState *pstate)
     TupleTableSlot *slot = NULL;
     GatherState *node = castNode(GatherState, pstate);
 
+	/* If there if no pei, no need to set status, no need to read data from workers. */
+	if (!node->pei)
+		return;
+
     (*node->pei->executor_done) = true;
 
     if (g_DataPumpDebug)
