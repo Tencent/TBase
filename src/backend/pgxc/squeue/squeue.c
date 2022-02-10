@@ -772,15 +772,20 @@ SharedQueueShmemSize(void)
 {
     Size sqs_size;
 
+	/* Shared Queues Sync */
     sqs_size = mul_size(NUM_SQUEUES, SQUEUE_SYNC_SIZE);
+	/* Shared Queue Locks */
+    sqs_size = add_size(sqs_size, mul_size((NUM_SQUEUES * (TBASE_MAX_DATANODE_NUMBER)), sizeof(LWLockPadded)));
 
 #ifdef __TBASE__
     if (g_UseDataPump)
     {
+	    /* Disconnect Consumers */
         sqs_size = add_size(sqs_size, hash_estimate_size(NUM_SQUEUES, sizeof(DisConsumer)));
     }
 #endif
 
+    /* Shared Queues */
     if(g_UseDataPump)
         return add_size(sqs_size, hash_estimate_size(NUM_SQUEUES, SQUEUE_HDR_SIZE(TBASE_MAX_DATANODE_NUMBER)));
     else
