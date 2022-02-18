@@ -321,18 +321,27 @@ pgcs_entry_initialize(void)
  * 
  *  Report common fileds of cluster backend status activity,
  *  called by pgcs_report_query_activity and pgcs_report_activity.
- *  report role, sqname, also if this backend become consumer, remove
- *  previous planstate and cursor.
  * ----------
  */
 static void
-pgcs_report_common(PgClusterStatus *entry, QueryDesc *desc)
+pgcs_report_common(PgClusterStatus *entry)
 {
 	strncpy((char *) entry->sessionid, PGXCSessionId, NAMEDATALEN);
 	
 	entry->sqdone = false;
 	entry->valid = true;
-	
+}
+
+/* ----------
+ * pgcs_report_role
+ * 
+ *  Report role, sqname, also if this backend become consumer, remove
+ *  previous planstate and cursor.
+ * ----------
+ */
+static void
+pgcs_report_role(PgClusterStatus *entry, QueryDesc *desc)
+{
 	/* fields need queryDesc */
 	if (IS_PGXC_DATANODE)
 	{
@@ -391,7 +400,7 @@ pgcs_report_query_activity(BackendState state, const char *cmd_str)
 	pgcs_entry_initialize();
 	entry = MyCSEntry;
 	
-	pgcs_report_common((PgClusterStatus *) entry, NULL);
+	pgcs_report_common((PgClusterStatus *) entry);
 	
 	if (prev_pgstat_report_hook)
 		prev_pgstat_report_hook(state, cmd_str);
@@ -468,7 +477,8 @@ pgcs_report_executor_activity(QueryDesc *desc, int eflags)
 	if (cursors != NULL && cursors->len > 0)
 		memcpy((char *) entry->cursors, cursors->data, Min(cursors->len + 1, NAMEDATALEN * 64));
 	
-	pgcs_report_common((PgClusterStatus *) entry, desc);
+	pgcs_report_common((PgClusterStatus *) entry);
+	pgcs_report_role((PgClusterStatus *) entry, desc);
 	
 	increment_changecount_after(entry);
 }
@@ -501,7 +511,8 @@ pgcs_report_activity(Portal portal)
 	increment_changecount_before(entry);
 	
 	strncpy((char *) entry->portal, portal->name, NAMEDATALEN);
-	pgcs_report_common((PgClusterStatus *) entry, desc);
+	pgcs_report_common((PgClusterStatus *) entry);
+	pgcs_report_role((PgClusterStatus *) entry, desc);
 	
 	increment_changecount_after(entry);
 }
