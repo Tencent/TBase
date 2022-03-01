@@ -4964,17 +4964,6 @@ static struct config_uint ConfigureNamesUInt[] =
         NULL, NULL, NULL
     },
 
-	{
-		{"tcp_user_timeout", PGC_USERSET, CLIENT_CONN_OTHER,
-			gettext_noop("TCP user timeout."),
-			gettext_noop("A value of 0 uses the system default."),
-			GUC_UNIT_MS
-		},
-		&tcp_user_timeout,
-		0, 0, INT_MAX,
-		NULL, assign_tcp_user_timeout, show_tcp_user_timeout
-	},
-
     /* End-of-list marker */
     {
         {NULL, 0, 0, NULL, NULL}, NULL, 0, 0, 0, NULL, NULL, NULL
