@@ -4298,7 +4298,16 @@ static struct config_int ConfigureNamesInt[] =
         0, 0, INT_MAX,
         NULL, assign_tcp_keepalives_count, show_tcp_keepalives_count
     },
-
+    {
+        {"tcp_user_timeout", PGC_USERSET, CLIENT_CONN_OTHER,
+         gettext_noop("TCP user timeout."),
+         gettext_noop("A value of 0 uses the system default."),
+         GUC_UNIT_MS
+        },
+        &tcp_user_timeout,
+        0, 0, INT_MAX,
+        NULL, assign_tcp_user_timeout, show_tcp_user_timeout
+    },
     {
         {"gin_fuzzy_search_limit", PGC_USERSET, CLIENT_CONN_OTHER,
             gettext_noop("Sets the maximum allowed result for exact search by GIN."),
@@ -4954,17 +4963,6 @@ static struct config_uint ConfigureNamesUInt[] =
 		0, 0, UINT_MAX,
         NULL, NULL, NULL
     },
-
-	{
-		{"tcp_user_timeout", PGC_USERSET, CLIENT_CONN_OTHER,
-			gettext_noop("TCP user timeout."),
-			gettext_noop("A value of 0 uses the system default."),
-			GUC_UNIT_MS
-		},
-		&tcp_user_timeout,
-		0, 0, INT_MAX,
-		NULL, assign_tcp_user_timeout, show_tcp_user_timeout
-	},
 
     /* End-of-list marker */
     {

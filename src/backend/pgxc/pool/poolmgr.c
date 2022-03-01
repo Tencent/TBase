@@ -7418,6 +7418,57 @@ connect_pools(void)
     }
 }
 
+/*
+ * Set cancel socket keepalive and user_timeout.
+ * We can use this to detect the broken connection quickly.
+ * see SetSockKeepAlive
+ */
+static void
+set_cancel_conn_keepalive(PGcancel *cancelConn)
+{
+    uint32 user_timeout = UINT32_MAX / 1000 < tcp_keepalives_idle ?
+                          0 : tcp_keepalives_idle * (uint32) 1000;
+
+    if (cancelConn == NULL)
+    {
+        return;
+    }
+
+    /*
+     * If the connection did not use the connection option
+     * set the option here
+     * */
+    if (cancelConn->keepalives == -1)
+    {
+        /* use TCP keepalives */
+        cancelConn->keepalives = 1;
+
+        if (tcp_keepalives_idle > 0)
+        {
+            /* time between TCP keepalives */
+            cancelConn->keepalives_idle = tcp_keepalives_idle;
+        }
+
+        if (tcp_keepalives_interval > 0)
+        {
+            /*time between TCP keepalive retransmits */
+            cancelConn->keepalives_interval = tcp_keepalives_interval;
+        }
+
+        if (tcp_keepalives_count > 0)
+        {
+            /* maximum number of TCP keepalive retransmits */
+            cancelConn->keepalives_count = tcp_keepalives_count;
+        }
+    }
+
+    if (cancelConn->pgtcp_user_timeout == -1 && user_timeout > 0)
+    {
+        /* tcp user timeout */
+        cancelConn->pgtcp_user_timeout = user_timeout;
+    }
+}
+
 static bool
 preconnect_and_warm(DatabasePool *dbPool)
 {// #lizard forgives
@@ -7521,6 +7572,7 @@ preconnect_and_warm(DatabasePool *dbPool)
 
 			slot->xc_cancelConn = (NODE_CANCEL *) PQgetCancel((PGconn *)slot->conn);
 			SetSockKeepAlive(((PGconn *)slot->conn)->sock);
+            set_cancel_conn_keepalive((PGcancel *)slot->xc_cancelConn);
 			
 			/* Increase count of pool size */			
 			nodePool->slot[nodePool->freeSize] = slot;
@@ -7628,6 +7680,7 @@ void *pooler_async_connection_management_thread(void *arg)
 						slot->xc_cancelConn = (NODE_CANCEL *) PQgetCancel((PGconn *)slot->conn);
 						slot->bwarmed       = false;
 						SetSockKeepAlive(((PGconn *)slot->conn)->sock);
+                        set_cancel_conn_keepalive((PGcancel *)slot->xc_cancelConn);
 					}					
 					break;
 				}
@@ -7910,6 +7963,7 @@ void *pooler_sync_remote_operator_thread(void *arg)
 								slot->xc_cancelConn = (NODE_CANCEL *) PQgetCancel((PGconn *)slot->conn);
 								slot->bwarmed       = false;
 								SetSockKeepAlive(((PGconn *)slot->conn)->sock);
+                                set_cancel_conn_keepalive((PGcancel *)slot->xc_cancelConn);
 								
 								/* set the time flags */
 								slot->released = time(NULL);

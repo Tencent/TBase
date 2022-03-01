@@ -2071,6 +2071,7 @@ SetSockKeepAlive(int sock)
 	{
 		elog(LOG, "SetSockKeepAlive setsockopt(TCP_USER_TIMEOUT) failed: %m");
 	}
+}
 
 int
 pq_gettcpusertimeout(Port *port)
