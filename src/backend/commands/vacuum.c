@@ -145,7 +145,7 @@ ExecVacuum(VacuumStmt *vacstmt, bool isTopLevel)
 
     /* Now go through the common routine */
     vacuum(vacstmt->options, vacstmt->relation, InvalidOid, &params,
-           vacstmt->va_cols, NULL, isTopLevel);
+		   vacstmt->va_cols, NULL, isTopLevel, vacstmt->sync_option);
 }
 
 /*
@@ -171,9 +171,15 @@ ExecVacuum(VacuumStmt *vacstmt, bool isTopLevel)
  * memory context that will not disappear at transaction commit.
  */
 void
-vacuum(int options, RangeVar *relation, Oid relid, VacuumParams *params,
-       List *va_cols, BufferAccessStrategy bstrategy, bool isTopLevel)
-{// #lizard forgives
+vacuum(int					options,
+	   RangeVar			*relation,
+	   Oid					relid,
+	   VacuumParams		*params,
+	   List				*va_cols,
+	   BufferAccessStrategy bstrategy,
+	   bool					isTopLevel,
+	   AnalyzeSyncOpt	  *syncOpt)
+{
     const char *stmttype;
     volatile bool in_outer_xact,
                 use_own_xacts;
@@ -344,7 +350,7 @@ vacuum(int options, RangeVar *relation, Oid relid, VacuumParams *params,
                 }
 
                 analyze_rel(relid, relation, options, params,
-                            va_cols, in_outer_xact, vac_strategy);
+							va_cols, in_outer_xact, vac_strategy, syncOpt);
 
                 if (use_own_xacts)
                 {

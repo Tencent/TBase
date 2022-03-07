@@ -1694,6 +1694,16 @@ _equalVacuumStmt(const VacuumStmt *a, const VacuumStmt *b)
     COMPARE_SCALAR_FIELD(options);
     COMPARE_NODE_FIELD(relation);
     COMPARE_NODE_FIELD(va_cols);
+	COMPARE_NODE_FIELD(sync_option);
+
+	return true;
+}
+
+static bool
+_equalAnalyzeSyncOpt(const AnalyzeSyncOpt *a, const AnalyzeSyncOpt *b)
+{
+	COMPARE_SCALAR_FIELD(is_sync_from);
+	COMPARE_NODE_FIELD(nodes);
 
     return true;
 }
@@ -3592,6 +3602,9 @@ equal(const void *a, const void *b)
         case T_VacuumStmt:
             retval = _equalVacuumStmt(a, b);
             break;
+		case T_AnalyzeSyncOpt:
+			retval = _equalAnalyzeSyncOpt(a, b);
+			break;
 #ifdef _SHARDING_
         case T_VacuumShardStmt:
             retval = _equalVacuumShardStmt(a, b);
