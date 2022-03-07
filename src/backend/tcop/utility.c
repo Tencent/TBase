@@ -711,8 +711,47 @@ ProcessUtilityPre(PlannedStmt *pstmt,
                 VacuumStmt *stmt = (VacuumStmt *) parsetree;
 
                 /* we choose to allow this during "read only" transactions */
-                PreventCommandDuringRecovery((stmt->options & VACOPT_VACUUM) ?
-                                             "VACUUM" : "ANALYZE");
+			PreventCommandDuringRecovery((stmt->options & VACOPT_VACUUM) ? "VACUUM"
+																		 : "ANALYZE");
+			/* When statement is emit by the coordinating node, the statement is not
+			 * rewritten, we adapt it here */
+			if (IsConnFromCoord() && IS_PGXC_COORDINATOR &&
+				(stmt->options & VACOPT_ANALYZE) && stmt->sync_option)
+			{
+				stmt->sync_option->is_sync_from = true;
+				list_free_deep(stmt->sync_option->nodes);
+				stmt->sync_option->nodes = NIL;
+				stmt->sync_option->nodes = list_make1(makeString(parentPGXCNode));
+			}
+			if (!IsConnFromCoord() && IS_PGXC_COORDINATOR && stmt->sync_option &&
+				stmt->sync_option->nodes != NIL)
+			{
+				const ListCell *cell;
+				char			node_type = PGXC_NODE_COORDINATOR;
+				foreach (cell, stmt->sync_option->nodes)
+				{
+					if (0 == strcmp(strVal(lfirst(cell)), PGXCNodeName))
+						ereport(ERROR,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("Can not sync to/from local!")));
+
+					PGXCNodeGetNodeIdFromName(strVal(lfirst(cell)), &node_type);
+					if (node_type == PGXC_NODE_NONE)
+					{
+						ereport(ERROR,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("can not find coordinator %s!",
+										strVal(lfirst(cell)))));
+					}
+					if (node_type != PGXC_NODE_COORDINATOR)
+					{
+						ereport(ERROR,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("node %s is not coordinator!",
+										strVal(lfirst(cell)))));
+					}
+				}
+			}
                 /*
                  * We have to run the command on nodes before Coordinator because
                  * vacuum() pops active snapshot and we can not send it to nodes
@@ -1275,6 +1314,7 @@ ProcessUtilityPost(PlannedStmt *pstmt,
     bool        auto_commit = false;
     bool        add_context = false;
     RemoteQueryExecType    exec_type = EXEC_ON_NONE;
+	ExecNodes		  *exec_nodes = NULL;
 
     /*
      * auto_commit and is_temp is initialised to false and changed if required.
@@ -1313,7 +1353,122 @@ ProcessUtilityPost(PlannedStmt *pstmt,
         case T_NotifyStmt:
         case T_ListenStmt:
         case T_UnlistenStmt:
+			break;
         case T_VacuumStmt:
+		{
+			VacuumStmt *vstmt = (VacuumStmt *)parsetree;
+			if (!IsConnFromCoord() && IS_PGXC_COORDINATOR &&
+				(vstmt->options & VACOPT_ANALYZE) && vstmt->sync_option)
+			{
+				exec_type		  = EXEC_ON_COORDS;
+				if (vstmt->sync_option->nodes)
+				{
+					ListCell *lc;
+					int		  nodeIdx;
+					exec_nodes					= (ExecNodes *)makeNode(ExecNodes);
+					exec_nodes->accesstype		= RELATION_ACCESS_INSERT;
+					exec_nodes->baselocatortype = LOCATOR_TYPE_SHARD; /* not used */
+					exec_nodes->en_expr			= NULL;
+					exec_nodes->en_relid		= InvalidOid;
+					exec_nodes->primarynodelist = NIL;
+
+					foreach (lc, vstmt->sync_option->nodes)
+					{
+						char node_type = PGXC_NODE_COORDINATOR;
+						nodeIdx =
+							PGXCNodeGetNodeIdFromName(strVal(lfirst(lc)), &node_type);
+						/* Assert(nodeIdx > 0 && nodeIdx < NumDataNodes); */
+						/* if(node_type != PGXC_NODE_COORDINATOR){ */
+						/* 	ereport(ERROR, */
+						/* 			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED), */
+						/* 			 errmsg("node %s is not coordinator!",
+						 * strVal(lfirst(lc))))); */
+						/* } */
+						/* already check/rewrite in pre, just add it */
+						exec_nodes->nodeList = lappend_int(exec_nodes->nodeList, nodeIdx);
+					}
+				}
+				PopActiveSnapshot();
+				CommitTransactionCommand();
+				StartTransactionCommand();
+			}
+			/* if (vstmt->options & VACOPT_ANALYZE && vstmt->sync_option != NULL && */
+			/* 	vstmt->sync_option->is_sync_from != true) */
+			/* { */
+			/* 	StringInfo queryStr = makeStringInfo(); */
+			/* 	appendStringInfo(queryStr, "ANALYZE (COORDINATOR"); */
+			/* 	if (vstmt->options & VACOPT_VERBOSE) */
+			/* 	{ */
+			/* 		appendStringInfoString(queryStr, " ,VERBOSE"); */
+			/* 	} */
+			/* 	appendStringInfoChar(queryStr, ')'); */
+			/* 	if (vstmt->relation) */
+			/* 		appendStringInfo(queryStr, " %s", RangeVarGetName(vstmt->relation));
+			 */
+			/* 	if (vstmt->va_cols) */
+			/* 	{ */
+			/* 		ListCell *lc; */
+			/* 		bool	  comma = false; */
+			/* 		appendStringInfoString(queryStr, " ("); */
+			/* 		foreach (lc, vstmt->va_cols) */
+			/* 		{ */
+			/* 			if (comma) */
+			/* 				comma = true; */
+			/* 			else */
+			/* 				appendStringInfoChar(queryStr, ','); */
+			/* 			appendStringInfoString(queryStr, strVal(lfirst(lc))); */
+			/* 		} */
+			/* 		appendStringInfoChar(queryStr, ')'); */
+			/* 	} */
+
+			/* 	appendStringInfo(queryStr, " SYNC FROM %s", PGXCNodeName); */
+			/* 	PopActiveSnapshot(); */
+			/* 	CommitTransactionCommand(); */
+			/* 	StartTransactionCommand(); */
+			/* 	if (vstmt->sync_option->nodes) */
+			/* 	{ */
+			/* 		ExecNodes *execnodes; */
+			/* 		ListCell *lc; */
+			/* 		int nodeIdx; */
+			/* 		execnodes				   = (ExecNodes *)makeNode(ExecNodes); */
+			/* 		execnodes->accesstype	   = RELATION_ACCESS_INSERT; */
+			/* 		execnodes->baselocatortype = LOCATOR_TYPE_SHARD;   /\* not used *\/ */
+			/* 		execnodes->en_expr		   = NULL; */
+			/* 		execnodes->en_relid		   = InvalidOid; */
+			/* 		execnodes->primarynodelist = NIL; */
+
+			/* 		foreach(lc, vstmt->sync_option->nodes){ */
+			/* 			char node_type = PGXC_NODE_COORDINATOR; */
+			/* 			nodeIdx = */
+			/* 				PGXCNodeGetNodeIdFromName(strVal(lfirst(lc)), &node_type); */
+			/* 			Assert(nodeIdx > 0 && nodeIdx < NumDataNodes); */
+			/* 			execnodes->nodeList = lappend_int(execnodes->nodeList, nodeIdx);
+			 */
+			/* 		} */
+			/* 		ExecUtilityStmtOnNodes(parsetree, */
+			/* 							   queryStr->data, */
+			/* 							   execnodes, */
+			/* 							   sentToRemote, */
+			/* 							   false, */
+			/* 							   EXEC_ON_COORDS, */
+			/* 							   false, */
+			/* 							   false); */
+			/* 		list_free(execnodes->nodeList); */
+			/* 	} */
+			/* 	else */
+			/* 		ExecUtilityStmtOnNodes(parsetree, */
+			/* 							   queryStr->data, */
+			/* 							   NULL, */
+			/* 							   sentToRemote, */
+			/* 							   auto_commit, */
+			/* 							   EXEC_ON_COORDS, */
+			/* 							   false, */
+			/* 							   false); */
+			/* 	pfree(queryStr->data); */
+			/* 	pfree(queryStr); */
+			/* } */
+			break;
+		}
 #ifdef _SHARDING_
         case T_VacuumShardStmt:
 #endif
@@ -1797,7 +1952,7 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 
     if (IS_PGXC_LOCAL_COORDINATOR)
 	{
-        ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, auto_commit,
+		ExecUtilityStmtOnNodes(parsetree, queryString, exec_nodes, sentToRemote, auto_commit,
                 exec_type, is_temp, add_context);
 		
 		if (IsA(parsetree, IndexStmt) &&

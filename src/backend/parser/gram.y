@@ -263,6 +263,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	RoleSpec			*rolespec;
 	PartitionForExpr	*partfor;
 	PartitionBy         *partby; 
+	AnalyzeSyncOpt      *analyze_sync_opt;
 }
 
 %type <node>	stmt schema_stmt
@@ -634,6 +635,8 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 %type <ival>		audit_stmt audit_obj_type opt_when_success_or_not success_or_not
 /* __AUDIT__ END */
 
+/* AYALYZE */
+%type <analyze_sync_opt> analyze_sync_option
 /*
  * Non-keyword token types.  These are hard-wired into the "flex" lexer.
  * They must be listed first so that their numeric codes do not depend on
@@ -730,7 +733,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	SERIALIZABLE SERVER SESSION SESSION_USER SESSIONTIMEZONE SET SETS SETOF SHARDING SHARE SHOW
 	SIMILAR SIMPLE SKIP SLOT SMALLINT SNAPSHOT SOME SQL_P STABLE STANDALONE_P
 	START STATEMENT STATISTICS STDIN STDOUT STEP STORAGE STRICT_P STRIP_P
-	SUBSCRIPTION SUBSTRING SUCCESSFUL SYMMETRIC SYSDATE SYSID SYSTEM_P SYSTIMESTAMP 
+	SUBSCRIPTION SUBSTRING SUCCESSFUL SYMMETRIC SYNC SYSDATE SYSID SYSTEM_P SYSTIMESTAMP 
 
 	TABLE TABLES TABLESAMPLE TABLESPACE TBASE_P TEMP TEMPLATE TEMPORARY TEXT_P THEN
 	TIME TIMESTAMP TO TRAILING TRANSACTION TRANSFORM TREAT TRIGGER TRIM TRUE_P
@@ -11060,7 +11063,7 @@ vacuum_option_elem:
 		;
 
 AnalyzeStmt:
-			analyze_keyword opt_verbose
+			analyze_keyword opt_verbose analyze_sync_option
 				{
 					VacuumStmt *n = makeNode(VacuumStmt);
 					n->options = VACOPT_ANALYZE;
@@ -11068,9 +11071,10 @@ AnalyzeStmt:
 						n->options |= VACOPT_VERBOSE;
 					n->relation = NULL;
 					n->va_cols = NIL;
+					n->sync_option = $3;
 					$$ = (Node *)n;
 				}
-			| analyze_keyword opt_verbose qualified_name opt_name_list
+			| analyze_keyword opt_verbose qualified_name opt_name_list analyze_sync_option
 				{
 					VacuumStmt *n = makeNode(VacuumStmt);
 					n->options = VACOPT_ANALYZE;
@@ -11078,22 +11082,25 @@ AnalyzeStmt:
 						n->options |= VACOPT_VERBOSE;
 					n->relation = $3;
 					n->va_cols = $4;
+					n->sync_option = $5;
 					$$ = (Node *)n;
 				}
-			| analyze_keyword '(' analyze_option_list ')'
+			| analyze_keyword '(' analyze_option_list ')' analyze_sync_option
 				{
 					VacuumStmt *n = makeNode(VacuumStmt);
 					n->options = VACOPT_ANALYZE | $3;
 					n->relation = NULL;
 					n->va_cols = NIL;
+					n->sync_option = $5;
 					$$ = (Node *)n;
 				}
-			| analyze_keyword '(' analyze_option_list ')' qualified_name opt_name_list
+			| analyze_keyword '(' analyze_option_list ')' qualified_name opt_name_list analyze_sync_option
 				{
 					VacuumStmt *n = makeNode(VacuumStmt);
 					n->options = VACOPT_ANALYZE | $3;
 					n->relation = $5;
 					n->va_cols = $6;
+					n->sync_option = $7;
 					$$ = (Node *)n;
 				}
 		;
@@ -11101,6 +11108,31 @@ AnalyzeStmt:
 analyze_keyword:
 			ANALYZE									{}
 			| ANALYSE /* British */					{}
+		;
+
+analyze_sync_option :
+/*            SYNC
+			    {
+					AnalyzeSyncOpt *n = makeNode(AnalyzeSyncOpt);
+					n->is_sync_from = false;
+					n->nodes = NIL;
+					$$ = (Node *)n;
+			    }
+			|*/ SYNC TO pgxcnode_list
+			    {
+					AnalyzeSyncOpt *n = makeNode(AnalyzeSyncOpt);
+					n->is_sync_from = false;
+					n->nodes = $3;
+					$$ = n;
+			    }
+			| SYNC FROM pgxcnode_list
+			    {
+					AnalyzeSyncOpt *n = makeNode(AnalyzeSyncOpt);
+					n->is_sync_from = true;
+					n->nodes = $3;
+					$$ = n;
+				}
+			| /*EMPTY*/ { $$ = NULL; }
 		;
 
 opt_verbose:
@@ -16883,6 +16915,7 @@ unreserved_keyword:
 			| STRICT_P
 			| STRIP_P
 			| SUBSCRIPTION
+			| SYNC
 			| SYSID
 			| SYSTEM_P
 			| TABLES
