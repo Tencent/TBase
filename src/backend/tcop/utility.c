@@ -713,16 +713,6 @@ ProcessUtilityPre(PlannedStmt *pstmt,
                 /* we choose to allow this during "read only" transactions */
 			PreventCommandDuringRecovery((stmt->options & VACOPT_VACUUM) ? "VACUUM"
 																		 : "ANALYZE");
-			/* When statement is emit by the coordinating node, the statement is not
-			 * rewritten, we adapt it here */
-			if (IsConnFromCoord() && IS_PGXC_COORDINATOR &&
-				(stmt->options & VACOPT_ANALYZE) && stmt->sync_option)
-			{
-				stmt->sync_option->is_sync_from = true;
-				list_free_deep(stmt->sync_option->nodes);
-				stmt->sync_option->nodes = NIL;
-				stmt->sync_option->nodes = list_make1(makeString(parentPGXCNode));
-			}
 			if (!IsConnFromCoord() && IS_PGXC_COORDINATOR && stmt->sync_option &&
 				stmt->sync_option->nodes != NIL)
 			{
@@ -740,10 +730,10 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 					{
 						ereport(ERROR,
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								 errmsg("can not find coordinator %s!",
+								 errmsg("Can not find coordinator %s!",
 										strVal(lfirst(cell)))));
 					}
-					if (node_type != PGXC_NODE_COORDINATOR)
+					else if (node_type != PGXC_NODE_COORDINATOR)
 					{
 						ereport(ERROR,
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -752,11 +742,22 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 					}
 				}
 			}
+
+			/* When statement is emit by the coordinating node, the statement is not
+			 * rewritten, adapt it here */
+			if (IsConnFromCoord() && IS_PGXC_COORDINATOR &&
+				(stmt->options & VACOPT_ANALYZE) && stmt->sync_option)
+			{
+				stmt->sync_option->is_sync_from = true;
+				list_free_deep(stmt->sync_option->nodes);
+				stmt->sync_option->nodes = NIL;
+				stmt->sync_option->nodes = list_make1(makeString(parentPGXCNode));
+			}
                 /*
-                 * We have to run the command on nodes before Coordinator because
+			 * Not SYNC command, We have to run the command on nodes before Coordinator because
                  * vacuum() pops active snapshot and we can not send it to nodes
                  */
-                if (!(stmt->options & VACOPT_COORDINATOR))
+			else if (!(stmt->options & VACOPT_COORDINATOR))
                     exec_type = EXEC_ON_DATANODES;
                 auto_commit = true;
             }
@@ -1357,6 +1358,7 @@ ProcessUtilityPost(PlannedStmt *pstmt,
         case T_VacuumStmt:
 		{
 			VacuumStmt *vstmt = (VacuumStmt *)parsetree;
+			/* Send synchronization statements to other coordinator nodes  */
 			if (!IsConnFromCoord() && IS_PGXC_COORDINATOR &&
 				(vstmt->options & VACOPT_ANALYZE) && vstmt->sync_option)
 			{
@@ -1377,14 +1379,6 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 						char node_type = PGXC_NODE_COORDINATOR;
 						nodeIdx =
 							PGXCNodeGetNodeIdFromName(strVal(lfirst(lc)), &node_type);
-						/* Assert(nodeIdx > 0 && nodeIdx < NumDataNodes); */
-						/* if(node_type != PGXC_NODE_COORDINATOR){ */
-						/* 	ereport(ERROR, */
-						/* 			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED), */
-						/* 			 errmsg("node %s is not coordinator!",
-						 * strVal(lfirst(lc))))); */
-						/* } */
-						/* already check/rewrite in pre, just add it */
 						exec_nodes->nodeList = lappend_int(exec_nodes->nodeList, nodeIdx);
 					}
 				}
@@ -1392,81 +1386,6 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 				CommitTransactionCommand();
 				StartTransactionCommand();
 			}
-			/* if (vstmt->options & VACOPT_ANALYZE && vstmt->sync_option != NULL && */
-			/* 	vstmt->sync_option->is_sync_from != true) */
-			/* { */
-			/* 	StringInfo queryStr = makeStringInfo(); */
-			/* 	appendStringInfo(queryStr, "ANALYZE (COORDINATOR"); */
-			/* 	if (vstmt->options & VACOPT_VERBOSE) */
-			/* 	{ */
-			/* 		appendStringInfoString(queryStr, " ,VERBOSE"); */
-			/* 	} */
-			/* 	appendStringInfoChar(queryStr, ')'); */
-			/* 	if (vstmt->relation) */
-			/* 		appendStringInfo(queryStr, " %s", RangeVarGetName(vstmt->relation));
-			 */
-			/* 	if (vstmt->va_cols) */
-			/* 	{ */
-			/* 		ListCell *lc; */
-			/* 		bool	  comma = false; */
-			/* 		appendStringInfoString(queryStr, " ("); */
-			/* 		foreach (lc, vstmt->va_cols) */
-			/* 		{ */
-			/* 			if (comma) */
-			/* 				comma = true; */
-			/* 			else */
-			/* 				appendStringInfoChar(queryStr, ','); */
-			/* 			appendStringInfoString(queryStr, strVal(lfirst(lc))); */
-			/* 		} */
-			/* 		appendStringInfoChar(queryStr, ')'); */
-			/* 	} */
-
-			/* 	appendStringInfo(queryStr, " SYNC FROM %s", PGXCNodeName); */
-			/* 	PopActiveSnapshot(); */
-			/* 	CommitTransactionCommand(); */
-			/* 	StartTransactionCommand(); */
-			/* 	if (vstmt->sync_option->nodes) */
-			/* 	{ */
-			/* 		ExecNodes *execnodes; */
-			/* 		ListCell *lc; */
-			/* 		int nodeIdx; */
-			/* 		execnodes				   = (ExecNodes *)makeNode(ExecNodes); */
-			/* 		execnodes->accesstype	   = RELATION_ACCESS_INSERT; */
-			/* 		execnodes->baselocatortype = LOCATOR_TYPE_SHARD;   /\* not used *\/ */
-			/* 		execnodes->en_expr		   = NULL; */
-			/* 		execnodes->en_relid		   = InvalidOid; */
-			/* 		execnodes->primarynodelist = NIL; */
-
-			/* 		foreach(lc, vstmt->sync_option->nodes){ */
-			/* 			char node_type = PGXC_NODE_COORDINATOR; */
-			/* 			nodeIdx = */
-			/* 				PGXCNodeGetNodeIdFromName(strVal(lfirst(lc)), &node_type); */
-			/* 			Assert(nodeIdx > 0 && nodeIdx < NumDataNodes); */
-			/* 			execnodes->nodeList = lappend_int(execnodes->nodeList, nodeIdx);
-			 */
-			/* 		} */
-			/* 		ExecUtilityStmtOnNodes(parsetree, */
-			/* 							   queryStr->data, */
-			/* 							   execnodes, */
-			/* 							   sentToRemote, */
-			/* 							   false, */
-			/* 							   EXEC_ON_COORDS, */
-			/* 							   false, */
-			/* 							   false); */
-			/* 		list_free(execnodes->nodeList); */
-			/* 	} */
-			/* 	else */
-			/* 		ExecUtilityStmtOnNodes(parsetree, */
-			/* 							   queryStr->data, */
-			/* 							   NULL, */
-			/* 							   sentToRemote, */
-			/* 							   auto_commit, */
-			/* 							   EXEC_ON_COORDS, */
-			/* 							   false, */
-			/* 							   false); */
-			/* 	pfree(queryStr->data); */
-			/* 	pfree(queryStr); */
-			/* } */
 			break;
 		}
 #ifdef _SHARDING_
