@@ -11111,25 +11111,25 @@ analyze_keyword:
 		;
 
 analyze_sync_option :
-/*            SYNC
+            SYNC ALL
 			    {
 					AnalyzeSyncOpt *n = makeNode(AnalyzeSyncOpt);
 					n->is_sync_from = false;
 					n->nodes = NIL;
-					$$ = (Node *)n;
+					$$ = n;
 			    }
-			|*/ SYNC TO pgxcnode_list
+			| SYNC TO pgxcnode_list
 			    {
 					AnalyzeSyncOpt *n = makeNode(AnalyzeSyncOpt);
 					n->is_sync_from = false;
 					n->nodes = $3;
 					$$ = n;
 			    }
-			| SYNC FROM pgxcnode_list
+			| SYNC FROM pgxcnode_name
 			    {
 					AnalyzeSyncOpt *n = makeNode(AnalyzeSyncOpt);
 					n->is_sync_from = true;
-					n->nodes = $3;
+					n->nodes = list_make1(makeString($3));
 					$$ = n;
 				}
 			| /*EMPTY*/ { $$ = NULL; }

@@ -5349,64 +5349,174 @@ acquire_coordinator_sample_rows(Relation onerel, int elevel,
 
 #endif
 
+static RemoteQuery *
+init_sync_remotequery(AnalyzeSyncOpt *syncOpt, char **cnname)
+{
+	RemoteQuery *step;
+	ListCell	 *lc;
+	int			 nodeIdx;
+	ExecNodes	  *execnodes	   = (ExecNodes *)makeNode(ExecNodes);
+	char		 node_type	   = PGXC_NODE_COORDINATOR;
+	execnodes->accesstype	   = RELATION_ACCESS_READ;
+	execnodes->baselocatortype = LOCATOR_TYPE_SHARD; /* not used */
+	execnodes->en_expr		   = NULL;
+	execnodes->en_relid		   = InvalidOid;
+	execnodes->primarynodelist = NIL;
+
+	lc						   = list_head(syncOpt->nodes);
+	*cnname					   = strVal(lfirst(lc));
+	nodeIdx					   = PGXCNodeGetNodeIdFromName(*cnname, &node_type);
+	Assert(node_type == PGXC_NODE_COORDINATOR);
+	execnodes->nodeList = lappend_int(execnodes->nodeList, nodeIdx);
+
+	step				= makeNode(RemoteQuery);
+	step->combine_type	= COMBINE_TYPE_NONE;
+	step->exec_nodes	= execnodes;
+	step->exec_type		= EXEC_ON_COORDS;
+	return step;
+}
 
 /*
- * coord_collect_simple_stats
- *		Collect simple stats for a relation (pg_statistic contents).
- *
- * Collects statistics from the datanodes, and then keeps the one of the
- * received statistics for each attribute (the first one we receive, but
- * it's mostly random).
- *
- * XXX We do not try to build statistics covering data fro all the nodes,
- * either by collecting fresh sample of rows or merging the statistics
- * somehow. The current approach is very simple and cheap, but may have
- * negative impact on estimate accuracy as the stats only covers data
- * from a single node, and we may end up with stats from different node
- * for each attribute.
+ * coord_sync_rel_stats
+ *		sync relation stats from the coordinator node specified by syncOpt.
  */
 static void
-coord_collect_stats(Relation onerel, bool inh, int attr_cnt,
-					VacAttrStats **vacattrstats, AnalyzeSyncOpt *syncOpt)
+coord_sync_rel_stats(Relation onerel, AnalyzeSyncOpt *syncOpt)
 {
 	char 		   *nspname;
 	char 		   *relname;
-	/* Fields to run query to read statistics from data nodes */
+	char			 *cnname;
+	/* Fields to run query to read statistics from coordinator nodes */
 	StringInfoData  query;
 	EState 		   *estate;
 	MemoryContext 	oldcontext;
 	RemoteQuery	    *step;
 	RemoteQueryState *node;
 	TupleTableSlot *result;
-	int 			i;
-	/* Number of data nodes from which attribute statistics are received. */
-	int			   *numnodes;
 	int reltuples;
 	int relpages;
 	int relallvisible;
 	bool relhasindex;
-	ListCell		 *lc;
-	int				  nodeIdx;
-	ExecNodes		  *execnodes = (ExecNodes *)makeNode(ExecNodes);
 	/* Get the relation identifier */
 	relname = RelationGetRelationName(onerel);
 	nspname = get_namespace_name(RelationGetNamespace(onerel));
 
 	/* Make up query string */
 	initStringInfo(&query);
-	/* Generic statistic fields */
-	appendStringInfoString(&query,
-						   "SELECT s.staattnum, "
+	appendStringInfo(&query,
+					 "SELECT "
 						   "c.reltuples, "
 						   "c.relpages,"
 						   "c.relallvisible,"
-						   "c.relhasindex,"
+					 "c.relhasindex"
+					 " FROM pg_class c JOIN pg_namespace nc on c.relnamespace = "
+					 "nc.oid WHERE nc.nspname = '%s' and c.relname = '%s'",
+					 nspname,
+					 relname);
+
+	/* Build up RemoteQuery */
+	step				= init_sync_remotequery(syncOpt, &cnname);
+	step->sql_statement = query.data;
+
+	/* Add targetlist entries */
+	step->scan.plan.targetlist =
+		lappend(step->scan.plan.targetlist,
+				make_relation_tle(RelationRelationId, "pg_class", "reltuples"));
+	step->scan.plan.targetlist =
+		lappend(step->scan.plan.targetlist,
+				make_relation_tle(RelationRelationId, "pg_class", "relpages"));
+	step->scan.plan.targetlist =
+		lappend(step->scan.plan.targetlist,
+				make_relation_tle(RelationRelationId, "pg_class", "relallvisible"));
+	step->scan.plan.targetlist =
+		lappend(step->scan.plan.targetlist,
+				make_relation_tle(RelationRelationId, "pg_class", "relhasindex"));
+	/* Execute query on the data nodes */
+	estate	   = CreateExecutorState();
+
+	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
+	node	   = ExecInitRemoteQuery(step, estate, 0);
+	MemoryContextSwitchTo(oldcontext);
+
+	result = ExecRemoteQuery((PlanState *)node);
+	if (result != NULL && !TupIsNull(result))
+	{
+		Datum value;
+		bool  isnull;
+		int	  colnum  = 1;
+
+		/* Process statistics */
+		value		  = slot_getattr(result, colnum++, &isnull); /* reltuple */
+		reltuples	  = DatumGetFloat4(value);
+
+		value		  = slot_getattr(result, colnum++, &isnull); /* relpages */
+		relpages	  = DatumGetInt32(value);
+
+		value		  = slot_getattr(result, colnum++, &isnull); /* relallvisible */
+		relallvisible = DatumGetInt32(value);
+
+		value		  = slot_getattr(result, colnum++, &isnull); /* relhasindex */
+		relhasindex	  = DatumGetBool(value);
+
+		vac_update_relstats(onerel,
+							relpages,
+							reltuples,
+							relallvisible,
+							relhasindex,
+							InvalidTransactionId,
+							InvalidMultiXactId,
+							false);
+	}
+	else
+	{
+		ereport(WARNING,
+				(errcode(ERRCODE_UNDEFINED_TABLE),
+				 errmsg("Relation \"%s\" does not exist in coordinator %s",
+						relname,
+						cnname)));
+	}
+	ExecEndRemoteQuery(node);
+}
+
+/*
+ * coord_sync_col_stats
+ *		sync column stats from the coordinator node specified by syncOpt.
+ */
+static void
+coord_sync_col_stats(Relation		 onerel,
+					 bool			 inh,
+					 int			 attr_cnt,
+					 VacAttrStats  **vacattrstats,
+					 AnalyzeSyncOpt *syncOpt)
+{
+	char			 *nspname;
+	char			 *relname;
+	char			 *cnname;
+	/* Fields to run query to read statistics from coordinator nodes */
+	StringInfoData	  query;
+	EState		   *estate;
+	MemoryContext	  oldcontext;
+	RemoteQuery		*step;
+	RemoteQueryState *node;
+	TupleTableSlot   *result;
+	int				  i;
+
+	/* Get the relation identifier */
+	relname						= RelationGetRelationName(onerel);
+	nspname						= get_namespace_name(RelationGetNamespace(onerel));
+
+	/* Make up query string */
+	initStringInfo(&query);
+	/* Generic statistic fields */
+	appendStringInfoString(&query,
+						   "SELECT s.staattnum, "
 						   "s.stanullfrac, "
 						   "s.stawidth, "
 						   "s.stadistinct");
 	/* Detailed statistic slots */
 	for (i = 1; i <= STATISTIC_NUM_SLOTS; i++)
-		appendStringInfo(&query, ", s.stakind%d"
+		appendStringInfo(&query,
+						 ", s.stakind%d"
 								 ", o%d.oprname"
 								 ", no%d.nspname"
 								 ", t%dl.typname"
@@ -5418,13 +5528,15 @@ coord_collect_stats(Relation onerel, bool inh, int attr_cnt,
 						 i, i, i, i, i, i, i, i, i);
 
 	/* Common part of FROM clause */
-	appendStringInfoString(&query, " FROM pg_statistic s JOIN pg_class c "
+	appendStringInfoString(&query,
+						   " FROM pg_statistic s JOIN pg_class c "
 									"    ON s.starelid = c.oid "
 									"JOIN pg_namespace nc "
 									"    ON c.relnamespace = nc.oid ");
 	/* Info about involved operations */
 	for (i = 1; i <= STATISTIC_NUM_SLOTS; i++)
-		appendStringInfo(&query, "LEFT JOIN (pg_operator o%d "
+		appendStringInfo(&query,
+						 "LEFT JOIN (pg_operator o%d "
 								 "           JOIN pg_namespace no%d "
 								 "               ON o%d.oprnamespace = no%d.oid "
 								 "           JOIN pg_type t%dl "
@@ -5436,133 +5548,77 @@ coord_collect_stats(Relation onerel, bool inh, int attr_cnt,
 								 "           JOIN pg_namespace nt%dr "
 								 "               ON t%dr.typnamespace = nt%dr.oid) "
 								 "    ON s.staop%d = o%d.oid ",
-						 i, i, i, i, i, i, i, i, i,
-						 i, i, i, i, i, i, i, i, i);
-	appendStringInfo(&query, "WHERE nc.nspname = '%s' "
+						 i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i);
+	appendStringInfo(&query,
+					 "WHERE nc.nspname = '%s' "
 							  "AND c.relname = '%s'",
-					 nspname, relname);
+					 nspname,
+					 relname);
 
 	/* Build up RemoteQuery */
-	execnodes->accesstype	   = RELATION_ACCESS_READ;
-	execnodes->baselocatortype = LOCATOR_TYPE_SHARD; /* not used */
-	execnodes->en_expr		   = NULL;
-	execnodes->en_relid		   = InvalidOid;
-	execnodes->primarynodelist = NIL;
-
-	foreach (lc, syncOpt->nodes)
-	{
-		char node_type = PGXC_NODE_COORDINATOR;
-		nodeIdx		   = PGXCNodeGetNodeIdFromName(strVal(lfirst(lc)), &node_type);
-		execnodes->nodeList = lappend_int(execnodes->nodeList, nodeIdx);
-	}
-	step = makeNode(RemoteQuery);
-	step->combine_type = COMBINE_TYPE_NONE;
-	step->exec_nodes = execnodes;
+	step				= init_sync_remotequery(syncOpt, &cnname);
 	step->sql_statement = query.data;
-	step->force_autocommit = true;
-	step->exec_type = EXEC_ON_COORDS;
 
 	/* Add targetlist entries */
-	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-										 make_relation_tle(StatisticRelationId,
-														   "pg_statistic",
-														   "staattnum"));
-	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-										 make_relation_tle(RelationRelationId,
-														   "pg_class",
-														   "reltuples"));
 	step->scan.plan.targetlist =
 		lappend(step->scan.plan.targetlist,
-				make_relation_tle(RelationRelationId, "pg_class", "relpages"));
+				make_relation_tle(StatisticRelationId, "pg_statistic", "staattnum"));
 	step->scan.plan.targetlist =
 		lappend(step->scan.plan.targetlist,
-				make_relation_tle(RelationRelationId, "pg_class", "relallvisible"));
+				make_relation_tle(StatisticRelationId, "pg_statistic", "stanullfrac"));
 	step->scan.plan.targetlist =
 		lappend(step->scan.plan.targetlist,
-				make_relation_tle(RelationRelationId, "pg_class", "relhasindex"));
-	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-										 make_relation_tle(StatisticRelationId,
-														   "pg_statistic",
-														   "stanullfrac"));
-	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-										 make_relation_tle(StatisticRelationId,
-														   "pg_statistic",
-														   "stawidth"));
-	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-										 make_relation_tle(StatisticRelationId,
-														   "pg_statistic",
-														   "stadistinct"));
+				make_relation_tle(StatisticRelationId, "pg_statistic", "stawidth"));
+	step->scan.plan.targetlist =
+		lappend(step->scan.plan.targetlist,
+				make_relation_tle(StatisticRelationId, "pg_statistic", "stadistinct"));
 	for (i = 1; i <= STATISTIC_NUM_SLOTS; i++)
 	{
 		/* 16 characters would be enough */
 		char 	colname[16];
 
 		sprintf(colname, "stakind%d", i);
-		step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-											 make_relation_tle(StatisticRelationId,
-															   "pg_statistic",
-															   colname));
+		step->scan.plan.targetlist =
+			lappend(step->scan.plan.targetlist,
+					make_relation_tle(StatisticRelationId, "pg_statistic", colname));
 
-		step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-											 make_relation_tle(OperatorRelationId,
-															   "pg_operator",
-															   "oprname"));
-		step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-											 make_relation_tle(NamespaceRelationId,
-															   "pg_namespace",
-															   "nspname"));
-		step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-											 make_relation_tle(TypeRelationId,
-															   "pg_type",
-															   "typname"));
-		step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-											 make_relation_tle(NamespaceRelationId,
-															   "pg_namespace",
-															   "nspname"));
-		step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-											 make_relation_tle(TypeRelationId,
-															   "pg_type",
-															   "typname"));
-		step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-											 make_relation_tle(NamespaceRelationId,
-															   "pg_namespace",
-															   "nspname"));
+		step->scan.plan.targetlist =
+			lappend(step->scan.plan.targetlist,
+					make_relation_tle(OperatorRelationId, "pg_operator", "oprname"));
+		step->scan.plan.targetlist =
+			lappend(step->scan.plan.targetlist,
+					make_relation_tle(NamespaceRelationId, "pg_namespace", "nspname"));
+		step->scan.plan.targetlist =
+			lappend(step->scan.plan.targetlist,
+					make_relation_tle(TypeRelationId, "pg_type", "typname"));
+		step->scan.plan.targetlist =
+			lappend(step->scan.plan.targetlist,
+					make_relation_tle(NamespaceRelationId, "pg_namespace", "nspname"));
+		step->scan.plan.targetlist =
+			lappend(step->scan.plan.targetlist,
+					make_relation_tle(TypeRelationId, "pg_type", "typname"));
+		step->scan.plan.targetlist =
+			lappend(step->scan.plan.targetlist,
+					make_relation_tle(NamespaceRelationId, "pg_namespace", "nspname"));
 
 		sprintf(colname, "stanumbers%d", i);
-		step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-											 make_relation_tle(StatisticRelationId,
-															   "pg_statistic",
-															   colname));
+		step->scan.plan.targetlist =
+			lappend(step->scan.plan.targetlist,
+					make_relation_tle(StatisticRelationId, "pg_statistic", colname));
 
 		sprintf(colname, "stavalues%d", i);
-		step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
-											 make_relation_tle(StatisticRelationId,
-															   "pg_statistic",
-															   colname));
+		step->scan.plan.targetlist =
+			lappend(step->scan.plan.targetlist,
+					make_relation_tle(StatisticRelationId, "pg_statistic", colname));
 	}
 	/* Execute query on the data nodes */
 	estate = CreateExecutorState();
 
 	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
-
-	/*
-	 * Take a fresh snapshot so that we see the effects of the ANALYZE command
-	 * on the datanode. That command is run in auto-commit mode hence just
-	 * bumping up the command ID is not good enough
-	 */
-	/* PushActiveSnapshot(GetLocalTransactionSnapshot());  */
-	estate->es_snapshot = GetActiveSnapshot();
-
 	node = ExecInitRemoteQuery(step, estate, 0);
 	MemoryContextSwitchTo(oldcontext);
 
-	/* get ready to combine results */
-	numnodes = (int *) palloc(attr_cnt * sizeof(int));
-	for (i = 0; i < attr_cnt; i++)
-		numnodes[i] = 0;
-
 	result = ExecRemoteQuery((PlanState *) node);
-	/* PopActiveSnapshot(); */
 	while (result != NULL && !TupIsNull(result))
 	{
 		Datum 			value;
@@ -5574,7 +5630,6 @@ coord_collect_stats(Relation onerel, bool inh, int attr_cnt,
 		float4			distinct;
 		VacAttrStats   *stats = NULL;
 
-
 		/* Process statistics from the data node */
 		value = slot_getattr(result, colnum++, &isnull); /* staattnum */
 		attnum = DatumGetInt16(value);
@@ -5583,21 +5638,8 @@ coord_collect_stats(Relation onerel, bool inh, int attr_cnt,
 			{
 				stats = vacattrstats[i];
 				stats->stats_valid = true;
-				numnodes[i]++;
 				break;
 			}
-
-		value = slot_getattr(result, colnum++, &isnull); /* reltuples */
-		reltuples = DatumGetFloat4(value);
-
-		value	  = slot_getattr(result, colnum++, &isnull); /* relpages */
-		relpages = DatumGetInt32(value);
-
-		value	  = slot_getattr(result, colnum++, &isnull); /* relallvisible */
-		relallvisible  = DatumGetInt32(value);
-
-		value		   = slot_getattr(result, colnum++, &isnull); /* relhasindex */
-		relhasindex  = DatumGetBool(value);
 
 		if (stats)
 		{
@@ -5614,13 +5656,12 @@ coord_collect_stats(Relation onerel, bool inh, int attr_cnt,
 			stats->stadistinct = distinct;
 
 			/* Detailed statistics */
-			for (i = 1; i <= STATISTIC_NUM_SLOTS; i++)
+			for (i = 0; i < STATISTIC_NUM_SLOTS; i++)
 			{
 				int16 		kind;
 				float4	   *numbers;
 				Datum	   *values;
 				int			nnumbers, nvalues;
-				int 		k;
 
 				value = slot_getattr(result, colnum++, &isnull); /* kind */
 				kind = DatumGetInt16(value);
@@ -5655,10 +5696,8 @@ coord_collect_stats(Relation onerel, bool inh, int attr_cnt,
 						char	   *oprname;
 						char	   *oprnspname;
 						Oid			ltypid, rtypid;
-						char	   *ltypname,
-								   *rtypname;
-						char	   *ltypnspname,
-								   *rtypnspname;
+						char *ltypname, *rtypname;
+						char *ltypnspname, *rtypnspname;
 						oprname = DatumGetCString(value);
 						value = slot_getattr(result, colnum++, &isnull); /* oprnspname */
 						oprnspname = DatumGetCString(value);
@@ -5667,67 +5706,36 @@ coord_collect_stats(Relation onerel, bool inh, int attr_cnt,
 						ltypname = DatumGetCString(value);
 						value = slot_getattr(result, colnum++, &isnull); /* typnspname */
 						ltypnspname = DatumGetCString(value);
-						ltypid = get_typname_typid(ltypname,
-											   get_namespaceid(ltypnspname));
+						ltypid =
+							get_typname_typid(ltypname, get_namespaceid(ltypnspname));
 						/* Get right operand data type */
 						value = slot_getattr(result, colnum++, &isnull); /* typname */
 						rtypname = DatumGetCString(value);
 						value = slot_getattr(result, colnum++, &isnull); /* typnspname */
 						rtypnspname = DatumGetCString(value);
-						rtypid = get_typname_typid(rtypname,
-											   get_namespaceid(rtypnspname));
+						rtypid =
+							get_typname_typid(rtypname, get_namespaceid(rtypnspname));
 						/* lookup operator */
-						oprid = get_operid(oprname, ltypid, rtypid,
+						oprid = get_operid(oprname,
+										   ltypid,
+										   rtypid,
 										   get_namespaceid(oprnspname));
-					}
-					/*
-					 * Look up a statistics slot. If there is an entry of the
-					 * same kind already, leave it, assuming the statistics
-					 * is approximately the same on all nodes, so values from
-					 * one node are representing entire relation well.
-					 * If empty slot is found store values here. If no more
-					 * slots skip remaining values.
-					 */
-					for (k = 0; k < STATISTIC_NUM_SLOTS; k++)
-					{
-						if (stats->stakind[k] == 0 ||
-								(stats->stakind[k] == kind && stats->staop[k] == oprid))
-							break;
-					}
-
-					if (k >= STATISTIC_NUM_SLOTS)
-					{
-						/* No empty slots */
-						break;
-					}
-
-					/*
-					 * If it is an existing slot which has numbers or values
-					 * continue to the next set. If slot exists but without
-					 * numbers and values, try to acquire them now
-					 */
-					if (stats->stakind[k] != 0 && (stats->numnumbers[k] > 0 ||
-							stats->numvalues[k] > 0))
-					{
-						colnum += 2; /* skip numbers and values */
-						continue;
 					}
 
 					/*
 					 * Initialize slot
 					 */
-					stats->stakind[k] = kind;
-					stats->staop[k] = oprid;
-					stats->numnumbers[k] = 0;
-					stats->stanumbers[k] = NULL;
-					stats->numvalues[k] = 0;
-					stats->stavalues[k] = NULL;
-					stats->statypid[k] = InvalidOid;
-					stats->statyplen[k] = -1;
-					stats->statypalign[k] = 'i';
-					stats->statypbyval[k] = true;
+					stats->stakind[i]	  = kind;
+					stats->staop[i]		  = oprid;
+					stats->numnumbers[i]  = 0;
+					stats->stanumbers[i]  = NULL;
+					stats->numvalues[i]	  = 0;
+					stats->stavalues[i]	  = NULL;
+					stats->statypid[i]	  = InvalidOid;
+					stats->statyplen[i]	  = -1;
+					stats->statypalign[i] = 'i';
+					stats->statypbyval[i] = true;
 				}
-
 
 				/* get numbers */
 				value = slot_getattr(result, colnum++, &isnull); /* numbers */
@@ -5741,13 +5749,11 @@ coord_collect_stats(Relation onerel, bool inh, int attr_cnt,
 					 * to look like a C array of float4 values.
 					 */
 					nnumbers = ARR_DIMS(arry)[0];
-					if (ARR_NDIM(arry) != 1 || nnumbers <= 0 ||
-						ARR_HASNULL(arry) ||
+					if (ARR_NDIM(arry) != 1 || nnumbers <= 0 || ARR_HASNULL(arry) ||
 						ARR_ELEMTYPE(arry) != FLOAT4OID)
 						elog(ERROR, "stanumbers is not a 1-D float4 array");
 					numbers = (float4 *) palloc(nnumbers * sizeof(float4));
-					memcpy(numbers, ARR_DATA_PTR(arry),
-						   nnumbers * sizeof(float4));
+					memcpy(numbers, ARR_DATA_PTR(arry), nnumbers * sizeof(float4));
 
 					/*
 					 * Free arry if it's a detoasted copy.
@@ -5755,8 +5761,8 @@ coord_collect_stats(Relation onerel, bool inh, int attr_cnt,
 					if ((Pointer) arry != DatumGetPointer(value))
 						pfree(arry);
 
-					stats->numnumbers[k] = nnumbers;
-					stats->stanumbers[k] = numbers;
+					stats->numnumbers[i] = nnumbers;
+					stats->stanumbers[i] = numbers;
 				}
 				/* get values */
 				value = slot_getattr(result, colnum++, &isnull); /* values */
@@ -5770,12 +5776,18 @@ coord_collect_stats(Relation onerel, bool inh, int attr_cnt,
 					arry = DatumGetArrayTypeP(value);
 					/* We could cache this data, but not clear it's worth it */
 					get_typlenbyvalalign(ARR_ELEMTYPE(arry),
-										 &elmlen, &elmbyval, &elmalign);
+										 &elmlen,
+										 &elmbyval,
+										 &elmalign);
 					/* Deconstruct array into Datum elements; NULLs not expected */
 					deconstruct_array(arry,
 									  ARR_ELEMTYPE(arry),
-									  elmlen, elmbyval, elmalign,
-									  &values, NULL, &nvalues);
+									  elmlen,
+									  elmbyval,
+									  elmalign,
+									  &values,
+									  NULL,
+									  &nvalues);
 
 					/*
 					 * If the element type is pass-by-reference, we now have a bunch of
@@ -5794,13 +5806,13 @@ coord_collect_stats(Relation onerel, bool inh, int attr_cnt,
 					if ((Pointer) arry != DatumGetPointer(value))
 						pfree(arry);
 
-					stats->numvalues[k] = nvalues;
-					stats->stavalues[k] = values;
+					stats->numvalues[i]	  = nvalues;
+					stats->stavalues[i]	  = values;
 					/* store details about values data type */
-					stats->statypid[k] = ARR_ELEMTYPE(arry);
-					stats->statyplen[k] = elmlen;
-					stats->statypalign[k] = elmalign;
-					stats->statypbyval[k] = elmbyval;
+					stats->statypid[i]	  = ARR_ELEMTYPE(arry);
+					stats->statyplen[i]	  = elmlen;
+					stats->statypalign[i] = elmalign;
+					stats->statypbyval[i] = elmbyval;
 				}
 			}
 		}
@@ -5810,49 +5822,151 @@ coord_collect_stats(Relation onerel, bool inh, int attr_cnt,
 	}
 	ExecEndRemoteQuery(node);
 
-	/* for (i = 0; i < attr_cnt; i++) */
-	/* { */
-	/* 	VacAttrStats *stats = vacattrstats[i]; */
-
-	/* 	if (numnodes[i] > 0) */
-	/* 	{ */
-	/* 		stats->stanullfrac /= numnodes[i]; */
-	/* 		stats->stawidth /= numnodes[i]; */
-	/* 		stats->stadistinct /= numnodes[i]; */
-	/* 	} */
-	/* } */
 	update_attstats(RelationGetRelid(onerel),
 					inh,
 					attr_cnt,
 					vacattrstats,
 					RelationGetRelPersistence(onerel));
-	vac_update_relstats(onerel,
-						relpages,
-						reltuples,
-						relallvisible,
-						relhasindex,
-						InvalidTransactionId,
-						InvalidMultiXactId,
-						false);
+}
+
+/*
+ * coord_collect_extended_stats
+ *		sync extended stats for a relation (pg_statistic_ext contents).
+ *
+ * Sync statistics from the coordinator node specified by syncOpt.
+ *
+ */
+static void
+coord_sync_extended_stats(Relation onerel, int attr_cnt, AnalyzeSyncOpt *syncOpt)
+{
+	char			 *nspname;
+	char			 *relname;
+	char			 *cnname;
+	/* Fields to run query to read statistics from data nodes */
+	StringInfoData	  query;
+	EState		   *estate;
+	MemoryContext	  oldcontext;
+	RemoteQuery		*step;
+	RemoteQueryState *node;
+	TupleTableSlot   *result;
+	int				  i;
+	/* Number of data nodes from which attribute statistics are received. */
+	int				*numnodes;
+
+	/* Get the relation identifier */
+	relname = RelationGetRelationName(onerel);
+	nspname = get_namespace_name(RelationGetNamespace(onerel));
+
+	initStringInfo(&query);
+
+	appendStringInfo(&query,
+					 "SELECT ns.nspname, "
+					 "stxname, "
+					 "stxndistinct::bytea AS stxndistinct, "
+					 "stxdependencies::bytea AS stxdependencies "
+					 " FROM pg_statistic_ext s JOIN pg_class c "
+					 "    ON s.stxrelid = c.oid "
+					 "JOIN pg_namespace nc "
+					 "    ON c.relnamespace = nc.oid "
+					 "JOIN pg_namespace ns "
+					 "    ON s.stxnamespace = ns.oid "
+					 "WHERE nc.nspname = '%s' AND c.relname = '%s'",
+					 nspname,
+					 relname);
+
+	/* Build up RemoteQuery */
+	step				= init_sync_remotequery(syncOpt, &cnname);
+	step->sql_statement = query.data;
+
+	/* Add targetlist entries */
+	step->scan.plan.targetlist =
+		lappend(step->scan.plan.targetlist,
+				make_relation_tle(NamespaceRelationId, "pg_namespace", "nspname"));
+
+	step->scan.plan.targetlist =
+		lappend(step->scan.plan.targetlist,
+				make_relation_tle(StatisticExtRelationId, "pg_statistic_ext", "stxname"));
+
+	step->scan.plan.targetlist = lappend(
+		step->scan.plan.targetlist,
+		make_relation_tle(StatisticExtRelationId, "pg_statistic_ext", "stxndistinct"));
+
+	step->scan.plan.targetlist = lappend(
+		step->scan.plan.targetlist,
+		make_relation_tle(StatisticExtRelationId, "pg_statistic_ext", "stxdependencies"));
+
+	/* Execute query on the data nodes */
+	estate	   = CreateExecutorState();
+	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
+	node	   = ExecInitRemoteQuery(step, estate, 0);
+	MemoryContextSwitchTo(oldcontext);
+
+	/* get ready to combine results */
+	numnodes = (int *)palloc(attr_cnt * sizeof(int));
+	for (i = 0; i < attr_cnt; i++)
+		numnodes[i] = 0;
+
+	result = ExecRemoteQuery((PlanState *)node);
+
+	while (result != NULL && !TupIsNull(result))
+	{
+		Datum  value;
+		bool   isnull;
+		Name   nspname;
+		Name   stxname;
+		bytea *stxndistinct	   = NULL;
+		bytea *stxdependencies = NULL;
+
+		/* Process statistics from the data node */
+		value				   = slot_getattr(result, 1, &isnull); /* nspname */
+		nspname				   = DatumGetName(value);
+
+		value				   = slot_getattr(result, 2, &isnull); /* stxname */
+		stxname				   = DatumGetName(value);
+
+		value				   = slot_getattr(result, 3, &isnull); /* stxndistinct */
+		if (!isnull)
+			stxndistinct = DatumGetByteaP(value);
+
+		value = slot_getattr(result, 4, &isnull); /* stxdependencies */
+		if (!isnull)
+			stxdependencies = DatumGetByteaP(value);
+
+		update_ext_stats(nspname, stxname, stxndistinct, stxdependencies);
+
+		/* fetch stats from next node */
+		result = ExecRemoteQuery((PlanState *)node);
+	}
+	ExecEndRemoteQuery(node);
 }
 
 static void
-analyze_rel_sync(Relation onerel, bool inh, int attr_cnt,
-						VacAttrStats **vacattrstats, int nindexes,
-				 Relation *indexes, AnlIndexData *indexdata, AnalyzeSyncOpt *syncOpt)
+analyze_rel_sync(Relation		 onerel,
+				 bool			 inh,
+				 int			 attr_cnt,
+				 VacAttrStats  **vacattrstats,
+				 int			 nindexes,
+				 Relation		  *indexes,
+				 AnlIndexData	  *indexdata,
+				 AnalyzeSyncOpt *syncOpt)
 {
-
 	int i;
-	/* collect and fit simple statistics (pg_statistic) for the relation */
-	coord_collect_stats(onerel, inh, attr_cnt, vacattrstats, syncOpt);
+	/* sync statistics for the relation */
+	coord_sync_rel_stats(onerel, syncOpt);
+	/* sync column statistics (pg_statistic) for the relation */
+	coord_sync_col_stats(onerel, inh, attr_cnt, vacattrstats, syncOpt);
 
-	/* collect and fit simple statistics (pg_statistic) for all indexes */
+	/* sync simple statistics (pg_statistic) for all indexes */
 	for (i = 0; i < nindexes; i++)
-		coord_collect_stats(indexes[i],
+	{
+		coord_sync_rel_stats(indexes[i], syncOpt);
+		coord_sync_col_stats(indexes[i],
 									   false,
 									   indexdata[i].attr_cnt,
-							indexdata[i].vacattrstats, syncOpt);
+							 indexdata[i].vacattrstats,
+							 syncOpt);
+	}
 
 	/* extended statistics (pg_statistic) for the relation */
-	/* coord_collect_extended_stats(onerel, attr_cnt);  */
+	coord_sync_extended_stats(onerel, attr_cnt, syncOpt);
 }
