@@ -11132,7 +11132,13 @@ analyze_sync_option :
 					n->nodes = list_make1(makeString($3));
 					$$ = n;
 				}
-			| /*EMPTY*/ { $$ = NULL; }
+            | /*EMPTY*/
+				{
+					AnalyzeSyncOpt *n = makeNode(AnalyzeSyncOpt);
+					n->is_sync_from = false;
+					n->nodes = NIL;
+					$$ = n;
+				}
 		;
 
 opt_verbose:
