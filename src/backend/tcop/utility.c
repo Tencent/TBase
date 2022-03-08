@@ -721,24 +721,16 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 				foreach (cell, stmt->sync_option->nodes)
 				{
 					if (0 == strcmp(strVal(lfirst(cell)), PGXCNodeName))
-						ereport(ERROR,
-								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								 errmsg("Can not sync to/from local!")));
+						elog(ERROR, "Can not sync to/from local!");
 
 					PGXCNodeGetNodeIdFromName(strVal(lfirst(cell)), &node_type);
 					if (node_type == PGXC_NODE_NONE)
 					{
-						ereport(ERROR,
-								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								 errmsg("Can not find coordinator %s!",
-										strVal(lfirst(cell)))));
+						elog(ERROR, "Can not find coordinator %s!", strVal(lfirst(cell)));
 					}
 					else if (node_type != PGXC_NODE_COORDINATOR)
 					{
-						ereport(ERROR,
-								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								 errmsg("node %s is not coordinator!",
-										strVal(lfirst(cell)))));
+						elog(ERROR, "node %s is not coordinator!", strVal(lfirst(cell)));
 					}
 				}
 			}
