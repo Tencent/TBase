@@ -735,8 +735,10 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 				}
 			}
 
-			/* When statement is emit by the coordinating node, the statement is not
-			 * rewritten, adapt it here */
+			/*
+			 * When statement is emit by the coordinating node, the statement is not
+			 * rewritten, adapt it here
+			 */
 			if (IsConnFromCoord() && IS_PGXC_COORDINATOR &&
 				(stmt->options & VACOPT_ANALYZE) && stmt->sync_option)
 			{
