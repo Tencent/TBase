@@ -545,3 +545,31 @@ alter table returningwrtest2 drop c;
 alter table returningwrtest attach partition returningwrtest2 for values in (2);
 insert into returningwrtest values (2, 'foo') returning returningwrtest;
 drop table returningwrtest;
+
+-- check insert into a shard table from a CTE table
+create table t1(f1 int,f2 int) distribute by shard(f1);
+create table t2(f1 int,f2 int) distribute by shard(f1);
+insert into t1 values(1,1);
+insert into t1 values(2,2);
+with baseInfo as(select * from t1)
+insert into t2 select * from baseInfo;
+drop table t1;
+drop table t2;
+
+-- Determine whether tables of different groups are allowed to insert.
+set default_locator_type to shard;
+drop table if exists t2;
+drop table if exists t2_rep;
+drop table if exists t2_new;
+create table t2(f1 int,f2 int);
+create table t2_rep(f1 int,f2 int) distribute by replication;
+insert into t2_rep values(1,1),(2,2);
+insert into t2 select * from t2_rep;
+select count(*) from t2_rep;
+select count(*) from t2;
+create table t2_new as select * from t2_rep;
+select count(*) from t2_new;
+drop table t2;
+drop table t2_rep;
+drop table t2_new;
+reset default_locator_type;
