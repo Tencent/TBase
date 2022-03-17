@@ -76,7 +76,8 @@
 #include "nodes/nodes.h"
 #include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
-
+#include "nodes/relation.h"
+#include "storage/lockdefs.h"
 
 extern char *pg_get_indexdef_string(Oid indexrelid);
 extern char *pg_get_indexdef_columns(Oid indexrelid, bool pretty);
@@ -101,6 +102,8 @@ extern char * GetPartitionName(Oid parentrelid, int partidx, bool isindex);
 extern int RelationGetPartitionIdxByValue(Relation rel, Datum value);
 
 extern List *RelationGetAllPartitions(Relation rel);
+extern List *RelationGetAllPartitionsWithLock(Relation rel, LOCKMODE lockmode);
+extern int GetAllPartitionIntervalCount(Oid parent_oid);
 
 extern int GetAllPartitionIntervalCount(Oid parent_oid);
 

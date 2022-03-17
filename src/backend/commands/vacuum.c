@@ -456,6 +456,15 @@ get_rel_oids(Oid relid, const RangeVar *vacrel)
         if (include_parts)
             oid_list = list_concat(oid_list,
                                    find_all_inheritors(relid, NoLock, NULL));
+		else if (!IsAutoVacuumWorkerProcess() &&
+				 classForm->relpartkind == RELPARTKIND_PARENT)
+		{
+			Relation p_rel;
+			p_rel	 = relation_open(relid, NoLock);
+			oid_list = lappend_oid(oid_list, relid);
+			oid_list = list_concat(oid_list, RelationGetAllPartitions(p_rel));
+			relation_close(p_rel, NoLock);
+		}
         else
             oid_list = lappend_oid(oid_list, relid);
         MemoryContextSwitchTo(oldcontext);
@@ -1266,14 +1275,6 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
     Oid            save_userid;
     int            save_sec_context;
     int            save_nestlevel;
-#ifdef __TBASE__
-    bool        part_vacuum_result = true;
-    List        *childs = NULL;
-    List        *new_childs = NULL;
-    Oid         child;
-    ListCell    *lc;
-    MemoryContext oldmctx;
-#endif
 
     Assert(params != NULL);
 

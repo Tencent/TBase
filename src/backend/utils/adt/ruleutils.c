@@ -93,6 +93,7 @@
 #include "postmaster/postmaster.h"
 #endif
 
+#include "storage/lmgr.h"
 /* ----------
  * Pretty formatting constants
  * ----------
@@ -12051,6 +12052,12 @@ RelationGetPartitionByValue(Relation rel, Const *value)
 List *
 RelationGetAllPartitions(Relation rel)
 {
+	return RelationGetAllPartitionsWithLock(rel, NoLock);
+}
+
+List *
+RelationGetAllPartitionsWithLock(Relation rel, LOCKMODE lockmode)
+{
     int nparts = 0;
     char *partname = NULL;
     Oid     partoid = InvalidOid;
@@ -12072,7 +12079,24 @@ RelationGetAllPartitions(Relation rel)
 		{
 			continue;
 		}
+		if (lockmode != NoLock)
+		{
+			/* Get the lock to synchronize against concurrent drop */
+			LockRelationOid(partoid, lockmode);
 
+			/*
+			 * Now that we have the lock, double-check to see if the relation
+			 * really exists or not.  If not, assume it was dropped while we
+			 * waited to acquire lock, and ignore it.
+			 */
+			if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(partoid)))
+			{
+				/* Release useless lock */
+				UnlockRelationOid(partoid, lockmode);
+				/* And ignore this relation */
+				continue;
+			}
+		}
 		result = lappend_oid(result, partoid);
     }
 
