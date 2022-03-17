@@ -170,34 +170,6 @@ analyze_rel(Oid relid, RangeVar *relation, int options,
     int            elevel;
     AcquireSampleRowsFunc acquirefunc = NULL;
     BlockNumber relpages = 0;
-#ifdef __TBASE__
-    List        *childs = NULL;
-    Oid         child;
-    ListCell    *lc;
-
-    if(!IsAutoVacuumWorkerProcess())
-    {
-        onerel = relation_open(relid, NoLock);
-
-        if(RELATION_IS_INTERVAL(onerel))
-        {
-            childs = RelationGetAllPartitions(onerel);
-            foreach(lc, childs)
-            {
-                child = lfirst_oid(lc);
-                analyze_rel(child, relation, options, params, va_cols, in_outer_xact,
-                            bstrategy);
-            }
-			if (childs)
-				pfree(childs);
-            childs = NULL;
-			CommandCounterIncrement();
-        }
-
-        relation_close(onerel, NoLock);
-        onerel = NULL;
-    }
-#endif
 
     /* Select logging level */
     if (options & VACOPT_VERBOSE)
@@ -1549,7 +1521,7 @@ acquire_inherited_sample_rows(Relation onerel, int elevel,
      */
 	if (RELATION_IS_INTERVAL(onerel))
 	{
-		tableOIDs = RelationGetAllPartitions(onerel);
+		tableOIDs = RelationGetAllPartitionsWithLock(onerel, AccessShareLock);
 	}
 	else 
 	{
@@ -1562,8 +1534,9 @@ acquire_inherited_sample_rows(Relation onerel, int elevel,
      * child but no longer does.  In that case, we can clear the
      * relhassubclass field so as not to make the same mistake again later.
      * (This is safe because we hold ShareUpdateExclusiveLock.)
+	 * 
      */
-    if (list_length(tableOIDs) < 2)
+	if (list_length(tableOIDs) < 2 && !(list_length(tableOIDs) == 1 && RELATION_IS_INTERVAL(onerel)))
     {
         /* CCI because we already updated the pg_class row in this command */
         CommandCounterIncrement();
@@ -1594,14 +1567,8 @@ acquire_inherited_sample_rows(Relation onerel, int elevel,
         BlockNumber relpages = 0;
 
         /* We already got the needed lock */
-		if (RELATION_IS_INTERVAL(onerel))
-		{
-			childrel = heap_open(childOID, AccessShareLock);
-		}
-		else 
-		{
 			childrel = heap_open(childOID, NoLock);
-		}
+
 
         /* Ignore if temp table of another backend */
         if (RELATION_IS_OTHER_TEMP(childrel))
@@ -4878,12 +4845,12 @@ get_rel_pages_visiblepages(Relation onerel,
 
 		if (RELATION_IS_INTERVAL(onerel))
 		{
-			childs = RelationGetAllPartitions(onerel);
+			childs = RelationGetAllPartitionsWithLock(onerel, AccessShareLock);
 		}
 		else 
 		{
 			childs =
-				find_all_inheritors(RelationGetRelid(onerel), NoLock, NULL);
+				find_all_inheritors(RelationGetRelid(onerel), AccessShareLock, NULL);
 		}
 
 		*pages = 0;
@@ -4896,7 +4863,7 @@ get_rel_pages_visiblepages(Relation onerel,
 			BlockNumber visible;
 
 			/* We already got the needed lock */
-			childrel = heap_open(childOID, AccessShareLock);
+			childrel = heap_open(childOID, NoLock);
 
 			/* Ignore if temp table of another backend */
 			if (RELATION_IS_OTHER_TEMP(childrel))
