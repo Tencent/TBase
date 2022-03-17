@@ -456,15 +456,6 @@ get_rel_oids(Oid relid, const RangeVar *vacrel)
         if (include_parts)
             oid_list = list_concat(oid_list,
                                    find_all_inheritors(relid, NoLock, NULL));
-		else if (!IsAutoVacuumWorkerProcess() &&
-				 classForm->relpartkind == RELPARTKIND_PARENT)
-		{
-			Relation p_rel;
-			p_rel	 = relation_open(relid, NoLock);
-			oid_list = lappend_oid(oid_list, relid);
-			oid_list = list_concat(oid_list, RelationGetAllPartitions(p_rel));
-			relation_close(p_rel, NoLock);
-		}
         else
             oid_list = lappend_oid(oid_list, relid);
         MemoryContextSwitchTo(oldcontext);
@@ -497,6 +488,9 @@ get_rel_oids(Oid relid, const RangeVar *vacrel)
                 classForm->relkind != RELKIND_PARTITIONED_TABLE)
                 continue;
 			
+			if (classForm->relpartkind == RELPARTKIND_CHILD)
+				continue;
+
 			if (classForm->relpartkind == RELPARTKIND_CHILD)
 				continue;
 
@@ -1275,6 +1269,15 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
     Oid            save_userid;
     int            save_sec_context;
     int            save_nestlevel;
+#ifdef __TBASE__
+       bool            part_vacuum_result = true;
+       List            *childs = NULL;
+       List            *new_childs = NULL;
+       Oid             child;
+       ListCell        *lc;
+       MemoryContext oldmctx;
+#endif
+
 
     Assert(params != NULL);
 
@@ -1285,19 +1288,25 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
         /* functions in indexes may want a snapshot set */
         PushActiveSnapshot(GetLocalTransactionSnapshot());
 
-        onerel = relation_open(relid, NoLock);
-
-        if(RELATION_IS_INTERVAL(onerel))
+        onerel = try_relation_open(relid, NoLock);
+        if (!onerel)
         {
-            childs = RelationGetAllPartitions(onerel);
+            PopActiveSnapshot();
+            CommitTransactionCommand();
+            return false;
+        }
 
-            oldmctx = MemoryContextSwitchTo(vac_context);
+        if (RELATION_IS_INTERVAL(onerel))
+        {
+            childs	  = RelationGetAllPartitions(onerel);
+
+            oldmctx	  = MemoryContextSwitchTo(vac_context);
             new_childs = list_copy(childs);
             MemoryContextSwitchTo(oldmctx);
 
-			if (childs)
-				pfree(childs);
-            childs = NULL;
+            if (childs)
+                pfree(childs);
+            childs	= NULL;
             onerelid = onerel->rd_lockInfo.lockRelId;
             LockRelationIdForSession(&onerelid, RowExclusiveLock);
         }
@@ -1307,23 +1316,23 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
 
         PopActiveSnapshot();
         CommitTransactionCommand();
-        
-        if(new_childs)
+
+        if (new_childs)
         {
-            foreach(lc, new_childs)
+            foreach (lc, new_childs)
             {
-                child = lfirst_oid(lc);
+                child			  = lfirst_oid(lc);
                 part_vacuum_result = vacuum_rel(child, relation, options, params);
             }
             UnlockRelationIdForSession(&onerelid, RowExclusiveLock);
             pfree(new_childs);
 
-            if(!part_vacuum_result)
+            if (!part_vacuum_result)
             {
                 return false;
-            }        
+            }
         }
-    }
+	}
 #endif    
 
     /* Begin a transaction for vacuuming this relation */

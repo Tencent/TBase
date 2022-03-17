@@ -170,6 +170,39 @@ analyze_rel(Oid relid, RangeVar *relation, int options,
     int            elevel;
     AcquireSampleRowsFunc acquirefunc = NULL;
     BlockNumber relpages = 0;
+#ifdef __TBASE__
+	List	 *childs = NULL;
+	Oid		  child;
+	ListCell *lc;
+	if (!IsAutoVacuumWorkerProcess())
+	{
+		onerel = try_relation_open(relid, NoLock);
+		if(!onerel)
+			return;
+
+		if (RELATION_IS_INTERVAL(onerel))
+		{
+			childs = RelationGetAllPartitions(onerel);
+			foreach (lc, childs)
+			{
+				child = lfirst_oid(lc);
+				analyze_rel(child,
+							relation,
+							options,
+							params,
+							va_cols,
+							in_outer_xact,
+							bstrategy);
+			}
+			if (childs)
+				pfree(childs);
+			childs = NULL;
+			CommandCounterIncrement();
+		}
+		relation_close(onerel, NoLock);
+		onerel = NULL;
+	}
+#endif
 
     /* Select logging level */
     if (options & VACOPT_VERBOSE)
