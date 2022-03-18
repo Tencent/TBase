@@ -176,13 +176,15 @@ analyze_rel(Oid relid, RangeVar *relation, int options,
 	ListCell *lc;
 	if (!IsAutoVacuumWorkerProcess())
 	{
-		onerel = try_relation_open(relid, NoLock);
+		onerel = try_relation_open(relid, AccessShareLock);
 		if(!onerel)
 			return;
 
 		if (RELATION_IS_INTERVAL(onerel))
 		{
 			childs = RelationGetAllPartitions(onerel);
+			/* no need maintain parent lock，unlock and close */
+			relation_close(onerel, AccessShareLock);
 			foreach (lc, childs)
 			{
 				child = lfirst_oid(lc);
@@ -199,7 +201,8 @@ analyze_rel(Oid relid, RangeVar *relation, int options,
 			childs = NULL;
 			CommandCounterIncrement();
 		}
-		relation_close(onerel, NoLock);
+		else
+			relation_close(onerel, AccessShareLock);
 		onerel = NULL;
 	}
 #endif

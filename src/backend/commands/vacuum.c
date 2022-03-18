@@ -1288,7 +1288,7 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
         /* functions in indexes may want a snapshot set */
         PushActiveSnapshot(GetLocalTransactionSnapshot());
 
-        onerel = try_relation_open(relid, NoLock);
+		   onerel = try_relation_open(relid, AccessShareLock);
         if (!onerel)
         {
             PopActiveSnapshot();
@@ -1311,7 +1311,7 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
             LockRelationIdForSession(&onerelid, RowExclusiveLock);
         }
 
-        relation_close(onerel, NoLock);
+		   relation_close(onerel, AccessShareLock);
         onerel = NULL;
 
         PopActiveSnapshot();
