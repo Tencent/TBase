@@ -1570,12 +1570,18 @@ acquire_inherited_sample_rows(Relation onerel, int elevel,
      * child but no longer does.  In that case, we can clear the
      * relhassubclass field so as not to make the same mistake again later.
      * (This is safe because we hold ShareUpdateExclusiveLock.)
-	 * 
+	 * No need to deal with the parent table of interval partitioned table, so tableOIDs
+	 * only carry children table oids.
      */
 	if (list_length(tableOIDs) < 2 && !(list_length(tableOIDs) == 1 && RELATION_IS_INTERVAL(onerel)))
     {
         /* CCI because we already updated the pg_class row in this command */
         CommandCounterIncrement();
+		/*
+		 * the interval partitioned table has nothing to do with attribute named
+		 * relhassubclass
+		 */
+		if(!RELATION_IS_INTERVAL(onerel))
         SetRelationHasSubclass(RelationGetRelid(onerel), false);
         ereport(elevel,
                 (errmsg("skipping analyze of \"%s.%s\" inheritance tree --- this inheritance tree contains no child tables",
