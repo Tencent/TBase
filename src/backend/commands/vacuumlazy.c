@@ -213,7 +213,7 @@ lazy_vacuum_interval_rel(Relation onerel, VacuumParams *params)
                               &multiXactCutoff, NULL);
     }
 
-	childs = RelationGetAllPartitions(onerel);
+	childs = RelationGetAllPartitionsWithLock(onerel, AccessShareLock);
 
 	foreach (lc, childs)
 	{
@@ -222,7 +222,7 @@ lazy_vacuum_interval_rel(Relation onerel, VacuumParams *params)
 		PgStat_StatTabEntry *tabentry;
 	
 		/* We already got the needed lock */
-		childrel = heap_open(childOID, AccessShareLock);
+		childrel = heap_open(childOID, NoLock);
 
 		/* Ignore if temp table of another backend */
 		if (RELATION_IS_OTHER_TEMP(childrel))
