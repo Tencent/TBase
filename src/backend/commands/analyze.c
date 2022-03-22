@@ -121,7 +121,7 @@ static BufferAccessStrategy vac_strategy;
 static void do_analyze_rel(Relation onerel, int options,
                VacuumParams *params, List *va_cols,
                AcquireSampleRowsFunc acquirefunc, BlockNumber relpages,
-						   bool inh, bool in_outer_xact, int elevel, AnalyzeSyncOpt *syncOpt);
+						   bool inh, bool in_outer_xact, int elevel, StatSyncOpt *syncOpt);
 static void compute_index_stats(Relation onerel, double totalrows,
                     AnlIndexData *indexdata, int nindexes,
                     HeapTuple *rows, int numrows,
@@ -146,7 +146,7 @@ static void					analyze_rel_sync(Relation		 onerel,
 											 int			 nindexes,
 											 Relation		  *indexes,
 											 AnlIndexData	  *indexdata,
-											 AnalyzeSyncOpt *syncOpt);
+											 StatSyncOpt *syncOpt);
 
 #ifdef XCP
 static void analyze_rel_coordinator(Relation onerel, bool inh, int attr_cnt,
@@ -177,7 +177,7 @@ analyze_rel(Oid					 relid,
 			List				 *va_cols,
 			bool				 in_outer_xact,
 			BufferAccessStrategy bstrategy,
-			AnalyzeSyncOpt	   *syncOpt)
+			StatSyncOpt	   *syncOpt)
 {
     Relation    onerel;
     int            elevel;
@@ -438,7 +438,7 @@ do_analyze_rel(Relation				 onerel,
 			   bool					 inh,
 			   bool					 in_outer_xact,
 			   int					 elevel,
-			   AnalyzeSyncOpt		  *syncOpt)
+			   StatSyncOpt		  *syncOpt)
 {
     int            attr_cnt,
                 tcnt,
@@ -633,10 +633,8 @@ do_analyze_rel(Relation				 onerel,
 	 * Sync statistics if this session is connected to other remote Coordinator.
 	 * When receiving sync commands directly from the client, we also sync statistics.
 	 */
-	if (iscoordinator && IsConnFromCoord() &&
-		(syncOpt != NULL && syncOpt->is_sync_from == true))
+	if (iscoordinator && (syncOpt != NULL && syncOpt->is_sync_from == true))
 	{
-		elog(INFO, "SYNC statistic");
 		analyze_rel_sync(onerel,
 						 inh,
 						 attr_cnt,
@@ -5349,8 +5347,8 @@ acquire_coordinator_sample_rows(Relation onerel, int elevel,
 
 #endif
 
-static RemoteQuery *
-init_sync_remotequery(AnalyzeSyncOpt *syncOpt, char **cnname)
+RemoteQuery *
+init_sync_remotequery(StatSyncOpt *syncOpt, char **cnname)
 {
 	RemoteQuery *step;
 	ListCell	 *lc;
@@ -5381,7 +5379,7 @@ init_sync_remotequery(AnalyzeSyncOpt *syncOpt, char **cnname)
  *		sync relation stats from the coordinator node specified by syncOpt.
  */
 static void
-coord_sync_rel_stats(Relation onerel, AnalyzeSyncOpt *syncOpt)
+coord_sync_rel_stats(Relation onerel, StatSyncOpt *syncOpt)
 {
 	char 		   *nspname;
 	char 		   *relname;
@@ -5487,7 +5485,7 @@ coord_sync_col_stats(Relation		 onerel,
 					 bool			 inh,
 					 int			 attr_cnt,
 					 VacAttrStats  **vacattrstats,
-					 AnalyzeSyncOpt *syncOpt)
+					 StatSyncOpt *syncOpt)
 {
 	char			 *nspname;
 	char			 *relname;
@@ -5837,7 +5835,7 @@ coord_sync_col_stats(Relation		 onerel,
  *
  */
 static void
-coord_sync_extended_stats(Relation onerel, int attr_cnt, AnalyzeSyncOpt *syncOpt)
+coord_sync_extended_stats(Relation onerel, int attr_cnt, StatSyncOpt *syncOpt)
 {
 	char			 *nspname;
 	char			 *relname;
@@ -5948,7 +5946,7 @@ analyze_rel_sync(Relation		 onerel,
 				 int			 nindexes,
 				 Relation		  *indexes,
 				 AnlIndexData	  *indexdata,
-				 AnalyzeSyncOpt *syncOpt)
+				 StatSyncOpt *syncOpt)
 {
 	int i;
 	/* sync statistics for the relation */

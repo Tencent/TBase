@@ -567,9 +567,10 @@ pg_relation_size(PG_FUNCTION_ARGS)
             partoid = lfirst_oid(lc);
             
             child_rel = try_relation_open(partoid, AccessShareLock);
+			/* skip calculate size of child not exists */
             if (NULL == child_rel)
             {
-                PG_RETURN_NULL();
+				continue;
             }
             size += calculate_relation_size(&(child_rel->rd_node), child_rel->rd_backend,
                                            forkname_to_number(text_to_cstring(forkName)), NULL);
