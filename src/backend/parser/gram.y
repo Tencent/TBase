@@ -10969,7 +10969,7 @@ cluster_index_specification:
  *
  *****************************************************************************/
 
-VacuumStmt: VACUUM opt_full opt_freeze opt_verbose
+VacuumStmt: VACUUM opt_full opt_freeze opt_verbose analyze_sync_option
 				{
 					VacuumStmt *n = makeNode(VacuumStmt);
 					n->options = VACOPT_VACUUM;
@@ -10981,9 +10981,10 @@ VacuumStmt: VACUUM opt_full opt_freeze opt_verbose
 						n->options |= VACOPT_VERBOSE;
 					n->relation = NULL;
 					n->va_cols = NIL;
+					n->sync_option = $5;
 					$$ = (Node *)n;
 				}
-			| VACUUM opt_full opt_freeze opt_verbose qualified_name
+			| VACUUM opt_full opt_freeze opt_verbose qualified_name analyze_sync_option
 				{
 					VacuumStmt *n = makeNode(VacuumStmt);
 					n->options = VACOPT_VACUUM;
@@ -10995,6 +10996,7 @@ VacuumStmt: VACUUM opt_full opt_freeze opt_verbose
 						n->options |= VACOPT_VERBOSE;
 					n->relation = $5;
 					n->va_cols = NIL;
+					n->sync_option = $6;
 					$$ = (Node *)n;
 				}
 			| VACUUM opt_full opt_freeze opt_verbose AnalyzeStmt
@@ -11009,15 +11011,16 @@ VacuumStmt: VACUUM opt_full opt_freeze opt_verbose
 						n->options |= VACOPT_VERBOSE;
 					$$ = (Node *)n;
 				}
-			| VACUUM '(' vacuum_option_list ')'
+			| VACUUM '(' vacuum_option_list ')' analyze_sync_option
 				{
 					VacuumStmt *n = makeNode(VacuumStmt);
 					n->options = VACOPT_VACUUM | $3;
 					n->relation = NULL;
 					n->va_cols = NIL;
+					n->sync_option = $5;
 					$$ = (Node *) n;
 				}
-			| VACUUM '(' vacuum_option_list ')' qualified_name opt_name_list
+			| VACUUM '(' vacuum_option_list ')' qualified_name opt_name_list analyze_sync_option
 				{
 					VacuumStmt *n = makeNode(VacuumStmt);
 					n->options = VACOPT_VACUUM | $3;
@@ -11025,6 +11028,7 @@ VacuumStmt: VACUUM opt_full opt_freeze opt_verbose
 					n->va_cols = $6;
 					if (n->va_cols != NIL)	/* implies analyze */
 						n->options |= VACOPT_ANALYZE;
+					n->sync_option = $7;
 					$$ = (Node *) n;
 				}
 /* _SHARDING_ BEGIN */
@@ -11113,28 +11117,28 @@ analyze_keyword:
 analyze_sync_option :
             SYNC ALL
 			    {
-					AnalyzeSyncOpt *n = makeNode(AnalyzeSyncOpt);
+					StatSyncOpt *n = makeNode(StatSyncOpt);
 					n->is_sync_from = false;
 					n->nodes = NIL;
 					$$ = n;
 			    }
 			| SYNC TO pgxcnode_list
 			    {
-					AnalyzeSyncOpt *n = makeNode(AnalyzeSyncOpt);
+					StatSyncOpt *n = makeNode(StatSyncOpt);
 					n->is_sync_from = false;
 					n->nodes = $3;
 					$$ = n;
 			    }
 			| SYNC FROM pgxcnode_name
 			    {
-					AnalyzeSyncOpt *n = makeNode(AnalyzeSyncOpt);
+					StatSyncOpt *n = makeNode(StatSyncOpt);
 					n->is_sync_from = true;
 					n->nodes = list_make1(makeString($3));
 					$$ = n;
 				}
             | /*EMPTY*/
 				{
-					AnalyzeSyncOpt *n = makeNode(AnalyzeSyncOpt);
+					StatSyncOpt *n = makeNode(StatSyncOpt);
 					n->is_sync_from = false;
 					n->nodes = NIL;
 					$$ = n;

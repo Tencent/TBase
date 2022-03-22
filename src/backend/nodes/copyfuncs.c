@@ -4149,10 +4149,10 @@ _copyVacuumStmt(const VacuumStmt *from)
 	return newnode;
 }
 
-static AnalyzeSyncOpt *
-_copyAnalyzeSyncOpt(const AnalyzeSyncOpt *from)
+static StatSyncOpt *
+_copyStatSyncOpt(const StatSyncOpt *from)
 {
-	AnalyzeSyncOpt *newnode = makeNode(AnalyzeSyncOpt);
+	StatSyncOpt *newnode = makeNode(StatSyncOpt);
 
 	COPY_SCALAR_FIELD(is_sync_from);
 	COPY_NODE_FIELD(nodes);
@@ -5926,8 +5926,8 @@ copyObjectImpl(const void *from)
         case T_VacuumStmt:
             retval = _copyVacuumStmt(from);
             break;
-		case T_AnalyzeSyncOpt:
-			retval = _copyAnalyzeSyncOpt(from);
+		case T_StatSyncOpt:
+			retval = _copyStatSyncOpt(from);
 			break;
 #ifdef _SHARDING_
         case T_VacuumShardStmt:

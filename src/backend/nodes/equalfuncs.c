@@ -1700,7 +1700,7 @@ _equalVacuumStmt(const VacuumStmt *a, const VacuumStmt *b)
 }
 
 static bool
-_equalAnalyzeSyncOpt(const AnalyzeSyncOpt *a, const AnalyzeSyncOpt *b)
+_equalStatSyncOpt(const StatSyncOpt *a, const StatSyncOpt *b)
 {
 	COMPARE_SCALAR_FIELD(is_sync_from);
 	COMPARE_NODE_FIELD(nodes);
@@ -3602,8 +3602,8 @@ equal(const void *a, const void *b)
         case T_VacuumStmt:
             retval = _equalVacuumStmt(a, b);
             break;
-		case T_AnalyzeSyncOpt:
-			retval = _equalAnalyzeSyncOpt(a, b);
+		case T_StatSyncOpt:
+			retval = _equalStatSyncOpt(a, b);
 			break;
 #ifdef _SHARDING_
         case T_VacuumShardStmt:

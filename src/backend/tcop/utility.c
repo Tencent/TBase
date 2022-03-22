@@ -739,8 +739,7 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 			 * When statement is emit by the coordinating node, the statement is not
 			 * rewritten, adapt it here
 			 */
-			if (IsConnFromCoord() && IS_PGXC_COORDINATOR &&
-				(stmt->options & VACOPT_ANALYZE) && stmt->sync_option)
+			if (IsConnFromCoord() && IS_PGXC_COORDINATOR && stmt->sync_option)
 			{
 				stmt->sync_option->is_sync_from = true;
 				list_free_deep(stmt->sync_option->nodes);
@@ -748,10 +747,10 @@ ProcessUtilityPre(PlannedStmt *pstmt,
 				stmt->sync_option->nodes = list_make1(makeString(parentPGXCNode));
 			}
                 /*
-			 * Not SYNC command, We have to run the command on nodes before Coordinator because
+			 * If it is not a SYNC FROM command, We have to run the command on nodes before Coordinator because
                  * vacuum() pops active snapshot and we can not send it to nodes
                  */
-			else if (!(stmt->options & VACOPT_COORDINATOR))
+			else if (!(stmt->options & VACOPT_COORDINATOR) && !(stmt->sync_option && stmt->sync_option->is_sync_from == true))
                     exec_type = EXEC_ON_DATANODES;
                 auto_commit = true;
             }
@@ -1352,9 +1351,21 @@ ProcessUtilityPost(PlannedStmt *pstmt,
         case T_VacuumStmt:
 		{
 			VacuumStmt *vstmt = (VacuumStmt *)parsetree;
-			/* Send synchronization statements to other coordinator nodes  */
+			if (vstmt->relation != NULL)
+			{
+				Relation rel =
+					relation_openrv_extended(vstmt->relation, NoLock, true, false);
+				if (rel && rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
+				{
+					relation_close(rel, NoLock);
+					break;
+				}
+				if (rel)
+					relation_close(rel, NoLock);
+			}
 			if (!IsConnFromCoord() && IS_PGXC_COORDINATOR &&
-				(vstmt->options & VACOPT_ANALYZE) && vstmt->sync_option)
+				!IsInTransactionChain(context == PROCESS_UTILITY_TOPLEVEL) &&
+				vstmt->sync_option)
 			{
 				exec_type		  = EXEC_ON_COORDS;
 				if (vstmt->sync_option->nodes)
@@ -1376,10 +1387,14 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 						exec_nodes->nodeList = lappend_int(exec_nodes->nodeList, nodeIdx);
 					}
 				}
+				if (ActiveSnapshotSet())
+				{
 				PopActiveSnapshot();
+				}
 				CommitTransactionCommand();
 				StartTransactionCommand();
 			}
+			auto_commit = true;
 			break;
 		}
 #ifdef _SHARDING_

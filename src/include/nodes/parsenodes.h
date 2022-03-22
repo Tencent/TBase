@@ -3301,13 +3301,13 @@ typedef enum VacuumOption
                                   */
 } VacuumOption;
 
-typedef struct AnalyzeSyncOpt
+typedef struct StatSyncOpt
 {
 	NodeTag type;
 	bool  is_sync_from; /* false: sync to other CN node; true: sync from node identified by
 						 node_name */
 	List *nodes;	  /* node list for sync to/from */
-} AnalyzeSyncOpt;
+} StatSyncOpt;
 
 typedef struct VacuumStmt
 {
@@ -3315,7 +3315,7 @@ typedef struct VacuumStmt
     int            options;        /* OR of VacuumOption flags */
     RangeVar   *relation;        /* single table to process, or NULL */
     List       *va_cols;        /* list of column names, or NIL for all */
-	AnalyzeSyncOpt *sync_option; /* Sync statistics to/from other nodes, or NULL */
+	StatSyncOpt *sync_option; /* Sync statistics to/from other nodes, or NULL */
 } VacuumStmt;
 
 #ifdef _SHARDING_
