@@ -20,6 +20,7 @@
 #include "storage/shmem.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
+#include "utils/memutils.h"
 #include "utils/portal.h"
 #include "utils/snapmgr.h"
 #include "utils/timestamp.h"
@@ -103,6 +104,8 @@ static PortalDrop_hook_type prev_PortalDrop = NULL;
 static ExecutorStart_hook_type prev_ExecutorStart = NULL;
 
 static bool pgcs_enable_planstate; /* whether to show planstate in result sets */
+
+MemoryContext PGCSMemoryContext = NULL;
 
 /*
  * Macros to load and store st_changecount with the memory barriers.
@@ -419,6 +422,8 @@ pgcs_report_executor_activity(QueryDesc *desc, int eflags)
 	volatile PgClusterStatus *entry;
 	StringInfo planstate_str = NULL;
 	StringInfo cursors = NULL;
+	ExplainState *es = NULL;
+	MemoryContext oldctx;
 	
 	if (prev_ExecutorStart)
 		prev_ExecutorStart(desc, eflags);
@@ -440,12 +445,14 @@ pgcs_report_executor_activity(QueryDesc *desc, int eflags)
 		return;
 	}
 	
+	oldctx = MemoryContextSwitchTo(PGCSMemoryContext);
+	
 	if (desc->planstate != NULL)
 	{
 		/* make planstate text tree if enabled */
 		if (pgcs_enable_planstate)
 		{
-			ExplainState *es = NewExplainState();
+			es = NewExplainState();
 			
 			es->costs = false;
 			/* we don't want plan->targetlist been changed */
@@ -469,6 +476,9 @@ pgcs_report_executor_activity(QueryDesc *desc, int eflags)
 		cursors = makeStringInfo();
 		cursorCollectWalker(desc->planstate, cursors);
 	}
+	
+	MemoryContextSwitchTo(oldctx);
+	MemoryContextResetAndDeleteChildren(PGCSMemoryContext);
 	
 	increment_changecount_before(entry);
 	
@@ -1140,6 +1150,9 @@ _PG_init(void)
 	 */
 	RequestAddinShmemSpace(pgcs_memsize());
 	
+	PGCSMemoryContext = AllocSetContextCreate(TopMemoryContext,
+	                                          "pg_stat_cluster_activity planstate",
+	                                          ALLOCSET_DEFAULT_SIZES);
 	/*
 	 * Install hooks.
 	 */
