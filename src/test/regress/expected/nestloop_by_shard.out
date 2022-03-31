@@ -81,8 +81,8 @@ where t1.unique1 = 1;
    ->  Nested Loop Left Join
          ->  Remote Subquery Scan on all
                Distribute results by S: hundred
-               ->  Seq Scan on tenk1_s t1
-                     Filter: (unique1 = 1)
+               ->  Index Scan using unique1_s on tenk1_s t1
+                     Index Cond: (unique1 = 1)
          ->  Materialize
                ->  Remote Subquery Scan on all
                      Distribute results by S: hundred
@@ -114,8 +114,8 @@ where t1.unique1 = 1;
    ->  Nested Loop Left Join
          ->  Remote Subquery Scan on all
                Distribute results by S: hundred
-               ->  Seq Scan on tenk1_s t1
-                     Filter: (unique1 = 1)
+               ->  Index Scan using unique1_s on tenk1_s t1
+                     Index Cond: (unique1 = 1)
          ->  Materialize
                ->  Remote Subquery Scan on all
                      Distribute results by S: hundred
