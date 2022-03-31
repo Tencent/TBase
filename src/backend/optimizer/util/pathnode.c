@@ -7414,7 +7414,13 @@ path_count_datanodes(Path *path)
 	    (path->distribution->distributionType == LOCATOR_TYPE_SHARD ||
 	     path->distribution->distributionType == LOCATOR_TYPE_HASH))
 	{
-		double nodes = bms_num_members(path->distribution->nodes);
+		double nodes;
+		
+		nodes = bms_num_members(path->distribution->restrictNodes);
+		if (nodes > 0)
+			return nodes;
+		
+		nodes = bms_num_members(path->distribution->nodes);
 		if (nodes > 0)
 			return nodes;
 	}
