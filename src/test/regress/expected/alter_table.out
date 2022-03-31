@@ -3831,3 +3831,28 @@ update dropped_col_remote_dml set b = 2;
 NOTICE:  this is a test
 drop table dropped_col_remote_dml cascade;
 drop function dropped_col_remote_dml_func;
+-- add column with default values and check shardid
+create table t_default_shardid(a int, b int) distribute by shard(a);
+NOTICE:  Replica identity is needed for shard table, please add to this table through "alter table" command.
+insert into t_default_shardid values(1,1), (2,2), (3,3);
+select shardid, a, b from t_default_shardid order by 1;
+ shardid | a | b 
+---------+---+---
+     105 | 3 | 3
+    2234 | 1 | 1
+    3318 | 2 | 2
+(3 rows)
+
+create sequence s_default_shardid;
+alter table t_default_shardid add column c int default nextval('s_default_shardid');
+-- shardid should not change
+select shardid, a, b from t_default_shardid order by 1;
+ shardid | a | b 
+---------+---+---
+     105 | 3 | 3
+    2234 | 1 | 1
+    3318 | 2 | 2
+(3 rows)
+
+drop table t_default_shardid;
+drop sequence s_default_shardid;
