@@ -192,7 +192,6 @@ extern void register_transaction_handles(PGXCNodeHandle* handle);
 extern void pfree_pgxc_all_handles(PGXCNodeAllHandles *handles);
 
 extern void release_handles(bool force);
-extern void reset_handles(void);
 extern void clear_handles(void);
 
 extern int get_transaction_nodes(PGXCNodeHandle ** connections,
