@@ -1545,67 +1545,6 @@ release_handles(bool force)
 }
 
 /*
- * Reset all Datanode and Coordinator connections occupied memory.
- */
-void
-reset_handles(void)
-{
-	int			i;
-
-	/* don't reset connection if holding a cluster lock */
-	if (cluster_ex_lock_held)
-	{
-		return;
-	}
-
-	if (datanode_count == 0 && coord_count == 0 && slavedatanode_count == 0)
-	{
-		return;
-	}
-
-	/* Do not reset connections if we have prepared statements on nodes */
-	if (HaveActiveDatanodeStatements())
-	{
-		return;
-	}
-
-	/* Reset Datanodes handles occupied memory */
-	for (i = 0; i < NumDataNodes; i++)
-	{
-		PGXCNodeHandle *handle = &dn_handles[i];
-
-		if (handle->sock != NO_SOCKET)
-		{
-			pgxc_node_init(handle, handle->sock, true, handle->backend_pid);
-		}
-	}
-
-	for (i = 0; i < NumSlaveDataNodes; i++)
-	{
-		PGXCNodeHandle *handle = &sdn_handles[i];
-
-		if (handle->sock != NO_SOCKET)
-		{
-			pgxc_node_init(handle, handle->sock, true, handle->backend_pid);
-		}
-	}
-
-	if (IS_PGXC_COORDINATOR)
-	{
-		/* Collect Coordinator handles */
-		for (i = 0; i < NumCoords; i++)
-		{
-			PGXCNodeHandle *handle = &co_handles[i];
-
-			if (handle->sock != NO_SOCKET)
-			{
-				pgxc_node_init(handle, handle->sock, true, handle->backend_pid);
-			}
-		}
-	}
-}
-
-/*
  * Check whether there bad connections to remote nodes when abort transactions.
  */
 bool
