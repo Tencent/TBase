@@ -281,7 +281,7 @@ extern void PGXCNodeSetParam(bool local, const char *name, const char *value,
 extern void PGXCNodeResetParams(bool only_local);
 extern char *PGXCNodeGetSessionParamStr(void);
 extern char *PGXCNodeGetTransactionParamStr(void);
-extern int pgxc_node_set_query(PGXCNodeHandle *handle, const char *set_query);
+extern void pgxc_node_set_query(PGXCNodeHandle *handle, const char *set_query);
 extern void RequestInvalidateRemoteHandles(void);
 extern void RequestRefreshRemoteHandles(void);
 extern bool PoolerMessagesPending(void);

@@ -3734,15 +3734,7 @@ pgxc_node_begin(int conn_count, PGXCNodeHandle **connections,
     {
         for (i = 0; i < new_count; i++)
         {
-			if (pgxc_node_set_query(new_connections[i], init_str))
-            {
-                /*
-                 * print log here and return eof indicates execution failure
-                 */
-                elog(LOG, "pgxc_node_begin send %s to node %s, pid:%d failed", init_str,
-                     new_connections[i]->nodename, new_connections[i]->backend_pid);
-                return EOF;
-            }
+			pgxc_node_set_query(new_connections[i], init_str);
 			elog(DEBUG5, "pgxc_node_begin send %s to node %s, pid:%d", init_str,
 					new_connections[i]->nodename, new_connections[i]->backend_pid);
         }
@@ -7059,13 +7051,7 @@ LeaderCnExecRemoteUtility(RemoteQuery *node,
 	char *init_str = PGXCNodeGetSessionParamStr();
 	if (init_str)
 	{
-		if (pgxc_node_set_query(leader_cn_conn, init_str))
-        {
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                            errmsg("pgxc_node_set_query send %s to node %s, pid:%d failed", init_str,
-                                   leader_cn_conn->nodename, leader_cn_conn->backend_pid)));
-        }
+		pgxc_node_set_query(leader_cn_conn, init_str);
 	}
 	
 	SetPlpgsqlTransactionBegin(leader_cn_conn);
