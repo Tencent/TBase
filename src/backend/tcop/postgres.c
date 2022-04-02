@@ -1159,70 +1159,43 @@ ch_is_space(char ch)
  * if the query string contain multi stmt
  */
 static char*
-get_myself_query_string(char* query_string, char** out_query_string)
+get_myself_query_string(const char* query_string, RawStmt *parsetree)
 {
-    char       *string_delimeter = NULL;
-    char       *myself_query_string = NULL;
-    int         myself_query_string_len = 0;
-    int         pos = 0;
-    bool        in_quotation = false;
-    int         query_string_len = 0;
+    static StringInfo myself_query_string = NULL;
+    int			query_location;
+    int			query_len;
+    MemoryContext oldcontext;
 
-    if (query_string && query_string[0] != '\0')
-    {
-        /* skip space and redundant ';' */
-        while (*query_string != '\0')
+    if (parsetree->stmt_location >= 0)
         {
-            if (ch_is_space(*query_string) || *query_string == ';')
-            {
-                query_string++;
+        Assert(parsetree->stmt_location <= strlen(query_string));
+        query_location = parsetree->stmt_location;
+        /* Length of 0 (or -1) means "rest of string" */
+        query_len =  (parsetree->stmt_len <= 0) ? strlen(query_string) : parsetree->stmt_len;
+        /* update the location */
+        parsetree->stmt_location = 0;
             }
             else
             {
-                break;
+        /* If query location is unknown, distrust query_len as well */
+        query_location = 0;
+        query_len = strlen(query_string);
             }
-        }
 
-        if (*query_string == '\0')
-        {
-            *out_query_string = NULL;
-            return NULL;
-        }
-
-        /* find ';' in query string, be careful of '\'' */
-        query_string_len = strlen(query_string);
-        for (pos = 0; pos < query_string_len; pos++)
-        {
-            if (query_string[pos] == '\'')
+    oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+    if (myself_query_string == NULL)
             {
-                in_quotation = (in_quotation) ? false : true;
-            }
-
-            if (query_string[pos] == ';' && !in_quotation)
-            {
-                string_delimeter = &query_string[pos];
-                break;
-            }
-        }
-
-        if (string_delimeter == NULL)
-        {
-            myself_query_string = query_string;
-            query_string = NULL;
+        myself_query_string = makeStringInfo();
         }
         else
         {
-            myself_query_string_len = string_delimeter - query_string;
-            myself_query_string = palloc(myself_query_string_len + 1);
-            memcpy(myself_query_string, query_string, myself_query_string_len);
-            myself_query_string[myself_query_string_len] = '\0';
-
-            query_string = string_delimeter + 1;
-        }
+        resetStringInfo(myself_query_string);
     }
 
-    *out_query_string = myself_query_string;
-    return query_string;
+    appendBinaryStringInfo(myself_query_string, query_string + query_location, query_len);
+    MemoryContextSwitchTo(oldcontext);
+
+    return myself_query_string->data;
 }
 
 /*
@@ -1242,7 +1215,6 @@ exec_simple_query(const char *query_string)
     bool        isTopLevel;
     char        msec_str[32];
     bool        multiCommands = false;
-    char       *query_string_tmp = NULL;
 
     /*
      * Report query to various monitoring facilities.
@@ -1314,8 +1286,6 @@ exec_simple_query(const char *query_string)
                          errmsg("COMMIT or ROLLBACK "
                                 "in multi-statement queries not allowed")));
         }
-
-        query_string_tmp = (char*) query_string;
     }
 
     /*
@@ -1373,13 +1343,9 @@ exec_simple_query(const char *query_string)
         Portal        portal;
         DestReceiver *receiver;
         int16        format;
-        char       *myself_query_string = NULL;
-
-        if (query_string_tmp && query_string_tmp[0] != '\0')
-        {
             /* get this portal's query when has multi parse tree */
-            query_string_tmp = get_myself_query_string(query_string_tmp, &myself_query_string);
-        }
+        const char  *myself_query_string = isTopLevel ? debug_query_string :
+                                           (const char *)get_myself_query_string(debug_query_string, parsetree);
 
 #ifdef PGXC
 
@@ -1543,7 +1509,7 @@ exec_simple_query(const char *query_string)
          */
         PortalDefineQuery(portal,
                           NULL,
-                          (myself_query_string) ? myself_query_string : query_string,
+                          myself_query_string,
                           commandTag,
                           plantree_list,
                           NULL);
