@@ -177,7 +177,7 @@ extern PGDLLIMPORT int NamedLWLockTrancheRequests;
 #define NUM_CACHE_2PC_PARTITIONS  128
 
 /* Number of partitions the shared lock tables are divided into */
-#define LOG2_NUM_LOCK_PARTITIONS  4
+#define LOG2_NUM_LOCK_PARTITIONS  8
 #define NUM_LOCK_PARTITIONS  (1 << LOG2_NUM_LOCK_PARTITIONS)
 
 /* Number of partitions the shared predicate lock tables are divided into */
