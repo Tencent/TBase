@@ -1461,8 +1461,6 @@ PgxcNodeAlter(AlterNodeStmt *stmt)
     /* Check that node exists */
     if (!OidIsValid(nodeOid))
     {
-        nodeOid = get_pgxc_nodeoid_extend(node_name, PGXCDefaultClusterName);
-        if (!OidIsValid(nodeOid))
             ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_OBJECT),
                      errmsg("PGXC Node %s: object not defined",
