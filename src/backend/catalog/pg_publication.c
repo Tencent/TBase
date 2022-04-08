@@ -93,6 +93,8 @@
 #include "catalog/pg_type.h"
 #include "catalog/pg_publication.h"
 #include "catalog/pg_publication_rel.h"
+#include "catalog/pg_depend.h"
+#include "catalog/pg_extension.h"
 
 #include "utils/array.h"
 #include "utils/builtins.h"
@@ -109,6 +111,145 @@
 #ifdef __SUBSCRIPTION__
 #include "replication/logicalrelation.h"
 #endif
+
+typedef struct
+{
+	Oid tableoid;
+	Oid oid;
+} CatalogId;
+
+/* This is an array of object identities. */
+static CatalogId *extmembers;
+static int numextmembers;
+
+#define oidcmp(x,y) ( ((x) < (y) ? -1 : ((x) > (y)) ?  1 : 0) )
+
+/*
+ * qsort comparator for CatalogId.
+ */
+static int
+CatalogIdCompare(const void *p1, const void *p2)
+{
+	const CatalogId *obj1 = (const CatalogId *) p1;
+	const CatalogId *obj2 = (const CatalogId *) p2;
+	int cmpval;
+	
+	/*
+	 * Compare OID first since it's usually unique, whereas there will only be
+	 * a few distinct values of tableoid.
+	 */
+	cmpval = oidcmp(obj1->oid, obj2->oid);
+	if (cmpval == 0)
+		cmpval = oidcmp(obj1->tableoid, obj2->tableoid);
+	return cmpval;
+}
+
+/*
+ * setExtensionMembership
+ *	  accept and save data about which objects belong to extensions
+ */
+static void
+setExtensionMembership(CatalogId *extmems, int nextmems)
+{
+	/* Sort array in preparation for binary searches */
+	if (nextmems > 1)
+		qsort((void *) extmems, nextmems, sizeof(CatalogId),
+		      CatalogIdCompare);
+	/* And save */
+	extmembers = extmems;
+	numextmembers = nextmems;
+}
+
+/*
+ * getExtensionMembership --- obtain extension membership data
+ *
+ * We need to identify objects that are extension members as soon as they're
+ * loaded, so that we can correctly determine whether they need to be dentified as publishable.
+ * Generally speaking, extension member objects will get marked as *not* to be publishable.
+ */
+static void
+getExtensionMembership()
+{
+	CatalogId *extmembers;
+	Relation depRel;
+	SysScanDesc depScan;
+	HeapTuple depTup;
+	int maxObjs = 32;
+	int nextmembers = 0;
+	
+	extmembers = (CatalogId *) palloc0(maxObjs * sizeof(CatalogId));
+	
+	depRel = heap_open(DependRelationId, AccessShareLock);
+	depScan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 0, NULL);
+	while (HeapTupleIsValid(depTup = systable_getnext(depScan)))
+	{
+		/*
+		 * We scan pg_depend to find those relations(RelationRelationId)
+		 * that depend on the given extension type.
+		 * (We assume we can ignore refobjsubid for a type.)
+		 */
+		Form_pg_depend pg_depend = (Form_pg_depend) GETSTRUCT(depTup);
+		if (pg_depend->refclassid != ExtensionRelationId
+		    || pg_depend->deptype != DEPENDENCY_EXTENSION
+		    || pg_depend->classid != RelationRelationId)
+			continue;
+		
+		if (nextmembers >= maxObjs)
+		{
+			maxObjs *= 2;
+			extmembers = (CatalogId *) repalloc(extmembers, maxObjs * sizeof(CatalogId));
+		}
+		extmembers[nextmembers].tableoid = pg_depend->classid;
+		extmembers[nextmembers].oid = pg_depend->objid;
+		nextmembers++;
+	}
+	
+	systable_endscan(depScan);
+	relation_close(depRel, AccessShareLock);
+	
+	/* Remember the data for use later */
+	setExtensionMembership(extmembers, nextmembers);
+}
+
+/*
+ * IsCatalogIdExtensionMember
+ *	  return If the specified catalog ID depends on some extension.
+ */
+static bool
+IsCatalogIdExtensionMember(CatalogId catalogId)
+{
+	CatalogId *low;
+	CatalogId *high;
+	
+	/*
+	 * We could use bsearch() here, but the notational cruft of calling
+	 * bsearch is nearly as bad as doing it ourselves; and the generalized
+	 * bsearch function is noticeably slower as well.
+	 */
+	if (numextmembers <= 0)
+		return false;
+	
+	low = extmembers;
+	high = extmembers + (numextmembers - 1);
+	while (low <= high)
+	{
+		CatalogId *middle;
+		int difference;
+		
+		middle = low + (high - low) / 2;
+		/* comparison must match ExtensionMemberIdCompare, below */
+		difference = oidcmp(middle->oid, catalogId.oid);
+		if (difference == 0)
+			difference = oidcmp(middle->tableoid, catalogId.tableoid);
+		if (difference == 0)
+			return true;
+		else if (difference < 0)
+			low = middle + 1;
+		else
+			high = middle - 1;
+	}
+	return false;
+}
 
 /*
  * Check if relation can be in given publication and throws appropriate
@@ -416,6 +557,8 @@ GetAllTablesPublicationRelations(void)
     HeapTuple    tuple;
     List       *result = NIL;
 
+	getExtensionMembership();
+
     classRel = heap_open(RelationRelationId, AccessShareLock);
 
     ScanKeyInit(&key[0],
@@ -427,15 +570,23 @@ GetAllTablesPublicationRelations(void)
 
     while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
     {
+		CatalogId   pub_rel;
         Oid            relid = HeapTupleGetOid(tuple);
         Form_pg_class relForm = (Form_pg_class) GETSTRUCT(tuple);
 
-        if (is_publishable_class(relid, relForm))
+		pub_rel.tableoid = RelationRelationId;
+		pub_rel.oid = relid;
+		
+		if (is_publishable_class(relid, relForm)
+		    && !IsCatalogIdExtensionMember(pub_rel))
             result = lappend_oid(result, relid);
     }
 
     heap_endscan(scan);
     heap_close(classRel, AccessShareLock);
+
+	if (extmembers)
+		pfree(extmembers);
 
     return result;
 }
