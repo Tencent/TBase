@@ -4033,27 +4033,6 @@ get_handles(List *datanodelist, List *coordlist, bool is_coord_only_query, bool 
 
                 node_handle = &dn_handles[node];
 				
-				if (be_pid == 0 && !raise_error)
-				{
-					PGXCNodeSetConnectionState(node_handle, DN_CONNECTION_STATE_ERROR_FATAL);
-					continue;
-				}
-				
-				pgxc_node_init(node_handle, fdsock, is_global_session, be_pid);
-                dn_handles[node] = *node_handle;
-                datanode_count++;
-
-                elog(DEBUG1, "Established a connection with datanode \"%s\","
-                        "remote backend PID %d, socket fd %d, global session %c",
-                        node_handle->nodename, (int) be_pid, fdsock,
-                        is_global_session ? 'T' : 'F');
-#ifdef _PG_REGRESS_
-                elog(LOG, "Established a connection with datanode \"%s\","
-                        "remote backend PID %d, socket fd %d, global session %c",
-                        node_handle->nodename, (int) be_pid, fdsock,
-                        is_global_session ? 'T' : 'F');
-#endif
-
 				if (IS_PGXC_COORDINATOR)
 				{
 					char nodetype = PGXC_NODE_DATANODE;
@@ -4078,6 +4057,27 @@ get_handles(List *datanodelist, List *coordlist, bool is_coord_only_query, bool 
 							"oid %d, type %c, max nodes %d", node_handle->nodename,
 							nodeidx, node_handle->nodeoid, nodetype, NumDataNodes);
 				}
+
+				if (be_pid == 0 && !raise_error)
+				{
+					PGXCNodeSetConnectionState(node_handle, DN_CONNECTION_STATE_ERROR_FATAL);
+					continue;
+				}
+
+				pgxc_node_init(node_handle, fdsock, is_global_session, be_pid);
+				dn_handles[node] = *node_handle;
+				datanode_count++;
+
+				elog(DEBUG1, "Established a connection with datanode \"%s\","
+						"remote backend PID %d, socket fd %d, global session %c",
+						node_handle->nodename, (int) be_pid, fdsock,
+						is_global_session ? 'T' : 'F');
+#ifdef _PG_REGRESS_
+				elog(LOG, "Established a connection with datanode \"%s\","
+						"remote backend PID %d, socket fd %d, global session %c",
+						node_handle->nodename, (int) be_pid, fdsock,
+						is_global_session ? 'T' : 'F');
+#endif
             }
         }
         /* Initialisation for Coordinators */
