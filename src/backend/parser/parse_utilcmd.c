@@ -3312,6 +3312,9 @@ transformRuleStmt(RuleStmt *stmt, const char *queryString,
 }
 
 
+/* check the year is leak year or common year */
+#define is_leak_year(year) ((year % 100 != 0 && year % 4 == 0) || (year % 400 == 0))
+
 /*
  * transformAlterTableStmt -
  *        parse analysis for ALTER TABLE
@@ -3472,12 +3475,46 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
                     int newnparts;
                     Oid groupId;
                     
+                    struct pg_tm start_time;
+                    fsec_t start_sec;
+                    int gap = 0;
+					
                     existnparts = RelationGetNParts(rel);
                     newnparts = ((AddDropPartitions*)cmd->def)->nparts;
 
                     if(newnparts <= 0)
                     {
                         elog(ERROR, "number of partitions to add cannot be negative or zero");
+                    }
+
+                    /*
+                     * Self-developed partition table compatibility processing
+                     */
+                    Form_pg_partition_interval routerinfo = NULL;
+                    routerinfo = rel->rd_partitions_info;
+
+                    if (routerinfo->partdatatype == TIMESTAMPOID)
+                    {
+                        /* timestamp convert to posix struct */
+                        if(timestamp2tm(routerinfo->partstartvalue_ts, NULL, &start_time, &start_sec, NULL, NULL) != 0)
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                                            errmsg("timestamp out of range")));
+
+                        if (routerinfo->partinterval_type == IntervalType_Day &&
+                            !is_leak_year(start_time.tm_year) && start_time.tm_mon <= 2 && start_time.tm_mday <= 28)
+                        {
+                            if (start_time.tm_mon < 2)
+                                gap = (31 - start_time.tm_mday) + 28 + 1;
+                            else
+                                gap = 28 - start_time.tm_mday + 1;
+
+                            if (gap >= existnparts && gap <= newnparts + existnparts)
+                            {
+                                newnparts++;
+                                ((AddDropPartitions*)cmd->def)->nparts = newnparts;
+                            }
+                        }
                     }
 
                     if(newnparts + existnparts > MAX_NUM_INTERVAL_PARTITIONS)
