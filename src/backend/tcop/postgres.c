@@ -4833,6 +4833,7 @@ PostgresMain(int argc, char *argv[],
     StringInfoData input_message;
     sigjmp_buf    local_sigjmp_buf;
     volatile bool send_ready_for_query = true;
+    volatile bool need_report_activity = false;
     bool        disable_idle_in_transaction_timeout = false;
 
 #ifdef PGXC /* PGXC_DATANODE */
@@ -5410,7 +5411,7 @@ PostgresMain(int argc, char *argv[],
          * uncommitted updates (that confuses autovacuum).  The notification
          * processor wants a call too, if we are not in a transaction block.
          */
-        if (send_ready_for_query)
+		if (send_ready_for_query || need_report_activity)
         {
             if (IsAbortedTransactionBlockState())
             {
@@ -5447,6 +5448,7 @@ PostgresMain(int argc, char *argv[],
                 pgstat_report_activity(STATE_IDLE, NULL);
             }
 
+            if(send_ready_for_query)
             ReadyForQuery(whereToSendOutput);
 
 #ifdef XCP
@@ -5469,6 +5471,7 @@ PostgresMain(int argc, char *argv[],
 #endif
 
             send_ready_for_query = false;
+            need_report_activity = false;
         }
 
         /*
@@ -5809,6 +5812,7 @@ PostgresMain(int argc, char *argv[],
             case 'L':			/* sync */
                 pq_getmsgend(&input_message);
                 finish_xact_command();
+                need_report_activity = true;
                 break;	
 #ifdef __TBASE__
             case 'N':
