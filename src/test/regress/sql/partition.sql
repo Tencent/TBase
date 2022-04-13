@@ -457,3 +457,17 @@ set enable_fast_query_shipping to off;
 explain (costs off) select * from t_in_test where c in ('20170901', '20171101');
 reset enable_fast_query_shipping;
 drop table t_in_test;
+
+-- for February of common year timestamp partition, add sub table should be ok
+create table t_time_range (a int, b int, c timestamp)
+partition by range (c) begin
+(timestamp without time zone '2022-02-27 0:0:0')
+step (interval '1 day') partitions (2)
+distribute by shard(a)
+to group default_group;
+
+insert into t_time_range values(1, 1, '2022-02-28');
+insert into t_time_range values(1, 1, '2022-03-1');
+ALTER TABLE t_time_range ADD PARTITIONS 1;
+insert into t_time_range values(1, 1, '2022-03-1');
+drop table t_time_range;
