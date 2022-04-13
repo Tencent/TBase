@@ -119,6 +119,7 @@
 
 #ifdef __TBASE__
 static int daysofmonth[13] = {0,31,29,31,30,31,30,31,31,30,31,30,31};
+static int daysofmonth_common_year[13] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
 
 static struct pg_tm g_partition_base_time = { 0,
                                                0,
@@ -13253,5 +13254,37 @@ is_first_day_from_start(int step, int steptype, struct pg_tm *start_time, struct
     }
 
     return result;
+}
+
+/*
+ * base on a time, add step days
+ */
+void
+calculate_time(int *year, int *mon, int *day, int step, int steptype, bool is_leap_year)
+{
+    int monDays;
+
+    if (!is_leap_year)
+        monDays = daysofmonth_common_year[*mon];
+    else
+        monDays = daysofmonth[*year];
+
+    /* partition by one day */
+    if (step == 1 && steptype == IntervalType_Day)
+    {
+        if (*day == monDays)
+        {
+            *day = 1;
+            if (*mon < 12)
+                (*mon)++;
+            else
+            {
+                *mon = 1;
+                (*year)++;
+            }
+        }
+        else
+            (*day)++;
+    }
 }
 #endif

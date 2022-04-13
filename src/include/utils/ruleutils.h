@@ -95,6 +95,7 @@ extern List *select_rtable_names_for_explain(List *rtable,
                                 Bitmapset *rels_used);
 extern char *generate_collation_name(Oid collid);
 extern char *get_range_partbound_string(List *bound_datums);
+extern void calculate_time(int *year, int *mon, int *day, int step, int steptype, bool is_leap_year);
 
 #ifdef __TBASE__
 extern char * GetPartitionName(Oid parentrelid, int partidx, bool isindex);
