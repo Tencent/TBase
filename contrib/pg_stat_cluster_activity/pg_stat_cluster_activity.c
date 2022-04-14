@@ -477,9 +477,6 @@ pgcs_report_executor_activity(QueryDesc *desc, int eflags)
 		cursorCollectWalker(desc->planstate, cursors);
 	}
 	
-	MemoryContextSwitchTo(oldctx);
-	MemoryContextResetAndDeleteChildren(PGCSMemoryContext);
-	
 	increment_changecount_before(entry);
 	
 	if (planstate_str != NULL && planstate_str->len > 0)
@@ -491,6 +488,9 @@ pgcs_report_executor_activity(QueryDesc *desc, int eflags)
 	pgcs_report_role((PgClusterStatus *) entry, desc);
 	
 	increment_changecount_after(entry);
+	
+	MemoryContextSwitchTo(oldctx);
+	MemoryContextResetAndDeleteChildren(PGCSMemoryContext);
 }
 
 /* ----------
