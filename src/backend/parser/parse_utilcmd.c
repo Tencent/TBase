@@ -3512,6 +3512,12 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
                     mon = start_time.tm_mon;
                     day = start_time.tm_mday;
 
+                    if(routerinfo->partdatatype == TIMESTAMPOID && !is_leap_year(year) && routerinfo->partinterval_type == IntervalType_Day)
+                    {
+                        for(partidx = 1; partidx < existnparts; partidx++)
+                            calculate_time(&year, &mon, &day, 1, IntervalType_Day, false);
+                    }
+
                     realPartidx = existnparts;
                     realNewnparts = newnparts;
 
@@ -3524,7 +3530,7 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
                         {
                             calculate_time(&year, &mon, &day, 1, IntervalType_Day, false);
 
-                            if (mon == 2 && day == 28)
+                            if(mon == 3 && day == 1)
                     {
                                 partidx--;
                                 realNewnparts++;
