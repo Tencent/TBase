@@ -10177,10 +10177,10 @@ xlog_redo(XLogReaderState *record)
 		TimestampTz timestamp = 0;
         gid = XLogRecGetData(record);
 		type = gid + strlen(gid) + 1;
-		pos = type + strlen(type) + 1;
-		memcpy(&timestamp, pos, sizeof(TimestampTz));
 		if (0 == strcmp(type, "rename"))
 		{
+			pos = type + strlen(type) + 1;
+			memcpy(&timestamp, pos, sizeof(TimestampTz));
 			rename_2pc_records(gid, timestamp);
 		}
 		else
@@ -10192,11 +10192,13 @@ xlog_redo(XLogReaderState *record)
     {
         TransactionId xid;
         TransactionId startxid;
+        GlobalTimestamp prepare_gts = InvalidGlobalTimestamp;
+        char *fmt_v2 = XLOG_FMT_2PC_V2;
         char *gid; 
         char *startnode;
         char *nodestring;
         char *pos;
-        char *temp;
+        char *type;
 #ifdef __TWO_PHASE_TESTS__            
         TransactionId old_shem_nextxid = ShmemVariableCache->nextXid;
 #endif
@@ -10204,27 +10206,48 @@ xlog_redo(XLogReaderState *record)
         gid = XLogRecGetData(record);
         pos = gid + strlen(gid) +1;
         /* if the transaction is readonly */
-        temp = pos;
-        pos = pos + strlen(temp) +1;
+        type = pos;
+        pos = pos + strlen(type) + 1;
 
-        if (0 != strcmp(temp, "readonly"))
+        if (0 != strcmp(type, "readonly"))
         {
-            startnode = temp;
+            if (0 == strcmp(type, fmt_v2))
+            {
+                startnode = pos;
+                pos = pos + strlen(startnode) + 1;
+                memcpy(&startxid, pos, sizeof(TransactionId));
+                pos = pos + sizeof(TransactionId);
+                nodestring = pos;
+                pos = pos + strlen(nodestring) + 1;
+                memcpy(&xid, pos, sizeof(TransactionId));
+                pos = pos + sizeof(TransactionId);
+                memcpy(&prepare_gts, pos, sizeof(GlobalTimestamp));
+                pos = pos + sizeof(GlobalTimestamp);
+            }
+            else
+        {
+                /* compatible with old format */
+                startnode = type;
             memcpy(&startxid, pos, sizeof(TransactionId));
             pos = pos + sizeof(TransactionId) + 1;
             nodestring = pos;
             pos = pos + strlen(nodestring) + 1;
             memcpy(&xid, pos, sizeof(TransactionId));
+                pos = pos + sizeof(TransactionId) + 1;
+            }
+
             if (enable_distri_print)
             {
                 elog(LOG, "xlog redo 2pc file name: '%s', startnode: %s, "
-                    "startxid: %u, nodestring: %s, xid: %u",
-                    gid, startnode, startxid, nodestring, xid);
+                    "startxid: %u, prepare_gts: %ld, nodestring: %s, xid: %u",
+                    gid, startnode, startxid, prepare_gts, nodestring, xid);
             }
+
 #ifdef __TWO_PHASE_TESTS__            
             if (FILE_XLOG_EXISTED == twophase_exception_case)
             {
                 elog(LOG, "FILE_XLOG_EXISTED complish");
+                SetGlobalPrepareTimestamp(prepare_gts);
                 record_2pc_involved_nodes_xid(gid, startnode, startxid, nodestring, xid);
             }
 #endif            
@@ -10248,6 +10271,7 @@ xlog_redo(XLogReaderState *record)
                 LWLockRelease(XidGenLock);
             }
 
+            SetGlobalPrepareTimestamp(prepare_gts);
             record_2pc_involved_nodes_xid(gid, startnode, startxid, nodestring, xid);
         }
         else

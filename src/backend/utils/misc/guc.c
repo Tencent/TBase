@@ -4887,7 +4887,11 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_S
 		},
 		&auto_clean_2pc_interval,
-		60, 10, INT_MAX,
+#ifdef __TWO_PHASE_TESTS__
+		60, 0, INT_MAX,
+#else
+		60, 30, INT_MAX,
+#endif
 		NULL, NULL, NULL
 	},
 
@@ -4898,7 +4902,11 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_S
 		},
 		&auto_clean_2pc_delay,
-		300, 3, INT_MAX,
+#ifdef __TWO_PHASE_TESTS__
+		60, 0, INT_MAX,
+#else
+		60, 30, INT_MAX,
+#endif
 		NULL, NULL, NULL
 	},
 
@@ -4909,7 +4917,11 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_S
 		},
 		&auto_clean_2pc_timeout,
+#ifdef __TWO_PHASE_TESTS__
 		1200, 0, INT_MAX,
+#else
+		1200, 30, INT_MAX,
+#endif
 		NULL, NULL, NULL
 	},
 
@@ -4920,7 +4932,11 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_S
 		},
 		&auto_clean_2pc_max_check_time,
+#ifdef __TWO_PHASE_TESTS__
 		1200, 0, INT_MAX,
+#else
+		1200, 30, INT_MAX,
+#endif
 		NULL, NULL, NULL
 	},
 
