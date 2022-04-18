@@ -461,8 +461,8 @@ drop table t_in_test;
 -- for February of common year timestamp partition, add sub table should be ok
 create table t_time_range (a int, b int, c timestamp)
 partition by range (c) begin
-(timestamp without time zone '2022-02-27 0:0:0')
-step (interval '1 day') partitions (2)
+(timestamp without time zone '2022-02-26 0:0:0')
+step (interval '1 day') partitions (3)
 distribute by shard(a)
 to group default_group;
 
@@ -471,3 +471,36 @@ insert into t_time_range values(1, 1, '2022-03-1');
 ALTER TABLE t_time_range ADD PARTITIONS 1;
 insert into t_time_range values(1, 1, '2022-03-1');
 drop table t_time_range;
+
+create table t_time_range (a int, b int, c timestamp)
+partition by range (c) begin
+(timestamp without time zone '2022-02-26 0:0:0')
+step (interval '1 day') partitions (1)
+distribute by shard(a)
+to group default_group;
+
+insert into t_time_range values(1, 1, '2022-02-26');
+ALTER TABLE t_time_range ADD PARTITIONS 2;
+insert into t_time_range values(1, 1, '2022-02-28');
+insert into t_time_range values(1, 1, '2022-03-1');
+ALTER TABLE t_time_range ADD PARTITIONS 1;
+insert into t_time_range values(1, 1, '2022-03-1');
+drop table t_time_range;
+
+-- for February of leap year timestamp partition, add sub table should be ok
+create table t_time_range (a int, b int, c timestamp)
+partition by range (c) begin
+(timestamp without time zone '2020-02-26 0:0:0')
+step (interval '1 day') partitions (3)
+distribute by shard(a)
+to group default_group;
+
+insert into t_time_range values(1, 1, '2020-02-26');
+insert into t_time_range values(1, 1, '2020-02-27');
+insert into t_time_range values(1, 1, '2020-02-28');
+insert into t_time_range values(1, 1, '2020-02-29');
+ALTER TABLE t_time_range ADD PARTITIONS 2;
+insert into t_time_range values(1, 1, '2020-02-29');
+insert into t_time_range values(1, 1, '2020-03-01');
+drop table t_time_range;
+
