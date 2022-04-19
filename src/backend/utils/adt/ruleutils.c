@@ -13260,7 +13260,7 @@ is_first_day_from_start(int step, int steptype, struct pg_tm *start_time, struct
  * base on a time, add step days
  */
 void
-calculate_time(int *year, int *mon, int *day, int step, int steptype, bool is_leap_year)
+add_day_calculation(int *year, int *mon, int *day, int step, int steptype, bool is_leap_year)
 {
     int monDays;
 
