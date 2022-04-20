@@ -5474,6 +5474,7 @@ coord_sync_rel_stats(Relation onerel, StatSyncOpt *syncOpt)
 						cnname)));
 	}
 	ExecEndRemoteQuery(node);
+	FreeExecutorState(estate);
 }
 
 /*
@@ -5819,6 +5820,7 @@ coord_sync_col_stats(Relation		 onerel,
 		result = ExecRemoteQuery((PlanState *) node);
 	}
 	ExecEndRemoteQuery(node);
+    FreeExecutorState(estate);
 
 	update_attstats(RelationGetRelid(onerel),
 					inh,
@@ -5936,6 +5938,7 @@ coord_sync_extended_stats(Relation onerel, int attr_cnt, StatSyncOpt *syncOpt)
 		result = ExecRemoteQuery((PlanState *)node);
 	}
 	ExecEndRemoteQuery(node);
+	FreeExecutorState(estate);
 }
 
 static void
