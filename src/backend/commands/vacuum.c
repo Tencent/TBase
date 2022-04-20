@@ -2024,8 +2024,8 @@ sync_remote_relstat(char *nspname, char *relname, bool replicated,
 		}
 	}
 	ExecEndRemoteQuery(node);
+	FreeExecutorState(estate);
 }
-
 
 /*
  * Coordinator does not contain any data, so we never need to vacuum relations.
