@@ -105,8 +105,6 @@ extern List *RelationGetAllPartitions(Relation rel);
 extern List *RelationGetAllPartitionsWithLock(Relation rel, LOCKMODE lockmode);
 extern int GetAllPartitionIntervalCount(Oid parent_oid);
 
-extern int GetAllPartitionIntervalCount(Oid parent_oid);
-
 extern int RelationGetChildIndex(Relation rel, Oid childoid);
 
 extern Oid RelationGetPartitionIndex(Relation rel, Oid indexOid, int partidx);

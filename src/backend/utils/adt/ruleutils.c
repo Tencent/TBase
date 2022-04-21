@@ -92,7 +92,6 @@
 #ifdef __COLD_HOT__
 #include "postmaster/postmaster.h"
 #endif
-
 #include "storage/lmgr.h"
 /* ----------
  * Pretty formatting constants
@@ -12063,18 +12062,14 @@ RelationGetAllPartitionsWithLock(Relation rel, LOCKMODE lockmode)
     Oid     partoid = InvalidOid;
     int partidx = 0;
     List * result = NULL;
-
     nparts = RelationGetNParts(rel);
-
     for(partidx = 0; partidx < nparts; partidx++)
     {
         partname = GetPartitionName(RelationGetRelid(rel), partidx, false);
         partoid = get_relname_relid(partname, RelationGetNamespace(rel));
-
         if(partname)
             pfree(partname);
         partname = NULL;
-
 		if (InvalidOid == partoid)
 		{
 			continue;
@@ -12083,7 +12078,6 @@ RelationGetAllPartitionsWithLock(Relation rel, LOCKMODE lockmode)
 		{
 			/* Get the lock to synchronize against concurrent drop */
 			LockRelationOid(partoid, lockmode);
-
 			/*
 			 * Now that we have the lock, double-check to see if the relation
 			 * really exists or not.  If not, assume it was dropped while we
@@ -12099,7 +12093,6 @@ RelationGetAllPartitionsWithLock(Relation rel, LOCKMODE lockmode)
 		}
 		result = lappend_oid(result, partoid);
     }
-
     return result;
 }
 
