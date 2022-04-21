@@ -1340,7 +1340,6 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params, Sta
         }
 	}
 #endif    
-
     /* Begin a transaction for vacuuming this relation */
     StartTransactionCommand();
 
