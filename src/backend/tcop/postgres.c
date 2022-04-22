@@ -124,6 +124,10 @@
 #include "replication/worker_internal.h"
 #endif
 
+char		*proxy_for_dn = NULL;       /* Proxy for which dn? */
+bool		am_proxy_for_dn = false;    /* Am I a proxy for dn? */
+bool		am_conn_from_proxy = false; /* Am I connected from proxy? */
+
 extern int    optind;
 
 /* ----------------
@@ -249,6 +253,13 @@ static void log_disconnections(int code, Datum arg);
 static void replace_null_with_blank(char *src, int length);
 static bool NeedResourceOwner(const char *stmt_name);
 #endif
+
+static PGXCNodeHandle *
+get_handle_on_proxy(void);
+static PGXCNodeHandle *
+handle_request_msg_on_proxy(PGXCNodeHandle *conn, int firstchar, StringInfo input_msg);
+void
+set_flag_from_proxy(int flag, const char *username);
 
 #ifdef __COLD_HOT__
 /*
@@ -654,6 +665,7 @@ SocketBackend(StringInfo inBuf)
                         (errcode(ERRCODE_PROTOCOL_VIOLATION),
                          errmsg("invalid frontend message type %d", qtype)));
             break;
+		case 'w':				/* Set connected by proxy */
 #ifdef PGXC /* PGXC_DATANODE */
 #ifdef __TBASE__
         case 'N':
@@ -4802,6 +4814,8 @@ PostgresMain(int argc, char *argv[],
     volatile bool need_report_activity = false;
     bool        disable_idle_in_transaction_timeout = false;
 
+	PGXCNodeHandle *proxy_conn = NULL;
+
 #ifdef PGXC /* PGXC_DATANODE */
     /* Snapshot info */
     TransactionId             xmin PG_USED_FOR_ASSERTS_ONLY;
@@ -5513,6 +5527,12 @@ PostgresMain(int argc, char *argv[],
         }
 #endif /* XCP */
 
+		if (am_proxy_for_dn)
+		{
+			proxy_conn = handle_request_msg_on_proxy(proxy_conn, firstchar, &input_message);
+			continue;
+		}
+
         switch (firstchar)
         {
             case 'Q':            /* simple query */
@@ -6127,6 +6147,18 @@ PostgresMain(int argc, char *argv[],
                 }
                 break;
 #endif
+			case 'w':				/* Set connected by proxy */
+				{
+					int flag = 0;
+
+					Assert(input_message.len == 4);
+
+					flag = pq_getmsgint(&input_message, 4);
+					pq_getmsgend(&input_message);
+
+					set_flag_from_proxy(flag, username);
+				}
+				break;
             default:
                 ereport(FATAL,
                         (errcode(ERRCODE_PROTOCOL_VIOLATION),
@@ -6403,4 +6435,251 @@ IsExtendedQuery(void)
 {
     return doing_extended_query_message;
 }
+
+/*
+ * Get a dn connection on proxy
+ */
+PGXCNodeHandle *
+get_handle_on_proxy(void)
+{
+	PGXCNodeHandle *conn = NULL;
+	char node_type = PGXC_NODE_DATANODE;
+	Oid node_oid = InvalidOid;
+	int node_id = -1;
+	int flag = 0;
+	PGXCNodeAllHandles *handles = NULL;
+	List *dnList = NIL;
+	int ret = 0;
+
+	Assert(IS_PGXC_COORDINATOR);
+
+	/* Get dn oid */
+	StartTransactionCommand();
+	InitMultinodeExecutor(false);
+	node_oid = get_pgxc_nodeoid(proxy_for_dn);
+	CommitTransactionCommand();
+
+	if (node_oid == InvalidOid)
+	{
+		ereport(FATAL,
+			(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				errmsg("Unknow dn: %s, oid is invalid", proxy_for_dn)));
+	}
+
+	/* Get dn id */
+	node_id = PGXCNodeGetNodeId(node_oid, &node_type);
+	if (node_id == -1)
+	{
+		ereport(FATAL,
+			(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				errmsg("Unknow dn: %s, oid: %d, id: -1", proxy_for_dn, node_oid)));
+	}
+
+	elog(LOG, "Proxy for dn %s, node oid %d, node id %d",
+		proxy_for_dn, node_oid, node_id);
+
+	/* Get dn connection */
+	dnList = lappend_int(dnList, node_id);
+	Assert(list_length(dnList) == 1);
+	handles = get_handles(dnList, NIL, false, false, true);
+	if (handles == NULL)
+	{
+		ereport(ERROR,
+			(errcode(ERRCODE_INTERNAL_ERROR),
+				errmsg("Get connections failed for %s", proxy_for_dn)));
+
+	}
+	if (handles->dn_conn_count == 0)
+	{
+		ereport(ERROR,
+			(errcode(ERRCODE_INTERNAL_ERROR),
+				errmsg("Get 0 connection for %s", proxy_for_dn)));
+	}
+
+	Assert(handles->co_conn_count == 0);
+	Assert(handles->dn_conn_count == 1);
+
+	conn = handles->datanode_handles[0];
+	Assert(conn != NULL);
+
+	pfree_pgxc_all_handles(handles);
+	handles = NULL;
+
+	/* Set dn process */
+	if (am_walsender)
+	{
+		flag |= FLAG_AM_WALSENDER;
+		if (am_db_walsender)
+		{
+			flag |= FLAG_AM_DB_WALSENDER;
+		}
+	}
+	ret = pgxc_node_send_proxy_flag(conn, flag);
+	if (ret != 0)
+	{
+		ereport(ERROR,
+			(errcode(ERRCODE_INTERNAL_ERROR),
+				errmsg("Proxy send flag to %s error: %d", proxy_for_dn, ret)));
+	}
+
+	return conn;
+}
+
+/*
+ * Forward client request command to dn and receive response
+ */
+PGXCNodeHandle *
+handle_request_msg_on_proxy(PGXCNodeHandle *conn, int firstchar, StringInfo input_msg)
+{
+	int ret = 0;
+
+	Assert(IS_PGXC_COORDINATOR);
+
+	if (conn == NULL)
+	{
+		conn = get_handle_on_proxy();
+	}
+
+	Assert(conn != NULL);
+
+	/* Before query, replicate stream is not closed, set stream_closed to false */
+	conn->stream_closed = false;
+
+	if (firstchar == 'Q')
+	{
+		const char *query_string = pq_getmsgstring(input_msg);
+		pq_getmsgend(input_msg);
+		debug_query_string = query_string;
+	}
+
+	elog(DEBUG1, "Proxy: firstchar is %c(%d)", firstchar, firstchar);
+
+	/* Send message */
+	ret = pgxc_node_send_on_proxy(conn, firstchar, input_msg);
+	if (ret != 0)
+	{
+		ereport(ERROR,
+			(errcode(ERRCODE_INTERNAL_ERROR),
+				errmsg("Proxy send request to %s error: %d", proxy_for_dn, ret)));
+	}
+
+	switch (firstchar)
+	{
+		/*
+		 * 'X' means that the frontend is closing down the socket. EOF
+		 * means unexpected loss of frontend connection. Either way,
+		 * perform normal shutdown.
+		 */
+		case 'X':
+		case EOF:
+			/*
+			 * Reset whereToSendOutput to prevent ereport from attempting
+			 * to send any more messages to client.
+			 */
+			if (whereToSendOutput == DestRemote)
+			{
+				elog(LOG, "Set whereToSendOutput from %d to %d",
+					whereToSendOutput, DestNone);
+				whereToSendOutput = DestNone;
+			}
+
+			/* Destroy the dn connection on proxy */
+			PoolManagerDisconnect();
+
+			/*
+			 * NOTE: if you are tempted to add more code here, DON'T!
+			 * Whatever you had in mind to do should be set up as an
+			 * on_proc_exit or on_shmem_exit callback, instead. Otherwise
+			 * it will fail to be called during other backend-shutdown
+			 * scenarios.
+			 */
+			proc_exit(0);
+
+		default:
+			break;
+	}
+
+	/* Receive message */
+	ret = pgxc_node_receive_on_proxy(conn);
+	if (ret != 0)
+	{
+		ereport(ERROR,
+			(errcode(ERRCODE_INTERNAL_ERROR),
+				errmsg("Proxy receive from %s error: %d", proxy_for_dn, ret)));
+	}
+
+	debug_query_string = NULL;
+
+	return conn;
+}
+
+/*
+ * Set flag from proxy
+ */
+void
+set_flag_from_proxy(int flag, const char *username)
+{
+	if (am_conn_from_proxy)
+	{
+		ereport(ERROR,
+			(errcode(ERRCODE_CONNECTION_EXCEPTION),
+				errmsg("It is connected from proxy already")));
+	}
+
+	am_conn_from_proxy = true;
+
+	elog(LOG, "It is connected from proxy");
+
+	if (am_walsender)
+	{
+		ereport(ERROR,
+			(errcode(ERRCODE_CONNECTION_EXCEPTION),
+				errmsg("It is a wal sender already")));
+	}
+
+	if (flag & FLAG_AM_WALSENDER)
+	{
+		am_walsender = true;
+		if (flag & FLAG_AM_DB_WALSENDER)
+		{
+			am_db_walsender = true;
+		}
+	}
+
+	elog(LOG, "Set wal sender: am_walsender(%d), am_db_walsender(%d)",
+		am_walsender, am_db_walsender);
+
+	if (am_walsender)
+	{
+		int fixed_len = 0;
+		const char *fixed = get_ps_display_fixed(&fixed_len);
+		char fixed_buf[fixed_len + 1];
+		char *display = NULL;
+
+		if (fixed_len != 0)
+		{
+			Assert (fixed != NULL);
+
+			snprintf(fixed_buf, fixed_len, "%s", fixed);
+			fixed_buf[fixed_len] = '\0';
+
+			display = strstr(fixed_buf, username);
+			Assert (display != NULL);
+
+			init_ps_display("wal sender used by proxy", display, "", "");
+		}
+		else
+		{
+			elog(WARNING, "Get ps display fixed length is 0");
+
+			init_ps_display("wal sender used by proxy", "", "", "");
+		}
+
+		IsNormalPostgres = false;
+
+		WalSndSignals();
+		InitWalSender();
+	}
+}
+
 #endif

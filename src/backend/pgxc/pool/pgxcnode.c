@@ -2596,6 +2596,72 @@ pgxc_node_send_apply(PGXCNodeHandle * handle, char * buf, int len, bool ignore_p
 #endif
 
 /*
+ * Send message to dn
+ */
+int
+pgxc_node_send_on_proxy(PGXCNodeHandle *handle, int firstchar, StringInfo inBuf)
+{
+	/* size + len */
+	int msgLen = 4 + inBuf->len;
+
+	/* msgType + msgLen */
+	if (ensure_out_buffer_capacity(handle->outEnd + 1 + msgLen, handle) != 0)
+	{
+		add_error_message(handle, "out of memory");
+		return EOF;
+	}
+
+	/* msg type */
+	handle->outBuffer[handle->outEnd++] = firstchar;
+
+	/* size */
+	msgLen = htonl(msgLen);
+	memcpy(handle->outBuffer + handle->outEnd, &msgLen, 4);
+	handle->outEnd += 4;
+
+	/* msg data */
+	memcpy(handle->outBuffer + handle->outEnd, inBuf->data, inBuf->len);
+	handle->outEnd += inBuf->len;
+
+	PGXCNodeSetConnectionState(handle, DN_CONNECTION_STATE_QUERY);
+	handle->in_extended_query = false;
+
+	return pgxc_node_flush(handle);
+}
+
+/*
+ * Send proxy configuration to dn
+ */
+int
+pgxc_node_send_proxy_flag(PGXCNodeHandle *handle, int flag)
+{
+	/* size + flag */
+	int msgLen = 4 + sizeof(int);
+
+	/* msgType + msgLen */
+	if (ensure_out_buffer_capacity(handle->outEnd + 1 + msgLen, handle) != 0)
+	{
+		add_error_message(handle, "out of memory");
+		return EOF;
+	}
+
+	/* msg type */
+	handle->outBuffer[handle->outEnd++] = 'w';
+
+	/* size */
+	msgLen = htonl(msgLen);
+	memcpy(handle->outBuffer + handle->outEnd, &msgLen, 4);
+	handle->outEnd += 4;
+
+	/* flag */
+	flag = htonl(flag);
+	memcpy(handle->outBuffer + handle->outEnd, &flag, sizeof(int));
+	handle->outEnd += sizeof(int);
+
+	return pgxc_node_flush(handle);
+}
+
+/*
  * Send series of Extended Query protocol messages to the data node
  */
 int
