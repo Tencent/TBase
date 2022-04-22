@@ -4310,6 +4310,7 @@ _outQuery(StringInfo str, const Query *node)
     WRITE_BOOL_FIELD(hasModifyingCTE);
     WRITE_BOOL_FIELD(hasForUpdate);
     WRITE_BOOL_FIELD(hasRowSecurity);
+	WRITE_BOOL_FIELD(hasCoordFuncs);
     WRITE_NODE_FIELD(cteList);
     WRITE_NODE_FIELD(rtable);
     WRITE_NODE_FIELD(jointree);
