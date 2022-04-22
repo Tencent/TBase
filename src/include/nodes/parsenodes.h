@@ -162,6 +162,7 @@ typedef struct Query
                                                                           * only used for DML. Will be set at the plan phase
                                                                           * in shippability check.
                                                                           */
+	bool        hasCoordFuncs;
     char        *copy_filename; /* fake filename for copy from */
     Bitmapset   *conflict_cols;
 #endif

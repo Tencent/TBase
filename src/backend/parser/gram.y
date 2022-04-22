@@ -720,7 +720,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 
 	PARALLEL PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PAUSE PLACING PLANS POLICY
 	POSITION PRECEDING PRECISION PREFERRED PRESERVE PREPARE PREPARED PRIMARY
-	PRIOR PRIVILEGES PROCEDURAL PROCEDURE PROGRAM PUBLICATION
+	PRIOR PRIVILEGES PROCEDURAL PROCEDURE PROGRAM PUBLICATION PUSHDOWN
 
 	QUOTE
 
@@ -8286,6 +8286,14 @@ common_func_opt_item:
 			| NOT LEAKPROOF
 				{
 					$$ = makeDefElem("leakproof", (Node *)makeInteger(FALSE), @1);
+				}
+			| PUSHDOWN
+				{
+					$$ = makeDefElem("pushdown", (Node *)makeInteger(TRUE), @1);
+				}
+			| NOT PUSHDOWN
+				{
+					$$ = makeDefElem("pushdown", (Node *)makeInteger(FALSE), @1);
 				}
 			| COST NumericOnly
 				{
@@ -16853,6 +16861,7 @@ unreserved_keyword:
 			| PROCEDURE
 			| PROGRAM
 			| PUBLICATION
+			| PUSHDOWN
 			| QUOTE
 /* PGXC_BEGIN */
 			| RANDOMLY

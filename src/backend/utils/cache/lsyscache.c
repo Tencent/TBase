@@ -1766,6 +1766,23 @@ get_func_cost(Oid funcid)
         elog(ERROR, "cache lookup failed for function %u", funcid);
 
     result = ((Form_pg_proc) GETSTRUCT(tp))->procost;
+	if (result < 0)
+		result = -result;
+	ReleaseSysCache(tp);
+	return result;
+}
+
+float4
+get_func_cost_with_sign(Oid funcid)
+{
+	HeapTuple	tp;
+	float4		result;
+	
+	tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
+	if (!HeapTupleIsValid(tp))
+		elog(ERROR, "cache lookup failed for function %u", funcid);
+	
+	result = ((Form_pg_proc) GETSTRUCT(tp))->procost;
     ReleaseSysCache(tp);
     return result;
 }
@@ -1787,6 +1804,25 @@ get_func_rows(Oid funcid)
     result = ((Form_pg_proc) GETSTRUCT(tp))->prorows;
     ReleaseSysCache(tp);
     return result;
+}
+
+Oid
+get_func_lang(Oid funcid)
+{
+	HeapTuple	tp;
+	
+	tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
+	if (HeapTupleIsValid(tp))
+	{
+		Form_pg_proc functup = (Form_pg_proc) GETSTRUCT(tp);
+		Oid	   result;
+		
+		result = functup->prolang;
+		ReleaseSysCache(tp);
+		return result;
+	}
+	else
+		return InvalidOid;
 }
 
 /*                ---------- RELATION CACHE ----------                     */

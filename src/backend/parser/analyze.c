@@ -447,6 +447,7 @@ transformStmt(ParseState *pstate, Node *parseTree)
     /* Mark as original query until we learn differently */
     result->querySource = QSRC_ORIGINAL;
     result->canSetTag = true;
+	result->hasCoordFuncs = pstate->p_hasCoordFuncs;
 
     return result;
 }

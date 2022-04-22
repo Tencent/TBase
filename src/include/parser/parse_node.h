@@ -260,6 +260,7 @@ struct ParseState
     bool        p_hasTargetSRFs;
     bool        p_hasSubLinks;
     bool        p_hasModifyingCTE;
+	bool        p_hasCoordFuncs;
 
     Node       *p_last_srf;        /* most recent set-returning func/op found */
 

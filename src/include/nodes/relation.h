@@ -225,6 +225,8 @@ typedef struct PlannerGlobal
 
     bool        parallelModeNeeded; /* parallel mode actually required? */
 
+	bool        hasCoordFuncs;
+
     char        maxParallelHazard;    /* worst PROPARALLEL hazard level */
 } PlannerGlobal;
 

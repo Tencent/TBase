@@ -12020,6 +12020,21 @@ dumpFunc(Archive *fout, FuncInfo *finfo)
      * break backwards-compatibility of the dump without need.  Keep this code
      * in sync with the defaults in functioncmds.c.
      */
+	if(procost[0] == '-')
+	{
+		char* temp;
+		int   len;
+		
+		appendPQExpBufferStr(q, " PUSHDOWN");
+		len = strlen(procost);
+		temp = pg_malloc(len + 1);
+		strcpy(temp, procost+1);
+		temp[len-1] = '\0';
+		strcpy(procost, temp);
+		procost[len-1] = 0;
+		pg_free(temp);
+		temp = NULL;
+	}
     if (strcmp(procost, "0") != 0)
     {
         if (strcmp(lanname, "internal") == 0 || strcmp(lanname, "c") == 0)
