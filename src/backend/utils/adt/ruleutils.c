@@ -13267,7 +13267,7 @@ add_day_calculation(int *year, int *mon, int *day, int step, int steptype, bool 
     if (!is_leap_year)
         monDays = daysofmonth_common_year[*mon];
     else
-        monDays = daysofmonth[*year];
+        monDays = daysofmonth[*mon];
 
     /* partition by one day */
     if (step == 1 && steptype == IntervalType_Day)
