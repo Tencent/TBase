@@ -7321,6 +7321,14 @@ ResetAllOptions(void)
 {// #lizard forgives
     int            i;
 
+	if (am_walsender)
+	{
+		/* never be here */
+		ereport(ERROR,
+			(errcode(ERRCODE_INTERNAL_ERROR),
+				errmsg("RESET ALL is forbidden on wal sender")));
+	}
+
     for (i = 0; i < num_guc_variables; i++)
     {
         struct config_generic *gconf = guc_variables[i];

@@ -123,6 +123,9 @@ struct pgxc_node_handle
 
 	bool		in_extended_query;
 	bool		needSync; /* set when error and extend query. */
+
+	bool		stream_closed; /* Whether replicate stream is closed on proxy? */
+
 #ifdef __TBASE__
 	bool		sock_fatal_occurred;	/*Network failure occurred, and sock descriptor was closed */
 	char        last_command; /*last command we processed. */
@@ -217,6 +220,11 @@ extern int	pgxc_node_send_my_sync(PGXCNodeHandle * handle);
 #ifdef __SUBSCRIPTION__
 extern int pgxc_node_send_apply(PGXCNodeHandle * handle, char * buf, int len, bool ignore_pk_conflict);
 #endif
+
+extern int pgxc_node_send_proxy_flag(PGXCNodeHandle *handle, int flag);
+extern int pgxc_node_send_on_proxy(PGXCNodeHandle *handle, int firstchar,
+									StringInfo inBuf);
+
 #ifdef __TBASE__
 extern int pgxc_node_send_disconnect(PGXCNodeHandle * handle, char *cursor, int cons);
 #endif
