@@ -140,7 +140,7 @@ VACUUM ANALYZE atest12;
 
 CREATE FUNCTION leak(integer,integer) RETURNS boolean
   AS $$begin return $1 < $2; end$$
-  LANGUAGE plpgsql immutable;
+  LANGUAGE plpgsql immutable pushdown;
 CREATE OPERATOR <<< (procedure = leak, leftarg = integer, rightarg = integer,
                      restrict = scalarltsel);
 

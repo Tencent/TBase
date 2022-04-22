@@ -3260,6 +3260,7 @@ _copyQuery(const Query *from)
     COPY_SCALAR_FIELD(isSingleValues);
     COPY_SCALAR_FIELD(isMultiValues);
     COPY_SCALAR_FIELD(hasUnshippableTriggers);
+	COPY_SCALAR_FIELD(hasCoordFuncs);
     COPY_STRING_FIELD(copy_filename);
 #endif
     COPY_NODE_FIELD(cteList);
