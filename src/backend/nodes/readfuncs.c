@@ -572,7 +572,18 @@ _readQuery(void)
     READ_BOOL_FIELD(hasModifyingCTE);
     READ_BOOL_FIELD(hasForUpdate);
     READ_BOOL_FIELD(hasRowSecurity);
-    READ_NODE_FIELD(cteList);
+	token = pg_strtok(&length);		/* get :fldname hasRowSecurity or cteList */
+	if (strncmp(nullable_string(token, length), ":hasCoordFuncs", length) == 0)
+	{
+		token = pg_strtok(&length);		/* get field value */
+		local_node->hasCoordFuncs = strtobool(token);
+		token = pg_strtok(&length);		/* skip :fldname cteList */
+	}
+	else
+	{
+		local_node->hasCoordFuncs = false;
+	}
+	local_node->cteList = nodeRead(NULL, 0);
     READ_NODE_FIELD(rtable);
     READ_NODE_FIELD(jointree);
     READ_NODE_FIELD(targetList);
