@@ -1740,6 +1740,8 @@ distribute_qual_to_rels(PlannerInfo *root, Node *clause,
     Relids        nullable_relids;
     RestrictInfo *restrictinfo;
 
+	bool        contain_udf = contain_user_defined_functions((Node *) clause);
+	
     /*
      * Retrieve all relids mentioned within the clause.
      */
@@ -2092,8 +2094,26 @@ distribute_qual_to_rels(PlannerInfo *root, Node *clause,
         }
     }
 
+	if (root->parse && root->parse->commandType == CMD_SELECT && contain_udf)
+	{
+		List    *quals_var;
+		
+		/* clause contain cn-udf, don't distribute it to rels, collect it */
+		root->udf_quals = lappend(root->udf_quals, restrictinfo->clause);
+		
+		/* cn-udf quals will not distribute to rels, but vars must be added */
+		quals_var = pull_var_clause((Node *) root->udf_quals,
+		                            PVC_RECURSE_AGGREGATES |
+		                            PVC_RECURSE_WINDOWFUNCS |
+		                            PVC_INCLUDE_PLACEHOLDERS);
+		
+		add_vars_to_targetlist(root, quals_var, bms_make_singleton(0), false);
+	}
+	else
+	{
     /* No EC special case applies, so push it into the clause lists */
     distribute_restrictinfo_to_rels(root, restrictinfo);
+}
 }
 
 /*

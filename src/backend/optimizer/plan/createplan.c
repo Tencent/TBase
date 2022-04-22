@@ -1131,6 +1131,13 @@ use_physical_tlist(PlannerInfo *root, Path *path, int flags)
         return false;
 
     /*
+	 * if we got cn-udf or rownum expr, return false to use
+	 * pathtarget to generate tlist.
+	 */
+	if (root->parse && root->parse->hasCoordFuncs)
+		return false;
+	
+	/*
      * We can do this for real relation scans, subquery scans, function scans,
      * tablefunc scans, values scans, and CTE scans (but not for, eg, joins).
      */
@@ -8456,6 +8463,14 @@ make_result(List *tlist,
     node->resconstantqual = resconstantqual;
 
 #ifdef XCP
+	/*
+	 * Do not consider pushing down node if this node is make to process any
+	 * project or qual that contain rownum or cn-udf.
+	 */
+	if (contain_user_defined_functions((Node *) tlist) ||
+	    contain_user_defined_functions((Node *) qual))
+		return node;
+	
     if (subplan)
     {
         /*
@@ -8828,6 +8843,7 @@ is_projection_capable_path(Path *path)
         case T_ModifyTable:
         case T_MergeAppend:
         case T_RecursiveUnion:
+		case T_RemoteSubplan:
             return false;
         case T_Append:
 

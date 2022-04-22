@@ -433,6 +433,7 @@ typedef struct PlannerInfo
     bool        haspart_tobe_modify;
     Index        partrelindex;
     Bitmapset    *partpruning;
+	List        *udf_quals;    /* quals that contain CN-udf */
 #endif
 #endif
 } PlannerInfo;

@@ -2038,7 +2038,10 @@ set_subquery_pathlist(PlannerInfo *root, RelOptInfo *rel,
     /*
      * The upper query might not use all the subquery's output columns; if
      * not, we can simplify.
+     *
+	 * but if upper query have cn-udf, don't try it.
      */
+	if (!root->udf_quals)
     remove_unused_subquery_outputs(subquery, rel);
 
     /*
