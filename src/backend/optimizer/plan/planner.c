@@ -1758,6 +1758,72 @@ inheritance_planner(PlannerInfo *root)
                                      SS_assign_special_param(root)));
 }
 
+/*
+ * Like make_rownum_input_target, exclude any udf expr from origin_target,
+ * only those udf that need to execute on CN will be considered, check
+ * function: contain_user_defined_functions.
+ */
+static PathTarget *
+make_udf_input_target(PlannerInfo *root, PathTarget *origin_target)
+{
+	PathTarget *input_target = create_empty_pathtarget();
+	Query	   *parse = root->parse;
+	List	   *udf_cols = NIL;
+	List	   *udf_vars = NIL;
+	int			i;
+	ListCell   *lc;
+	
+	i = 0;
+	foreach(lc, origin_target->exprs)
+	{
+		Expr	   *expr = (Expr *) lfirst(lc);
+		Index		sgref = get_pathtarget_sortgroupref(origin_target, i);
+		
+		if (!contain_user_defined_functions((Node *) expr))
+		{
+			add_column_to_pathtarget(input_target, expr, sgref);
+		}
+		else
+		{
+			/*
+			 * Non-cn-udf column, so just remember the expression for later
+			 * call to pull_var_clause.
+			 */
+			udf_cols = lappend(udf_cols, expr);
+		}
+		
+		i++;
+	}
+	
+	/*
+	 * TODO: having cn-udf expr.
+	 */
+	if (parse->havingQual)
+		udf_cols = lappend(udf_cols, parse->havingQual);
+	
+	udf_cols = list_concat(udf_cols, list_copy(root->udf_quals));
+	
+	/*
+	 * Pull out all the Vars mentioned in non-cn-udf cols, and
+	 * add them to the input target if not already present. Note this
+	 * includes Vars used in resjunk items, so we are covering the needs of
+	 * ORDER BY and window specifications. Vars used within Aggrefs and
+	 * WindowFuncs will be pulled out here, too.
+	 */
+	udf_vars = pull_var_clause((Node *) udf_cols,
+	                           PVC_RECURSE_AGGREGATES |
+	                           PVC_RECURSE_WINDOWFUNCS |
+	                           PVC_INCLUDE_PLACEHOLDERS);
+	add_new_columns_to_pathtarget(input_target, udf_vars);
+	
+	/* clean up cruft */
+	list_free(udf_vars);
+	list_free(udf_cols);
+	
+	/* XXX this causes some redundant cost calculation ... */
+	return set_pathtarget_cost_width(root, input_target);
+}
+
 /*--------------------
  * grouping_planner
  *      Perform planning steps related to grouping, aggregation, etc.
@@ -1906,6 +1972,7 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
         List       *scanjoin_targets;
         List       *scanjoin_targets_contain_srfs;
 		bool		scanjoin_target_parallel_safe;
+		PathTarget *cn_process_target; /* including rownum_target */
         bool        have_grouping;
         AggClauseCosts agg_costs;
         WindowFuncLists *wflists = NULL;
@@ -2096,6 +2163,39 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
 		}
 
         /*
+		 * In postgresql, vars in qual didn't count into targetlist as junk,
+		 * since they are evaluated just after scan happened, but a qual with
+		 * rownum expr or cn-udf will be evaluated after collecting tuple
+		 * to CN, so we need to pull out vars from them.
+		 *
+		 * This is a bit ugly doing things here, but root->rownum_quals and
+		 * root->udf_quals are determined after query_planner, and targetlist
+		 * is determined way before that.
+		 */
+		if (root->udf_quals)
+		{
+			List *quals_var = pull_var_clause((Node *) root->udf_quals,
+			                                  PVC_RECURSE_AGGREGATES |
+			                                  PVC_RECURSE_WINDOWFUNCS |
+			                                  PVC_INCLUDE_PLACEHOLDERS);
+			
+			/* copy to make other targets clean */
+			if (scanjoin_target == grouping_target)
+				scanjoin_target = copy_pathtarget(scanjoin_target);
+			
+			foreach(lc, quals_var)
+			{
+				if (!list_member(scanjoin_target->exprs, lfirst_node(Var, lc)))
+					add_column_to_pathtarget(scanjoin_target, (Expr *) lfirst_node(Var, lc), 0);
+			}
+		}
+		
+		cn_process_target = scanjoin_target;
+		/* exclude cn-udf from scanjoin_target */
+		if (parse->hasCoordFuncs)
+			scanjoin_target = make_udf_input_target(root, scanjoin_target);
+		
+		/*
          * If there are any SRFs in the targetlist, we must separate each of
          * these PathTargets into SRF-computing and SRF-free targets.  Replace
          * each of the named targets with a SRF-free version, and remember the
@@ -2235,6 +2335,42 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
         root->upper_targets[UPPERREL_WINDOW] = sort_input_target;
         root->upper_targets[UPPERREL_GROUP_AGG] = grouping_target;
 
+		if (parse->hasCoordFuncs)
+		{
+			Path	   *path;
+			
+			foreach(lc, current_rel->pathlist)
+			{
+				path = (Path *) lfirst(lc);
+				
+				/* must collect tuple to cn for further processing */
+				if (path->distribution != NULL)
+					path = create_remotesubplan_path(root, path, NULL);
+				
+				/* add other projection step, currently it's only cn-udf */
+				path = apply_projection_to_path(root, current_rel,
+				                                path, cn_process_target);
+				
+				/* then evaluate other qual on CN, currently it's only cn-udf */
+				if (root->udf_quals != NIL)
+					path = (Path *) create_qual_path(root, path, root->udf_quals);
+				
+				/* apply final target if no grouping and no post-pone projection */
+				if (!have_grouping && final_target == sort_input_target && !activeWindows)
+					path = apply_projection_to_path(root, current_rel,
+					                                path, final_target);
+				
+				lfirst(lc) = path;
+			}
+			
+			set_cheapest(current_rel);
+		}
+		else if (root->udf_quals != NIL)
+		{
+			/* cn-quals found but no cn-target specified, should not happen but raise an error */
+			elog(ERROR, "remote qualification must exist in target list");
+		}
+		
         /*
          * If we have grouping and/or aggregation, consider ways to implement
          * that.  We build a new upperrel representing the output of this

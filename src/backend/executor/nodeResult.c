@@ -126,10 +126,7 @@ ExecResult(PlanState *pstate)
 				
 				if (!ExecQual(qual, econtext))
 				{
-					if (node->rs_fail_return)
-						return NULL;
-					else
-						continue;
+					continue;
 				}
 				
 				ResetExprContext(econtext);
@@ -214,7 +211,6 @@ ExecInitResult(Result *node, EState *estate, int eflags)
 
 	resstate->rs_done = false;
 	resstate->rs_checkqual = (node->resconstantqual == NULL) ? false : true;
-	resstate->rs_fail_return = contain_rownum_fetch((Node *) node->plan.qual);
 
 	/*
 	 * Miscellaneous initialization

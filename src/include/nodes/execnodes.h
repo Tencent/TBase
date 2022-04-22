@@ -1018,7 +1018,6 @@ typedef struct ResultState
     ExprState  *resconstantqual;
     bool        rs_done;        /* are we done? */
     bool        rs_checkqual;    /* do we need to check the qual? */
-	bool        rs_fail_return; /* should return after failing qual? */
 } ResultState;
 
 /* ----------------
