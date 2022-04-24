@@ -1829,6 +1829,8 @@ END;
 $$
 LANGUAGE plpgsql STRICT IMMUTABLE LEAKPROOF;
 SELECT * FROM rw_view1 WHERE snoop(person);
+NOTICE:  snooped value: Tom
+NOTICE:  snooped value: Harry
  person 
 --------
  Tom
@@ -1836,7 +1838,15 @@ SELECT * FROM rw_view1 WHERE snoop(person);
 (2 rows)
 
 UPDATE rw_view1 SET person=person WHERE snoop(person);
+ERROR:  DML contains a function runs on CN which is not supported
+HINT:  You might need to push that function down to DN.
 DELETE FROM rw_view1 WHERE NOT snoop(person);
+ERROR:  DML contains a function runs on CN which is not supported
+HINT:  You might need to push that function down to DN.
+ALTER FUNCTION snoop(anyelement) pushdown;
+UPDATE rw_view1 SET person=person WHERE snoop(person);
+DELETE FROM rw_view1 WHERE NOT snoop(person);
+ALTER FUNCTION snoop(anyelement) not pushdown;
 ALTER VIEW rw_view1 SET (security_barrier = true);
 SELECT table_name, is_insertable_into
   FROM information_schema.tables
@@ -1864,12 +1874,21 @@ SELECT table_name, column_name, is_updatable
 (1 row)
 
 SELECT * FROM rw_view1 WHERE snoop(person);
+NOTICE:  snooped value: Tom
+NOTICE:  snooped value: Harry
  person 
 --------
  Tom
  Harry
 (2 rows)
 
+UPDATE rw_view1 SET person=person WHERE snoop(person);
+ERROR:  DML contains a function runs on CN which is not supported
+HINT:  You might need to push that function down to DN.
+DELETE FROM rw_view1 WHERE NOT snoop(person);
+ERROR:  DML contains a function runs on CN which is not supported
+HINT:  You might need to push that function down to DN.
+ALTER FUNCTION snoop(anyelement) pushdown;
 UPDATE rw_view1 SET person=person WHERE snoop(person);
 DELETE FROM rw_view1 WHERE NOT snoop(person);
 EXPLAIN (costs off, nodes off) SELECT * FROM rw_view1 WHERE snoop(person);
@@ -1900,6 +1919,7 @@ EXPLAIN (costs off, nodes off) DELETE FROM rw_view1 WHERE NOT snoop(person);
                Filter: ((visibility = 'public'::text) AND (NOT snoop(person)))
 (4 rows)
 
+ALTER FUNCTION snoop(anyelement) not pushdown;
 -- security barrier view on top of security barrier view
 CREATE VIEW rw_view2 WITH (security_barrier = true) AS
   SELECT * FROM rw_view1 WHERE snoop(person);
@@ -1929,6 +1949,10 @@ SELECT table_name, column_name, is_updatable
 (1 row)
 
 SELECT * FROM rw_view2 WHERE snoop(person);
+NOTICE:  snooped value: Tom
+NOTICE:  snooped value: Tom
+NOTICE:  snooped value: Harry
+NOTICE:  snooped value: Harry
  person 
 --------
  Tom
@@ -1936,13 +1960,20 @@ SELECT * FROM rw_view2 WHERE snoop(person);
 (2 rows)
 
 UPDATE rw_view2 SET person=person WHERE snoop(person);
+ERROR:  DML contains a function runs on CN which is not supported
+HINT:  You might need to push that function down to DN.
+DELETE FROM rw_view2 WHERE NOT snoop(person);
+ERROR:  DML contains a function runs on CN which is not supported
+HINT:  You might need to push that function down to DN.
+ALTER FUNCTION snoop(anyelement) pushdown;
+UPDATE rw_view2 SET person=person WHERE snoop(person);
 DELETE FROM rw_view2 WHERE NOT snoop(person);
 EXPLAIN (costs off, nodes off) SELECT * FROM rw_view2 WHERE snoop(person);
                         QUERY PLAN                         
 -----------------------------------------------------------
- Remote Subquery Scan on all
-   ->  Subquery Scan on rw_view2
-         Filter: snoop(rw_view2.person)
+ Subquery Scan on rw_view2
+   Filter: snoop(rw_view2.person)
+   ->  Remote Subquery Scan on all
          ->  Subquery Scan on rw_view1
                Filter: snoop(rw_view1.person)
                ->  Seq Scan on base_tbl
@@ -1967,6 +1998,7 @@ EXPLAIN (costs off, nodes off) DELETE FROM rw_view2 WHERE NOT snoop(person);
                Filter: ((visibility = 'public'::text) AND snoop(person) AND (NOT snoop(person)))
 (4 rows)
 
+ALTER FUNCTION snoop(anyelement) not pushdown;
 DROP TABLE base_tbl CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to view rw_view1
@@ -1990,6 +2022,13 @@ SELECT * FROM rw_view1;
 (1 row)
 
 EXPLAIN (costs off, nodes off) DELETE FROM rw_view1 WHERE id = 1 AND snoop(data);
+ERROR:  DML contains a function runs on CN which is not supported
+HINT:  You might need to push that function down to DN.
+DELETE FROM rw_view1 WHERE id = 1 AND snoop(data);
+ERROR:  DML contains a function runs on CN which is not supported
+HINT:  You might need to push that function down to DN.
+ALTER FUNCTION snoop(anyelement) pushdown;
+EXPLAIN (costs off, nodes off) DELETE FROM rw_view1 WHERE id = 1 AND snoop(data);
                                QUERY PLAN                                
 -------------------------------------------------------------------------
  Remote Subquery Scan on any
@@ -2003,6 +2042,7 @@ EXPLAIN (costs off, nodes off) DELETE FROM rw_view1 WHERE id = 1 AND snoop(data)
 (8 rows)
 
 DELETE FROM rw_view1 WHERE id = 1 AND snoop(data);
+ALTER FUNCTION snoop(anyelement) not pushdown;
 EXPLAIN (costs off, nodes off) INSERT INTO rw_view1 VALUES (2, 'New row 2');
                               QUERY PLAN                               
 -----------------------------------------------------------------------
@@ -2087,6 +2127,14 @@ SELECT * FROM v1 WHERE a=8;
 
 EXPLAIN (VERBOSE, COSTS OFF)
 UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
+ERROR:  DML contains a function runs on CN which is not supported
+HINT:  You might need to push that function down to DN.
+UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
+ERROR:  DML contains a function runs on CN which is not supported
+HINT:  You might need to push that function down to DN.
+ALTER FUNCTION leakproof(anyelement) pushdown;
+EXPLAIN (VERBOSE, COSTS OFF)
+UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
  Remote Subquery Scan on any (datanode_1,datanode_2)
@@ -2121,6 +2169,7 @@ UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
 (29 rows)
 
 UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
+ALTER FUNCTION leakproof(anyelement) not pushdown;
 SELECT * FROM v1 WHERE a=100; -- Nothing should have been changed to 100
  a | b | c | d 
 ---+---+---+---
@@ -2131,6 +2180,15 @@ SELECT * FROM t1 WHERE a=100; -- Nothing should have been changed to 100
 ---+---+---
 (0 rows)
 
+EXPLAIN (VERBOSE, COSTS OFF)
+UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
+ERROR:  DML contains a function runs on CN which is not supported
+HINT:  You might need to push that function down to DN.
+UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
+ERROR:  DML contains a function runs on CN which is not supported
+HINT:  You might need to push that function down to DN.
+ALTER FUNCTION leakproof(anyelement) pushdown;
+ALTER FUNCTION snoop(anyelement) pushdown;
 EXPLAIN (VERBOSE, COSTS OFF)
 UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
                                          QUERY PLAN                                          
@@ -2168,15 +2226,17 @@ UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
 
 UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
 SELECT * FROM v1 WHERE b=8;
- a | b |  c   |  d   
----+---+------+------
- 9 | 8 | t1   | t11d
- 9 | 8 | t11  | t11d
- 9 | 8 | t12  | t11d
- 9 | 8 | t111 | t11d
+ a | b |  c   |   d   
+---+---+------+-------
+ 9 | 8 | t1   | t111d
+ 9 | 8 | t11  | t111d
+ 9 | 8 | t12  | t111d
+ 9 | 8 | t111 | t111d
 (4 rows)
 
 DELETE FROM v1 WHERE snoop(a) AND leakproof(a); -- should not delete everything, just where a>5
+ALTER FUNCTION leakproof(anyelement) not pushdown;
+ALTER FUNCTION snoop(anyelement) not pushdown;
 TABLE t1; -- verify all a<=5 are intact
  a | b |  c   
 ---+---+------

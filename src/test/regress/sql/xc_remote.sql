@@ -185,7 +185,7 @@ CREATE TABLE xcrem_employee (EMPNO CHAR(6) NOT NULL, FIRSTNAME VARCHAR(12) NOT N
 
 create table xcrem_temptable as select * from xcrem_employee;
 
-create or replace function volatile_func(id int) returns int as
+create or replace function volatile_func(id int) returns int pushdown as
 $$begin return 3;end $$ language plpgsql;
 
 \set EXP 'explain (verbose true, costs false, nodes false)'

@@ -1081,9 +1081,9 @@ select * from
   where tattle(x, 8);
                         QUERY PLAN                        
 ----------------------------------------------------------
- Subquery Scan on ss
-   Output: x, u
-   Filter: tattle(ss.x, 8)
+ Result
+   Output: (9), (unnest('{1,2,3,11,12,13}'::integer[]))
+   Filter: tattle((9), 8)
    ->  ProjectSet
          Output: 9, unnest('{1,2,3,11,12,13}'::integer[])
          ->  Result

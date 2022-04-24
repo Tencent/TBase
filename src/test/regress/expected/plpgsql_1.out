@@ -1548,26 +1548,26 @@ update PSlot set slotlink = 'HS.base.hub1.1' where slotname = 'PS.base.b2';
 --
 -- PGXCTODO: This is failing due to issue 3522907, complicated SELECT queries in plpgsql functions
 select * from PField_v1 where pfname = 'PF0_1' order by slotname;
- pfname |       slotname       |          backside          |      patch      
---------+----------------------+----------------------------+-----------------
- PF0_1  | PS.base.a1           | WS.001.1a in room 001 -> - | PS.base.ta1 -> 
- PF0_1  | PS.base.a2           |                            | -
- PF0_1  | PS.base.a3           | WS.001.2a in room 001 -> - | PS.base.ta2 -> 
+ pfname |       slotname       |          backside          |      patch       
+--------+----------------------+----------------------------+------------------
+ PF0_1  | PS.base.a1           | WS.001.1a in room 001 -> - | PS.base.ta1 -> -
+ PF0_1  | PS.base.a2           | WS.001.1b in room 001 -> - | -
+ PF0_1  | PS.base.a3           | WS.001.2a in room 001 -> - | PS.base.ta2 -> -
  PF0_1  | PS.base.a4           | -                          | -
  PF0_1  | PS.base.a5           | -                          | -
  PF0_1  | PS.base.a6           | -                          | -
- PF0_1  | PS.base.b1           |                            | PS.base.ta5 -> 
- PF0_1  | PS.base.b2           |                            | 
- PF0_1  | PS.base.b3           |                            | PS.base.tb2 -> 
- PF0_1  | PS.base.b4           |                            | -
+ PF0_1  | PS.base.b1           | WS.002.1a in room 002 -> - | PS.base.ta5 -> -
+ PF0_1  | PS.base.b2           | WS.002.1b in room 002 -> - | 
+ PF0_1  | PS.base.b3           | WS.002.2a in room 002 -> - | PS.base.tb2 -> -
+ PF0_1  | PS.base.b4           | WS.002.2b in room 002 -> - | -
  PF0_1  | PS.base.b5           | WS.002.3a in room 002 -> - | -
- PF0_1  | PS.base.b6           |                            | -
+ PF0_1  | PS.base.b6           | WS.002.3b in room 002 -> - | -
  PF0_1  | PS.base.c1           | WS.003.1a in room 003 -> - | -
  PF0_1  | PS.base.c2           | WS.003.1b in room 003 -> - | -
  PF0_1  | PS.base.c3           | WS.003.2a in room 003 -> - | -
- PF0_1  | PS.base.c4           |                            | -
+ PF0_1  | PS.base.c4           | WS.003.2b in room 003 -> - | -
  PF0_1  | PS.base.c5           | WS.003.3a in room 003 -> - | -
- PF0_1  | PS.base.c6           |                            | -
+ PF0_1  | PS.base.c6           | WS.003.3b in room 003 -> - | -
 (18 rows)
 
 select * from PField_v1 where pfname = 'PF0_2' order by slotname;

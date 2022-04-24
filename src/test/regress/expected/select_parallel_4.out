@@ -43,20 +43,21 @@ explain (verbose, costs off)
 select parallel_restricted(unique1) from tenk1
   where stringu1 = 'GRAAAA' order by 1;
                           QUERY PLAN                           
----------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)
-   Output: parallel_restricted(unique1)
-   Sort Key: parallel_restricted(tenk1.unique1)
-   ->  Sort
+---------------------------------------------------------------------
+ Sort
          Output: (parallel_restricted(unique1))
          Sort Key: (parallel_restricted(tenk1.unique1))
-         ->  Gather
+   ->  Result
                Output: parallel_restricted(unique1)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               Output: unique1
+               ->  Gather
+                     Output: unique1
                Workers Planned: 4
                ->  Parallel Seq Scan on public.tenk1
                      Output: unique1
                      Filter: (tenk1.stringu1 = 'GRAAAA'::name)
-(12 rows)
+(13 rows)
 
 -- test parallel plan when group by expression is in target list.
 explain (costs off)
@@ -125,14 +126,15 @@ explain (costs off)
 	select  sum(parallel_restricted(unique1)) from tenk1
 	group by(parallel_restricted(unique1));
                                QUERY PLAN                                
--------------------------------------------------------------------------
+-----------------------------------------------------------------
  HashAggregate
    Group Key: parallel_restricted(unique1)
+   ->  Result
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Gather
                Workers Planned: 4
-               ->  Parallel Index Only Scan using tenk1_unique1 on tenk1
-(6 rows)
+                     ->  Parallel Seq Scan on tenk1
+(7 rows)
 
 -- test parallel plans for queries containing un-correlated subplans.
 alter table tenk2 set (parallel_workers = 0);
