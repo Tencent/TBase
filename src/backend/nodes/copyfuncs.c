@@ -3320,7 +3320,8 @@ _copyInsertStmt(const InsertStmt *from)
 	{
 	newnode->data_list =
 		(char ***)palloc(sizeof(char **) * from->ndatarows);
-	for (rowIdx = 0; rowIdx < from->ndatarows; rowIdx++) {
+		for (rowIdx = 0; rowIdx < from->ndatarows; rowIdx++)
+		{
 		newnode->data_list[rowIdx] =
 			(char **)palloc(sizeof(char *) * from->ninsert_columns);
 		for (colIdx = 0; colIdx < from->ninsert_columns; colIdx++)
