@@ -2107,7 +2107,7 @@ _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI,
 		 * TODO: now we don't support param, if multi values contains paramref, do not
 		 * transform to CopyStmt, refactor later
 		 */
-		if (plansource->insert_into && plansource->raw_parse_tree != NULL &&
+		if (g_transform_insert_to_copy && plansource->insert_into && plansource->raw_parse_tree != NULL &&
 			IsA(plansource->raw_parse_tree->stmt, InsertStmt))
 		{
 			bool suc;
@@ -2896,7 +2896,7 @@ static void _SPI_multi_insert_rewrite(CachedPlanSource *plansource,
 		 * set insert_into when we get multi-values insert, not
 		 * often happen
 		 */
-		if (unlikely(parse->isMultiValues && !parse->hasUnshippableTriggers))
+		if (unlikely(g_transform_insert_to_copy && parse->isMultiValues && !parse->hasUnshippableTriggers))
 		{
 			MemoryContext old_ctx;
 			InsertStmt *iStmt = (InsertStmt*)parsetree->stmt;
