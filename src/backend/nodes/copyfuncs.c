@@ -3303,6 +3303,8 @@ static InsertStmt *
 _copyInsertStmt(const InsertStmt *from)
 {
     InsertStmt *newnode = makeNode(InsertStmt);
+	int colIdx = 0;
+	int rowIdx = 0;
 
     COPY_NODE_FIELD(relation);
     COPY_NODE_FIELD(cols);
@@ -3313,8 +3315,20 @@ _copyInsertStmt(const InsertStmt *from)
     COPY_SCALAR_FIELD(override);
 #ifdef __TBASE__
     COPY_SCALAR_FIELD(ninsert_columns);
+	if(from->data_list != NULL)
+	{
+	newnode->data_list =
+		(char ***)palloc(sizeof(char **) * from->ndatarows);
+	for (rowIdx = 0; rowIdx < from->ndatarows; rowIdx++) {
+		newnode->data_list[rowIdx] =
+			(char **)palloc(sizeof(char *) * from->ninsert_columns);
+		for (colIdx = 0; colIdx < from->ninsert_columns; colIdx++)
+            newnode->data_list[rowIdx][colIdx] =
+                pstrdup(from->data_list[rowIdx][colIdx]);
+	}
+	}
+	COPY_SCALAR_FIELD(ndatarows);
 #endif
-
     return newnode;
 }
 
