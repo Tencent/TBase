@@ -53,6 +53,10 @@ static Portal SPI_cursor_open_internal(const char *name, SPIPlanPtr plan,
 static void _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree,
                   SPIPlanPtr plan);
 #endif
+static void _SPI_multi_insert_rewrite(
+    CachedPlanSource *plansource, RawStmt *parsetree,
+    List *stmtList);
+
 static void _SPI_prepare_plan(const char *src, SPIPlanPtr plan);
 
 static void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan);
@@ -1881,40 +1885,7 @@ _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlanPtr plan)
                                                _SPI_current->queryEnv);
         }
 
-		if (unlikely(IS_PGXC_COORDINATOR && list_length(stmt_list) == 1
-					 && IsA(parsetree->stmt, InsertStmt)))
-		{
-			Query *parse = (Query *)linitial(stmt_list);
-			/*
-			 * set insert_into when we get multi-values insert, not
-			 * often happen
-			 */
-			if (unlikely(parse->isMultiValues && !parse->hasUnshippableTriggers))
-			{
-				MemoryContext old_ctx;
-				InsertStmt *iStmt = (InsertStmt*)parsetree->stmt;
-				InsertStmt *pStmt = (InsertStmt*)plansource->raw_parse_tree->stmt;
-				int colIdx = 0;
-				int rowIdx = 0;
-
-				plansource->insert_into = true;
-				old_ctx = MemoryContextSwitchTo(plansource->context);
-				if (iStmt->data_list != NULL)
-				{
-				    pStmt->data_list = (char ***)palloc(sizeof(char **) * iStmt->ndatarows);
-					for (rowIdx = 0; rowIdx < iStmt->ndatarows; rowIdx++)
-					{
-						pStmt->data_list[rowIdx] = (char **)palloc(
-													sizeof(char *) * iStmt->ninsert_columns);
-						for (colIdx = 0; colIdx < iStmt->ninsert_columns; colIdx++)
-							pStmt->data_list[rowIdx][colIdx] = pstrdup(iStmt->data_list[rowIdx][colIdx]);
-					}
-				}
-				pStmt->ndatarows = iStmt->ndatarows;
-				pStmt->ninsert_columns = iStmt->ninsert_columns;
-				MemoryContextSwitchTo(old_ctx);
-			}
-		}
+		_SPI_multi_insert_rewrite(plansource, parsetree, stmt_list);
 
         /* Finish filling in the CachedPlanSource */
         CompleteCachedPlan(plansource,
@@ -2114,7 +2085,7 @@ _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI,
                                                    plan->nargs,
                                                    _SPI_current->queryEnv);
             }
-
+			_SPI_multi_insert_rewrite(plansource, parsetree, stmt_list);
             /* Finish filling in the CachedPlanSource */
             CompleteCachedPlan(plansource,
                                stmt_list,
@@ -2132,6 +2103,25 @@ _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI,
          * plan, the refcount must be backed by the CurrentResourceOwner.
          */
         cplan = GetCachedPlan(plansource, paramLI, plan->saved, _SPI_current->queryEnv);
+		/*
+		 * TODO: now we don't support param, if multi values contains paramref, do not
+		 * transform to CopyStmt, refactor later
+		 */
+		if (plansource->insert_into && plansource->raw_parse_tree != NULL &&
+			IsA(plansource->raw_parse_tree->stmt, InsertStmt))
+		{
+			bool suc;
+			InsertStmt *iStmt = (InsertStmt *) plansource->raw_parse_tree->stmt;
+			PlannedStmt *pStmt = (PlannedStmt *) linitial(cplan->stmt_list);
+			Query *query = (Query*) linitial(plansource->query_list);
+			if (!(pStmt->utilityStmt && IsA(pStmt->utilityStmt, CopyStmt)) && iStmt->data_list != NULL)
+			{
+				MemoryContext old_ctx;
+				old_ctx = MemoryContextSwitchTo(plansource->context);
+				cplan->stmt_list = transformInsertValuesIntoCopyFrom(NULL, iStmt, &suc, query->copy_filename, query);
+				MemoryContextSwitchTo(old_ctx);
+			}
+		}
         stmt_list = cplan->stmt_list;
 
         /*
@@ -2888,4 +2878,48 @@ SPI_register_trigger_data(TriggerData *tdata)
     }
 
     return SPI_OK_TD_REGISTER;
+}
+
+/*
+ * _SPI_multi_insert_rewrite
+ * If current stmt is a multi-line insert statement, copy the
+ * datalist to the raw_parse_tree in plansource and set plansource->insert_into
+ */
+static void _SPI_multi_insert_rewrite(CachedPlanSource *plansource,
+									  RawStmt *parsetree, List *stmtList)
+{
+	if (IS_PGXC_COORDINATOR && list_length(stmtList) == 1
+		&& IsA(parsetree->stmt, InsertStmt))
+	{
+		Query *parse = (Query *)linitial(stmtList);
+		/*
+		 * set insert_into when we get multi-values insert, not
+		 * often happen
+		 */
+		if (unlikely(parse->isMultiValues && !parse->hasUnshippableTriggers))
+		{
+			MemoryContext old_ctx;
+			InsertStmt *iStmt = (InsertStmt*)parsetree->stmt;
+			InsertStmt *pStmt = (InsertStmt*)plansource->raw_parse_tree->stmt;
+			int colIdx = 0;
+			int rowIdx = 0;
+
+			plansource->insert_into = true;
+			old_ctx = MemoryContextSwitchTo(plansource->context);
+			if (iStmt->data_list != NULL)
+			{
+				pStmt->data_list = (char ***)palloc(sizeof(char **) * iStmt->ndatarows);
+				for (rowIdx = 0; rowIdx < iStmt->ndatarows; rowIdx++)
+				{
+					pStmt->data_list[rowIdx] = (char **)palloc(
+						sizeof(char *) * iStmt->ninsert_columns);
+					for (colIdx = 0; colIdx < iStmt->ninsert_columns; colIdx++)
+						pStmt->data_list[rowIdx][colIdx] = pstrdup(iStmt->data_list[rowIdx][colIdx]);
+				}
+			}
+			pStmt->ndatarows = iStmt->ndatarows;
+			pStmt->ninsert_columns = iStmt->ninsert_columns;
+			MemoryContextSwitchTo(old_ctx);
+		}
+	}
 }

@@ -71,7 +71,6 @@
 #include "utils/rls.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
-#include "utils/lsyscache.h"
 #ifdef PGXC
 #include "commands/prepare.h"
 #include "pgxc/execRemote.h"
@@ -957,7 +956,7 @@ BuildCachedPlan(CachedPlanSource *plansource, List *qlist,
     MemoryContext plan_context;
     MemoryContext oldcxt = CurrentMemoryContext;
     ListCell   *lc;
-	char ***data_list = NULL;
+
     /*
      * Normally the querytree should be valid already, but if it's not,
      * rebuild it.
@@ -1005,18 +1004,6 @@ BuildCachedPlan(CachedPlanSource *plansource, List *qlist,
      */
     plist = pg_plan_queries(qlist, plansource->cursor_options, boundParams);
 
-	/*
-	 * When get the cached multi-values insert plan, we transform insert to copyfrom plan
-	 */
-	if (plansource->insert_into && plansource->raw_parse_tree != NULL
-		&& IsA(plansource->raw_parse_tree->stmt, InsertStmt))
-	{
-          InsertStmt *iStmt =
-              (InsertStmt *)plansource->raw_parse_tree->stmt;
-		  Query *query = (Query*) linitial(qlist);
-		  bool suc = false;
-		  plist=transformInsertValuesIntoCopyFrom(NULL, iStmt, &suc, query->copy_filename, query);
-	}
     /* Release snapshot if we got one */
     if (snapshot_set)
         PopActiveSnapshot();
@@ -1037,10 +1024,7 @@ BuildCachedPlan(CachedPlanSource *plansource, List *qlist,
          * Copy plan into the new context.
          */
         MemoryContextSwitchTo(plan_context);
-		/*
-		 * when we got a CopyStmt tansformed from multi values InsertStmt,
-		 * no need copy data_list, we set later
-		 */
+
         plist = copyObject(plist);
     }
     else
@@ -1373,78 +1357,7 @@ GetCachedPlan(CachedPlanSource *plansource, ParamListInfo boundParams,
     }
 
     Assert(plan != NULL);
-	if (plansource->insert_into && plansource->raw_parse_tree != NULL &&
-		IsA(plansource->raw_parse_tree->stmt, InsertStmt)) {
-		MemoryContext old_top;
-		InsertStmt *iStmt = (InsertStmt *)plansource->raw_parse_tree->stmt;
-		char ***data_list = NULL;
-		PlannedStmt *planstmt = (PlannedStmt *)linitial(plan->stmt_list);
-		CopyStmt *copyStmt = (CopyStmt *)planstmt->utilityStmt;
-		/*
-		 * we got parameters passed in, need trans them into data_list in
-		 * InsertStmt, then trans the insertStmt to copyStmt
-		 */
-		if (boundParams != NULL)
-		{
-            int colCnt = iStmt->ninsert_columns;
-            int i = 0;
-            char *valStr = NULL;
-            int colIdx = 0;
-            int rowIdx = 0;
 
-            if (colCnt == 0 || boundParams->numParams == 0 ||
-                boundParams->numParams % colCnt != 0)
-				plansource->insert_into = false;
-
-            old_top = MemoryContextSwitchTo(TopTransactionContext);
-            data_list = (char ***)palloc0(sizeof(char **) *
-                                          (boundParams->numParams / colCnt));
-            for (i = 0; i < (boundParams->numParams / colCnt); i++)
-			{
-              data_list[i] = (char **)palloc0(sizeof(char *) * colCnt);
-            }
-
-            for (i = 0; i < boundParams->numParams; i++)
-			{
-				Oid typOutput;
-				bool typIsVarlena;
-				Datum value;
-				Oid ptype = boundParams->params[i].ptype;
-				getTypeOutputInfo(ptype, &typOutput, &typIsVarlena);
-
-				if(typIsVarlena)
-				{
-					value = PointerGetDatum(PG_DETOAST_DATUM(boundParams->params[i].value));
-				}
-				else
-				{
-					value = boundParams->params[i].value;
-				}
-
-				if (boundParams->params[i].isnull)
-					data_list[rowIdx][colIdx++] = NULL;
-				else {
-					valStr = OidOutputFunctionCall(typOutput, value);
-					data_list[rowIdx][colIdx++] = pstrdup(valStr);
-				}
-				if (colIdx >= colCnt)
-				{
-					colIdx = 0;
-					rowIdx++;
-				}
-            }
-			copyStmt->data_list = data_list;
-			copyStmt->ndatarows = rowIdx;
-			copyStmt->ncolumns = colCnt;
-			MemoryContextSwitchTo(old_top);
-		}
-		else if(iStmt->data_list != NULL)
-		{
-			copyStmt->data_list = iStmt->data_list;
-			copyStmt->ndatarows = iStmt->ndatarows;
-			copyStmt->ncolumns = iStmt->ninsert_columns;
-		}
-	}
     /* Flag the plan as in use by caller */
     if (useResOwner)
         ResourceOwnerEnlargePlanCacheRefs(CurrentResourceOwner);
@@ -1453,10 +1366,10 @@ GetCachedPlan(CachedPlanSource *plansource, ParamListInfo boundParams,
         ResourceOwnerRememberPlanCacheRef(CurrentResourceOwner, plan);
 
     /*
-	 * Saved plans should be under CacheMemoryContext so they will not go
-	 * away until their reference count goes to zero.  In the generic-plan
-	 * cases we already took care of that, but for a custom plan, do it as
-	 * soon as we have created a reference-counted link.
+	 * Saved plans should be under CacheMemoryContext so they will not go away
+	 * until their reference count goes to zero.  In the generic-plan cases we
+	 * already took care of that, but for a custom plan, do it as soon as we
+	 * have created a reference-counted link.
      */
     if (customplan && plansource->is_saved)
     {
