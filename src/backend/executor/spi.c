@@ -34,7 +34,7 @@
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
-
+#include "parser/analyze.h"
 
 uint64        SPI_processed = 0;
 Oid            SPI_lastoid = InvalidOid;
@@ -1880,6 +1880,41 @@ _SPI_pgxc_prepare_plan(const char *src, List *src_parsetree, SPIPlanPtr plan)
                                                plan->nargs,
                                                _SPI_current->queryEnv);
         }
+
+		if (unlikely(IS_PGXC_COORDINATOR && list_length(stmt_list) == 1
+					 && IsA(parsetree->stmt, InsertStmt)))
+		{
+			Query *parse = (Query *)linitial(stmt_list);
+			/*
+			 * set insert_into when we get multi-values insert, not
+			 * often happen
+			 */
+			if (unlikely(parse->isMultiValues && !parse->hasUnshippableTriggers))
+			{
+				MemoryContext old_ctx;
+				InsertStmt *iStmt = (InsertStmt*)parsetree->stmt;
+				InsertStmt *pStmt = (InsertStmt*)plansource->raw_parse_tree->stmt;
+				int colIdx = 0;
+				int rowIdx = 0;
+
+				plansource->insert_into = true;
+				old_ctx = MemoryContextSwitchTo(plansource->context);
+				if (iStmt->data_list != NULL)
+				{
+				    pStmt->data_list = (char ***)palloc(sizeof(char **) * iStmt->ndatarows);
+					for (rowIdx = 0; rowIdx < iStmt->ndatarows; rowIdx++)
+					{
+						pStmt->data_list[rowIdx] = (char **)palloc(
+													sizeof(char *) * iStmt->ninsert_columns);
+						for (colIdx = 0; colIdx < iStmt->ninsert_columns; colIdx++)
+							pStmt->data_list[rowIdx][colIdx] = pstrdup(iStmt->data_list[rowIdx][colIdx]);
+					}
+				}
+				pStmt->ndatarows = iStmt->ndatarows;
+				pStmt->ninsert_columns = iStmt->ninsert_columns;
+				MemoryContextSwitchTo(old_ctx);
+			}
+		}
 
         /* Finish filling in the CachedPlanSource */
         CompleteCachedPlan(plansource,
