@@ -1951,6 +1951,17 @@ set_subquery_pathlist(PlannerInfo *root, RelOptInfo *rel,
     RelOptInfo *sub_final_rel;
     ListCell   *lc;
 
+	if (subquery->hasCoordFuncs &&
+	    (parse->commandType == CMD_UPDATE ||
+	     parse->commandType == CMD_INSERT ||
+	     parse->commandType == CMD_DELETE))
+	{
+		ereport(ERROR,
+		        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			        errmsg("DML has a subquery contains a function runs on CN"),
+			        errhint("You might need to push that function down to DN.")));
+	}
+	
     /*
      * Must copy the Query so that planning doesn't mess up the RTE contents
      * (really really need to fix the planner to not scribble on its input,
