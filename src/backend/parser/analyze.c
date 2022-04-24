@@ -448,6 +448,16 @@ transformStmt(ParseState *pstate, Node *parseTree)
     result->querySource = QSRC_ORIGINAL;
     result->canSetTag = true;
 	result->hasCoordFuncs = pstate->p_hasCoordFuncs;
+	if (result->hasCoordFuncs &&
+	    (result->commandType == CMD_UPDATE ||
+	     result->commandType == CMD_INSERT ||
+	     result->commandType == CMD_DELETE))
+	{
+		ereport(ERROR,
+		        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			        errmsg("DML contains a function runs on CN which is not supported"),
+			        errhint("You might need to push that function down to DN.")));
+	}
 
     return result;
 }
