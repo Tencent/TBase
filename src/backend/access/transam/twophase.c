@@ -2392,11 +2392,12 @@ CheckPointTwoPhase(XLogRecPtr redo_horizon)
 
 				if (!save_and_remove_2pc_info(gxact->gid))
 					{
-					elog(DEBUG1, "checkpoint: %s save to file failed", gxact->gid);
+					elog(LOG, "[%s] %s save to file failed",
+						__FUNCTION__, gxact->gid);
 				}
 				else
 				{
-					elog(LOG, "checkpoint: %s is saved to file", gxact->gid);
+					elog(LOG, "[%s] %s is saved to file", __FUNCTION__, gxact->gid);
 				}
 			}
 #endif
@@ -3740,12 +3741,10 @@ void record_2pc_involved_nodes_xid(const char * tid,
 	File fd = 0;
 	int ret = 0;
 	int size = 0;
-	int pg_clean_check_size = 0;
 	StringInfoData content;
 	struct stat fst;
 	char path[MAXPGPATH];
 	char *result = NULL;
-	GlobalTimestamp prepare_gts = InvalidGlobalTimestamp;
 
 #ifdef __TWO_PHASE_TESTS__
 	XLogRecPtr xlogrec = 0;
@@ -3754,18 +3753,6 @@ void record_2pc_involved_nodes_xid(const char * tid,
 	if (!enable_2pc_recovery_info)
 	{
 		return;
-	}
-
-	prepare_gts = GetGlobalPrepareTimestamp();
-	if (!GlobalTimestampIsValid(prepare_gts))
-	{
-		elog(WARNING, "prepare gts is invalid");
-		prepare_gts = GetGlobalTimestampGTM();
-		if (!GlobalTimestampIsValid(prepare_gts))
-		{
-			elog(ERROR, "get gts for prepare is invalid");
-		}
-		SetGlobalPrepareTimestamp(prepare_gts);
 	}
 
 	if (enable_distri_print || enable_2pc_entry_trace)
@@ -3793,10 +3780,6 @@ void record_2pc_involved_nodes_xid(const char * tid,
 	appendStringInfo(&content, "startxid:%u\n", startxid);
 	appendStringInfo(&content, "nodes:%s\n", nodestring);
 	appendStringInfo(&content, "xid:%u\n", xid);
-	pg_clean_check_size = content.len;
-	Assert(pg_clean_check_size == strlen(content.data));
-
-	appendStringInfo(&content, "global_prepare_timestamp:%ld\n", prepare_gts);
 	size = content.len;
 	Assert(size == strlen(content.data));
 
@@ -3815,10 +3798,11 @@ void record_2pc_involved_nodes_xid(const char * tid,
 				Assert(strlen(info) < MAX_2PC_INFO_SIZE);
 				check_2pc_file(tid, info, __FUNCTION__);
 
-				if (pg_strncasecmp(info, content.data, pg_clean_check_size) != 0)
+				if (strncmp(info, content.data, size) != 0)
 				{
-					elog(ERROR, "pg_clean attemp to write %s info conflict, "
-						"content: %s, info: %s", tid, content.data, info);
+					elog(ERROR, "[%s] pg_clean attemp to write %s info conflict, "
+						"content: %s, info: %s", __FUNCTION__, tid,
+						content.data, info);
 				}
 
 				resetStringInfo(&content);
@@ -3852,10 +3836,11 @@ void record_2pc_involved_nodes_xid(const char * tid,
 
 			Assert(NULL != result);
 
-			if (pg_strncasecmp(result, content.data, pg_clean_check_size) != 0)
+			if (strncmp(result, content.data, size) != 0)
             {
-				elog(ERROR, "pg_clean attemp to write %s info conflict, "
-					"content: %s, info: %s", tid, content.data, result);
+				elog(ERROR, "[%s] pg_clean attemp to write %s info conflict, "
+					"content: %s, info: %s",
+					__FUNCTION__, tid, content.data, result);
             }
 
 			pfree(result);
@@ -3868,16 +3853,12 @@ void record_2pc_involved_nodes_xid(const char * tid,
     
 	if (!RecoveryInProgress())
 	{
-		char *fmt_v2 = XLOG_FMT_2PC_V2;
 		XLogBeginInsert();
 		XLogRegisterData((char *)tid, strlen(tid) + 1);
-		XLogRegisterData((char *)fmt_v2, strlen(fmt_v2) + 1);
 		XLogRegisterData((char *)startnode, strlen(startnode) + 1);
-		XLogRegisterData((char *)&startxid, sizeof(GlobalTransactionId));
+		XLogRegisterData((char *)&startxid, sizeof(GlobalTransactionId) + 1);
 		XLogRegisterData((char *)nodestring, strlen(nodestring) + 1);
-		XLogRegisterData((char *)&xid, sizeof(GlobalTransactionId));
-		XLogRegisterData((char *)&prepare_gts, sizeof(GlobalTimestamp));
-
+		XLogRegisterData((char *)&xid, sizeof(GlobalTransactionId) + 1);
 #ifdef __TWO_PHASE_TESTS__
 		xlogrec = 
 #endif
@@ -3992,7 +3973,7 @@ void record_2pc_commit_timestamp(const char *tid, GlobalTimestamp commit_timesta
 	{
 		XLogBeginInsert();
 		XLogRegisterData((char *)tid, strlen(tid) + 1);
-		XLogRegisterData((char *)&commit_timestamp, sizeof(GlobalTimestamp));
+		XLogRegisterData((char *)&commit_timestamp, sizeof(GlobalTimestamp) + 1);
 		xlogrec = XLogInsert(RM_XLOG_ID, XLOG_RECORD_2PC_TIMESTAMP);
 		/* only start node need to flush and sync XLOG_RECORD_2PC_TIMESTAMP */
 		if (IS_PGXC_LOCAL_COORDINATOR)
@@ -4197,7 +4178,7 @@ void rename_2pc_records(const char *tid, TimestampTz timestamp)
 		XLogBeginInsert();
 		XLogRegisterData((char *)tid, strlen(tid) + 1);
 		XLogRegisterData((char *)type, strlen(type) + 1);
-		XLogRegisterData((char *)&timestamp, sizeof(TimestampTz));
+		XLogRegisterData((char *)&timestamp, sizeof(TimestampTz) + 1);
 		XLogInsert(RM_XLOG_ID, XLOG_CLEAN_2PC_FILE);
 	}
 
@@ -4407,7 +4388,7 @@ char *get_2pc_list_from_cache(int *count)
 		{
 			recordList = (char *) repalloc(recordList,
 				strlen(entry->key) + strlen(recordList) + 2);
-			sprintf(recordList + strlen(recordList), ",%s", entry->key);
+			sprintf(recordList, "%s,%s", recordList, entry->key);
 		}
 
 		if (++(*count) >= MAX_OUTPUT_FILE)
