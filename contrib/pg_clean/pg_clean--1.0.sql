@@ -50,11 +50,6 @@ RETURNS text
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
 
-CREATE FUNCTION pgxc_get_2pc_prepare_timestamp(gid text)
-RETURNS text
-AS 'MODULE_PATHNAME'
-LANGUAGE C;
-
 CREATE FUNCTION pgxc_get_2pc_commit_timestamp(gid text)
 RETURNS text
 AS 'MODULE_PATHNAME'
@@ -101,7 +96,6 @@ GRANT ALL ON FUNCTION pg_clean_check_txn(time_interval integer) TO PUBLIC;
 GRANT ALL ON FUNCTION pgxc_get_2pc_nodes(gid text) TO PUBLIC;
 GRANT ALL ON FUNCTION pgxc_get_2pc_startnode(gid text) TO PUBLIC;
 GRANT ALL ON FUNCTION pgxc_get_2pc_startxid(gid text) TO PUBLIC;
-GRANT ALL ON FUNCTION pgxc_get_2pc_prepare_timestamp(gid text) TO PUBLIC;
 GRANT ALL ON FUNCTION pgxc_get_2pc_commit_timestamp(gid text) TO PUBLIC;
 GRANT ALL ON FUNCTION pgxc_get_2pc_xid(gid text) TO PUBLIC;
 GRANT ALL ON FUNCTION pgxc_get_2pc_file(gid text) TO PUBLIC;

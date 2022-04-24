@@ -9,7 +9,6 @@ ALTER EXTENSION pg_clean ADD function pg_clean_check_txn(time_interval integer);
 ALTER EXTENSION pg_clean ADD function pgxc_get_2pc_nodes(gid text);
 ALTER EXTENSION pg_clean ADD function pgxc_get_2pc_startnode(gid text);
 ALTER EXTENSION pg_clean ADD function pgxc_get_2pc_startxid(gid text);
-ALTER EXTENSION pg_clean ADD function pgxc_get_2pc_prepare_timestamp(gid text);
 ALTER EXTENSION pg_clean ADD function pgxc_get_2pc_commit_timestamp(gid text);
 ALTER EXTENSION pg_clean ADD function pgxc_get_2pc_xid(gid text);
 ALTER EXTENSION pg_clean ADD function pgxc_get_2pc_file(gid text);

@@ -17,7 +17,6 @@
 #include "postgres.h"
 
 #include "access/htup_details.h"
-#include "catalog/namespace.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_type.h"
 #include "commands/dbcommands.h"
@@ -59,7 +58,7 @@ typedef enum
 bool enable_clean_2pc_launcher = true;
 
 int auto_clean_2pc_interval        = 60;
-int auto_clean_2pc_delay           = 60;
+int auto_clean_2pc_delay           = 300;
 int auto_clean_2pc_timeout         = 1200;
 int auto_clean_2pc_max_check_time  = 1200;
 
@@ -88,8 +87,6 @@ static void	start_clean_worker(int count);
 
 static void do_query_2pc(TimestampTz clean_time);
 static void do_clean_2pc(TimestampTz clean_time);
-
-static bool check_pg_clean_extension(void);
 
 static void clean_2pc_sigterm_handler(SIGNAL_ARGS);
 static void clean_2pc_sighup_handler(SIGNAL_ARGS);
@@ -435,12 +432,6 @@ do_query_2pc(TimestampTz clean_time)
 	Assert(result_str != NULL);
 	resetStringInfo(result_str);
 
-	if (!check_pg_clean_extension())
-	{
-		elog(WARNING, "create extension pg_clean please");
-		return;
-	}
-
 	check_time = (curr_time - clean_time)/USECS_PER_SEC;
 
 	if (check_time < 0)
@@ -693,40 +684,6 @@ do_clean_2pc(TimestampTz clean_time)
 		elog(LOG, "clean 2pc count(%d), sql: %s", count, query);
 		elog(LOG, "clean 2pc:\n%s", result_str->data);
 	}
-}
-
-/*
- * check if pg_clean_check_txn funciton exist
- */
-static bool
-check_pg_clean_extension(void)
-{
-	bool                 res = false;
-	List                *names = NULL;
-	FuncCandidateList    clist = NULL;
-	char                *fuc_name = "pg_clean_check_txn";
-
-	StartTransactionCommand();
-
-	/*
-	 * Parse the name into components and see if it matches any pg_proc
-	 * entries in the current search path.
-	 */
-	names = list_make1(makeString(fuc_name));
-	clist = FuncnameGetCandidates(names, -1, NIL, false, false, true);
-
-	if (clist == NULL || clist->next != NULL)
-	{
-		res = false;
-	}
-	else
-	{
-		res = true;
-	}
-
-	CommitTransactionCommand();
-
-	return res;
 }
 
 /* SIGTERM: set flag to exit normally */

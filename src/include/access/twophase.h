@@ -81,10 +81,6 @@
 #include "gtm/gtm_c.h"
 
 #define GIDSIZE (200 + 24)
-
-/* 2pc xlog v2 add prepare timestamp */
-#define XLOG_FMT_2PC_V2 "fmt_v2"
-
 /*
  * GlobalTransactionData is defined in twophase.c; other places have no
  * business knowing the internal definition.

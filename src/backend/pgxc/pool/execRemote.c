@@ -3986,10 +3986,11 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
 #endif
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
+	if(implicit)
+	{
         if(enable_distri_print)
         {
-		elog(LOG, "prepare remote transaction xid %d gid %s",
-			GetTopTransactionIdIfAny(), prepareGID);
+			elog(LOG, "prepare remote transaction xid %d gid %s", GetTopTransactionIdIfAny(), prepareGID);
         }
         global_prepare_ts = GetGlobalTimestampGTM();
 
@@ -3999,19 +4000,17 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
         global_prepare_ts = 0;
     }
 #endif
-
-	if (!GlobalTimestampIsValid(global_prepare_ts))
-	{
+		if(!GlobalTimestampIsValid(global_prepare_ts)){
             ereport(ERROR,
             (errcode(ERRCODE_INTERNAL_ERROR),
              errmsg("failed to get global timestamp for PREPARED command")));
         }
         if(enable_distri_print)
         {
-		elog(LOG, "prepare phase get global prepare timestamp gid %s, time "
-			INT64_FORMAT, prepareGID, global_prepare_ts);
+			elog(LOG, "prepare phase get global prepare timestamp gid %s, time " INT64_FORMAT, prepareGID, global_prepare_ts);
         }
         SetGlobalPrepareTimestamp(global_prepare_ts);
+	}
 #endif
 
 #ifdef __TWO_PHASE_TRANS__
@@ -4106,18 +4105,19 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
             {
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
+				if(implicit)
+				{
                     if(enable_distri_print)
                     {
-					elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts "
-						INT64_FORMAT, GetTopTransactionIdIfAny(),
+						elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts " INT64_FORMAT,GetTopTransactionIdIfAny(),
                                                         prepareGID, global_prepare_ts);
                     }
                     if (pgxc_node_send_prepare_timestamp(conn, global_prepare_ts))
                     {
                         ereport(ERROR,
                                 (errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("failed to send global prepare committs for "
-							"PREPARED command")));
+								 errmsg("failed to send global prepare committs for PREPARED command")));
+					}
                 }
 #endif
                 /* Send down prepare command */
@@ -4151,10 +4151,11 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
 #endif
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
+				if(implicit)
+				{
                     if(enable_distri_print)
                     {
-					elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts "
-						INT64_FORMAT, GetTopTransactionIdIfAny(),
+						elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts " INT64_FORMAT,GetTopTransactionIdIfAny(),
                                                         prepareGID, global_prepare_ts);
                     }
                     if (pgxc_node_send_prepare_timestamp(conn, global_prepare_ts))
@@ -4168,8 +4169,8 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
 #endif
                         ereport(ERROR,
                                 (errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("failed to send global prepare committs for "
-							"PREPARED command")));
+								 errmsg("failed to send global prepare committs for PREPARED command")));
+					}
                 }
 #endif
 
@@ -4308,18 +4309,19 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
             if (conn->read_only)
             {
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
+				if(implicit)
+				{
                     if(enable_distri_print)
                     {
-					elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts "
-						INT64_FORMAT,GetTopTransactionIdIfAny(),
+						elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts " INT64_FORMAT,GetTopTransactionIdIfAny(),
                                                         prepareGID, global_prepare_ts);
                     }
                     if (pgxc_node_send_prepare_timestamp(conn, global_prepare_ts))
                     {
                         ereport(ERROR,
                                 (errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("failed to send global prepare committs for "
-							"PREPARED command")));
+								 errmsg("failed to send global prepare committs for PREPARED command")));
+					}
                 }
 #endif
                 /* Send down prepare command */
@@ -4350,10 +4352,11 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
 #endif
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
+				if(implicit)
+				{
                     if(enable_distri_print)
                     {
-					elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts "
-						INT64_FORMAT,GetTopTransactionIdIfAny(),
+						elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts " INT64_FORMAT,GetTopTransactionIdIfAny(),
                                                         prepareGID, global_prepare_ts);
                     }
                     if (pgxc_node_send_prepare_timestamp(conn, global_prepare_ts))
@@ -4367,8 +4370,8 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
 #endif
                         ereport(ERROR,
                                 (errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("failed to send global prepare committs for "
-							"PREPARED command")));
+								 errmsg("failed to send global prepare committs for PREPARED command")));
+					}
                 }
 #endif
 
