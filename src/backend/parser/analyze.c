@@ -648,6 +648,7 @@ transformInsertStmt(ParseState *pstate, InsertStmt *stmt)
     qry->isSingleValues = false;
     qry->isMultiValues = false;
     stmt->ninsert_columns = 0;
+	qry->copy_filename = NULL;
 #endif
 
     /* process the WITH clause independently of all else */
@@ -875,7 +876,6 @@ transformInsertStmt(ParseState *pstate, InsertStmt *stmt)
         List       *colcollations = NIL;
         int            sublist_length = -1;
         bool        lateral = false;
-		bool        all_params = true;
 
         Assert(selectStmt->intoClause == NULL);
 
@@ -1006,12 +1006,10 @@ transformInsertStmt(ParseState *pstate, InsertStmt *stmt)
                     switch(nodeTag(v))
                     {
                         case T_A_Const:
-							all_params = false;
                             break;
                         case T_TypeCast:
                         {
                             TypeCast *cast = (TypeCast *)v;
-							all_params = false;
                             if (IsA(cast->arg, A_Const))
                             {
                                 v = (A_Const *)cast->arg;
@@ -1022,9 +1020,6 @@ transformInsertStmt(ParseState *pstate, InsertStmt *stmt)
                             }
                             break;
                         }
-					    case T_ParamRef:
-							copy_from = all_params;
-							break;
                         default:
                             {
                                 copy_from = false;
@@ -1039,9 +1034,6 @@ transformInsertStmt(ParseState *pstate, InsertStmt *stmt)
                     }
 
                     index++;
-					if(all_params){
-						continue;
-					}
                     /* A_Const */
                     switch(v->val.type)
                     {
@@ -1099,7 +1091,7 @@ transformInsertStmt(ParseState *pstate, InsertStmt *stmt)
 
             if (copy_from)
             {
-				if (ndatarows != column_index && !all_params)
+				if (ndatarows != column_index)
                 {
                     elog(ERROR, "datarow count mismatched, expected %d, result %d",
                                  ndatarows, column_index);
@@ -1107,10 +1099,7 @@ transformInsertStmt(ParseState *pstate, InsertStmt *stmt)
                 qry->copy_filename = palloc(MAXPGPATH);
                 snprintf(qry->copy_filename, MAXPGPATH, "%s", "Insert_into to Copy_from(Simple Protocl)");
                 stmt->ndatarows = ndatarows;
-				if(!all_params)
                 stmt->data_list = data_list;
-				else
-					 goto TRANSFORM_VALUELISTS;
             }
             else
             {
