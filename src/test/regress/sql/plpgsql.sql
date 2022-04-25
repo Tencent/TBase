@@ -4935,7 +4935,19 @@ end;
 $$
 language plpgsql;
 
+create or replace function insert_mul_null () returns text as
+$$
+begin
+    insert into multi_itb values(1,null),(2,null);
+        return 'ok';
+end;
+$$
+language plpgsql;
+
 select insert_mul();
+select * from multi_itb order by f1;
+truncate multi_itb;
+select insert_mul_null();
 select * from multi_itb order by f1;
 drop table multi_itb;
 set transform_insert_to_copy to off;

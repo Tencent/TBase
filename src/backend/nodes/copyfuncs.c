@@ -3325,8 +3325,13 @@ _copyInsertStmt(const InsertStmt *from)
 		newnode->data_list[rowIdx] =
 			(char **)palloc(sizeof(char *) * from->ninsert_columns);
 		for (colIdx = 0; colIdx < from->ninsert_columns; colIdx++)
+			{
+				if(from->data_list[rowIdx][colIdx] == NULL)
+					newnode->data_list[rowIdx][colIdx] = NULL;
+				else
             newnode->data_list[rowIdx][colIdx] =
                 pstrdup(from->data_list[rowIdx][colIdx]);
+	}
 	}
 	}
 	COPY_SCALAR_FIELD(ndatarows);

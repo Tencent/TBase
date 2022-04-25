@@ -6194,6 +6194,14 @@ begin
 end;
 $$
 language plpgsql;
+create or replace function insert_mul_null () returns text as
+$$
+begin
+    insert into multi_itb values(1,null),(2,null);
+        return 'ok';
+end;
+$$
+language plpgsql;
 select insert_mul();
  insert_mul 
 ------------
@@ -6205,6 +6213,20 @@ select * from multi_itb order by f1;
 ----+----
   1 |  1
   2 |  2
+(2 rows)
+
+truncate multi_itb;
+select insert_mul_null();
+ insert_mul_null 
+-----------------
+ ok
+(1 row)
+
+select * from multi_itb order by f1;
+ f1 | f2 
+----+----
+  1 |   
+  2 |   
 (2 rows)
 
 drop table multi_itb;

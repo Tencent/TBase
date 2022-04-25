@@ -2914,8 +2914,13 @@ static void _SPI_multi_insert_rewrite(CachedPlanSource *plansource,
 					pStmt->data_list[rowIdx] = (char **)palloc(
 						sizeof(char *) * iStmt->ninsert_columns);
 					for (colIdx = 0; colIdx < iStmt->ninsert_columns; colIdx++)
+					{
+						if (iStmt->data_list[rowIdx][colIdx] == NULL)
+							pStmt->data_list[rowIdx][colIdx] = NULL;
+						else
 						pStmt->data_list[rowIdx][colIdx] = pstrdup(iStmt->data_list[rowIdx][colIdx]);
 				}
+			}
 			}
 			pStmt->ndatarows = iStmt->ndatarows;
 			pStmt->ninsert_columns = iStmt->ninsert_columns;
