@@ -554,6 +554,11 @@ select case when $1 then $2 else $3 end $$ language sql;
 -- Note this would fail with integer overflow, never mind wrong bleat() output,
 -- if the CASE expression were not successfully inlined
 select f1, sql_if(f1 > 0, bleat(f1), bleat(f1 + 1)) from (select * from int4_tbl order by f1) q order by 1, 2;
+NOTICE:  bleat -2147483646
+NOTICE:  bleat -123455
+NOTICE:  bleat 1
+NOTICE:  bleat 123456
+NOTICE:  bleat 2147483647
      f1      |   sql_if    
 -------------+-------------
  -2147483647 | -2147483646
