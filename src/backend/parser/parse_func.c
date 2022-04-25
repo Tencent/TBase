@@ -2265,7 +2265,6 @@ check_srf_call_placement(ParseState *pstate, Node *last_srf, int location)
 bool
 func_is_pullup(Oid func_id)
 {
-	char *name = NULL;
 	if (func_id >= FirstNormalObjectId)
 	{
 		Oid func_lang_oid;
