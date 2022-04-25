@@ -255,7 +255,7 @@ ParseFuncOrColumn(ParseState *pstate, List *funcname, List *fargs,
 
     cancel_parser_errposition_callback(&pcbstate);
 
-	pstate->p_hasCoordFuncs = func_is_pullup(funcid);
+	pstate->p_hasCoordFuncs = pstate->p_hasCoordFuncs ? true : func_is_pullup(funcid);
 	
     if (fdresult == FUNCDETAIL_COERCION)
     {
