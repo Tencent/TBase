@@ -573,7 +573,8 @@ _readQuery(void)
     READ_BOOL_FIELD(hasForUpdate);
     READ_BOOL_FIELD(hasRowSecurity);
 	token = pg_strtok(&length);		/* get :fldname hasRowSecurity or cteList */
-	if (strncmp(nullable_string(token, length), ":hasCoordFuncs", length) == 0)
+	Assert(length != 0);
+	if (strncmp(debackslash(token, length), ":hasCoordFuncs", length) == 0)
 	{
 		token = pg_strtok(&length);		/* get field value */
 		local_node->hasCoordFuncs = strtobool(token);
