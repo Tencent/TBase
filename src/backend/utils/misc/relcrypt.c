@@ -1605,17 +1605,20 @@ Datum trsprt_crypt_decrypt_one_col_value(TranspCrypt*transp_crypt,
 {
     Datum   datum_ret;
     text *  datum_text;
+    text *  input_text;
 
     if (TRANSP_CRYPT_INVALID_ALGORITHM_ID != transp_crypt->algo_id)
     {
-        datum_text = decrypt_procedure(transp_crypt->algo_id, DatumGetTextP(inputval), INVALID_CONTEXT_LENGTH); 
+    	input_text = DatumGetTextP(inputval);
+    	
+        datum_text = decrypt_procedure(transp_crypt->algo_id, input_text, INVALID_CONTEXT_LENGTH);
         if (datum_text)
         {
         datum_ret = transparent_crypt_text_get_datum(datum_text, attr);
         }
         else
         {
-	        datum_ret = transparent_crypt_text_get_datum(DatumGetTextP(inputval), attr);
+	        datum_ret = transparent_crypt_text_get_datum(input_text, attr);
         }
 
         return datum_ret;
