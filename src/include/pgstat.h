@@ -722,7 +722,6 @@ typedef enum BackendType
 	B_PGXL_POOLER,
 	B_CLEAN_2PC_LAUNCHER,
 	B_CLEAN_2PC_WORKER,
-	B_PROXY_FOR_DN,
 } BackendType;
 
 

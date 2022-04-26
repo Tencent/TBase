@@ -162,8 +162,6 @@
 #include "audit/audit_fga.h"
 #endif
 
-#define PS_DISPLAY_MAX_LENGTH	256		/* process display max length */
-
 /*
  * Possible types of a backend. Beyond being the possible bkend_type values in
  * struct bkend, these are OR-able request flag bits for SignalSomeChildren()
@@ -2389,20 +2387,6 @@ retry1:
                                     valptr),
                              errhint("Valid values are: \"false\", 0, \"true\", 1, \"database\".")));
             }
-			else if (strcmp(nameptr, "proxy_for_dn") == 0)
-			{
-				if (!IS_PGXC_COORDINATOR)
-				{
-					ereport(FATAL,
-							(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-							 errmsg("parameter \"%s\" only support on cn", nameptr)));
-				}
-
-				elog(LOG, "Proxy for dn: %s", valptr);
-
-				am_proxy_for_dn = true;
-				proxy_for_dn = pstrdup(valptr);
-			}
             else
             {
                 /* Assume it's a generic GUC option */
@@ -4956,35 +4940,12 @@ BackendInitialize(Port *port)
      * as dbname to init_ps_display(). XXX: should add a new variant of
      * init_ps_display() to avoid abusing the parameters like this.
      */
-	if (am_proxy_for_dn)
-	{
-		char proxy_display[PS_DISPLAY_MAX_LENGTH];
     if (am_walsender)
-		{
-			snprintf(proxy_display, PS_DISPLAY_MAX_LENGTH,
-				"wal sender proxy for %s", proxy_for_dn);
-		}
-		else
-		{
-			snprintf(proxy_display, PS_DISPLAY_MAX_LENGTH,
-				"proxy for %s", proxy_for_dn);
-		}
-		init_ps_display(proxy_display, port->user_name, remote_ps_data,
-						update_process_title ? "authentication" : "");
-	}
-	else
-	{
-		if (am_walsender)
-		{
         init_ps_display("wal sender process", port->user_name, remote_ps_data,
                         update_process_title ? "authentication" : "");
-		}
     else
-		{
         init_ps_display(port->user_name, port->database_name, remote_ps_data,
                         update_process_title ? "authentication" : "");
-		}
-	}
 
     /*
      * Disable the timeout, and prevent SIGTERM/SIGQUIT again.

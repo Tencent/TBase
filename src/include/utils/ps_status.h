@@ -23,6 +23,4 @@ extern void set_ps_display(const char *activity, bool force);
 
 extern const char *get_ps_display(int *displen);
 
-extern const char *get_ps_display_fixed(int *displen);
-
 #endif							/* PS_STATUS_H */

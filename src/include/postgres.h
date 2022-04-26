@@ -71,11 +71,6 @@
 #define EXTENT_FIRST_BLOCKNUMBER(eid) ((eid)*PAGES_PER_EXTENTS)
 #endif
 
-extern char *proxy_for_dn;      /* Proxy for which dn? */
-extern bool am_proxy_for_dn;    /* Am I a proxy for dn? */
-extern bool am_conn_from_proxy; /* Am I connected from proxy? */
-
-
 /* ----------------------------------------------------------------
  *				Section 1:	variable-length datatypes (TOAST support)
  * ----------------------------------------------------------------

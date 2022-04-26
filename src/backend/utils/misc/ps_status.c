@@ -417,26 +417,3 @@ get_ps_display(int *displen)
 
     return ps_buffer + ps_buffer_fixed_size;
 }
-
-/*
- * Returns the fixed part in the ps display, in case someone needs
- * it.  Note that only the fixed part is returned.
- * The string will not be null-terminated, so return the effective
- * length into *fixlen.
- */
-const char *
-get_ps_display_fixed(int *fixlen)
-{
-#ifdef PS_USE_CLOBBER_ARGV
-	/* If ps_buffer is a pointer, it might still be null */
-	if (!ps_buffer)
-	{
-		*fixlen = 0;
-		return "";
-	}
-#endif
-
-	*fixlen = (int) ps_buffer_fixed_size;
-
-	return ps_buffer;
-}

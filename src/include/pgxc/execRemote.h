@@ -384,7 +384,6 @@ extern void ExecRemoteUtility(RemoteQuery *node);
 extern bool    is_data_node_ready(PGXCNodeHandle * conn);
 
 extern int handle_response(PGXCNodeHandle *conn, ResponseCombiner *combiner);
-extern int handle_response_on_proxy(PGXCNodeHandle *conn, ResponseCombiner *combiner);
 extern void HandleCmdComplete(CmdType commandType, CombineTag *combine, const char *msg_body,
                                     size_t len);
 
@@ -476,8 +475,6 @@ extern int pgxc_node_receive_responses(const int conn_count, PGXCNodeHandle ** c
                          struct timeval * timeout, ResponseCombiner *combiner);
 extern bool validate_combiner(ResponseCombiner *combiner);
 #endif
-
-extern int pgxc_node_receive_on_proxy(PGXCNodeHandle *handle);
 
 #ifdef __TWO_PHASE_TRANS__
 extern char *get_nodelist(char * prepareGID, bool localNode, bool implicit);

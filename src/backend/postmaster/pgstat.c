@@ -2913,11 +2913,6 @@ pgstat_bestart(void)
 			/* Clean 2pc Worker */
 			beentry->st_backendType = B_CLEAN_2PC_WORKER;
 		}
-		else if (am_proxy_for_dn)
-		{
-			/* Proxy for dn */
-			beentry->st_backendType = B_PROXY_FOR_DN;
-		}
         else if (am_walsender)
         {
             /* Wal sender */
@@ -4212,9 +4207,6 @@ pgstat_get_backend_desc(BackendType backendType)
 			break;
 		case B_CLEAN_2PC_WORKER:
 			backendDesc = "2pc clean worker";
-			break;
-		case B_PROXY_FOR_DN:
-			backendDesc = "proxy for dn";
 			break;
     }
 
