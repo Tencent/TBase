@@ -2133,6 +2133,7 @@ UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
 ERROR:  DML contains a function runs on CN which is not supported
 HINT:  You might need to push that function down to DN.
 ALTER FUNCTION leakproof(anyelement) pushdown;
+ALTER FUNCTION snoop(anyelement) pushdown;
 EXPLAIN (VERBOSE, COSTS OFF)
 UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
                                           QUERY PLAN                                           
@@ -2170,6 +2171,7 @@ UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
 
 UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
 ALTER FUNCTION leakproof(anyelement) not pushdown;
+ALTER FUNCTION snoop(anyelement) not pushdown;
 SELECT * FROM v1 WHERE a=100; -- Nothing should have been changed to 100
  a | b | c | d 
 ---+---+---+---
