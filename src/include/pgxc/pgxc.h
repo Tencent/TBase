@@ -134,8 +134,6 @@ extern Datum xc_lockForBackupKey2;
 #define IsConnFromGtm() (remoteConnType == REMOTE_CONN_GTM)
 #define IsConnFromGtmProxy() (remoteConnType == REMOTE_CONN_GTM_PROXY)
 
-#define IsConnFromProxy() (am_conn_from_proxy)
-
 /* key pair to be used as object id while using advisory lock for backup */
 #define XC_LOCK_FOR_BACKUP_KEY_1      0xFFFF
 #define XC_LOCK_FOR_BACKUP_KEY_2      0xFFFF

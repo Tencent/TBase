@@ -228,7 +228,7 @@ SendRowDescriptionMessage(TupleDesc typeinfo, List *targetlist, int16 *formats)
          * Send the type name from a Postgres-XC backend node.
          * This preserves from OID inconsistencies as architecture is shared nothing.
          */
-		if (IsConnFromCoord() && !IsConnFromProxy())
+		if (IsConnFromCoord())
         {
             char       *typename;
 			typename = get_typenamespace_typename(atttypid);

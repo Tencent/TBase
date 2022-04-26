@@ -3327,10 +3327,7 @@ WalSndSignals(void)
     pqsignal(SIGINT, StatementCancelHandler);    /* query cancel */
     pqsignal(SIGTERM, die);        /* request shutdown */
     pqsignal(SIGQUIT, quickdie);    /* hard crash time */
-	if (!IsConnFromProxy())
-	{
     InitializeTimeouts();        /* establishes SIGALRM handler */
-	}
     pqsignal(SIGPIPE, SIG_IGN);
     pqsignal(SIGUSR1, procsignal_sigusr1_handler);
     pqsignal(SIGUSR2, WalSndLastCycleHandler);    /* request a last cycle and

@@ -16,13 +16,6 @@
 
 #include "fmgr.h"
 
-#define FLAG_AM_WALSENDER      0x01		/* Flag to set am_walsender(Am I a walsender process?) */
-#define FLAG_AM_DB_WALSENDER   0x02		/* Flag to set am_db_walsender(Am I a
-											walsender process and connected to
-											a database?
-												Yes: used for logical replicate.
-												No:  used for physical replicate. */
-
 /*
  * What to do with a snapshot in create replication slot command.
  */
