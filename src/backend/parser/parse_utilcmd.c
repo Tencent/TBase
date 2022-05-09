@@ -3482,6 +3482,7 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
                     int year;
                     int mon;
                     int day;
+                    Form_pg_partition_interval routerinfo = NULL;
 					
                     existnparts = RelationGetNParts(rel);
                     newnparts = ((AddDropPartitions*)cmd->def)->nparts;
@@ -3499,7 +3500,6 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
                     /*
                      * Self-developed partition table compatibility processing
                      */
-                    Form_pg_partition_interval routerinfo = NULL;
                     routerinfo = rel->rd_partitions_info;
 
                         /* timestamp convert to posix struct */
@@ -3523,6 +3523,9 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
 
 					for(partidx = existnparts; partidx < existnparts + newnparts; partidx++)
                             {
+                        TableLikeClause *likeclause = makeNode(TableLikeClause);
+                        CreateStmt * createpart = makeNode(CreateStmt);
+
                         /*
                          * for compatible with the calculation of the normal time of the self-developed partition table
                          */
@@ -3538,8 +3541,6 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
                             }
                     }
 
-                        TableLikeClause *likeclause = makeNode(TableLikeClause);
-                        CreateStmt * createpart = makeNode(CreateStmt);
                         createpart->relation = copyObject((void *) stmt->relation);
                         createpart->relation->schemaname = get_namespace_name(RelationGetNamespace(rel));
                         //createpart->relation->relname = GetPartitionName(RelationGetRelid(rel), partidx, false);
