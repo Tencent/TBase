@@ -488,6 +488,9 @@ test_gtm_connection()
             GTMPQfinish(conn);
             print_msg(".");
             sleep(1); /* 1 sec */
+            /* if the GTM process is not alive, exit directly */
+            if (!gtm_is_alive(get_pgpid()))
+                break;
         }
     }
 
