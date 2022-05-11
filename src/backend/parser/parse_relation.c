@@ -949,7 +949,7 @@ markRTEForSelectPriv(ParseState *pstate, RangeTblEntry *rte,
          * have arbitrary query parsed on datanode is EXECUTE DIRECT, it is only
          * available for superuser.
          */
-        if (IS_PGXC_DATANODE && rte->relid == StatisticRelationId)
+		if ((IS_PGXC_DATANODE || IsConnFromCoord()) && rte->relid == StatisticRelationId)
             rte->requiredPerms = 0;
         else
 #endif
