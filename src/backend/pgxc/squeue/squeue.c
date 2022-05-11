@@ -4101,9 +4101,6 @@ DataPumpSender BuildDataPumpSenderControl(SharedQueue sq)
             end = sender_control->node_num;
         }
         InitDataPumpThreadControl(&sender_control->thread_control[i], sender_control->nodes, base, end, sender_control->node_num);
-        
-		/* Set running status for the thread. not running now */
-		sender_control->thread_control[i].thread_running = false;		
     }
 
     /* set sqname and max connection */
@@ -4832,6 +4829,7 @@ void DataPumpCleanThread(DataPumpSenderControl *sender)
 {
     int32                   threadid  = 0;
     DataPumpThreadControl *thread   = NULL;
+    bool                  *send_quit = (bool *)palloc0(sizeof(bool) * sender->thread_num);
     
     for (threadid = 0; threadid < sender->thread_num; threadid ++)
     {
@@ -4841,18 +4839,20 @@ void DataPumpCleanThread(DataPumpSenderControl *sender)
         {
             thread->thread_need_quit = true;
             ThreadSemaUp(&thread->send_sem);        
+            send_quit[threadid] = true;
         }
     }
 
     for (threadid = 0; threadid < sender->thread_num; threadid ++)
     {
+	    if (send_quit[threadid])
+        {
         thread = &sender->thread_control[threadid];
 		/* Wait for sender to quit. */	
-		if (thread->thread_need_quit)
-		{
 			ThreadSemaDown(&thread->quit_sem);
 		}
     }
+    pfree(send_quit);
 
     ConvertDone(&sender->convert_control);    
 }
