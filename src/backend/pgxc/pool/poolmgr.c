@@ -4725,7 +4725,6 @@ release_connection(DatabasePool *dbPool, PGXCNodePoolSlot *slot,
          */
         if (PoolConnectDebugPrint)
         {
-<<<<<<< HEAD
 			elog(LOG,
 				POOL_MGR_PREFIX"release_connection connection to "
 				"database:%s user:%s "
@@ -4734,9 +4733,6 @@ release_connection(DatabasePool *dbPool, PGXCNodePoolSlot *slot,
 				dbPool->database, dbPool->user_name,
 				nodePool->node_name, slot->backend_pid, nodeidx,
 				nodePool->size, nodePool->freeSize);
-=======
-			elog(LOG, POOL_MGR_PREFIX"release_connection connection to node:%s backend_pid:%d nodeidx:%d size:%d freeSize:%d can not find nodepool, just destory it", nodePool->node_name, slot->backend_pid, nodeidx, nodePool->size, nodePool->freeSize);
->>>>>>> jacky/bugfix/coredump_Tbase_v5.05.3 (merge request !206)
         }
         destroy_slot(nodeidx, node, slot);
         return;
