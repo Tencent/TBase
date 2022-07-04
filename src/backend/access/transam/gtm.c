@@ -24,6 +24,7 @@
 #include "postmaster/autovacuum.h"
 #include "postmaster/clean2pc.h"
 #include "postmaster/clustermon.h"
+#include "postmaster/postmaster.h"
 #include "storage/backendid.h"
 #include "tcop/tcopprot.h"
 #include "utils/guc.h"
@@ -1238,6 +1239,37 @@ ResetGTMConnection(void)
 
 	InitGTM();
 }
+
+#ifdef HAVE_UNIX_SOCKETS
+/*
+ * gtm_unix_socket_file_exists()
+ *
+ * Checks whether the gtm unix domain socket file exists.
+ */
+static bool
+gtm_unix_socket_file_exists(void)
+{
+    char		path[MAXGTMPATH];
+    char		lockfile[MAXPGPATH];
+    int			fd;
+
+    UNIXSOCK_PATH(path, GtmPort, gtm_unix_socket_directory);
+    snprintf(lockfile, sizeof(lockfile), "%s.lock", path);
+
+    if ((fd = open(lockfile, O_RDONLY, 0)) < 0)
+    {
+        /* ENOTDIR means we will throw a more useful error later */
+        if (errno != ENOENT && errno != ENOTDIR)
+            elog(LOG, "could not open file \"%s\" for reading: %s\n",
+                     lockfile, strerror(errno));
+
+        return false;
+    }
+
+    close(fd);
+    return true;
+}
+#endif
 
 void
 InitGTM(void)
