@@ -10927,66 +10927,6 @@ handle_session_command(PoolAgent * agent, StringInfo s)
     }
 }
 
-static bool
-remove_all_agent_references(Oid nodeoid)
-{
-	int i, j, index;
-	bool res = true;
-
-	/*
-	 * Identify if it's a coordinator or datanode first
-	 * and get its index
-	 */
-	for (i = 0; i < agentCount; i++)
-	{
-		bool found = false;
-		PoolAgent *agent;
-
-		index = agentIndexes[i];
-		agent = poolAgents[index];
-
-		for (j = 0; j < agent->num_dn_connections; j++)
-		{
-			if (agent->dn_conn_oids[j] == nodeoid)
-			{
-				found = true;
-				break;
-			}
-		}
-		if (found)
-		{
-			PGXCNodePoolSlot *slot = agent->dn_connections[j];
-			if (slot)
-				release_connection(agent->pool, slot, j, agent->dn_conn_oids[j], false, false);
-			agent->dn_connections[j] = NULL;
-		}
-		else
-		{
-			for (j = 0; j < agent->num_coord_connections; j++)
-			{
-				if (agent->coord_conn_oids[j] == nodeoid)
-				{
-					found = true;
-					break;
-				}
-			}
-			if (found)
-			{
-				PGXCNodePoolSlot *slot = agent->coord_connections[j];
-				if (slot)
-					release_connection(agent->pool, slot, j, agent->coord_conn_oids[j], true, true);
-				agent->coord_connections[j] = NULL;
-			}
-			else
-			{
-				elog(LOG, "Node not found! (%u)", nodeoid);
-				res = false;
-			}
-		}
-	}
-	return res;
-}
-
 /*
  * refresh_database_pools
  *        refresh information for all database pools

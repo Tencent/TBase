@@ -159,14 +159,14 @@ ALTER SERVER alt_fserv1 RENAME TO alt_fserv2;   -- failed (name conflict)
 ERROR:  server "alt_fserv2" already exists
 ALTER SERVER alt_fserv1 RENAME TO alt_fserv3;   -- OK
 SELECT fdwname FROM pg_foreign_data_wrapper WHERE fdwname like 'alt_fdw%';
- fdwname 
+ fdwname  
 ----------
  alt_fdw2
  alt_fdw3
 (2 rows)
 
 SELECT srvname FROM pg_foreign_server WHERE srvname like 'alt_fserv%';
- srvname 
+  srvname   
 ------------
  alt_fserv2
  alt_fserv3
