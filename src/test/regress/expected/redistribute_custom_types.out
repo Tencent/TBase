@@ -17,16 +17,16 @@ insert into enum_test(a,b) values(5,'Fri');
 insert into enum_test(a,b) values(6,'Sat');
 insert into enum_test(a,b) values(7,'Sun');
 explain select count(*) from enum_test where a < 100 group by b;
-                                               QUERY PLAN                                                
----------------------------------------------------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=132.87..134.74 rows=187 width=12)
-   ->  Finalize HashAggregate  (cost=132.87..134.74 rows=187 width=12)
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=116.44..117.38 rows=94 width=12)
+   ->  Finalize HashAggregate  (cost=116.44..117.38 rows=94 width=12)
          Group Key: b
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=129.12..131.93 rows=187 width=0)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=114.56..115.97 rows=94 width=0)
                Distribute results by S: b
-               ->  Partial HashAggregate  (cost=29.12..31.00 rows=187 width=12)
+               ->  Partial HashAggregate  (cost=14.56..15.50 rows=94 width=12)
                      Group Key: b
-                     ->  Seq Scan on enum_test  (cost=0.00..26.88 rows=450 width=4)
+                     ->  Seq Scan on enum_test  (cost=0.00..13.44 rows=225 width=4)
                            Filter: (a < 100)
 (9 rows)
 
@@ -57,20 +57,20 @@ insert into comptype_test(a,b) values(4,(4,5));
 insert into comptype_test(a,b) values(5,(5,6));
 insert into comptype_test(a,b) values(6,(6,7));
 explain select count(*) from comptype_test where a < 100 group by b;
-                                                  QUERY PLAN                                                   
----------------------------------------------------------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=145.27..147.81 rows=169 width=40)
-   ->  Finalize GroupAggregate  (cost=145.27..147.81 rows=169 width=40)
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=121.50..122.77 rows=85 width=40)
+   ->  Finalize GroupAggregate  (cost=121.50..122.77 rows=85 width=40)
          Group Key: b
-         ->  Sort  (cost=145.27..145.70 rows=169 width=0)
+         ->  Sort  (cost=121.50..121.71 rows=85 width=0)
                Sort Key: b
-               ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=134.18..139.02 rows=169 width=0)
+               ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=116.35..118.78 rows=85 width=0)
                      Distribute results by S: b
-                     ->  Partial GroupAggregate  (cost=34.18..38.17 rows=169 width=40)
+                     ->  Partial GroupAggregate  (cost=16.35..18.35 rows=85 width=40)
                            Group Key: b
-                           ->  Sort  (cost=34.18..34.95 rows=307 width=32)
+                           ->  Sort  (cost=16.35..16.73 rows=154 width=32)
                                  Sort Key: b
-                                 ->  Seq Scan on comptype_test  (cost=0.00..21.50 rows=307 width=32)
+                                 ->  Seq Scan on comptype_test  (cost=0.00..10.75 rows=154 width=32)
                                        Filter: (a < 100)
 (13 rows)
 
@@ -100,16 +100,16 @@ insert into domaintype_test(a,b) values(4,4);
 insert into domaintype_test(a,b) values(5,5);
 insert into domaintype_test(a,b) values(6,6);
 explain select count(*) from domaintype_test where a < 100 group by b;
-                                               QUERY PLAN                                                
----------------------------------------------------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=132.87..134.74 rows=187 width=12)
-   ->  Finalize HashAggregate  (cost=132.87..134.74 rows=187 width=12)
+                                               QUERY PLAN                                               
+--------------------------------------------------------------------------------------------------------
+ Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=116.44..117.38 rows=94 width=12)
+   ->  Finalize HashAggregate  (cost=116.44..117.38 rows=94 width=12)
          Group Key: b
-         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=129.12..131.93 rows=187 width=0)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)  (cost=114.56..115.97 rows=94 width=0)
                Distribute results by S: b
-               ->  Partial HashAggregate  (cost=29.12..31.00 rows=187 width=12)
+               ->  Partial HashAggregate  (cost=14.56..15.50 rows=94 width=12)
                      Group Key: b
-                     ->  Seq Scan on domaintype_test  (cost=0.00..26.88 rows=450 width=4)
+                     ->  Seq Scan on domaintype_test  (cost=0.00..13.44 rows=225 width=4)
                            Filter: (a < 100)
 (9 rows)
 
