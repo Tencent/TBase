@@ -1,21 +1,20 @@
-V2.4.0-release 版本主要修改集中在：
-1、分布式计算性能提升：
-● hasAggs/having/sort/limit/Stable function/ 优化下推到DN上执行，性能提升近百倍。
-● 分布式进程ProcLock分段锁优化，减少锁冲突，执行效率提升约5倍。
-● 执行计划优化：重分布的节点数为1时跳过remote算子，精简执行计划。
+The main revisions of V2.4.0-release focus on:
+1. Distributed computing performance improvement:
+● The hasAggs/having/sort/limit/Stable function/ optimization is pushed down to the DN for execution, and the performance is improved nearly a hundred times.
+● Distributed process ProcLock segmentation lock optimization reduces lock conflicts and improves execution efficiency by about 5 times.
+● Execution plan optimization: When the number of redistributed nodes is 1, the remote operator is skipped and the execution plan is simplified.
 
-2、2PC事务优化：
-● 死锁检查性能优化：批量获取gxid；遍历查找gxid修改为二分查找；增加try轮次限制。
-● 2PC添加保护模式，杜绝部分提交的情况。
-● drop database 增加prepare过程，确保不会出现节点失败残留。
+2. 2PC transaction optimization:
+● Deadlock checking performance optimization: obtain gxids in batches; change gxids from traversal search to binary search; increase try round limit.
+● 2PC adds a protection mode to prevent partial submissions.
+● The prepare process is added to drop database to ensure that there will be no residual node failures.
 
-3、易用性增强：
-● 增加pooler多线程日志功能，方便用户进行问题分析。
-● GTM日志优化，日志汇聚一个文件，并自动拆分活跃日志，方便用户随时查看。
-● 支持gtm_ctl -l指定日志文件路径启动，方便用户对日志进行管理。
+3. Enhanced usability:
+● Added pooler multi-thread log function, which is convenient for users to analyze problems.
+● GTM log optimization, logs are aggregated into one file, and active logs are automatically split, which is convenient for users to view at any time.
+● Support gtm_ctl -l to specify the log file path to start, which is convenient for users to manage logs.
 
-4、新特性支持：
-● 自研分区表剪枝，添加IN语法剪枝，提前加速剪枝。
-● 数据shuffle支持用户自定义函数。
-● 允许删除带有分布式外键约束的主表的列。
-
+4. New feature support:
+● Self-developed partition table pruning, adding IN syntax pruning, to accelerate pruning in advance.
+● Data shuffle supports user-defined functions.
+● Allow dropping columns of primary tables with distributed foreign key constraints.
