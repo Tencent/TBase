@@ -1354,7 +1354,7 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 			if (vstmt->relation != NULL)
 			{
 				Relation rel =
-					relation_openrv_extended(vstmt->relation, NoLock, true, false);
+					relation_openrv_extended(vstmt->relation, NoLock, true);
 				if (rel && rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
 				{
 					relation_close(rel, NoLock);

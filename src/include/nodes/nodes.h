@@ -587,7 +587,7 @@ typedef enum NodeTag
 #ifdef _MLS_
     ,T_SyncBufIdInfo            /* in bufmgr.c*/
 #endif
-	 ,T_AnalyzeSyncOpt
+	 ,T_StatSyncOpt
 } NodeTag;
 
 /*

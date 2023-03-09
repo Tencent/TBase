@@ -655,7 +655,7 @@ do_analyze_rel(Relation				 onerel,
         /*
          * Fetch relation statistics from remote nodes and update
          */
-		vacuum_rel_coordinator(onerel, in_outer_xact, params);
+		vacuum_rel_coordinator(onerel, in_outer_xact, params, NULL);
 
         /*
          * Fetch attribute statistics from remote nodes.
@@ -5825,8 +5825,7 @@ coord_sync_col_stats(Relation		 onerel,
 	update_attstats(RelationGetRelid(onerel),
 					inh,
 					attr_cnt,
-					vacattrstats,
-					RelationGetRelPersistence(onerel));
+					vacattrstats);
 }
 
 /*

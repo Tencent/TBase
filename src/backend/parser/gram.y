@@ -263,7 +263,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	RoleSpec			*rolespec;
 	PartitionForExpr	*partfor;
 	PartitionBy         *partby; 
-	AnalyzeSyncOpt      *analyze_sync_opt;
+	StatSyncOpt      *analyze_sync_opt;
 }
 
 %type <node>	stmt schema_stmt
