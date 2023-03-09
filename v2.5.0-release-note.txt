@@ -1,0 +1,15 @@
+V2.5.0-release 版本主要修改集中在:
+1、性能优化
+使用扩展协议时/function中执行insert多条数据重写为copy，写入性能提升数十倍
+cost代价估算准确性提升，执行计划性能提升2倍以上
+pg_stat_cluster_activity 内存使用优化
+
+
+2、功能增强
+支持资源隔离的不同nodegroup的表进行join
+支持从CN订阅DN WAL日志
+支持analyze信息同步到其他CN，保障不同CN的统计信息一致
+增加libpq TCP超时设置
+错误信息提示加强，方便用户进行问题分析
+
+3、其他已知bug修复
