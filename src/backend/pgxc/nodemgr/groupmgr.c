@@ -678,7 +678,8 @@ GetMyGroupName(void)
     return NULL;
 }
 
-char* GetGroupNameByNode(Oid nodeoid)
+char *
+GetGroupNameByNode(Oid nodeoid)
 {
     Relation    relation;
     SysScanDesc scan;

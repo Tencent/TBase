@@ -222,7 +222,7 @@ extern int pgxc_node_send_disconnect(PGXCNodeHandle * handle, char *cursor, int 
 #endif
 extern int	pgxc_node_send_bind(PGXCNodeHandle * handle, const char *portal,
 								const char *statement, int paramlen, const char *params,
-								int eqpctxlen, const char *epqctx);
+								int eqpctxlen, const char *epqctx, StringInfo shardmap);
 extern int	pgxc_node_send_parse(PGXCNodeHandle * handle, const char* statement,
 								 const char *query, short num_params, Oid *param_types);
 extern int	pgxc_node_send_flush(PGXCNodeHandle * handle);

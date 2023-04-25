@@ -3203,8 +3203,9 @@ autovacuum_do_vac_analyze(autovac_table *tab, BufferAccessStrategy bstrategy)
     /* Let pgstat know what we're doing */
     autovac_report_activity(tab);
 
+	/* no need sync for auto vacuum and/or analyze*/
     vacuum(tab->at_vacoptions, &rangevar, tab->at_relid, &tab->at_params, NIL,
-           bstrategy, true);
+		   bstrategy, true, NULL);
 }
 
 /*

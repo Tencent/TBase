@@ -100,7 +100,7 @@ CATALOG(pg_proc,1255) BKI_BOOTSTRAP BKI_ROWTYPE_OID(81) BKI_SCHEMA_MACRO
     Oid            pronamespace;    /* OID of namespace containing this proc */
     Oid            proowner;        /* procedure owner */
     Oid            prolang;        /* OID of pg_language entry */
-    float4        procost;        /* estimated execution cost */
+	float4		procost;		/* estimated execution cost, the negtive number means the function can be pushed down*/
     float4        prorows;        /* estimated # of rows out (if proretset) */
     Oid            provariadic;    /* element type of variadic array, or 0 */
     regproc        protransform;    /* transforms calls to it during planning */

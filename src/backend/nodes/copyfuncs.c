@@ -3260,6 +3260,7 @@ _copyQuery(const Query *from)
     COPY_SCALAR_FIELD(isSingleValues);
     COPY_SCALAR_FIELD(isMultiValues);
     COPY_SCALAR_FIELD(hasUnshippableTriggers);
+	COPY_SCALAR_FIELD(hasCoordFuncs);
     COPY_STRING_FIELD(copy_filename);
 #endif
     COPY_NODE_FIELD(cteList);
@@ -3303,6 +3304,8 @@ static InsertStmt *
 _copyInsertStmt(const InsertStmt *from)
 {
     InsertStmt *newnode = makeNode(InsertStmt);
+	int colIdx = 0;
+	int rowIdx = 0;
 
     COPY_NODE_FIELD(relation);
     COPY_NODE_FIELD(cols);
@@ -3313,8 +3316,26 @@ _copyInsertStmt(const InsertStmt *from)
     COPY_SCALAR_FIELD(override);
 #ifdef __TBASE__
     COPY_SCALAR_FIELD(ninsert_columns);
+	if(from->data_list != NULL)
+	{
+	newnode->data_list =
+		(char ***)palloc(sizeof(char **) * from->ndatarows);
+		for (rowIdx = 0; rowIdx < from->ndatarows; rowIdx++)
+		{
+		newnode->data_list[rowIdx] =
+			(char **)palloc(sizeof(char *) * from->ninsert_columns);
+		for (colIdx = 0; colIdx < from->ninsert_columns; colIdx++)
+			{
+				if(from->data_list[rowIdx][colIdx] == NULL)
+					newnode->data_list[rowIdx][colIdx] = NULL;
+				else
+            newnode->data_list[rowIdx][colIdx] =
+                pstrdup(from->data_list[rowIdx][colIdx]);
+	}
+	}
+	}
+	COPY_SCALAR_FIELD(ndatarows);
 #endif
-
     return newnode;
 }
 
@@ -4144,6 +4165,18 @@ _copyVacuumStmt(const VacuumStmt *from)
     COPY_SCALAR_FIELD(options);
     COPY_NODE_FIELD(relation);
     COPY_NODE_FIELD(va_cols);
+	COPY_NODE_FIELD(sync_option);
+
+	return newnode;
+}
+
+static StatSyncOpt *
+_copyStatSyncOpt(const StatSyncOpt *from)
+{
+	StatSyncOpt *newnode = makeNode(StatSyncOpt);
+
+	COPY_SCALAR_FIELD(is_sync_from);
+	COPY_NODE_FIELD(nodes);
 
     return newnode;
 }
@@ -5914,6 +5947,9 @@ copyObjectImpl(const void *from)
         case T_VacuumStmt:
             retval = _copyVacuumStmt(from);
             break;
+		case T_StatSyncOpt:
+			retval = _copyStatSyncOpt(from);
+			break;
 #ifdef _SHARDING_
         case T_VacuumShardStmt:
             retval = _copyVacuumShardStmt(from);

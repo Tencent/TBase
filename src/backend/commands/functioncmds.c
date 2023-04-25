@@ -456,6 +456,7 @@ compute_common_attribute(ParseState *pstate,
                          DefElem **strict_item,
                          DefElem **security_item,
                          DefElem **leakproof_item,
+						 DefElem **pushdow_item,
                          List **set_items,
                          DefElem **cost_item,
                          DefElem **rows_item,
@@ -489,6 +490,13 @@ compute_common_attribute(ParseState *pstate,
 
         *leakproof_item = defel;
     }
+	else if (strcmp(defel->defname, "pushdown") == 0)
+	{
+		if (*pushdow_item)
+			goto duplicate_error;
+		
+		*pushdow_item = defel;
+	}
     else if (strcmp(defel->defname, "set") == 0)
     {
         *set_items = lappend(*set_items, defel->arg);
@@ -612,6 +620,7 @@ compute_attributes_sql_style(ParseState *pstate,
                              bool *strict_p,
                              bool *security_definer,
                              bool *leakproof_p,
+							 bool *pushable_p,
                              ArrayType **proconfig,
                              float4 *procost,
                              float4 *prorows,
@@ -626,6 +635,7 @@ compute_attributes_sql_style(ParseState *pstate,
     DefElem    *strict_item = NULL;
     DefElem    *security_item = NULL;
     DefElem    *leakproof_item = NULL;
+	DefElem    *pushdown_item = NULL;
     List       *set_items = NIL;
     DefElem    *cost_item = NULL;
     DefElem    *rows_item = NULL;
@@ -677,6 +687,7 @@ compute_attributes_sql_style(ParseState *pstate,
                                           &strict_item,
                                           &security_item,
                                           &leakproof_item,
+										  &pushdown_item,
                                           &set_items,
                                           &cost_item,
                                           &rows_item,
@@ -724,6 +735,8 @@ compute_attributes_sql_style(ParseState *pstate,
         *security_definer = intVal(security_item->arg);
     if (leakproof_item)
         *leakproof_p = intVal(leakproof_item->arg);
+	if (pushdown_item)
+		*pushable_p = intVal(pushdown_item->arg);
     if (set_items)
         *proconfig = update_proconfig_value(NULL, set_items);
     if (cost_item)
@@ -883,7 +896,8 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
     bool        isWindowFunc,
                 isStrict,
                 security,
-                isLeakProof;
+				isLeakProof,
+				isPushdown;
     char        volatility;
     ArrayType  *proconfig;
     float4        procost;
@@ -908,6 +922,7 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
     isStrict = false;
     security = false;
     isLeakProof = false;
+	isPushdown = false;
     volatility = PROVOLATILE_VOLATILE;
     proconfig = NULL;
     procost = -1;                /* indicates not set */
@@ -919,7 +934,7 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
                                  stmt->options,
                                  &as_clause, &language, &transformDefElem,
                                  &isWindowFunc, &volatility,
-                                 &isStrict, &security, &isLeakProof,
+								 &isStrict, &security, &isLeakProof, &isPushdown,
                                  &proconfig, &procost, &prorows, &parallel);
 
     /* Look up the language and validate permissions */
@@ -1064,6 +1079,9 @@ CreateFunction(ParseState *pstate, CreateFunctionStmt *stmt)
         else
             procost = 100;
     }
+	if(isPushdown)
+		procost = -procost;
+	
     if (prorows < 0)
     {
         if (returnsSet)
@@ -1174,6 +1192,7 @@ AlterFunction(ParseState *pstate, AlterFunctionStmt *stmt)
     DefElem    *strict_item = NULL;
     DefElem    *security_def_item = NULL;
     DefElem    *leakproof_item = NULL;
+	DefElem    *pushdown_item = NULL;
     List       *set_items = NIL;
     DefElem    *cost_item = NULL;
     DefElem    *rows_item = NULL;
@@ -1212,6 +1231,7 @@ AlterFunction(ParseState *pstate, AlterFunctionStmt *stmt)
                                      &strict_item,
                                      &security_def_item,
                                      &leakproof_item,
+									 &pushdown_item,
                                      &set_items,
                                      &cost_item,
                                      &rows_item,
@@ -1241,6 +1261,14 @@ AlterFunction(ParseState *pstate, AlterFunctionStmt *stmt)
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                      errmsg("COST must be positive")));
     }
+	if (pushdown_item)
+	{
+		bool pushdown = intVal(pushdown_item->arg);
+		if (pushdown && procForm->procost > 0)
+			procForm->procost = -procForm->procost;
+		if ((!pushdown) && procForm->procost < 0)
+			procForm->procost = -procForm->procost;
+	}
     if (rows_item)
     {
         procForm->prorows = defGetNumeric(rows_item);

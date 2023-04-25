@@ -1030,6 +1030,8 @@ BuildCachedPlan(CachedPlanSource *plansource, List *qlist,
     else
         plan_context = CurrentMemoryContext;
 
+
+
 #ifdef PGXC
     /*
      * If this plansource belongs to a named prepared statement, store the stmt
@@ -1364,10 +1366,10 @@ GetCachedPlan(CachedPlanSource *plansource, ParamListInfo boundParams,
         ResourceOwnerRememberPlanCacheRef(CurrentResourceOwner, plan);
 
     /*
-     * Saved plans should be under CacheMemoryContext so they will not go away
-     * until their reference count goes to zero.  In the generic-plan cases we
-     * already took care of that, but for a custom plan, do it as soon as we
-     * have created a reference-counted link.
+	 * Saved plans should be under CacheMemoryContext so they will not go away
+	 * until their reference count goes to zero.  In the generic-plan cases we
+	 * already took care of that, but for a custom plan, do it as soon as we
+	 * have created a reference-counted link.
      */
     if (customplan && plansource->is_saved)
     {

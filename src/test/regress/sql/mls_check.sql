@@ -973,6 +973,19 @@ select MLS_TRANSPARENT_CRYPT_ALGORITHM_UNBIND_SCHEMA('crypt_schema_sm4');
 \c - godlike
 alter schema crypt_schema_sm4 rename to crypt_schema_sm5;
 drop schema crypt_schema_sm5;
+create table tbl_col_sm4(normala int, normalb int, encrypted varchar) distribute by shard(normala);
+\c - mls_admin
+select MLS_TRANSPARENT_CRYPT_ALGORITHM_BIND_TABLE('public', 'tbl_col_sm4', 'encrypted', 4);
+\c - godlike
+insert into tbl_col_sm4 values(1, 11, '1111dfa11');
+insert into tbl_col_sm4 values(2, 22, repeat('a', 16));
+insert into tbl_col_sm4 values(3, 33, 'dsfanle1={ntwkqweg-dibjf"sdfaw21(){{()"wjqtoij2j 199');
+select * from tbl_col_sm4 order by 1;
+truncate tbl_col_sm4;
+\c - mls_admin
+select MLS_TRANSPARENT_CRYPT_ALGORITHM_UNBIND_TABLE('public', 'tbl_col_sm4', 'encrypted');
+\c - godlike
+drop table tbl_col_sm4;
 
 --case rename tables in crypted schema
 \c - godlike 

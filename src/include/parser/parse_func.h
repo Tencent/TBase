@@ -21,54 +21,56 @@
 /* Result codes for func_get_detail */
 typedef enum
 {
-    FUNCDETAIL_NOTFOUND,        /* no matching function */
-    FUNCDETAIL_MULTIPLE,        /* too many matching functions */
-    FUNCDETAIL_NORMAL,            /* found a matching regular function */
-    FUNCDETAIL_AGGREGATE,        /* found a matching aggregate function */
-    FUNCDETAIL_WINDOWFUNC,        /* found a matching window function */
-    FUNCDETAIL_COERCION            /* it's a type coercion request */
+	FUNCDETAIL_NOTFOUND,		/* no matching function */
+	FUNCDETAIL_MULTIPLE,		/* too many matching functions */
+	FUNCDETAIL_NORMAL,			/* found a matching regular function */
+	FUNCDETAIL_AGGREGATE,		/* found a matching aggregate function */
+	FUNCDETAIL_WINDOWFUNC,		/* found a matching window function */
+	FUNCDETAIL_COERCION			/* it's a type coercion request */
 } FuncDetailCode;
 
 
 extern Node *ParseFuncOrColumn(ParseState *pstate, List *funcname, List *fargs,
-                  Node *last_srf, FuncCall *fn, int location);
+				  Node *last_srf, FuncCall *fn, int location);
 
 extern FuncDetailCode func_get_detail(List *funcname,
-                List *fargs, List *fargnames,
-                int nargs, Oid *argtypes,
-                bool expand_variadic, bool expand_defaults,
-                Oid *funcid, Oid *rettype,
-                bool *retset, int *nvargs, Oid *vatype,
-                Oid **true_typeids, List **argdefaults);
+				List *fargs, List *fargnames,
+				int nargs, Oid *argtypes,
+				bool expand_variadic, bool expand_defaults,
+				Oid *funcid, Oid *rettype,
+				bool *retset, int *nvargs, Oid *vatype,
+				Oid **true_typeids, List **argdefaults);
 
 extern int func_match_argtypes(int nargs,
-                    Oid *input_typeids,
-                    FuncCandidateList raw_candidates,
-                    FuncCandidateList *candidates);
+					Oid *input_typeids,
+					FuncCandidateList raw_candidates,
+					FuncCandidateList *candidates);
 
 extern FuncCandidateList func_select_candidate(int nargs,
-                      Oid *input_typeids,
-                      FuncCandidateList candidates);
+					  Oid *input_typeids,
+					  FuncCandidateList candidates);
 
 extern void make_fn_arguments(ParseState *pstate,
-                  List *fargs,
-                  Oid *actual_arg_types,
-                  Oid *declared_arg_types);
+				  List *fargs,
+				  Oid *actual_arg_types,
+				  Oid *declared_arg_types);
 
 extern const char *funcname_signature_string(const char *funcname, int nargs,
-                          List *argnames, const Oid *argtypes);
+						  List *argnames, const Oid *argtypes);
 extern const char *func_signature_string(List *funcname, int nargs,
-                      List *argnames, const Oid *argtypes);
+					  List *argnames, const Oid *argtypes);
 
 extern Oid LookupFuncName(List *funcname, int nargs, const Oid *argtypes,
-               bool noError);
+			   bool noError);
 extern Oid LookupFuncWithArgs(ObjectWithArgs *func,
-                   bool noError);
+				   bool noError);
 extern Oid LookupAggWithArgs(ObjectWithArgs *agg,
-                  bool noError);
+				  bool noError);
 
 extern void check_srf_call_placement(ParseState *pstate, Node *last_srf,
-                         int location);
+						 int location);
 
 extern void check_pg_get_expr_args(ParseState *pstate, Oid fnoid, List *args);
-#endif                            /* PARSE_FUNC_H */
+
+extern bool func_is_pullup(Oid func_id);
+#endif							/* PARSE_FUNC_H */

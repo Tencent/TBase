@@ -2567,7 +2567,7 @@ void recover2PC(txn_info * txn)
             else
             {
     			txn->op = COMMIT;
-    			/* check whether all nodes can commit prepared */
+				/* check whether all nodes can commit prepared */
 				for (i = 0; i < check_times; i++)
 				{
 					check_ok = true;
@@ -2606,7 +2606,7 @@ void recover2PC(txn_info * txn)
     			if (!clean_2PC_iscommit(txn, true, false))
     			{
     				txn->op_issuccess = false;
-    				elog(LOG, "commit 2PC transaction %s failed", txn->gid);
+					elog(LOG, "commit 2PC transaction %s failed", txn->gid);
     				return;
     			}
     			txn->op_issuccess = true;
@@ -2771,7 +2771,7 @@ TXN_STATUS check_txn_global_status(txn_info *txn)
     }
 #endif                
     if (clear_2pc_belong_node)
-    {
+        {
         if (!check_2pc_belong_node(txn))
         {
             return TXN_STATUS_INPROGRESS;
@@ -2786,13 +2786,13 @@ TXN_STATUS check_txn_global_status(txn_info *txn)
         if (node_idx >= 0)
         {
             if (abnormal_time < txn->prepare_timestamp[node_idx])
-            {
+        {
                 elog(WARNING, "gid: %s, abnormal time: " INT64_FORMAT
                     ", prepare timestamp[%d]: " INT64_FORMAT, txn->gid,
                     abnormal_time, node_idx, txn->prepare_timestamp[node_idx]);
 
-                return TXN_STATUS_INPROGRESS;
-            }
+            return TXN_STATUS_INPROGRESS;
+        }
         }
         else
         {
@@ -2800,14 +2800,14 @@ TXN_STATUS check_txn_global_status(txn_info *txn)
         }
 
         if (abnormal_time < prepared_time)
-        {
+            {
             elog(WARNING, "gid: %s, abnormal time: " INT64_FORMAT
                 ", prepared time: " INT64_FORMAT, txn->gid,
                 abnormal_time, prepared_time);
 
-            return TXN_STATUS_INPROGRESS;
+                return TXN_STATUS_INPROGRESS;
+            }
         }
-    }
     else
     {
         if (check_flag & TXN_INPROGRESS ||current_time - prepared_time <= time_gap)
@@ -3421,7 +3421,7 @@ bool check_2pc_start_from_node(txn_info *txn)
 
 		startnode = strtok(NULL, ":");
 		if (NULL == startnode)
-		{
+{
 			elog(WARNING, "get startnode(%s) from gid(%s) failed",
 				startnode, gid);
 			return false;
@@ -3429,19 +3429,19 @@ bool check_2pc_start_from_node(txn_info *txn)
 
 		node_oid = get_pgxc_nodeoid(startnode);
 		if (NULL == startnode)
-		{
+			{
 			elog(WARNING, "get invalid oid for startnode(%s) from gid(%s)",
 				startnode, gid);
 			return false;
-		}
+	}
 
 		elog(DEBUG1, "get oid(%d) for startnode(%s) from gid(%s)",
 			node_oid, startnode, gid);
 
 		if (abnormal_nodeoid == node_oid)
-		{
-			return true;
-		}
+	{
+		return true;
+	}
 	}
 
 	return false;

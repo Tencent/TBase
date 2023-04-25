@@ -18,10 +18,12 @@
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
+#include "commands/proclang.h"
 #include "funcapi.h"
 #include "lib/stringinfo.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
+#include "optimizer/clauses.h"
 #include "parser/parse_agg.h"
 #include "parser/parse_clause.h"
 #include "parser/parse_coerce.h"
@@ -253,6 +255,8 @@ ParseFuncOrColumn(ParseState *pstate, List *funcname, List *fargs,
 
     cancel_parser_errposition_callback(&pcbstate);
 
+	pstate->p_hasCoordFuncs = pstate->p_hasCoordFuncs ? true : func_is_pullup(funcid);
+	
     if (fdresult == FUNCDETAIL_COERCION)
     {
         /*
@@ -2256,4 +2260,33 @@ check_srf_call_placement(ParseState *pstate, Node *last_srf, int location)
                  errmsg("set-returning functions are not allowed in %s",
                         ParseExprKindName(pstate->p_expr_kind)),
                  parser_errposition(pstate, location)));
+}
+
+bool
+func_is_pullup(Oid func_id)
+{
+	if (func_id >= FirstNormalObjectId)
+	{
+		Oid func_lang_oid;
+		Oid plpgsql_oid;
+		float cost;
+		
+		/*
+		 * A set returning function is not supposed to be in targetlist
+		 * so ignore it.
+		 */
+		if (get_func_retset(func_id))
+			return false;
+		
+		/* A stable function surely can be pushed down to DN */
+		if (func_volatile(func_id) == PROVOLATILE_STABLE)
+			return false;
+		
+		func_lang_oid = get_func_lang(func_id);
+		plpgsql_oid = get_language_oid("plpgsql", true);
+		cost = get_func_cost_with_sign(func_id);
+		if (func_lang_oid == plpgsql_oid && cost >= 0)
+			return true;
+	}
+	return false;
 }

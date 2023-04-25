@@ -125,6 +125,8 @@
 #include "tcop/pquery.h"
 #include "optimizer/plancat.h"
 #include "parser/analyze.h"
+#include "pgxc/groupmgr.h"
+#include "utils/lsyscache.h"
 #endif
 
 #ifdef __AUDIT__
@@ -260,9 +262,11 @@ static const char *show_archive_command(void);
 static void assign_tcp_keepalives_idle(int newval, void *extra);
 static void assign_tcp_keepalives_interval(int newval, void *extra);
 static void assign_tcp_keepalives_count(int newval, void *extra);
+static void assign_tcp_user_timeout(int newval, void *extra);
 static const char *show_tcp_keepalives_idle(void);
 static const char *show_tcp_keepalives_interval(void);
 static const char *show_tcp_keepalives_count(void);
+static const char *show_tcp_user_timeout(void);
 static bool check_maxconnections(int *newval, void **extra, GucSource source);
 static bool check_max_worker_processes(int *newval, void **extra, GucSource source);
 static bool check_autovacuum_max_workers(int *newval, void **extra, GucSource source);
@@ -292,6 +296,9 @@ static void strreplace_all(char *str, char *needle, char *replacement);
 #ifdef __TBASE__
 static bool set_warm_shared_buffer(bool *newval, void **extra, GucSource source);
 static const char *show_total_memorysize(void);
+
+static bool check_constrain_group(char **newval, void **extra, GucSource source);
+static void assign_constrain_group(const char *newval, void *extra);
 #endif
 #ifdef __COLD_HOT__
 static void assign_cold_hot_partition_type(const char *newval, void *extra);
@@ -672,6 +679,7 @@ char       *nls_sort_locale = NULL;
 int            tcp_keepalives_idle;
 int            tcp_keepalives_interval;
 int            tcp_keepalives_count;
+int			tcp_user_timeout;
 
 /*
  * SSL renegotiation was been removed in PostgreSQL 9.5, but we tolerate it
@@ -4295,7 +4303,16 @@ static struct config_int ConfigureNamesInt[] =
         0, 0, INT_MAX,
         NULL, assign_tcp_keepalives_count, show_tcp_keepalives_count
     },
-
+    {
+        {"tcp_user_timeout", PGC_USERSET, CLIENT_CONN_OTHER,
+         gettext_noop("TCP user timeout."),
+         gettext_noop("A value of 0 uses the system default."),
+         GUC_UNIT_MS
+        },
+        &tcp_user_timeout,
+        0, 0, INT_MAX,
+        NULL, assign_tcp_user_timeout, show_tcp_user_timeout
+    },
     {
         {"gin_fuzzy_search_limit", PGC_USERSET, CLIENT_CONN_OTHER,
             gettext_noop("Sets the maximum allowed result for exact search by GIN."),
@@ -5859,6 +5876,16 @@ static struct config_string ConfigureNamesString[] =
         "mls_admin",
         NULL, NULL, NULL
     },
+	{
+		{"join_constrain_group", PGC_USERSET, CUSTOM_OPTIONS,
+			gettext_noop("name of the group that join execute in, "
+				"any data that not in this group will be redistributed"),
+			NULL
+		},
+		&g_constrain_group,
+		"",
+		check_constrain_group, assign_constrain_group, NULL
+	},
 #endif
 #ifdef _PG_ORCL_
     {
@@ -13442,6 +13469,23 @@ show_tcp_keepalives_count(void)
     return nbuf;
 }
 
+static void
+assign_tcp_user_timeout(int newval, void *extra)
+{
+	/* See comments in assign_tcp_keepalives_idle */
+	(void) pq_settcpusertimeout(newval, MyProcPort);
+}
+
+static const char *
+show_tcp_user_timeout(void)
+{
+	/* See comments in assign_tcp_keepalives_idle */
+	static char nbuf[16];
+
+	snprintf(nbuf, sizeof(nbuf), "%d", pq_gettcpusertimeout(MyProcPort));
+	return nbuf;
+}
+
 static bool
 check_maxconnections(int *newval, void **extra, GucSource source)
 {
@@ -13707,6 +13751,37 @@ show_total_memorysize(void)
     size = get_total_memory_size();
 	snprintf(buf, sizeof(buf), "%dM", size);
     return buf;
+}
+
+static bool
+check_constrain_group(char **newval, void **extra, GucSource source)
+{
+	char *group_name = NULL;
+	if (!IsUnderPostmaster)
+		return true;
+	
+	if ((*newval)[0] == '\0')
+		return true;
+		
+	group_name = pstrdup(*newval);
+	return get_pgxc_groupoid(group_name) != InvalidOid;
+}
+
+static void
+assign_constrain_group(const char *newval, void *extra)
+{
+	char *group_name = NULL;
+	if (!IsUnderPostmaster)
+		return;
+	
+	if (newval[0] == '\0')
+	{
+		assign_constrain_nodes(NIL);
+		return;
+	}
+	
+	group_name = pstrdup(newval);
+	assign_constrain_nodes(GetGroupNodeList(get_pgxc_groupoid(group_name)));
 }
 #endif
 #ifdef __COLD_HOT__

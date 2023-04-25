@@ -29,6 +29,7 @@
 #include "optimizer/planner.h"
 #include "parser/parse_coerce.h"
 #include "parser/scansup.h"
+#include "parser/analyze.h"
 #include "storage/proc.h"
 #include "tcop/tcopprot.h"
 #include "utils/array.h"
@@ -3689,6 +3690,11 @@ exec_stmt_execsql(PLpgSQL_execstate *estate,
                         q->commandType == CMD_UPDATE ||
                         q->commandType == CMD_DELETE)
                         stmt->mod_stmt = true;
+
+					/* when transform insert to copy, reset mod_stmt */
+					if (g_transform_insert_to_copy && q->commandType == CMD_INSERT &&
+						q->isMultiValues && !q->hasUnshippableTriggers)
+						stmt->mod_stmt = false;
                     /* PGXCTODO: Support a better parameter interface for XC with DMLs */
                     if
 #ifdef XCP

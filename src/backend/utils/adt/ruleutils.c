@@ -92,7 +92,7 @@
 #ifdef __COLD_HOT__
 #include "postmaster/postmaster.h"
 #endif
-
+#include "storage/lmgr.h"
 /* ----------
  * Pretty formatting constants
  * ----------
@@ -119,6 +119,7 @@
 
 #ifdef __TBASE__
 static int daysofmonth[13] = {0,31,29,31,30,31,30,31,31,30,31,30,31};
+static int daysofmonth_common_year[13] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
 
 static struct pg_tm g_partition_base_time = { 0,
                                                0,
@@ -2612,6 +2613,8 @@ pg_get_functiondef(PG_FUNCTION_ARGS)
         appendStringInfoString(&buf, " SECURITY DEFINER");
     if (proc->proleakproof)
         appendStringInfoString(&buf, " LEAKPROOF");
+	if (proc->procost < 0)
+		appendStringInfoString(&buf, " PUSHDOWN");
 
     /* This code for the default cost and rows should match functioncmds.c */
     if (proc->prolang == INTERNALlanguageId ||
@@ -12051,31 +12054,48 @@ RelationGetPartitionByValue(Relation rel, Const *value)
 List *
 RelationGetAllPartitions(Relation rel)
 {
+	return RelationGetAllPartitionsWithLock(rel, NoLock);
+}
+
+List *
+RelationGetAllPartitionsWithLock(Relation rel, LOCKMODE lockmode)
+{
     int nparts = 0;
     char *partname = NULL;
     Oid     partoid = InvalidOid;
     int partidx = 0;
     List * result = NULL;
-
     nparts = RelationGetNParts(rel);
-
     for(partidx = 0; partidx < nparts; partidx++)
     {
         partname = GetPartitionName(RelationGetRelid(rel), partidx, false);
         partoid = get_relname_relid(partname, RelationGetNamespace(rel));
-
         if(partname)
             pfree(partname);
         partname = NULL;
-
 		if (InvalidOid == partoid)
 		{
 			continue;
 		}
-
+		if (lockmode != NoLock)
+		{
+			/* Get the lock to synchronize against concurrent drop */
+			LockRelationOid(partoid, lockmode);
+			/*
+			 * Now that we have the lock, double-check to see if the relation
+			 * really exists or not.  If not, assume it was dropped while we
+			 * waited to acquire lock, and ignore it.
+			 */
+			if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(partoid)))
+			{
+				/* Release useless lock */
+				UnlockRelationOid(partoid, lockmode);
+				/* And ignore this relation */
+				continue;
+			}
+		}
 		result = lappend_oid(result, partoid);
     }
-
     return result;
 }
 
@@ -13236,5 +13256,37 @@ is_first_day_from_start(int step, int steptype, struct pg_tm *start_time, struct
     }
 
     return result;
+}
+
+/*
+ * base on a time, add step days
+ */
+void
+add_day_calculation(int *year, int *mon, int *day, int step, int steptype, bool is_leap_year)
+{
+    int monDays;
+
+    if (!is_leap_year)
+        monDays = daysofmonth_common_year[*mon];
+    else
+        monDays = daysofmonth[*mon];
+
+    /* partition by one day */
+    if (step == 1 && steptype == IntervalType_Day)
+    {
+        if (*day == monDays)
+        {
+            *day = 1;
+            if (*mon < 12)
+                (*mon)++;
+            else
+            {
+                *mon = 1;
+                (*year)++;
+            }
+        }
+        else
+            (*day)++;
+    }
 }
 #endif

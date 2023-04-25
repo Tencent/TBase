@@ -388,6 +388,8 @@ end$$ language plpgsql volatile;
 create table revalidate_bug (c float8 unique);
 insert into revalidate_bug values (1);
 insert into revalidate_bug values (inverse(0));
+alter function inverse(int) pushdown;
+insert into revalidate_bug values (inverse(0));
 
 drop table revalidate_bug;
 drop function inverse(int);
@@ -431,7 +433,7 @@ abort;
 
 -- Test for proper cleanup after a failure in a cursor portal
 -- that was created in an outer subtransaction
-CREATE FUNCTION invert(x float8) RETURNS float8 LANGUAGE plpgsql AS
+CREATE FUNCTION invert(x float8) RETURNS float8 pushdown LANGUAGE plpgsql AS
 $$ begin return 1/x; end $$;
 
 CREATE FUNCTION create_temp_tab() RETURNS text

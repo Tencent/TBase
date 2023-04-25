@@ -366,7 +366,7 @@ CREATE TABLE xcrem_employee (EMPNO CHAR(6) NOT NULL, FIRSTNAME VARCHAR(12) NOT N
      INSERT INTO xcrem_employee (EMPNO,FIRSTNAME,MIDINIT,LASTNAME,WORKDEPT,PHONENO,HIREDATE,JOB,EDLEVEL,SEX,BIRTHDATE,SALARY,BONUS,COMM) VALUES(
 '000180','MARILYN',       'S',  'SCOUTTEN',       'D11',  '1682','1973-07-07','DESIGNER',    17,  'F', '1949-02-21',  21340.00,500,1707);
 create table xcrem_temptable as select * from xcrem_employee;
-create or replace function volatile_func(id int) returns int as
+create or replace function volatile_func(id int) returns int pushdown as
 $$begin return 3;end $$ language plpgsql;
 \set EXP 'explain (verbose true, costs false, nodes false)'
 \set SEL 'select empno, edlevel, lastname, salary, bonus from xcrem_employee order by empno'
