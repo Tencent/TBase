@@ -114,6 +114,7 @@ typedef enum
 
 typedef enum
 {
+	ConvertInit,
 	ConvertRunning,
 	ConvertListenError,
 	ConvertAcceptError,

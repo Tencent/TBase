@@ -4921,3 +4921,33 @@ BEGIN
 END; $$ LANGUAGE plpgsql;
 
 SELECT * FROM list_partitioned_table() AS t;
+
+set transform_insert_to_copy to on;
+
+create table multi_itb(f1 int,f2 int);
+
+create or replace function insert_mul () returns text as
+$$
+begin
+  insert into multi_itb values(1,1),(2,2);
+  return 'ok';
+end;
+$$
+language plpgsql;
+
+create or replace function insert_mul_null () returns text as
+$$
+begin
+    insert into multi_itb values(1,null),(2,null);
+        return 'ok';
+end;
+$$
+language plpgsql;
+
+select insert_mul();
+select * from multi_itb order by f1;
+truncate multi_itb;
+select insert_mul_null();
+select * from multi_itb order by f1;
+drop table multi_itb;
+set transform_insert_to_copy to off;

@@ -84,7 +84,7 @@
 #include "storage/lock.h"
 #include "storage/relfilenode.h"
 #include "utils/relcache.h"
-
+#include "pgxc/planner.h"
 
 /*----------
  * ANALYZE builds one of these structs for each attribute (column) that is
@@ -288,9 +288,14 @@ typedef struct
 
 /* in commands/vacuum.c */
 extern void ExecVacuum(VacuumStmt *vacstmt, bool isTopLevel);
-extern void vacuum(int options, RangeVar *relation, Oid relid,
-       VacuumParams *params, List *va_cols,
-       BufferAccessStrategy bstrategy, bool isTopLevel);
+extern void	  vacuum(int				  options,
+					 RangeVar			  *relation,
+					 Oid				  relid,
+					 VacuumParams		  *params,
+					 List				  *va_cols,
+					 BufferAccessStrategy bstrategy,
+					 bool				  isTopLevel,
+					 StatSyncOpt *syncOpt);
 extern void vac_open_indexes(Relation relation, LOCKMODE lockmode,
                  int *nindexes, Relation **Irel);
 extern void vac_close_indexes(int nindexes, Relation *Irel, LOCKMODE lockmode);
@@ -318,7 +323,7 @@ extern void vacuum_set_xid_limits(Relation rel,
 extern void vac_update_datfrozenxid(void);
 extern void vacuum_delay_point(void);
 #ifdef XCP
-extern void vacuum_rel_coordinator(Relation onerel, bool is_outer, VacuumParams *params);
+extern void vacuum_rel_coordinator(Relation onerel, bool is_outer, VacuumParams *params, StatSyncOpt *syncOpt);
 TargetEntry *make_relation_tle(Oid reloid, const char *relname, const char *column);
 #endif
 
@@ -338,15 +343,21 @@ extern void ExecVacuumShard(VacuumShardStmt *stmt);
 #endif
 
 /* in commands/analyze.c */
-extern void analyze_rel(Oid relid, RangeVar *relation, int options,
-            VacuumParams *params, List *va_cols, bool in_outer_xact,
-            BufferAccessStrategy bstrategy);
+extern void	  analyze_rel(Oid				   relid,
+						  RangeVar			   *relation,
+						  int				   options,
+						  VacuumParams		   *params,
+						  List				   *va_cols,
+						  bool				   in_outer_xact,
+						  BufferAccessStrategy bstrategy,
+						  StatSyncOpt		 *syncOpt);
 extern bool std_typanalyze(VacAttrStats *stats);
 
 /* in utils/misc/sampling.c --- duplicate of declarations in utils/sampling.h */
 extern double anl_random_fract(void);
 extern double anl_init_selection_state(int n);
 extern double anl_get_next_S(double t, int n, double *stateptr);
+extern RemoteQuery *init_sync_remotequery(StatSyncOpt *syncOpt, char **cnname);
 
 #ifdef __TBASE__
 extern Size QueryAnalyzeInfoShmemSize(void);

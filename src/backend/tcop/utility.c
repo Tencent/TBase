@@ -711,13 +711,46 @@ ProcessUtilityPre(PlannedStmt *pstmt,
                 VacuumStmt *stmt = (VacuumStmt *) parsetree;
 
                 /* we choose to allow this during "read only" transactions */
-                PreventCommandDuringRecovery((stmt->options & VACOPT_VACUUM) ?
-                                             "VACUUM" : "ANALYZE");
+			PreventCommandDuringRecovery((stmt->options & VACOPT_VACUUM) ? "VACUUM"
+																		 : "ANALYZE");
+			if (!IsConnFromCoord() && IS_PGXC_COORDINATOR && stmt->sync_option &&
+				stmt->sync_option->nodes != NIL)
+			{
+				const ListCell *cell;
+				char			node_type = PGXC_NODE_COORDINATOR;
+				foreach (cell, stmt->sync_option->nodes)
+				{
+					if (0 == strcmp(strVal(lfirst(cell)), PGXCNodeName))
+						elog(ERROR, "Can not sync to/from local!");
+
+					PGXCNodeGetNodeIdFromName(strVal(lfirst(cell)), &node_type);
+					if (node_type == PGXC_NODE_NONE)
+					{
+						elog(ERROR, "Can not find coordinator %s!", strVal(lfirst(cell)));
+					}
+					else if (node_type != PGXC_NODE_COORDINATOR)
+					{
+						elog(ERROR, "node %s is not coordinator!", strVal(lfirst(cell)));
+					}
+				}
+			}
+
+			/*
+			 * When statement is emit by the coordinating node, the statement is not
+			 * rewritten, adapt it here
+			 */
+			if (IsConnFromCoord() && IS_PGXC_COORDINATOR && stmt->sync_option)
+			{
+				stmt->sync_option->is_sync_from = true;
+				list_free_deep(stmt->sync_option->nodes);
+				stmt->sync_option->nodes = NIL;
+				stmt->sync_option->nodes = list_make1(makeString(parentPGXCNode));
+			}
                 /*
-                 * We have to run the command on nodes before Coordinator because
+			 * If it is not a SYNC FROM command, We have to run the command on nodes before Coordinator because
                  * vacuum() pops active snapshot and we can not send it to nodes
                  */
-                if (!(stmt->options & VACOPT_COORDINATOR))
+			else if (!(stmt->options & VACOPT_COORDINATOR) && !(stmt->sync_option && stmt->sync_option->is_sync_from == true))
                     exec_type = EXEC_ON_DATANODES;
                 auto_commit = true;
             }
@@ -1277,6 +1310,7 @@ ProcessUtilityPost(PlannedStmt *pstmt,
     bool        auto_commit = false;
     bool        add_context = false;
     RemoteQueryExecType    exec_type = EXEC_ON_NONE;
+	ExecNodes		  *exec_nodes = NULL;
 
     /*
      * auto_commit and is_temp is initialised to false and changed if required.
@@ -1315,7 +1349,56 @@ ProcessUtilityPost(PlannedStmt *pstmt,
         case T_NotifyStmt:
         case T_ListenStmt:
         case T_UnlistenStmt:
+			break;
         case T_VacuumStmt:
+		{
+			VacuumStmt *vstmt = (VacuumStmt *)parsetree;
+			if (vstmt->relation != NULL)
+			{
+				Relation rel =
+					relation_openrv_extended(vstmt->relation, NoLock, true);
+				if (rel && rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
+				{
+					relation_close(rel, NoLock);
+					break;
+				}
+				if (rel)
+					relation_close(rel, NoLock);
+			}
+			if (!IsConnFromCoord() && IS_PGXC_COORDINATOR &&
+				!IsInTransactionChain(context == PROCESS_UTILITY_TOPLEVEL) &&
+				vstmt->sync_option)
+			{
+				exec_type		  = EXEC_ON_COORDS;
+				if (vstmt->sync_option->nodes)
+				{
+					ListCell *lc;
+					int		  nodeIdx;
+					exec_nodes					= (ExecNodes *)makeNode(ExecNodes);
+					exec_nodes->accesstype		= RELATION_ACCESS_INSERT;
+					exec_nodes->baselocatortype = LOCATOR_TYPE_SHARD; /* not used */
+					exec_nodes->en_expr			= NULL;
+					exec_nodes->en_relid		= InvalidOid;
+					exec_nodes->primarynodelist = NIL;
+
+					foreach (lc, vstmt->sync_option->nodes)
+					{
+						char node_type = PGXC_NODE_COORDINATOR;
+						nodeIdx =
+							PGXCNodeGetNodeIdFromName(strVal(lfirst(lc)), &node_type);
+						exec_nodes->nodeList = lappend_int(exec_nodes->nodeList, nodeIdx);
+					}
+				}
+				if (ActiveSnapshotSet())
+				{
+				PopActiveSnapshot();
+				}
+				CommitTransactionCommand();
+				StartTransactionCommand();
+			}
+			auto_commit = true;
+			break;
+		}
 #ifdef _SHARDING_
         case T_VacuumShardStmt:
 #endif
@@ -1799,7 +1882,7 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 
     if (IS_PGXC_LOCAL_COORDINATOR)
 	{
-        ExecUtilityStmtOnNodes(parsetree, queryString, NULL, sentToRemote, auto_commit,
+		ExecUtilityStmtOnNodes(parsetree, queryString, exec_nodes, sentToRemote, auto_commit,
                 exec_type, is_temp, add_context);
 		
 		if (IsA(parsetree, IndexStmt) &&

@@ -173,6 +173,10 @@ static HTAB               *g_GroupHashTab     = NULL;
 /*For DN*/
 static ShardNodeGroupInfo_DN *g_GroupShardingMgr_DN = NULL;
 
+/* For local DN received from parent node */
+static bool g_ShardMapValid = false;
+static ShardMapItemDef g_ShardMap[SHARD_MAP_GROUP_NUM];
+
 /* used for datanodes */
 Bitmapset                      *g_DatanodeShardgroupBitmap  = NULL;
 
@@ -1315,6 +1319,9 @@ int32  GetNodeIndexByHashValue(Oid group, long hashvalue)
         }
 
         shardIdx     = abs(hashvalue) % (g_GroupShardingMgr_DN->members->shmemNumShards);
+		if (g_ShardMapValid)
+			shardgroup = &g_ShardMap[shardIdx];
+		else
         shardgroup   = &g_GroupShardingMgr_DN->members->shmemshardmap[shardIdx];
         nodeIdx      = shardgroup->nodeindex;
     }
@@ -5718,4 +5725,84 @@ List* GetShardMapRangeList(Oid group, Oid coldgroup, Oid relation, Oid type, Dat
     return list;
 }
 
+/* serialize shard map info for dispatching to lower DNs */
+StringInfo 
+SerializeShardmap(void)
+{
+	GroupShardInfo *info;
+	StringInfo      data;
+	int             i;
+	
+	if (!IS_PGXC_DATANODE)
+		elog(ERROR, "shouldn't try to serialize group shard info on CN");
+	
+	info = g_GroupShardingMgr_DN->members;
+	data = makeStringInfo();
+	
+	appendStringInfo(data, "%d", info->shmemNumShards);
+	for (i = 0; i < info->shmemNumShards; i++)
+	{
+		appendStringInfo(data, ",%d",
+		                 info->shmemshardmap[i].nodeindex);
+	}
+
+	return data;
+}
+
+/*
+ * Deserialize shard map info into g_ShardMap, these information
+ * comes from parent DN and will replace local info for distribution
+ * across multi groups.
+ */
+void
+DeserializeShardmap(const char *data)
+{
+	char    *tmp_head = (char *) data;
+	char    *tmp_pos;
+	int      num_shards, i;
+	
+	num_shards = (int) strtod(tmp_head, &tmp_pos);
+	tmp_head = tmp_pos + 1;
+	
+	if (num_shards != SHARD_MAP_SHARD_NUM)
+	{
+		/*
+		 * for now num_shards should always be SHARD_MAP_GROUP_NUM
+		 * since SHARD_MAP_SHARD_NUM == EXTENSION_SHARD_MAP_SHARD_NUM
+		 * but maybe it will change someday, error out to avoid more
+		 * critical error.
+		 */
+		elog(ERROR, "deserializing invalid num of shard map, %d", num_shards);
+	}
+	
+	for (i = 0; i < num_shards; i++)
+	{
+		g_ShardMap[i].shardgroupid = i;
+		g_ShardMap[i].nodeindex = (int) strtod(tmp_head, &tmp_pos);
+		tmp_head = tmp_pos + 1;
+	}
+	
+	/* enable remote shard map info */
+	g_ShardMapValid = true;
+}
+
+/* g_ShardMap is a static array, simply disable it by another static bool */
+void
+InvalidRemoteShardmap(void)
+{
+	g_ShardMapValid = false;
+}
+
+/*
+ * return group oid of this node in
+ * return invalid if it's not in a group or it's a CN.
+ */
+Oid
+GetMyGroupOid(void)
+{
+	if (IS_PGXC_DATANODE)
+		return g_GroupShardingMgr_DN->members->group;
+	else
+		return InvalidOid;
+}
 #endif

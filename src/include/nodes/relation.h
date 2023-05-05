@@ -225,6 +225,8 @@ typedef struct PlannerGlobal
 
     bool        parallelModeNeeded; /* parallel mode actually required? */
 
+	bool        hasCoordFuncs;
+
     char        maxParallelHazard;    /* worst PROPARALLEL hazard level */
 } PlannerGlobal;
 
@@ -431,6 +433,7 @@ typedef struct PlannerInfo
     bool        haspart_tobe_modify;
     Index        partrelindex;
     Bitmapset    *partpruning;
+	List        *udf_quals;    /* quals that contain CN-udf */
 #endif
 #endif
 } PlannerInfo;
@@ -1636,6 +1639,13 @@ typedef struct ProjectionPath
     Path       *subpath;        /* path representing input source */
     bool        dummypp;        /* true if no separate Result is needed */
 } ProjectionPath;
+
+typedef struct QualPath
+{
+	Path        path;
+	Path       *subpath;
+	List       *quals;
+} QualPath;
 
 /*
  * ProjectSetPath represents evaluation of a targetlist that includes

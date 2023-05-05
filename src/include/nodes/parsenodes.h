@@ -162,6 +162,7 @@ typedef struct Query
                                                                           * only used for DML. Will be set at the plan phase
                                                                           * in shippability check.
                                                                           */
+	bool        hasCoordFuncs;
     char        *copy_filename; /* fake filename for copy from */
     Bitmapset   *conflict_cols;
 #endif
@@ -3301,12 +3302,21 @@ typedef enum VacuumOption
                                   */
 } VacuumOption;
 
+typedef struct StatSyncOpt
+{
+	NodeTag type;
+	bool  is_sync_from; /* false: sync to other CN node; true: sync from node identified by
+						 node_name */
+	List *nodes;	  /* node list for sync to/from */
+} StatSyncOpt;
+
 typedef struct VacuumStmt
 {
     NodeTag        type;
     int            options;        /* OR of VacuumOption flags */
     RangeVar   *relation;        /* single table to process, or NULL */
     List       *va_cols;        /* list of column names, or NIL for all */
+	StatSyncOpt *sync_option; /* Sync statistics to/from other nodes, or NULL */
 } VacuumStmt;
 
 #ifdef _SHARDING_

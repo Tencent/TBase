@@ -307,6 +307,8 @@ extern char *nls_sort_locale;
 extern int    tcp_keepalives_idle;
 extern int    tcp_keepalives_interval;
 extern int    tcp_keepalives_count;
+extern int	tcp_user_timeout;
+
 #ifdef _SHARDING_
 extern bool g_allow_dml_on_datanode;
 extern bool g_allow_force_ddl;

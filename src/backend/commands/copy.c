@@ -5039,7 +5039,8 @@ CopyReadLine(CopyState cstate)
                 cstate->line_buf.data[cstate->line_buf.len] = '\0';
                 break;
             case EOL_UNKNOWN:
-                /* shouldn't get here */
+				/* shouldn't get here except we are transform from insert */
+				if (!cstate->internal_mode)
                 Assert(false);
                 break;
         }

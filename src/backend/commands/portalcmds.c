@@ -362,6 +362,9 @@ PortalCleanup(Portal portal)
 			/* If cleanup fails below prevent double cleanup */
 			portal->queryDesc = NULL;
 			
+			/* invalidate remote shard map info no matter producer or consumer */
+			InvalidRemoteShardmap();
+			
 			/*
 			 * If portal is producing it has an executor which should be
 			 * shut down

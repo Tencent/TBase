@@ -419,6 +419,7 @@ pgcs_report_executor_activity(QueryDesc *desc, int eflags)
 	volatile PgClusterStatus *entry;
 	StringInfo planstate_str = NULL;
 	StringInfo cursors = NULL;
+	MemoryContext oldcxt;
 	
 	if (prev_ExecutorStart)
 		prev_ExecutorStart(desc, eflags);
@@ -439,6 +440,12 @@ pgcs_report_executor_activity(QueryDesc *desc, int eflags)
 		increment_changecount_after(entry);
 		return;
 	}
+	
+	/*
+	 * Make sure we operate in the per-query context, so any cruft will be
+	 * discarded later during ExecutorEnd. estate should be set by standard_ExecutorStart.
+	 */
+	oldcxt = MemoryContextSwitchTo(desc->estate->es_query_cxt);
 	
 	if (desc->planstate != NULL)
 	{
@@ -481,6 +488,8 @@ pgcs_report_executor_activity(QueryDesc *desc, int eflags)
 	pgcs_report_role((PgClusterStatus *) entry, desc);
 	
 	increment_changecount_after(entry);
+	
+	MemoryContextSwitchTo(oldcxt);
 }
 
 /* ----------

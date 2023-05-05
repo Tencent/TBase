@@ -2563,3 +2563,14 @@ alter table dropped_col_remote_dml drop column c;
 update dropped_col_remote_dml set b = 2;
 drop table dropped_col_remote_dml cascade;
 drop function dropped_col_remote_dml_func;
+
+-- add column with default values and check shardid
+create table t_default_shardid(a int, b int) distribute by shard(a);
+insert into t_default_shardid values(1,1), (2,2), (3,3);
+select shardid, a, b from t_default_shardid order by 1;
+create sequence s_default_shardid;
+alter table t_default_shardid add column c int default nextval('s_default_shardid');
+-- shardid should not change
+select shardid, a, b from t_default_shardid order by 1;
+drop table t_default_shardid;
+drop sequence s_default_shardid;

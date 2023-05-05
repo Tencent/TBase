@@ -60,12 +60,13 @@
 #include "catalog/pgxc_class.h"
 #ifdef __TBASE__
 #include "commands/explain_dist.h"
-#include "pgxc/squeue.h"
 #include "executor/execParallel.h"
-#include "postmaster/postmaster.h"
 #include "executor/nodeModifyTable.h"
-#include "utils/syscache.h"
 #include "nodes/print.h"
+#include "optimizer/pathnode.h"
+#include "pgxc/squeue.h"
+#include "postmaster/postmaster.h"
+#include "utils/syscache.h"
 #endif
 /*
  * We do not want it too long, when query is terminating abnormally we just
@@ -3026,7 +3027,7 @@ pgxc_node_receive_responses(const int conn_count, PGXCNodeHandle ** connections,
         while (i < count)
         {
             int32 nbytes = 0;
-            int result =  handle_response(to_receive[i], combiner);
+			int result =  handle_response(to_receive[i], combiner);
 #ifdef __TBASE__
 #ifdef     _PG_REGRESS_            
             elog(LOG, "Received response %d on connection to node %s",
@@ -3974,11 +3975,11 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
 #endif
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-    if(implicit)
-    {
+	if(implicit)
+	{
         if(enable_distri_print)
         {
-            elog(LOG, "prepare remote transaction xid %d gid %s", GetTopTransactionIdIfAny(), prepareGID);
+			elog(LOG, "prepare remote transaction xid %d gid %s", GetTopTransactionIdIfAny(), prepareGID);
         }
         global_prepare_ts = GetGlobalTimestampGTM();
 
@@ -3988,17 +3989,17 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
         global_prepare_ts = 0;
     }
 #endif
-        if(!GlobalTimestampIsValid(global_prepare_ts)){
+		if(!GlobalTimestampIsValid(global_prepare_ts)){
             ereport(ERROR,
             (errcode(ERRCODE_INTERNAL_ERROR),
              errmsg("failed to get global timestamp for PREPARED command")));
         }
         if(enable_distri_print)
         {
-            elog(LOG, "prepare phase get global prepare timestamp gid %s, time " INT64_FORMAT, prepareGID, global_prepare_ts);
+			elog(LOG, "prepare phase get global prepare timestamp gid %s, time " INT64_FORMAT, prepareGID, global_prepare_ts);
         }
         SetGlobalPrepareTimestamp(global_prepare_ts);
-    }
+	}
 #endif
 
 #ifdef __TWO_PHASE_TRANS__
@@ -4093,19 +4094,19 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
             {
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-                if(implicit)
-                {
+				if(implicit)
+				{
                     if(enable_distri_print)
                     {
-                        elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts " INT64_FORMAT,GetTopTransactionIdIfAny(),
+						elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts " INT64_FORMAT,GetTopTransactionIdIfAny(),
                                                         prepareGID, global_prepare_ts);
                     }
                     if (pgxc_node_send_prepare_timestamp(conn, global_prepare_ts))
                     {
                         ereport(ERROR,
                                 (errcode(ERRCODE_INTERNAL_ERROR),
-                                 errmsg("failed to send global prepare committs for PREPARED command")));
-                    }
+								 errmsg("failed to send global prepare committs for PREPARED command")));
+					}
                 }
 #endif
                 /* Send down prepare command */
@@ -4139,11 +4140,11 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
 #endif
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-                if(implicit)
-                {
+				if(implicit)
+				{
                     if(enable_distri_print)
                     {
-                        elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts " INT64_FORMAT,GetTopTransactionIdIfAny(),
+						elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts " INT64_FORMAT,GetTopTransactionIdIfAny(),
                                                         prepareGID, global_prepare_ts);
                     }
                     if (pgxc_node_send_prepare_timestamp(conn, global_prepare_ts))
@@ -4157,8 +4158,8 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
 #endif
                         ereport(ERROR,
                                 (errcode(ERRCODE_INTERNAL_ERROR),
-                                 errmsg("failed to send global prepare committs for PREPARED command")));
-                    }
+								 errmsg("failed to send global prepare committs for PREPARED command")));
+					}
                 }
 #endif
 
@@ -4297,19 +4298,19 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
             if (conn->read_only)
             {
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-                if(implicit)
-                {
+				if(implicit)
+				{
                     if(enable_distri_print)
                     {
-                        elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts " INT64_FORMAT,GetTopTransactionIdIfAny(),
+						elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts " INT64_FORMAT,GetTopTransactionIdIfAny(),
                                                         prepareGID, global_prepare_ts);
                     }
                     if (pgxc_node_send_prepare_timestamp(conn, global_prepare_ts))
                     {
                         ereport(ERROR,
                                 (errcode(ERRCODE_INTERNAL_ERROR),
-                                 errmsg("failed to send global prepare committs for PREPARED command")));
-                    }
+								 errmsg("failed to send global prepare committs for PREPARED command")));
+					}
                 }
 #endif
                 /* Send down prepare command */
@@ -4340,11 +4341,11 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
 #endif
 
 #ifdef __SUPPORT_DISTRIBUTED_TRANSACTION__
-                if(implicit)
-                {
+				if(implicit)
+				{
                     if(enable_distri_print)
                     {
-                        elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts " INT64_FORMAT,GetTopTransactionIdIfAny(),
+						elog(LOG, "send prepare timestamp for xid %d gid %s prepare ts " INT64_FORMAT,GetTopTransactionIdIfAny(),
                                                         prepareGID, global_prepare_ts);
                     }
                     if (pgxc_node_send_prepare_timestamp(conn, global_prepare_ts))
@@ -4358,8 +4359,8 @@ pgxc_node_remote_prepare(char *prepareGID, bool localNode, bool implicit)
 #endif
                         ereport(ERROR,
                                 (errcode(ERRCODE_INTERNAL_ERROR),
-                                 errmsg("failed to send global prepare committs for PREPARED command")));
-                    }
+								 errmsg("failed to send global prepare committs for PREPARED command")));
+					}
                 }
 #endif
 
@@ -10941,6 +10942,9 @@ primary_mode_phase_two:
                  OidIsValid(primary_data_node) &&
                  combiner->conn_count > 1 && !g_UseDataPump);
         char cursor[NAMEDATALEN];
+#ifdef __TBASE__
+		StringInfo shardmap = NULL;
+#endif
 
         if (plan->cursor)
         {
@@ -11000,6 +11004,26 @@ primary_mode_phase_two:
 		if (estate->es_epqTuple != NULL)
 			epqctxlen = encode_epqcontext(&combiner->ss.ps, &epqctxdata);
 
+#ifdef __TBASE__
+		/*
+		 * consider whether to distribute shard map info
+		 * we do that when:
+		 *  1. this is a DN node
+		 *  2. plan distribution is by shard
+		 *  3. target of distribution is not in our group
+		 */
+		if (IS_PGXC_DATANODE && node->execNodes != NIL &&
+		    plan->distributionType == LOCATOR_TYPE_SHARD)
+		{
+			ListCell *cell;
+			
+			foreach(cell, node->execNodes)
+			{
+				if (!list_member_int(PGXCGroupNodeList, lfirst_int(cell)))
+					shardmap = SerializeShardmap();
+			}
+		}
+#endif
         /*
          * The subplan being rescanned, need to restore connections and
          * re-bind the portal
@@ -11039,7 +11063,7 @@ primary_mode_phase_two:
 
                 /* rebind */
                 pgxc_node_send_bind(conn, combiner->cursor, combiner->cursor,
-									paramlen, paramdata, epqctxlen, epqctxdata);
+									paramlen, paramdata, epqctxlen, epqctxdata, shardmap);
                 if (enable_statistic)
                 {
                     elog(LOG, "Bind Message:pid:%d,remote_pid:%d,remote_ip:%s,remote_port:%d,fd:%d,cursor:%s",
@@ -11128,7 +11152,7 @@ primary_mode_phase_two:
 
                 /* bind */
 				pgxc_node_send_bind(conn, cursor, cursor, paramlen, paramdata,
-				                    epqctxlen, epqctxdata);
+				                    epqctxlen, epqctxdata, shardmap);
 
                 if (enable_statistic)
                 {

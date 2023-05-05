@@ -95,4 +95,5 @@ extern Node *replace_distribkey_func(Node *node);
 
 extern Node *replace_eval_sql_value_function(Node *node);
 
+extern bool contain_user_defined_functions(Node *clause);
 #endif							/* CLAUSES_H */

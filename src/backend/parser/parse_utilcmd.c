@@ -3312,6 +3312,9 @@ transformRuleStmt(RuleStmt *stmt, const char *queryString,
 }
 
 
+/* check the year is leak year or common year */
+#define is_leap_year(year) ((year % 100 != 0 && year % 4 == 0) || (year % 400 == 0))
+
 /*
  * transformAlterTableStmt -
  *        parse analysis for ALTER TABLE
@@ -3469,9 +3472,18 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
                 {
                     int existnparts;
                     int partidx;
+                    int realPartidx;
                     int newnparts;
+                    int realNewnparts;
                     Oid groupId;
                     
+                    struct pg_tm start_time;
+                    fsec_t start_sec;
+                    int year;
+                    int mon;
+                    int day;
+                    Form_pg_partition_interval routerinfo = NULL;
+					
                     existnparts = RelationGetNParts(rel);
                     newnparts = ((AddDropPartitions*)cmd->def)->nparts;
 
@@ -3480,15 +3492,55 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
                         elog(ERROR, "number of partitions to add cannot be negative or zero");
                     }
 
-                    if(newnparts + existnparts > MAX_NUM_INTERVAL_PARTITIONS)
+					if(newnparts + existnparts > MAX_NUM_INTERVAL_PARTITIONS)
+					{
+						elog(ERROR, "one table only have %d partitions at most", MAX_NUM_INTERVAL_PARTITIONS);
+					}
+
+                    /*
+                     * Self-developed partition table compatibility processing
+                     */
+                    routerinfo = rel->rd_partitions_info;
+
+                        /* timestamp convert to posix struct */
+                        if(timestamp2tm(routerinfo->partstartvalue_ts, NULL, &start_time, &start_sec, NULL, NULL) != 0)
+                            ereport(ERROR,
+                                    (errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+                                            errmsg("timestamp out of range")));
+
+                    year = start_time.tm_year;
+                    mon = start_time.tm_mon;
+                    day = start_time.tm_mday;
+
+                    if(routerinfo->partdatatype == TIMESTAMPOID && !is_leap_year(year) && routerinfo->partinterval_type == IntervalType_Day)
                     {
-                        elog(ERROR, "one table only have %d partitions at most", MAX_NUM_INTERVAL_PARTITIONS);
+                        for(partidx = 1; partidx < existnparts; partidx++)
+                            add_day_calculation(&year, &mon, &day, 1, IntervalType_Day, false);
                     }
 
-                    for(partidx = existnparts; partidx < existnparts + newnparts; partidx++)
-                    {
+                    realPartidx = existnparts;
+                    realNewnparts = newnparts;
+
+					for(partidx = existnparts; partidx < existnparts + newnparts; partidx++)
+                            {
                         TableLikeClause *likeclause = makeNode(TableLikeClause);
                         CreateStmt * createpart = makeNode(CreateStmt);
+
+                        /*
+                         * for compatible with the calculation of the normal time of the self-developed partition table
+                         */
+                        if (routerinfo->partdatatype == TIMESTAMPOID && !is_leap_year(year) && routerinfo->partinterval_type == IntervalType_Day)
+                        {
+                            add_day_calculation(&year, &mon, &day, 1, IntervalType_Day, false);
+
+                            if(mon == 3 && day == 1)
+                    {
+                                partidx--;
+                                realNewnparts++;
+                                ((AddDropPartitions*)cmd->def)->nparts = realNewnparts;
+                            }
+                    }
+
                         createpart->relation = copyObject((void *) stmt->relation);
                         createpart->relation->schemaname = get_namespace_name(RelationGetNamespace(rel));
                         //createpart->relation->relname = GetPartitionName(RelationGetRelid(rel), partidx, false);
@@ -3498,7 +3550,7 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
                         createpart->tableElts = lappend(createpart->tableElts, likeclause);
 
                         createpart->interval_child = true;
-                        createpart->interval_child_idx = partidx;
+						createpart->interval_child_idx = realPartidx;
 
                         createpart->interval_parentId = RelationGetRelid(rel);
                         
@@ -3583,6 +3635,8 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
 #else
                         createlist = list_concat(createlist, transformCreateStmt(createpart, queryString, true));
 #endif
+
+                        realPartidx++;
                     }
                 }
                 else

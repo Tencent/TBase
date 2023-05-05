@@ -986,6 +986,7 @@ _equalQuery(const Query *a, const Query *b)
     COMPARE_SCALAR_FIELD(hasModifyingCTE);
     COMPARE_SCALAR_FIELD(hasForUpdate);
     COMPARE_SCALAR_FIELD(hasRowSecurity);
+	COMPARE_SCALAR_FIELD(hasCoordFuncs);
     COMPARE_NODE_FIELD(cteList);
     COMPARE_NODE_FIELD(rtable);
     COMPARE_NODE_FIELD(jointree);
@@ -1694,6 +1695,16 @@ _equalVacuumStmt(const VacuumStmt *a, const VacuumStmt *b)
     COMPARE_SCALAR_FIELD(options);
     COMPARE_NODE_FIELD(relation);
     COMPARE_NODE_FIELD(va_cols);
+	COMPARE_NODE_FIELD(sync_option);
+
+	return true;
+}
+
+static bool
+_equalStatSyncOpt(const StatSyncOpt *a, const StatSyncOpt *b)
+{
+	COMPARE_SCALAR_FIELD(is_sync_from);
+	COMPARE_NODE_FIELD(nodes);
 
     return true;
 }
@@ -3592,6 +3603,9 @@ equal(const void *a, const void *b)
         case T_VacuumStmt:
             retval = _equalVacuumStmt(a, b);
             break;
+		case T_StatSyncOpt:
+			retval = _equalStatSyncOpt(a, b);
+			break;
 #ifdef _SHARDING_
         case T_VacuumShardStmt:
             retval = _equalVacuumShardStmt(a, b);

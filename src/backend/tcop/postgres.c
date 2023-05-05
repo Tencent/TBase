@@ -124,6 +124,7 @@
 #include "replication/worker_internal.h"
 #endif
 
+
 extern int    optind;
 
 /* ----------------
@@ -1141,88 +1142,48 @@ pg_plan_queries(List *querytrees, int cursorOptions, ParamListInfo boundParams)
     return stmt_list;
 }
 
-static bool
-ch_is_space(char ch)
-{
-	if (ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r' || ch == '\f')
-	{
-	    return true;
-	}
-	else
-	{
-		return false;
-	}
-}
-
 /*
  * get myself query string from original query string,
  * if the query string contain multi stmt
  */
 static char*
-get_myself_query_string(char* query_string, char** out_query_string)
+get_myself_query_string(const char* query_string, RawStmt *parsetree)
 {
-    char       *string_delimeter = NULL;
-    char       *myself_query_string = NULL;
-    int         myself_query_string_len = 0;
-    int         pos = 0;
-    bool        in_quotation = false;
-    int         query_string_len = 0;
+    static StringInfo myself_query_string = NULL;
+    int			query_location;
+    int			query_len;
+    MemoryContext oldcontext;
 
-    if (query_string && query_string[0] != '\0')
-    {
-        /* skip space and redundant ';' */
-        while (*query_string != '\0')
+    if (parsetree->stmt_location >= 0)
         {
-            if (ch_is_space(*query_string) || *query_string == ';')
-            {
-                query_string++;
+        Assert(parsetree->stmt_location <= strlen(query_string));
+        query_location = parsetree->stmt_location;
+        /* Length of 0 (or -1) means "rest of string" */
+        query_len =  (parsetree->stmt_len <= 0) ? strlen(query_string) : parsetree->stmt_len;
+        /* update the location */
+        parsetree->stmt_location = 0;
             }
             else
             {
-                break;
+        /* If query location is unknown, distrust query_len as well */
+        query_location = 0;
+        query_len = strlen(query_string);
             }
-        }
 
-        if (*query_string == '\0')
-        {
-            *out_query_string = NULL;
-            return NULL;
-        }
-
-        /* find ';' in query string, be careful of '\'' */
-        query_string_len = strlen(query_string);
-        for (pos = 0; pos < query_string_len; pos++)
-        {
-            if (query_string[pos] == '\'')
+    oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+    if (myself_query_string == NULL)
             {
-                in_quotation = (in_quotation) ? false : true;
-            }
-
-            if (query_string[pos] == ';' && !in_quotation)
-            {
-                string_delimeter = &query_string[pos];
-                break;
-            }
-        }
-
-        if (string_delimeter == NULL)
-        {
-            myself_query_string = query_string;
-            query_string = NULL;
+        myself_query_string = makeStringInfo();
         }
         else
         {
-            myself_query_string_len = string_delimeter - query_string;
-            myself_query_string = palloc(myself_query_string_len + 1);
-            memcpy(myself_query_string, query_string, myself_query_string_len);
-            myself_query_string[myself_query_string_len] = '\0';
-
-            query_string = string_delimeter + 1;
-        }
+        resetStringInfo(myself_query_string);
     }
 
-    *out_query_string = myself_query_string;
-    return query_string;
+    appendBinaryStringInfo(myself_query_string, query_string + query_location, query_len);
+    MemoryContextSwitchTo(oldcontext);
+
+    return myself_query_string->data;
 }
 
 /*
@@ -1242,7 +1203,6 @@ exec_simple_query(const char *query_string)
     bool        isTopLevel;
     char        msec_str[32];
     bool        multiCommands = false;
-    char       *query_string_tmp = NULL;
 
     /*
      * Report query to various monitoring facilities.
@@ -1314,8 +1274,6 @@ exec_simple_query(const char *query_string)
                          errmsg("COMMIT or ROLLBACK "
                                 "in multi-statement queries not allowed")));
         }
-
-        query_string_tmp = (char*) query_string;
     }
 
     /*
@@ -1373,13 +1331,9 @@ exec_simple_query(const char *query_string)
         Portal        portal;
         DestReceiver *receiver;
         int16        format;
-        char       *myself_query_string = NULL;
-
-        if (query_string_tmp && query_string_tmp[0] != '\0')
-        {
             /* get this portal's query when has multi parse tree */
-            query_string_tmp = get_myself_query_string(query_string_tmp, &myself_query_string);
-        }
+        const char  *myself_query_string = isTopLevel ? debug_query_string :
+                                           (const char *)get_myself_query_string(debug_query_string, parsetree);
 
 #ifdef PGXC
 
@@ -1543,7 +1497,7 @@ exec_simple_query(const char *query_string)
          */
         PortalDefineQuery(portal,
                           NULL,
-                          (myself_query_string) ? myself_query_string : query_string,
+                          myself_query_string,
                           commandTag,
                           plantree_list,
                           NULL);
@@ -2271,6 +2225,7 @@ exec_bind_message(StringInfo input_message)
     int column_index;
     int index;
     char ***data_list = NULL;
+	const char *shard_map;
     MemoryContext old_top;
 #endif
 
@@ -2802,6 +2757,8 @@ exec_bind_message(StringInfo input_message)
             rformats[i] = pq_getmsgint(input_message, 2);
     }
 
+	InvalidRemoteShardmap();
+	
 	/* Get epq context, only datanodes need them */
 	if (IsConnFromCoord() || IsConnFromDatanode())
 	{
@@ -2825,6 +2782,11 @@ exec_bind_message(StringInfo input_message)
                 portal->epqContext->nodeid[i] = pq_getmsgint(input_message, 4);
             }
         }
+		
+		/* Get shard map info */
+		shard_map = pq_getmsgstring(input_message);
+		if (shard_map[0] != '\0')
+			DeserializeShardmap(shard_map);
 	}
 	
     pq_getmsgend(input_message);
@@ -4833,6 +4795,7 @@ PostgresMain(int argc, char *argv[],
     StringInfoData input_message;
     sigjmp_buf    local_sigjmp_buf;
     volatile bool send_ready_for_query = true;
+    volatile bool need_report_activity = false;
     bool        disable_idle_in_transaction_timeout = false;
 
 #ifdef PGXC /* PGXC_DATANODE */
@@ -5410,7 +5373,7 @@ PostgresMain(int argc, char *argv[],
          * uncommitted updates (that confuses autovacuum).  The notification
          * processor wants a call too, if we are not in a transaction block.
          */
-        if (send_ready_for_query)
+		if (send_ready_for_query || need_report_activity)
         {
             if (IsAbortedTransactionBlockState())
             {
@@ -5447,6 +5410,7 @@ PostgresMain(int argc, char *argv[],
                 pgstat_report_activity(STATE_IDLE, NULL);
             }
 
+            if(send_ready_for_query)
             ReadyForQuery(whereToSendOutput);
 
 #ifdef XCP
@@ -5469,6 +5433,7 @@ PostgresMain(int argc, char *argv[],
 #endif
 
             send_ready_for_query = false;
+            need_report_activity = false;
         }
 
         /*
@@ -5809,6 +5774,7 @@ PostgresMain(int argc, char *argv[],
             case 'L':			/* sync */
                 pq_getmsgend(&input_message);
                 finish_xact_command();
+                need_report_activity = true;
                 break;	
 #ifdef __TBASE__
             case 'N':

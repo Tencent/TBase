@@ -83,8 +83,8 @@ select c1,c2 from t_day_1 where c2 < timestamp without time zone '2015-09-04' or
   1 | Tue Sep 01 13:11:00 2015
   2 | Wed Sep 02 13:11:00 2015
   3 | Wed Sep 02 13:11:00 2015
-  7 | Thu Sep 03 13:11:00 2015
   4 | Thu Sep 03 13:11:00 2015
+  7 | Thu Sep 03 13:11:00 2015
 (5 rows)
 
 select c1,c2 from t_day_1 where c2 < timestamp without time zone '2015-09-04' order by c2 desc limit 5;
@@ -103,8 +103,8 @@ select shardid,c2 from t_day_1 where c2 < timestamp without time zone '2015-09-0
     2234 | Tue Sep 01 13:11:00 2015
     3318 | Wed Sep 02 13:11:00 2015
      105 | Wed Sep 02 13:11:00 2015
-    1025 | Thu Sep 03 13:11:00 2015
      213 | Thu Sep 03 13:11:00 2015
+    1025 | Thu Sep 03 13:11:00 2015
 (5 rows)
 
 select shardid,c1+c3 from t_day_1 where c2 < timestamp without time zone '2015-09-04' order by c2 limit 5;
@@ -113,8 +113,8 @@ select shardid,c1+c3 from t_day_1 where c2 < timestamp without time zone '2015-0
     2234 |        2
     3318 |        3
      105 |        4
-    1025 |        8
      213 |        5
+    1025 |        8
 (5 rows)
 
 select shardid,c1+c3 from t_day_1 where c2 < timestamp without time zone '2015-09-04' order by c3,c2 limit 5;
@@ -221,8 +221,8 @@ select c1,c2 from t_day_7 where c2 < timestamp without time zone '2015-09-20' or
   1 | Tue Sep 01 13:11:00 2015
   2 | Tue Sep 08 13:11:00 2015
   3 | Tue Sep 08 13:11:00 2015
-  7 | Tue Sep 15 13:11:00 2015
   4 | Tue Sep 15 13:11:00 2015
+  7 | Tue Sep 15 13:11:00 2015
 (5 rows)
 
 select c1,c2 from t_day_7 where c2 < timestamp without time zone '2015-09-20' order by c2 desc limit 5;
@@ -241,8 +241,8 @@ select shardid,c2 from t_day_7 where c2 < timestamp without time zone '2015-09-2
     2234 | Tue Sep 01 13:11:00 2015
     3318 | Tue Sep 08 13:11:00 2015
      105 | Tue Sep 08 13:11:00 2015
-    1025 | Tue Sep 15 13:11:00 2015
      213 | Tue Sep 15 13:11:00 2015
+    1025 | Tue Sep 15 13:11:00 2015
 (5 rows)
 
 select shardid,c1+c3 from t_day_7 where c2 < timestamp without time zone '2015-09-20' order by c2 limit 5;
@@ -251,8 +251,8 @@ select shardid,c1+c3 from t_day_7 where c2 < timestamp without time zone '2015-0
     2234 |        2
     3318 |        3
      105 |        4
-    1025 |        8
      213 |        5
+    1025 |        8
 (5 rows)
 
 select shardid,c1+c3 from t_day_7 where c2 < timestamp without time zone '2015-09-20' order by c3,c2 limit 5;
@@ -388,10 +388,10 @@ select c1,c2 from t_month_3 where c2 < timestamp without time zone '2016-02-01' 
 select c1,c2 from t_month_3 where c2 < timestamp without time zone '2016-02-01' order by c2 desc limit 5;
  c1 |            c2            
 ----+--------------------------
- 17 | Fri Jan 01 13:11:00 2016
- 19 | Fri Jan 01 13:11:00 2016
  21 | Fri Jan 01 13:11:00 2016
  23 | Fri Jan 01 13:11:00 2016
+ 17 | Fri Jan 01 13:11:00 2016
+ 19 | Fri Jan 01 13:11:00 2016
  26 | Fri Jan 01 13:11:00 2016
 (5 rows)
 
@@ -421,8 +421,8 @@ select shardid,c1+c3 from t_month_3 where c2 < timestamp without time zone '2016
     2234 |        2
     3318 |        3
      105 |        4
-     213 |        5
     1025 |        8
+     213 |        5
 (5 rows)
 
 select shardid,c1 from t_month_3 where c2 < timestamp without time zone '2016-02-01' and mod(c1,2) = 1 order by c1 desc limit 5;

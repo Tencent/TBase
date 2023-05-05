@@ -42,21 +42,22 @@ alter table tenk1 set (parallel_workers = 4);
 explain (verbose, costs off)
 select parallel_restricted(unique1) from tenk1
   where stringu1 = 'GRAAAA' order by 1;
-                          QUERY PLAN                           
----------------------------------------------------------------
- Remote Subquery Scan on all (datanode_1,datanode_2)
-   Output: parallel_restricted(unique1)
-   Sort Key: parallel_restricted(tenk1.unique1)
-   ->  Sort
-         Output: (parallel_restricted(unique1))
-         Sort Key: (parallel_restricted(tenk1.unique1))
-         ->  Gather
-               Output: parallel_restricted(unique1)
-               Workers Planned: 4
-               ->  Parallel Seq Scan on public.tenk1
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Sort
+   Output: (parallel_restricted(unique1))
+   Sort Key: (parallel_restricted(tenk1.unique1))
+   ->  Result
+         Output: parallel_restricted(unique1)
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               Output: unique1
+               ->  Gather
                      Output: unique1
-                     Filter: (tenk1.stringu1 = 'GRAAAA'::name)
-(12 rows)
+                     Workers Planned: 4
+                     ->  Parallel Seq Scan on public.tenk1
+                           Output: unique1
+                           Filter: (tenk1.stringu1 = 'GRAAAA'::name)
+(13 rows)
 
 -- test parallel plan when group by expression is in target list.
 explain (costs off)
@@ -124,15 +125,16 @@ select count(stringu1) as num, (CASE WHEN length(stringu1) > 5 THEN 'LONG' ELSE 
 explain (costs off)
 	select  sum(parallel_restricted(unique1)) from tenk1
 	group by(parallel_restricted(unique1));
-                               QUERY PLAN                                
--------------------------------------------------------------------------
+                           QUERY PLAN                            
+-----------------------------------------------------------------
  HashAggregate
    Group Key: parallel_restricted(unique1)
-   ->  Remote Subquery Scan on all (datanode_1,datanode_2)
-         ->  Gather
-               Workers Planned: 4
-               ->  Parallel Index Only Scan using tenk1_unique1 on tenk1
-(6 rows)
+   ->  Result
+         ->  Remote Subquery Scan on all (datanode_1,datanode_2)
+               ->  Gather
+                     Workers Planned: 4
+                     ->  Parallel Seq Scan on tenk1
+(7 rows)
 
 -- test parallel plans for queries containing un-correlated subplans.
 alter table tenk2 set (parallel_workers = 0);
@@ -277,8 +279,8 @@ set enable_hashjoin to off;
 set enable_nestloop to off;
 explain (costs off)
 	select  count(*) from tenk1, tenk2 where tenk1.unique1 = tenk2.unique1;
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Finalize Aggregate
    ->  Remote Subquery Scan on all (datanode_1,datanode_2)
          ->  Gather
@@ -286,9 +288,13 @@ explain (costs off)
                ->  Partial Aggregate
                      ->  Parallel Merge Join
                            Merge Cond: (tenk1.unique1 = tenk2.unique1)
-                           ->  Parallel Index Only Scan using tenk1_unique1 on tenk1
-                           ->  Index Only Scan using tenk2_unique1 on tenk2
-(9 rows)
+                           ->  Sort
+                                 Sort Key: tenk1.unique1
+                                 ->  Parallel Seq Scan on tenk1
+                           ->  Sort
+                                 Sort Key: tenk2.unique1
+                                 ->  Seq Scan on tenk2
+(13 rows)
 
 select  count(*) from tenk1, tenk2 where tenk1.unique1 = tenk2.unique1;
  count 

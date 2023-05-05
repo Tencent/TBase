@@ -10177,8 +10177,8 @@ xlog_redo(XLogReaderState *record)
 		TimestampTz timestamp = 0;
         gid = XLogRecGetData(record);
 		type = gid + strlen(gid) + 1;
-		pos = type + strlen(type) + 1;
-		memcpy(&timestamp, pos, sizeof(TimestampTz));
+			pos = type + strlen(type) + 1;
+			memcpy(&timestamp, pos, sizeof(TimestampTz));
 		if (0 == strcmp(type, "rename"))
 		{
 			rename_2pc_records(gid, timestamp);
@@ -10205,7 +10205,7 @@ xlog_redo(XLogReaderState *record)
         pos = gid + strlen(gid) +1;
         /* if the transaction is readonly */
         temp = pos;
-        pos = pos + strlen(temp) +1;
+        pos = pos + strlen(temp) + 1;
 
         if (0 != strcmp(temp, "readonly"))
         {

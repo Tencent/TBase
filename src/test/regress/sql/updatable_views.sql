@@ -886,6 +886,10 @@ LANGUAGE plpgsql STRICT IMMUTABLE LEAKPROOF;
 SELECT * FROM rw_view1 WHERE snoop(person);
 UPDATE rw_view1 SET person=person WHERE snoop(person);
 DELETE FROM rw_view1 WHERE NOT snoop(person);
+ALTER FUNCTION snoop(anyelement) pushdown;
+UPDATE rw_view1 SET person=person WHERE snoop(person);
+DELETE FROM rw_view1 WHERE NOT snoop(person);
+ALTER FUNCTION snoop(anyelement) not pushdown;
 
 ALTER VIEW rw_view1 SET (security_barrier = true);
 
@@ -905,10 +909,14 @@ SELECT table_name, column_name, is_updatable
 SELECT * FROM rw_view1 WHERE snoop(person);
 UPDATE rw_view1 SET person=person WHERE snoop(person);
 DELETE FROM rw_view1 WHERE NOT snoop(person);
+ALTER FUNCTION snoop(anyelement) pushdown;
+UPDATE rw_view1 SET person=person WHERE snoop(person);
+DELETE FROM rw_view1 WHERE NOT snoop(person);
 
 EXPLAIN (costs off, nodes off) SELECT * FROM rw_view1 WHERE snoop(person);
 EXPLAIN (costs off, nodes off) UPDATE rw_view1 SET person=person WHERE snoop(person);
 EXPLAIN (costs off, nodes off) DELETE FROM rw_view1 WHERE NOT snoop(person);
+ALTER FUNCTION snoop(anyelement) not pushdown;
 
 -- security barrier view on top of security barrier view
 
@@ -931,10 +939,14 @@ SELECT table_name, column_name, is_updatable
 SELECT * FROM rw_view2 WHERE snoop(person);
 UPDATE rw_view2 SET person=person WHERE snoop(person);
 DELETE FROM rw_view2 WHERE NOT snoop(person);
+ALTER FUNCTION snoop(anyelement) pushdown;
+UPDATE rw_view2 SET person=person WHERE snoop(person);
+DELETE FROM rw_view2 WHERE NOT snoop(person);
 
 EXPLAIN (costs off, nodes off) SELECT * FROM rw_view2 WHERE snoop(person);
 EXPLAIN (costs off, nodes off) UPDATE rw_view2 SET person=person WHERE snoop(person);
 EXPLAIN (costs off, nodes off) DELETE FROM rw_view2 WHERE NOT snoop(person);
+ALTER FUNCTION snoop(anyelement) not pushdown;
 
 DROP TABLE base_tbl CASCADE;
 
@@ -959,6 +971,10 @@ SELECT * FROM rw_view1;
 
 EXPLAIN (costs off, nodes off) DELETE FROM rw_view1 WHERE id = 1 AND snoop(data);
 DELETE FROM rw_view1 WHERE id = 1 AND snoop(data);
+ALTER FUNCTION snoop(anyelement) pushdown;
+EXPLAIN (costs off, nodes off) DELETE FROM rw_view1 WHERE id = 1 AND snoop(data);
+DELETE FROM rw_view1 WHERE id = 1 AND snoop(data);
+ALTER FUNCTION snoop(anyelement) not pushdown;
 
 EXPLAIN (costs off, nodes off) INSERT INTO rw_view1 VALUES (2, 'New row 2');
 INSERT INTO rw_view1 VALUES (2, 'New row 2');
@@ -1003,6 +1019,13 @@ SELECT * FROM v1 WHERE a=8;
 EXPLAIN (VERBOSE, COSTS OFF)
 UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
 UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
+ALTER FUNCTION leakproof(anyelement) pushdown;
+ALTER FUNCTION snoop(anyelement) pushdown;
+EXPLAIN (VERBOSE, COSTS OFF)
+UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
+UPDATE v1 SET a=100 WHERE snoop(a) AND leakproof(a) AND a < 7 AND a != 6;
+ALTER FUNCTION leakproof(anyelement) not pushdown;
+ALTER FUNCTION snoop(anyelement) not pushdown;
 
 SELECT * FROM v1 WHERE a=100; -- Nothing should have been changed to 100
 SELECT * FROM t1 WHERE a=100; -- Nothing should have been changed to 100
@@ -1010,10 +1033,17 @@ SELECT * FROM t1 WHERE a=100; -- Nothing should have been changed to 100
 EXPLAIN (VERBOSE, COSTS OFF)
 UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
 UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
+ALTER FUNCTION leakproof(anyelement) pushdown;
+ALTER FUNCTION snoop(anyelement) pushdown;
+EXPLAIN (VERBOSE, COSTS OFF)
+UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
+UPDATE v1 SET a=a+1 WHERE snoop(a) AND leakproof(a) AND a = 8;
 
 SELECT * FROM v1 WHERE b=8;
 
 DELETE FROM v1 WHERE snoop(a) AND leakproof(a); -- should not delete everything, just where a>5
+ALTER FUNCTION leakproof(anyelement) not pushdown;
+ALTER FUNCTION snoop(anyelement) not pushdown;
 
 TABLE t1; -- verify all a<=5 are intact
 

@@ -304,6 +304,7 @@ typedef enum NodeTag
     T_AppendPath,
     T_MergeAppendPath,
     T_ResultPath,
+	T_QualPath,
     T_MaterialPath,
     T_UniquePath,
     T_GatherPath,
@@ -586,6 +587,7 @@ typedef enum NodeTag
 #ifdef _MLS_
     ,T_SyncBufIdInfo            /* in bufmgr.c*/
 #endif
+	 ,T_StatSyncOpt
 } NodeTag;
 
 /*

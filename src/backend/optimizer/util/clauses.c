@@ -5368,3 +5368,40 @@ replace_eval_sql_value_function(Node *node)
 	return expression_tree_mutator(node, replace_eval_sql_value_function, NULL);
 }
 #endif
+/*****************************************************************************
+ *		Check clauses for pull-up-ed user defined functions
+ *****************************************************************************/
+ 
+static bool
+contain_user_defined_functions_checker(Oid func_id, void *context)
+{
+	return func_is_pullup(func_id);
+}
+
+static bool
+contain_check_functions_walker(Node *node, bool (*checker)())
+{
+	if (node == NULL)
+		return false;
+	
+	if (check_functions_in_node(node, checker,
+	                            NULL))
+		return true;
+	
+	/* Recurse to check arguments */
+	if (IsA(node, Query))
+	{
+		/* Recurse into subselects */
+		return query_tree_walker((Query *) node,
+		                         contain_check_functions_walker,
+		                         checker, 0);
+	}
+	return expression_tree_walker(node, contain_check_functions_walker,
+	                              checker);
+}
+
+bool
+contain_user_defined_functions(Node *clause)
+{
+	return contain_check_functions_walker(clause, &contain_user_defined_functions_checker);
+}

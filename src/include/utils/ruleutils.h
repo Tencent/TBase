@@ -76,7 +76,8 @@
 #include "nodes/nodes.h"
 #include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
-
+#include "nodes/relation.h"
+#include "storage/lockdefs.h"
 
 extern char *pg_get_indexdef_string(Oid indexrelid);
 extern char *pg_get_indexdef_columns(Oid indexrelid, bool pretty);
@@ -94,6 +95,7 @@ extern List *select_rtable_names_for_explain(List *rtable,
                                 Bitmapset *rels_used);
 extern char *generate_collation_name(Oid collid);
 extern char *get_range_partbound_string(List *bound_datums);
+extern void add_day_calculation(int *year, int *mon, int *day, int step, int steptype, bool is_leap_year);
 
 #ifdef __TBASE__
 extern char * GetPartitionName(Oid parentrelid, int partidx, bool isindex);
@@ -101,7 +103,7 @@ extern char * GetPartitionName(Oid parentrelid, int partidx, bool isindex);
 extern int RelationGetPartitionIdxByValue(Relation rel, Datum value);
 
 extern List *RelationGetAllPartitions(Relation rel);
-
+extern List *RelationGetAllPartitionsWithLock(Relation rel, LOCKMODE lockmode);
 extern int GetAllPartitionIntervalCount(Oid parent_oid);
 
 extern int RelationGetChildIndex(Relation rel, Oid childoid);

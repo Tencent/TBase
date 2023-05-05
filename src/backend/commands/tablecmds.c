@@ -6409,7 +6409,7 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
                  * since the per-tuple memory context will be reset shortly.
                  */
 #ifdef _SHARDING_
-                if(newrel && RelationIsSharded(newrel))
+				if (RelationIsSharded(oldrel))
                     tuple = heap_form_tuple_plain(newTupDesc, values,isnull, diskey, secdiskey, RelationGetRelid(newrel));
                 else
 #endif

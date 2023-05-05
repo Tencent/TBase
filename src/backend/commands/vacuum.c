@@ -98,7 +98,7 @@ static void vac_truncate_clog(TransactionId frozenXID,
                   TransactionId lastSaneFrozenXid,
                   MultiXactId lastSaneMinMulti);
 static bool vacuum_rel(Oid relid, RangeVar *relation, int options,
-           VacuumParams *params);
+					   VacuumParams *params, StatSyncOpt *syncOpt);
 
 /*
  * Primary entry point for manual VACUUM and ANALYZE commands
@@ -145,7 +145,7 @@ ExecVacuum(VacuumStmt *vacstmt, bool isTopLevel)
 
     /* Now go through the common routine */
     vacuum(vacstmt->options, vacstmt->relation, InvalidOid, &params,
-           vacstmt->va_cols, NULL, isTopLevel);
+		   vacstmt->va_cols, NULL, isTopLevel, vacstmt->sync_option);
 }
 
 /*
@@ -171,9 +171,15 @@ ExecVacuum(VacuumStmt *vacstmt, bool isTopLevel)
  * memory context that will not disappear at transaction commit.
  */
 void
-vacuum(int options, RangeVar *relation, Oid relid, VacuumParams *params,
-       List *va_cols, BufferAccessStrategy bstrategy, bool isTopLevel)
-{// #lizard forgives
+vacuum(int					options,
+	   RangeVar			*relation,
+	   Oid					relid,
+	   VacuumParams		*params,
+	   List				*va_cols,
+	   BufferAccessStrategy bstrategy,
+	   bool					isTopLevel,
+	   StatSyncOpt	  *syncOpt)
+{
     const char *stmttype;
     volatile bool in_outer_xact,
                 use_own_xacts;
@@ -326,7 +332,7 @@ vacuum(int options, RangeVar *relation, Oid relid, VacuumParams *params,
 
             if (options & VACOPT_VACUUM)
             {
-                if (!vacuum_rel(relid, relation, options, params))
+				if (!vacuum_rel(relid, relation, options, params, syncOpt))
                     continue;
             }
 
@@ -344,7 +350,7 @@ vacuum(int options, RangeVar *relation, Oid relid, VacuumParams *params,
                 }
 
                 analyze_rel(relid, relation, options, params,
-                            va_cols, in_outer_xact, vac_strategy);
+							va_cols, in_outer_xact, vac_strategy, syncOpt);
 
                 if (use_own_xacts)
                 {
@@ -488,6 +494,9 @@ get_rel_oids(Oid relid, const RangeVar *vacrel)
                 classForm->relkind != RELKIND_PARTITIONED_TABLE)
                 continue;
 			
+			if (classForm->relpartkind == RELPARTKIND_CHILD)
+				continue;
+
 			if (classForm->relpartkind == RELPARTKIND_CHILD)
 				continue;
 
@@ -707,7 +716,8 @@ vacuum_set_xid_limits(Relation rel,
  *        we take the old value of pg_class.reltuples as a measurement of the
  *        tuple density in the unscanned pages.
  *
- *        This routine is shared by VACUUM and ANALYZE.
+ *		Note: scanned_tuples should count only *live* tuples, since
+ *		pg_class.reltuples is defined that way.
  */
 double
 vac_estimate_reltuples(Relation relation, bool is_analyze,
@@ -806,6 +816,9 @@ vac_estimate_reltuples(Relation relation, bool is_analyze,
  *        So we refrain from updating the DDL flags if we're inside an outer
  *        transaction.  This is OK since postponing the flag maintenance is
  *        always allowable.
+ *
+ *		Note: num_tuples should count only *live* tuples, since
+ *		pg_class.reltuples is defined that way.
  *
  *        This routine is shared by VACUUM and ANALYZE.
  */
@@ -1253,8 +1266,8 @@ vac_truncate_clog(TransactionId frozenXID,
  *        At entry and exit, we are not inside a transaction.
  */
 static bool
-vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
-{// #lizard forgives
+vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params, StatSyncOpt *syncOpt)
+{
     LOCKMODE    lmode;
     Relation    onerel;
     LockRelId    onerelid;
@@ -1263,13 +1276,14 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
     int            save_sec_context;
     int            save_nestlevel;
 #ifdef __TBASE__
-    bool        part_vacuum_result = true;
-    List        *childs = NULL;
-    List        *new_childs = NULL;
-    Oid         child;
-    ListCell    *lc;
-    MemoryContext oldmctx;
+       bool            part_vacuum_result = true;
+       List            *childs = NULL;
+       List            *new_childs = NULL;
+       Oid             child;
+       ListCell        *lc;
+       MemoryContext oldmctx;
 #endif
+
 
     Assert(params != NULL);
 
@@ -1280,47 +1294,52 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
         /* functions in indexes may want a snapshot set */
         PushActiveSnapshot(GetLocalTransactionSnapshot());
 
-        onerel = relation_open(relid, NoLock);
-
-        if(RELATION_IS_INTERVAL(onerel))
+		   onerel = try_relation_open(relid, AccessShareLock);
+        if (!onerel)
         {
-            childs = RelationGetAllPartitions(onerel);
+            PopActiveSnapshot();
+            CommitTransactionCommand();
+            return false;
+        }
 
-            oldmctx = MemoryContextSwitchTo(vac_context);
+        if (RELATION_IS_INTERVAL(onerel))
+        {
+            childs	  = RelationGetAllPartitions(onerel);
+
+            oldmctx	  = MemoryContextSwitchTo(vac_context);
             new_childs = list_copy(childs);
             MemoryContextSwitchTo(oldmctx);
 
-			if (childs)
-				pfree(childs);
-            childs = NULL;
+            if (childs)
+                pfree(childs);
+            childs	= NULL;
             onerelid = onerel->rd_lockInfo.lockRelId;
             LockRelationIdForSession(&onerelid, RowExclusiveLock);
         }
 
-        relation_close(onerel, NoLock);
+		   relation_close(onerel, AccessShareLock);
         onerel = NULL;
 
         PopActiveSnapshot();
         CommitTransactionCommand();
-        
-        if(new_childs)
+
+        if (new_childs)
         {
-            foreach(lc, new_childs)
+            foreach (lc, new_childs)
             {
-                child = lfirst_oid(lc);
-                part_vacuum_result = vacuum_rel(child, relation, options, params);
+                child			  = lfirst_oid(lc);
+				part_vacuum_result = vacuum_rel(child, relation, options, params, syncOpt);
             }
             UnlockRelationIdForSession(&onerelid, RowExclusiveLock);
             pfree(new_childs);
 
-            if(!part_vacuum_result)
+            if (!part_vacuum_result)
             {
                 return false;
-            }        
+            }
         }
-    }
+	}
 #endif    
-
     /* Begin a transaction for vacuuming this relation */
     StartTransactionCommand();
 
@@ -1534,7 +1553,7 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
 		 */
 		if (toast_relid != InvalidOid)
 		{
-			vacuum_rel(toast_relid, relation, options, params);
+			vacuum_rel(toast_relid, relation, options, params, syncOpt);
 		}
 
 		/*
@@ -1554,7 +1573,7 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
      */
     if (IS_PGXC_COORDINATOR && onerel->rd_locator_info)
     {
-		vacuum_rel_coordinator(onerel, true, params);
+		vacuum_rel_coordinator(onerel, true, params, syncOpt);
     }
     else
 #endif
@@ -1598,7 +1617,7 @@ vacuum_rel(Oid relid, RangeVar *relation, int options, VacuumParams *params)
      * totally unimportant for toast relations.
      */
     if (toast_relid != InvalidOid)
-        vacuum_rel(toast_relid, relation, options, params);
+		vacuum_rel(toast_relid, relation, options, params, syncOpt);
 
     /*
      * Now release the session-level lock on the master table.
@@ -1909,12 +1928,111 @@ get_remote_relstat(char *nspname, char *relname, bool replicated,
 
 
 /*
+ * Get relation statistics from coordinator node specified by syncOpt
+ */
+static void
+sync_remote_relstat(char *nspname, char *relname, bool replicated,
+				   int32 *pages, int32 *allvisiblepages,
+					float4 *tuples, TransactionId *frozenXid, StatSyncOpt *syncOpt)
+{
+	char *cnname;
+	StringInfoData query;
+	EState 	   *estate;
+	MemoryContext oldcontext;
+	RemoteQuery *step;
+	RemoteQueryState *node;
+	TupleTableSlot *result;
+
+	/* Make up query string */
+	initStringInfo(&query);
+	appendStringInfo(&query, "SELECT c.relpages, "
+									"c.reltuples, "
+									"c.relallvisible, "
+									"c.relfrozenxid "
+							 "FROM pg_class c JOIN pg_namespace n "
+							 "ON c.relnamespace = n.oid "
+							 "WHERE n.nspname = '%s' "
+							 "AND c.relname = '%s'",
+					 nspname, relname);
+
+	/* Build up RemoteQuery */
+	step = init_sync_remotequery(syncOpt, &cnname);
+	step->sql_statement = query.data;
+	step->force_autocommit = true;
+
+
+	/* Add targetlist entries */
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 make_relation_tle(RelationRelationId,
+														   "pg_class",
+														   "relpages"));
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 make_relation_tle(RelationRelationId,
+														   "pg_class",
+														   "reltuples"));
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 make_relation_tle(RelationRelationId,
+														   "pg_class",
+														   "relallvisible"));
+	step->scan.plan.targetlist = lappend(step->scan.plan.targetlist,
+										 make_relation_tle(RelationRelationId,
+														   "pg_class",
+														   "relfrozenxid"));
+
+	/* Execute query on the data nodes */
+	estate = CreateExecutorState();
+	oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
+
+	node = ExecInitRemoteQuery(step, estate, 0);
+	MemoryContextSwitchTo(oldcontext);
+	/* get ready to combine results */
+	*pages = 0;
+	*allvisiblepages = 0;
+	*tuples = 0.0;
+	*frozenXid = InvalidTransactionId;
+
+	result = ExecRemoteQuery((PlanState *) node);
+	if (result != NULL && !TupIsNull(result))
+	{
+		Datum 	value;
+		bool	isnull;
+		/* Process statistics from the data node */
+		value = slot_getattr(result, 1, &isnull); /* relpages */
+		if (!isnull)
+		{
+			*pages = DatumGetInt32(value);
+		}
+		value = slot_getattr(result, 2, &isnull); /* reltuples */
+		if (!isnull)
+		{
+			*tuples = DatumGetFloat4(value);
+		}
+		value = slot_getattr(result, 3, &isnull); /* relallvisible */
+		if (!isnull)
+		{
+			*allvisiblepages = DatumGetInt32(value);
+		}
+		value = slot_getattr(result, 4, &isnull); /* relfrozenxid */
+		if (!isnull)
+		{
+			TransactionId xid = DatumGetTransactionId(value);
+			if (TransactionIdIsValid(xid))
+			{
+					*frozenXid = xid;
+			}
+		}
+	}
+	ExecEndRemoteQuery(node);
+	FreeExecutorState(estate);
+}
+
+/*
  * Coordinator does not contain any data, so we never need to vacuum relations.
  * This function only updates optimizer statistics based on info from the
  * data nodes.
  */
 void
-vacuum_rel_coordinator(Relation onerel, bool is_outer, VacuumParams *params)
+vacuum_rel_coordinator(Relation onerel, bool is_outer, VacuumParams *params, StatSyncOpt *syncOpt)
 {
     char        *nspname;
     char        *relname;
@@ -1925,7 +2043,8 @@ vacuum_rel_coordinator(Relation onerel, bool is_outer, VacuumParams *params)
     TransactionId min_frozenxid;
     bool        hasindex;
     bool         replicated;
-    int         rel_nodes;
+	int 		rel_nodes = 0;
+	bool        isSync = false;
 #ifdef __TBASE__
 	TransactionId oldestXmin = InvalidTransactionId;
 	TransactionId freezeLimit = InvalidTransactionId;
@@ -1956,10 +2075,23 @@ vacuum_rel_coordinator(Relation onerel, bool is_outer, VacuumParams *params)
      * Get stats from the remote nodes. Function returns the number of nodes
      * returning correct stats.
      */
+	if (syncOpt != NULL && syncOpt->is_sync_from == true &&
+		!RELATION_IS_COORDINATOR_LOCAL(onerel))
+	{
+		sync_remote_relstat(nspname,
+							relname,
+							replicated,
+							&num_pages,
+							&num_allvisible_pages,
+							&num_tuples,
+							&min_frozenxid,
+							syncOpt);
+		isSync = true;
+	}else
     rel_nodes = get_remote_relstat(nspname, relname, replicated,
                                    &num_pages, &num_allvisible_pages,
                                    &num_tuples, &min_frozenxid);
-    if (rel_nodes > 0)
+	if (rel_nodes > 0 || isSync)
     {
         int            nindexes;
         Relation   *Irel;
@@ -1978,22 +2110,33 @@ vacuum_rel_coordinator(Relation onerel, bool is_outer, VacuumParams *params)
                 int32    idx_pages, idx_allvisible_pages;
                 float4    idx_tuples;
                 TransactionId idx_frozenxid;
-                int idx_nodes;
+				int idx_nodes = 0;
 
                 /* Get the index identifier */
                 relname = RelationGetRelationName(Irel[i]);
                 nspname = get_namespace_name(RelationGetNamespace(Irel[i]));
                 /* Index is replicated if parent relation is replicated */
+				if(isSync)
+				{
+					sync_remote_relstat(nspname,
+										relname,
+										replicated,
+										&idx_pages,
+										&idx_allvisible_pages,
+										&idx_tuples,
+										&idx_frozenxid,
+										syncOpt);
+				}else
                 idx_nodes = get_remote_relstat(nspname, relname, replicated,
                                         &idx_pages, &idx_allvisible_pages,
                                         &idx_tuples, &idx_frozenxid);
-                if (idx_nodes > 0)
+				if (idx_nodes > 0 || isSync)
                 {
                     /*
                      * Do not update the frozenxid if information was not from
                      * all the expected nodes.
                      */
-                    if (idx_nodes < nodes)
+					if (idx_nodes < nodes && !isSync)
                     {
                         idx_frozenxid = InvalidTransactionId;
                     }
@@ -2018,7 +2161,7 @@ vacuum_rel_coordinator(Relation onerel, bool is_outer, VacuumParams *params)
          * Do not update the frozenxid if information was not from all
          * the expected nodes.
          */
-        if (rel_nodes < nodes)
+		if (rel_nodes < nodes && !isSync)
         {
             min_frozenxid = InvalidTransactionId;
         }

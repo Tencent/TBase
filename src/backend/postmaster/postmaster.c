@@ -470,6 +470,8 @@ bool        IsPGXCMainCluster = false;
 int            PGXCNodeId = 0;
 #ifdef __TBASE__
 char             PGXCSessionId[NAMEDATALEN];
+int              PGXCLevelId = -1;
+List            *PGXCGroupNodeList = NIL;
 #endif
 /*
  * When a particular node starts up, store the node identifier in this variable

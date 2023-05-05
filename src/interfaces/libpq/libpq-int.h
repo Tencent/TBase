@@ -398,6 +398,7 @@ struct pg_conn
     char       *pgtty;            /* tty on which the backend messages is
                                  * displayed (OBSOLETE, NOT USED) */
     char       *connect_timeout;    /* connection timeout (numeric string) */
+	char	   *pgtcp_user_timeout; /* tcp user timeout (numeric string) */
     char       *client_encoding_initial;    /* encoding to use */
     char       *pgoptions;        /* options to start the backend with */
     char       *appname;        /* application name */
@@ -575,6 +576,13 @@ struct pg_cancel
     SockAddr    raddr;            /* Remote address */
     int            be_pid;            /* PID of backend --- needed for cancels */
     int            be_key;            /* key of backend --- needed for cancels */
+	int			pgtcp_user_timeout; /* tcp user timeout */
+	int			keepalives;		/* use TCP keepalives? */
+	int			keepalives_idle;	/* time between TCP keepalives */
+	int			keepalives_interval;	/* time between TCP keepalive
+										 * retransmits */
+	int			keepalives_count;	/* maximum number of TCP keepalive
+									 * retransmits */
 };
 
 

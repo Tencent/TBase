@@ -3256,6 +3256,17 @@ _outGatherPath(StringInfo str, const GatherPath *node)
 }
 
 static void
+_outQualPath(StringInfo str, const QualPath *node)
+{
+	WRITE_NODE_TYPE("QUALPATH");
+	
+	_outPathInfo(str, (const Path *) node);
+	
+	WRITE_NODE_FIELD(subpath);
+	WRITE_NODE_FIELD(quals);
+}
+
+static void
 _outProjectionPath(StringInfo str, const ProjectionPath *node)
 {
     WRITE_NODE_TYPE("PROJECTIONPATH");
@@ -4299,6 +4310,7 @@ _outQuery(StringInfo str, const Query *node)
     WRITE_BOOL_FIELD(hasModifyingCTE);
     WRITE_BOOL_FIELD(hasForUpdate);
     WRITE_BOOL_FIELD(hasRowSecurity);
+	WRITE_BOOL_FIELD(hasCoordFuncs);
     WRITE_NODE_FIELD(cteList);
     WRITE_NODE_FIELD(rtable);
     WRITE_NODE_FIELD(jointree);
@@ -5502,6 +5514,9 @@ outNode(StringInfo str, const void *obj)
             case T_ResultPath:
                 _outResultPath(str, obj);
                 break;
+			case T_QualPath:
+				_outQualPath(str, obj);
+				break;
             case T_MaterialPath:
                 _outMaterialPath(str, obj);
                 break;

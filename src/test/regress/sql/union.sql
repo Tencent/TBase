@@ -341,13 +341,22 @@ ORDER BY x;
 -- Test proper handling of parameterized appendrel paths when the
 -- potential join qual is expensive
 create function expensivefunc(int) returns int
-language plpgsql immutable strict cost 10000
+language plpgsql immutable strict pushdown cost 10000
 as $$begin return $1; end$$;
 
 create temp table t3 as select generate_series(-1000,1000) as x;
 create index t3i on t3 (expensivefunc(x));
 analyze t3;
 
+explain (num_nodes off, nodes off, costs off)
+select * from
+    (select * from t3 a union all select * from t3 b) ss
+        join int4_tbl on f1 = expensivefunc(x);
+select * from
+    (select * from t3 a union all select * from t3 b) ss
+        join int4_tbl on f1 = expensivefunc(x);
+
+alter function expensivefunc not pushdown;
 explain (num_nodes off, nodes off, costs off)
 select * from
   (select * from t3 a union all select * from t3 b) ss

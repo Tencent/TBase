@@ -7,7 +7,7 @@ set enable_oracle_compatible to on;
 -- Name: func_getlastnetvalue(varchar2, date); Type: FUNCTION; Schema: sync; Owner: gregsun
 --
 
-CREATE FUNCTION func_getlastnetvalue(v_fundcode varchar2, v_cdate date) RETURNS numeric
+CREATE FUNCTION func_getlastnetvalue(v_fundcode varchar2, v_cdate date) RETURNS numeric pushdown
     LANGUAGE plpgsql
     AS $$
  declare   v_netvalue text;

@@ -133,6 +133,7 @@ extern MergeAppendPath *create_merge_append_path(PlannerInfo *root,
                           List *pathkeys,
                           Relids required_outer,
                           List *partitioned_rels);
+extern QualPath *create_qual_path(PlannerInfo *root, Path *subpath, List *quals);
 extern ResultPath *create_result_path(PlannerInfo *root, RelOptInfo *rel,
                     PathTarget *target, List *resconstantqual);
 extern MaterialPath *create_material_path(RelOptInfo *rel, Path *subpath);
@@ -371,10 +372,13 @@ extern Path *create_redistribute_distinct_agg_path(PlannerInfo *root,
 												   Aggref *agg);
 extern void contains_remotesubplan(Path *path, int *number, bool *redistribute);
 
+extern void assign_constrain_nodes(List *node_list);
+
 extern int replication_level;
 
 extern bool restrict_query;
 extern bool enable_subquery_shipping;
+extern char *g_constrain_group;
 #endif
 
 #endif                            /* PATHNODE_H */

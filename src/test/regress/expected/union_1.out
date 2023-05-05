@@ -822,15 +822,15 @@ ORDER BY x;
 -- Test proper handling of parameterized appendrel paths when the
 -- potential join qual is expensive
 create function expensivefunc(int) returns int
-language plpgsql immutable strict cost 10000
+language plpgsql immutable strict pushdown cost 10000
 as $$begin return $1; end$$;
 create temp table t3 as select generate_series(-1000,1000) as x;
 create index t3i on t3 (expensivefunc(x));
 analyze t3;
 explain (num_nodes off, nodes off, costs off)
 select * from
-  (select * from t3 a union all select * from t3 b) ss
-  join int4_tbl on f1 = expensivefunc(x);
+    (select * from t3 a union all select * from t3 b) ss
+        join int4_tbl on f1 = expensivefunc(x);
                             QUERY PLAN                            
 ------------------------------------------------------------------
  Remote Subquery Scan on all
@@ -842,6 +842,34 @@ select * from
                ->  Index Scan using t3i on t3 b
                      Index Cond: (expensivefunc(x) = int4_tbl.f1)
 (8 rows)
+
+select * from
+    (select * from t3 a union all select * from t3 b) ss
+        join int4_tbl on f1 = expensivefunc(x);
+ x | f1 
+---+----
+ 0 |  0
+ 0 |  0
+(2 rows)
+
+alter function expensivefunc not pushdown;
+explain (num_nodes off, nodes off, costs off)
+select * from
+  (select * from t3 a union all select * from t3 b) ss
+  join int4_tbl on f1 = expensivefunc(x);
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Nested Loop
+   ->  Remote Subquery Scan on all
+         ->  Seq Scan on int4_tbl
+   ->  Materialize
+         ->  Remote Subquery Scan on all
+               ->  Append
+                     ->  Index Scan using t3i on t3 a
+                           Index Cond: (expensivefunc(x) = int4_tbl.f1)
+                     ->  Index Scan using t3i on t3 b
+                           Index Cond: (expensivefunc(x) = int4_tbl.f1)
+(10 rows)
 
 select * from
   (select * from t3 a union all select * from t3 b) ss
