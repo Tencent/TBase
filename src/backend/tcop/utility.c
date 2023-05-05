@@ -1052,6 +1052,7 @@ ProcessUtilityPre(PlannedStmt *pstmt,
                     }
                 }
 
+/*
 #ifndef _PG_REGRESS_
                 if (rd_locator_info && rd_locator_info->locatorType == LOCATOR_TYPE_REPLICATED)
                 {
@@ -1059,6 +1060,7 @@ ProcessUtilityPre(PlannedStmt *pstmt,
                     elog(ERROR, "TRIGGER is not supported on replication table");
                 }
 #endif
+*/
                 relation_close(rel, AccessShareLock);
             }
             

@@ -8978,12 +8978,13 @@ ATExecAddConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
                 elog(ERROR, "ADD ForeignKeyConstraint on interval partition is forbidden");
             }
 
-#ifndef _PG_REGRESS_
+/*#ifndef _PG_REGRESS_
             if (rel->rd_locator_info && rel->rd_locator_info->locatorType ==  LOCATOR_TYPE_REPLICATED)
             {
                 elog(ERROR, "ADD ForeignKeyConstraint on replication table is forbidden");
             }
 #endif
+*/
 #endif
 
             /*

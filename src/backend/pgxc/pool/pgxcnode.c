@@ -6060,7 +6060,7 @@ find_ddl_leader_cn(void)
 /*
  * Return whether I am the leader cn
  */
-inline bool
+extern inline bool
 is_ddl_leader_cn(char *first_cn)
 {
     if(first_cn == NULL)

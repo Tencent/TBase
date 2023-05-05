@@ -75,7 +75,7 @@ Server_Message_Level_Options();
  * GTM option variables that are exported from this module
  */
 char       *data_directory;
-char       *GTMConfigFileName;
+//char       *GTMConfigFileName;
 
 
 /*
