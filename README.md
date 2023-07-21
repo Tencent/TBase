@@ -22,6 +22,18 @@ For more information look at our website located at:
 
 ## Building
 
+### System Requirements: 
+
+Memory: 4G RAM minimum
+
+OS: TencentOS 2, TencentOS 3, OpenCloudOS, CentOS 7, CentOS 8
+
+### Dependence
+
+` yum -y install gcc make readline-devel zlib-devel openssl-devel uuid-devel bison flex`
+
+### Building
+
 ```
 cd ${SOURCECODE_PATH}
 rm -rf ${INSTALL_PATH}/tbase_bin_v2.0
@@ -51,6 +63,15 @@ Use PGXC\_CTL tool to build a cluster, for example: a cluster with a global tran
 	export LC_ALL=C
     ```
 
+2. Disable SELinux and firewall (optinal)
+
+    ```
+	vi /etc/selinux/config # set SELINUX=disabled
+	# Disable firewalld
+    systemctl disable firewalld
+    systemctl stop firewalld
+    ```
+    
 2. Get through the SSH password free login between the machines where the cluster node is installed, and then deploy and init will SSH to the machines of each node. After getting through, you do not need to enter the password.
 
     ```
@@ -139,7 +160,7 @@ postgres=# create table foo(id bigint, str text) distribute by shard(id);
 ## References  
 
 ```
-https://github.com/Tencent/TBase/wiki/1%E3%80%81TBase_Quick_Start
+https://github.com/Tencent/TBase/wiki/1.-TBase_Quick_Start
 ```
 
 ## License
