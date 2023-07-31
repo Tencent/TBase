@@ -22,7 +22,36 @@ For more information look at our website located at:
 
 ## Building
 
+### System Requirements: 
+
+Memory: 4G RAM minimum
+
+OS: TencentOS 2, TencentOS 3, OpenCloudOS, CentOS 7, CentOS 8, Ubuntu
+
+### Dependence
+
+` yum -y install gcc make readline-devel zlib-devel openssl-devel uuid-devel bison flex`
+
+or
+
+` apt install -y gcc make libreadline-dev zlib1g-dev libssl-dev libossp-uuid-dev bison flex`
+
+### Create User 'tbase'
+
+```shell
+mkdir /data
+useradd -d /data/tbase -s /bin/bash -m tbase # add user tbase
+passwd tbase # set password
 ```
+
+### Building
+
+```shell
+git clone https://github.com/Tencent/TBase
+
+export SOURCECODE_PATH=/data/tbase/TBase
+export INSTALL_PATH=/data/tbase/install
+
 cd ${SOURCECODE_PATH}
 rm -rf ${INSTALL_PATH}/tbase_bin_v2.0
 chmod +x configure*
@@ -36,6 +65,8 @@ make -sj
 make install
 ```
 
+**Notice: if you use Ubuntu and see *initgtm: command not found* while doing "init all", you may add *${INSTALL_PATH}/tbase_bin_v2.0/bin* to */etc/environment***
+
 ## Installation
 Use PGXC\_CTL tool to build a cluster, for example: a cluster with a global transaction management node (GTM), a coordinator(COORDINATOR) and two data nodes (DATANODE).
 
@@ -44,16 +75,26 @@ Use PGXC\_CTL tool to build a cluster, for example: a cluster with a global tran
 
 1. Install pgxc and import the path of pgxc installation package into environment variable.
 
-    ```
+    ```shell
 	PG_HOME=${INSTALL_PATH}/tbase_bin_v2.0
 	export PATH="$PATH:$PG_HOME/bin"
 	export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PG_HOME/lib"
 	export LC_ALL=C
     ```
 
+2. Disable SELinux and firewall (optinal)
+
+    ```shell
+    vi /etc/selinux/config # disable SELinux, change SELINUX=enforcing to SELINUX=disabled
+    # disable firewall, for Ubuntu, change firewalld to ufw
+    systemctl disable firewalld
+    systemctl stop firewalld
+    ```
+    
 2. Get through the SSH password free login between the machines where the cluster node is installed, and then deploy and init will SSH to the machines of each node. After getting through, you do not need to enter the password.
 
-    ```
+    ```shell
+        su tbase
 	ssh-keygen -t rsa
 	ssh-copy-id -i ~/.ssh/id_rsa.pub destination-user@destination-server
     ```
@@ -64,13 +105,13 @@ Use PGXC\_CTL tool to build a cluster, for example: a cluster with a global tran
 
 	* The pgxcInstallDir at the beginning of the configuration file refers to the installation package location of pgxc. The database user can set it according to his own needs.
 
-	```
+	```shell
 	pgxcInstallDir=${INSTALL_PATH}/tbase_bin_v2.0
 	```
 
 	* For GTM, you need to configure the node name, IP, port and node directory.
 
-	```
+	```shell
 	#---- GTM ----------
 	gtmName=gtm
 	gtmMasterServer=xxx.xxx.xxx.1
@@ -80,7 +121,7 @@ Use PGXC\_CTL tool to build a cluster, for example: a cluster with a global tran
 
 	* If you do not need gtmSlave, you can directly set it to 'n' in the configuration of the corresponding node.
 
-	```
+	```shell
 	gtmSlave=n
 	```
 
@@ -139,7 +180,7 @@ postgres=# create table foo(id bigint, str text) distribute by shard(id);
 ## References  
 
 ```
-https://github.com/Tencent/TBase/wiki/1%E3%80%81TBase_Quick_Start
+https://github.com/Tencent/TBase/wiki/1.-TBase_Quick_Start
 ```
 
 ## License

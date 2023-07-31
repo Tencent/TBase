@@ -301,7 +301,7 @@ int pgxc_get_coordinator_proc_pid(void);
 void pgxc_set_coordinator_proc_vxid(TransactionId proc_vxid);
 TransactionId pgxc_get_coordinator_proc_vxid(void);
 PGXCNodeHandle* find_ddl_leader_cn(void);
-inline bool  is_ddl_leader_cn(char *leader_cn);
+bool  is_ddl_leader_cn(char *leader_cn);
 void CheckInvalidateRemoteHandles(void);
 extern int pgxc_node_send_sessionid(PGXCNodeHandle * handle);
 extern void SerializeSessionId(Size maxsize, char *start_address);
