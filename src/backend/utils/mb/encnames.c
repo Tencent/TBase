@@ -465,22 +465,10 @@ is_encoding_supported_by_icu(int encoding)
 const char *
 get_encoding_name_for_icu(int encoding)
 {
-    const char *icu_encoding_name;
-
-	StaticAssertStmt(lengthof(pg_enc2icu_tbl) == PG_SERVER_ENCODING_BE_LAST + 1,
-                     "pg_enc2icu_tbl incomplete");
-
-    icu_encoding_name = pg_enc2icu_tbl[encoding];
-
-    if (!icu_encoding_name)
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("encoding \"%s\" not supported by ICU",
-                        pg_encoding_to_char(encoding))));
-
-    return icu_encoding_name;
+	    if (!PG_VALID_BE_ENCODING(encoding))
+		            return NULL;
+	        return pg_enc2icu_tbl[encoding];
 }
-
 #endif                            /* not FRONTEND */
 
 
