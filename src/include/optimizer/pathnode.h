@@ -357,6 +357,14 @@ extern ParamPathInfo *get_joinrel_parampathinfo(PlannerInfo *root,
                           List **restrict_clauses);
 extern ParamPathInfo *get_appendrel_parampathinfo(RelOptInfo *appendrel,
                             Relids required_outer);
+#ifdef XZ
+void restrict_distribution(PlannerInfo *root, RestrictInfo *ri,
+							Path *pathnode);
+void set_scanpath_distribution(PlannerInfo *root, RelOptInfo *rel, Path *pathnode);
+
+List *set_joinpath_distribution(PlannerInfo *root, JoinPath *pathnode);
+
+#endif
 extern ParamPathInfo *find_param_path_info(RelOptInfo *rel,
                                         Relids required_outer);
 extern RelOptInfo *build_child_join_rel(PlannerInfo *root,

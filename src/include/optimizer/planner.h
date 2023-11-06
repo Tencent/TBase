@@ -125,9 +125,32 @@ extern void preprocess_rowmarks(PlannerInfo *root);
 
 #ifdef __TBASE__
 extern bool olap_optimizer;
-extern Size estimate_hashagg_entrysize(Path *path, const AggClauseCosts *agg_costs,
-						   						double dNumGroups);
+extern Size estimate_hashagg_entrysize(Path *path, const AggClauseCosts *agg_costs,						   						double dNumGroups);
 #endif
+
+#ifdef XZ
+typedef struct
+{
+    List       *rollups;
+    List       *hash_sets_idx;
+    double        dNumHashGroups;
+    bool        any_hashable;
+    Bitmapset  *unsortable_refs;
+    Bitmapset  *unhashable_refs;
+    List       *unsortable_sets;
+    int           *tleref_to_colnum_map;
+} grouping_sets_data;
+
+extern PathTarget *make_partial_grouping_target(PlannerInfo *root,
+							 PathTarget *grouping_target,
+							 Node *havingQual); 
+extern bool can_push_down_grouping(PlannerInfo *root, Query *parse, Path *path);
+extern double get_number_of_groups(PlannerInfo *root,
+                     double path_rows,
+					 grouping_sets_data *gd,
+					 List *target_list);
+#endif
+
 
 
 #endif                            /* PLANNER_H */

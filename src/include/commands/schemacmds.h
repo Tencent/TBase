@@ -80,7 +80,11 @@
 
 extern Oid CreateSchemaCommand(CreateSchemaStmt *parsetree,
                     const char *queryString,
+//#ifdef XZ
+//                    bool sentToRemote,
+//#else
                     bool is_top_level,
+//#endif
                     int stmt_location, int stmt_len);
 
 extern void RemoveSchemaById(Oid schemaOid);

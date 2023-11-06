@@ -96,8 +96,9 @@ static List *translate_sub_tlist(List *tlist, int relid);
 static List *reparameterize_pathlist_by_child(PlannerInfo *root,
                                                                 List *pathlist,
                                                                 RelOptInfo *child_rel);
-
 #ifdef XCP
+#ifdef XZ
+#else
 static void restrict_distribution(PlannerInfo *root, RestrictInfo *ri,
                                   Path *pathnode);
 static Path *redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
@@ -105,6 +106,7 @@ static Path *redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
                   Bitmapset *nodes, Bitmapset *restrictNodes);
 static void set_scanpath_distribution(PlannerInfo *root, RelOptInfo *rel, Path *pathnode);
 static List *set_joinpath_distribution(PlannerInfo *root, JoinPath *pathnode);
+#endif
 extern void PoolPingNodes(void);
 #endif
 
@@ -1033,7 +1035,11 @@ add_partial_path_precheck(RelOptInfo *parent_rel, Cost total_cost,
  *    Analyze the RestrictInfo and decide if it is possible to restrict
  *    distribution nodes
  */
+#ifdef XZ
+void
+#else
 static void
+#endif
 restrict_distribution(PlannerInfo *root, RestrictInfo *ri,
                                   Path *pathnode)
 {// #lizard forgives
@@ -1262,15 +1268,30 @@ restrict_distribution(PlannerInfo *root, RestrictInfo *ri,
  * set_scanpath_distribution
  *      Assign distribution to the path which is a base relation scan.
  */
+#ifdef XZ
+void
+#else
 static void
+#endif
 set_scanpath_distribution(PlannerInfo *root, RelOptInfo *rel, Path *pathnode)
 {// #lizard forgives
     RangeTblEntry   *rte;
     RelationLocInfo *rel_loc_info;
 
     rte = planner_rt_fetch(rel->relid, root);
-    rel_loc_info = GetRelationLocInfo(rte->relid);
     
+    // XZ
+#ifdef XZ
+    if(rte == NULL) {
+#ifdef XZ_DEBUG
+        elog(WARNING,"[DEBUG](set_scanpath_distribution) -> rte is NULL | rid: %d",rel->relid);
+#endif
+        return;
+    }
+#endif
+
+    rel_loc_info = GetRelationLocInfo(rte->relid);
+
 #ifdef __TBASE__
     /* 
      * get group oid which base rel belongs to, and used later at end of planner.
@@ -1373,6 +1394,9 @@ retry_pools:
         }
         else
         {
+#ifdef XZ_DEBUG
+            elog(NOTICE,"[DEBUG](set_scanpath_distribution) -> add nodes");
+#endif
             foreach(lc, rel_loc_info->rl_nodeList)
                 distribution->nodes = bms_add_member(distribution->nodes,
                                                      lfirst_int(lc));
@@ -1386,6 +1410,9 @@ retry_pools:
         distribution->distributionExpr = NULL;
         if (rel_loc_info->partAttrNum)
         {
+#ifdef XZ_DEBUG
+            elog(NOTICE,"[DEBUG](set_scanpath_distribution) -> partAttrNum found");
+#endif
             Var        *var = NULL;
             ListCell   *lc;
 
@@ -1487,6 +1514,10 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
      */
     if (IsA(subpath, MaterialPath))
     {
+#ifdef XZ_DEBUG
+        elog(NOTICE,"[DEBUG](redistribute_path) -> MaterialPath");
+#endif
+
         MaterialPath *mpath = (MaterialPath *) subpath;
         /* If subpath is already a RemoteSubPath, just replace distribution */
         if (IsA(mpath->subpath, RemoteSubPath))
@@ -1531,6 +1562,10 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
     }
     else
     {
+#ifdef XZ_DEBUG
+        elog(NOTICE,"[DEBUG](redistribute_path) -> NOT MaterialPath");
+#endif
+
         Cost    input_startup_cost = 0;
         Cost    input_total_cost = 0;
 
@@ -1541,6 +1576,10 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
         pathnode->path.param_info = subpath->param_info;
         pathnode->path.pathkeys = pathkeys ? pathkeys : subpath->pathkeys;
         pathnode->path.distribution = distribution;
+
+#ifdef XZ_DEBUG
+        elog(NOTICE,"[DEBUG](redistribute_path) -> T_RemoteSubplan: %s",nodeToString(pathnode));
+#endif
 
         /*
          * If we need to insert a Sort node, add it here, so that it gets
@@ -1597,7 +1636,11 @@ redistribute_path(PlannerInfo *root, Path *subpath, List *pathkeys,
  * returned as a list so caller can cost all of them and choose cheapest to
  * continue.
  */
+#ifndef XZ
 static List *
+#else
+List *
+#endif
 set_joinpath_distribution(PlannerInfo *root, JoinPath *pathnode)
 {// #lizard forgives
     Distribution   *innerd = pathnode->innerjoinpath->distribution;
@@ -3137,6 +3180,10 @@ create_redistribute_distinct_agg_path(PlannerInfo *root, Query *parse, Path *pat
 Path *
 create_redistribute_grouping_path(PlannerInfo *root, Query *parse, Path *path)
 {// #lizard forgives
+
+#ifdef XZ_DEBUG
+    elog(NOTICE,"[DEBUG](create_redist_group_path)");
+#endif
     if(parse->groupingSets)
     {
         /* not implement now */
@@ -3161,6 +3208,11 @@ create_redistribute_grouping_path(PlannerInfo *root, Query *parse, Path *path)
 
         List *groupExprs = get_sortgrouplist_exprs(parse->groupClause,
                                                  parse->targetList);
+
+#ifdef XZ_DEBUG
+            elog(NOTICE,"[DEBUG](create_redist_group_path) -> groupClause");
+#endif
+
 
         if (IsA(path, AggPath))
         {
@@ -3214,6 +3266,10 @@ create_redistribute_grouping_path(PlannerInfo *root, Query *parse, Path *path)
 
         if (group == InvalidOid)
         {
+#ifdef XZ_DEBUG
+            elog(NOTICE,"[DEBUG](create_redist_group_path) -> InvalidOid");
+#endif
+
             for (i = 0; i < NumDataNodes; i++)
                 nodes = bms_add_member(nodes, i);
 
@@ -3230,6 +3286,10 @@ create_redistribute_grouping_path(PlannerInfo *root, Query *parse, Path *path)
         }
         else
         {
+#ifdef XZ_DEBUG
+            elog(NOTICE,"[DEBUG](create_redist_group_path) -> GetGroupNodeList | OID: %d",group);
+#endif
+
             ListCell *cell;
             List *nodelist = GetGroupNodeList(group);
 
@@ -3238,6 +3298,11 @@ create_redistribute_grouping_path(PlannerInfo *root, Query *parse, Path *path)
                 int nodeid = lfirst_int(cell);
 
                 nodes = bms_add_member(nodes, nodeid);
+
+#ifdef XZ_DEBUG
+            elog(NOTICE,"[DEBUG](create_redist_group_path) -> node added: %d",nodeid);
+#endif
+
             }
             /*
               * FIXING ME! check hash column's data type to satisfity hash locator func
@@ -3258,6 +3323,10 @@ create_redistribute_grouping_path(PlannerInfo *root, Query *parse, Path *path)
 
     if(parse->hasAggs)
     {
+#ifdef XZ_DEBUG
+            elog(NOTICE,"[DEBUG](create_redist_group_path) -> hasAggs");
+#endif
+
         /*
           * FIXING ME! check hash column's data type to satisfity hash locator func
           */
@@ -6957,12 +7026,21 @@ reparameterize_path(PlannerInfo *root, Path *path,
                     double loop_count)
 {// #lizard forgives
     RelOptInfo *rel = path->parent;
-
+#ifdef XZ_DEBUG
+    elog(NOTICE,"[DEBUG](reparameterize_path)");
+#endif
     /* Can only increase, not decrease, path's parameterization */
     if (!bms_is_subset(PATH_REQ_OUTER(path), required_outer))
         return NULL;
     switch (path->pathtype)
     {
+#ifdef XZ
+        case T_CustomScan:
+#ifdef XZ_DEBUG
+            elog(NOTICE,"[DEBUG](reparameterize_path) -> T_CustomScan");
+#endif
+            break;
+#endif
         case T_SeqScan:
             return create_seqscan_path(root, rel, required_outer, 0);
         case T_SampleScan:

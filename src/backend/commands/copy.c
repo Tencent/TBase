@@ -2935,6 +2935,10 @@ limit_printout_length(const char *str)
 uint64
 CopyFrom(CopyState cstate)
 {// #lizard forgives
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](COPY) called");
+#endif
+
     HeapTuple    tuple;
     TupleDesc    tupDesc;
     Datum       *values;
@@ -2986,6 +2990,10 @@ CopyFrom(CopyState cstate)
      */
     if (cstate->rel->rd_rel->relkind != RELKIND_RELATION &&
         cstate->rel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE &&
+#ifdef XZ
+		/* Allow on coordinator */
+		! (cstate->rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE && IS_PGXC_COORDINATOR) &&
+#endif
         !(cstate->rel->trigdesc &&
           cstate->rel->trigdesc->trig_insert_instead_row))
     {
@@ -3000,11 +3008,15 @@ CopyFrom(CopyState cstate)
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                      errmsg("cannot copy to materialized view \"%s\"",
                             RelationGetRelationName(cstate->rel))));
+#ifdef XZ
+        /* Allow this, so coordinator can forward to data nodes to load */
+#else
         else if (cstate->rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE)
             ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                      errmsg("cannot copy to foreign table \"%s\"",
                             RelationGetRelationName(cstate->rel))));
+#endif
         else if (cstate->rel->rd_rel->relkind == RELKIND_SEQUENCE)
             ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),

@@ -218,6 +218,9 @@ DefineType(ParseState *pstate, List *names, List *parameters)
      */
     if (!OidIsValid(typoid))
     {
+#ifdef XZ_DEBUG
+        elog(WARNING,"[DEBUG](DefineType) typeOid does not exist -> create shell type");
+#endif
         address = TypeShellMake(typeName, typeNamespace, GetUserId());
         typoid = address.objectId;
         /* Make new shell type visible for modification below */
@@ -322,8 +325,12 @@ DefineType(ParseState *pstate, List *names, List *parameters)
         internalLength = defGetTypeLength(internalLengthEl);
     if (inputNameEl)
         inputName = defGetQualifiedName(inputNameEl);
-    if (outputNameEl)
+    if (outputNameEl) {
         outputName = defGetQualifiedName(outputNameEl);
+#ifdef XZ_DEBUG
+        elog(WARNING,"[DEBUG](DefineType) outputNameEl %s / %s",outputNameEl->defnamespace,outputNameEl->defname);
+#endif
+    }
     if (receiveNameEl)
         receiveName = defGetQualifiedName(receiveNameEl);
     if (sendNameEl)
@@ -1715,10 +1722,13 @@ findTypeOutputFunction(List *procname, Oid typeOid)
      */
     argList[0] = typeOid;
 
+#ifdef XZ_DEBUG
+    elog(WARNING,"[DEBUG](findTypeOutputFunc) typeOid: %d",typeOid);
+#endif
     procOid = LookupFuncName(procname, 1, argList, true);
     if (OidIsValid(procOid))
         return procOid;
-
+   
     /* No luck, try it with OPAQUE */
     argList[0] = OPAQUEOID;
 

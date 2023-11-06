@@ -2395,6 +2395,13 @@ int do_singleLine(char *buf, char *wkline)
         do_stop_command(line);
         return 0;
     }
+    #ifdef XZ
+    else if (TestToken("restart")) {
+        do_stop_command(line);
+        do_start_command(line);
+        return 0;
+    }
+    #endif
     else if (TestToken("monitor"))
     {
         do_monitor_command(line);

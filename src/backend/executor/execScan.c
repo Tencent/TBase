@@ -139,7 +139,6 @@ ExecScan(ScanState *node,
     ExprContext *econtext;
     ExprState  *qual;
     ProjectionInfo *projInfo;
-    
 #ifdef __AUDIT_FGA__
 	ShardID 	shardid = InvalidShardID;
     ListCell      *item;

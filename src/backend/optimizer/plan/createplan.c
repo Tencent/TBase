@@ -445,7 +445,11 @@ create_plan_recurse(PlannerInfo *root, Path *best_path, int flags)
         case T_NamedTuplestoreScan:
         case T_ForeignScan:
         case T_CustomScan:
+#ifdef XZ_DEBUG
+            elog(WARNING,"[DEBUG](create_plan_recurse) -> T_CustomScan");
+#endif
             plan = create_scan_plan(root, best_path, flags);
+            
             break;
 #ifdef XCP
         case T_RemoteSubplan:
@@ -4677,6 +4681,9 @@ static CustomScan *
 create_customscan_plan(PlannerInfo *root, CustomPath *best_path,
                        List *tlist, List *scan_clauses)
 {
+#ifdef XZ_DEBUG
+    elog(NOTICE,"[DEBUG](create_customscan_plan)");
+#endif
     CustomScan *cplan;
     RelOptInfo *rel = best_path->path.parent;
     List       *custom_plans = NIL;

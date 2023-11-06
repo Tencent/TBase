@@ -812,7 +812,9 @@ execute_extension_script(Oid extensionOid, ExtensionControlFile *control,
     int            save_nestlevel;
     StringInfoData pathbuf;
     ListCell   *lc;
-
+#ifdef XZ_DEBUG   
+    elog(WARNING,"[DEBUG](exec_ext_script) entry");
+#endif
     /*
      * Enforce superuser-ness if appropriate.  We postpone this check until
      * here so that the flag is correctly associated with the right script(s)
@@ -943,10 +945,16 @@ execute_extension_script(Oid extensionOid, ExtensionControlFile *control,
 
         if (support_gis_extension)
         {
+#ifdef XZ_DEBUG
+            elog(WARNING, "[DEBUG](exec_ext_script) gis");
+#endif
             execute_support_gis_sql_string(control, c_sql, filename);
         }
         else
         {
+#ifdef XZ_DEBUG 
+            elog(WARNING, "[DEBUG](exec_ext_script) non-gis"); 
+#endif
             execute_sql_string(c_sql, filename);
         }
         
@@ -1311,7 +1319,9 @@ CreateExtensionInternal(char *extensionName,
     Oid            extensionOid;
     ObjectAddress address;
     ListCell   *lc;
-
+#ifdef XZ_DEBUG
+    elog(WARNING, "[DEBUG](CreateExtensionInternal)");
+#endif
     /*
      * Read the primary control file.  Note we assume that it does not contain
      * any non-ASCII data, so there is no need to worry about encoding at this
@@ -1657,7 +1667,9 @@ CreateExtension(ParseState *pstate, CreateExtensionStmt *stmt)
     char       *oldVersionName = NULL;
     bool        cascade = false;
     ListCell   *lc;
-
+#ifdef XZ
+    bool        create = true;
+#endif
     /* Check extension name validity before any filesystem access */
     check_valid_extension_name(stmt->extname);
 
@@ -1738,9 +1750,24 @@ CreateExtension(ParseState *pstate, CreateExtensionStmt *stmt)
             d_cascade = defel;
             cascade = defGetBoolean(d_cascade);
         }
+#ifdef XZ
+        /*
+            Only create extension on particular node if NODE option is set
+        */
+        else if(strcmp(defel->defname,"node") == 0)
+        {
+            if(strcasecmp(defGetString(defel),PGXCNodeName) !=0) {
+                create = false;
+            }
+        }
+#endif
         else
             elog(ERROR, "unrecognized option: %s", defel->defname);
     }
+
+#ifdef XZ
+    if(!create) return InvalidObjectAddress;
+#endif
 
     /* Call CreateExtensionInternal to do the real work. */
     return CreateExtensionInternal(stmt->extname,
@@ -3390,7 +3417,12 @@ PrepareExtension(ParseState *pstate, CreateExtensionStmt *stmt)
     char       *oldVersionName = NULL;
     bool        cascade = false;
     ListCell   *lc;
-
+#ifdef XZ
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](PrepareExtension)");
+#endif
+    bool        create = true;
+#endif
     /* Check extension name validity before any filesystem access */
     check_valid_extension_name(stmt->extname);
 
@@ -3471,11 +3503,38 @@ PrepareExtension(ParseState *pstate, CreateExtensionStmt *stmt)
             d_cascade = defel;
             cascade = defGetBoolean(d_cascade);
         }
+#ifdef XZ
+        /*
+            Only create extension on particular node if NODE option is set
+        */
+        else if(strcmp(defel->defname,"node") == 0)
+        {
+#ifdef XZ_DEBUG
+            elog(NOTICE, "[DEBUG](PrepareExtension) target NODE: %s",defGetString(defel));
+            elog(NOTICE, "[DEBUG](PrepareExtension) cur    NODE: %s",PGXCNodeName);
+#endif
+            if(strcasecmp(defGetString(defel),PGXCNodeName) !=0) {           
+                create = false;
+            }
+        }
+#endif
         else
             elog(ERROR, "unrecognized option: %s", defel->defname);
     }
 
+#ifdef XZ
+    if(!create) {
+#ifdef XZ_DEBUG
+        elog(NOTICE, "[DEBUG](PrepareExtension) do not create");
+#endif
+        return InvalidObjectAddress;
+    }
+#endif
     /* Call PrepareExtensionInternal to do the real work. */
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](PrepareExtension) call internal");
+#endif
+    
     return PrepareExtensionInternal(stmt->extname,
                                    schemaName,
                                    versionName,
@@ -3506,7 +3565,9 @@ PrepareExtensionInternal(char *extensionName,
     Oid            extensionOid;
     ObjectAddress address;
     ListCell   *lc;
-
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](PrepareExtensionInternal)");
+#endif
     /*
      * Read the primary control file.  Note we assume that it does not contain
      * any non-ASCII data, so there is no need to worry about encoding at this
@@ -3732,6 +3793,9 @@ PrepareExtensionInternal(char *extensionName,
     /*
      * Insert new tuple into pg_extension, and create dependency entries.
      */
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](PrepareExtensionInternal) pre-tuple");
+#endif
     address = InsertExtensionTuple(control->name, extowner,
                                    schemaOid, control->relocatable,
                                    versionName,
@@ -3764,16 +3828,22 @@ ExecuteExtension(ParseState *pstate, CreateExtensionStmt *stmt)
     char       *oldVersionName = NULL;
     bool        cascade = false;
     ListCell   *lc;
-    
+#ifdef XZ
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](ExecuteExtension)");
+#endif
+    bool        create = true;
+#endif
     /*
      * We use global variables to track the extension being created, so we can
      * create only one extension at the same time.
      */
+#ifndef XZ
     if (!creating_extension)
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                  errmsg("Unexpected EXECUTE CREATE EXTENSION")));
-
+#endif
     /* Deconstruct the statement option list */
     foreach(lc, stmt->options)
     {
@@ -3819,9 +3889,29 @@ ExecuteExtension(ParseState *pstate, CreateExtensionStmt *stmt)
             d_cascade = defel;
             cascade = defGetBoolean(d_cascade);
         }
+#ifdef XZ
+        /*
+            Only create extension on particular node if NODE option is set
+        */
+        else if(strcmp(defel->defname,"node") == 0)
+        {
+            if(strcasecmp(defGetString(defel),PGXCNodeName) !=0) {           
+                create = false;
+            }
+        }
+#endif
         else
             elog(ERROR, "unrecognized option: %s", defel->defname);
     }
+
+#ifdef XZ
+    if(!create) return;
+
+    if (!creating_extension)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("Unexpected EXECUTE CREATE EXTENSION")));
+#endif
 
     /* Call ExecuteExtensionInternal to do the real work. */
     ExecuteExtensionInternal(stmt->extname,
@@ -3852,7 +3942,9 @@ static void ExecuteExtensionInternal(char *extensionName,
     List       *requiredSchemas;
     Oid            extensionOid;
     ListCell   *lc;
-
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](ExecuteExtensionInternal)");
+#endif
     /*
      * Read the primary control file.  Note we assume that it does not contain
      * any non-ASCII data, so there is no need to worry about encoding at this
@@ -4111,6 +4203,9 @@ execute_support_gis_sql_string(ExtensionControlFile *control, const char *sql, c
      */
     raw_parsetree_list = pg_parse_query(sql);
 
+#ifdef XZ_DEBUG 
+    elog(WARNING,"[DEBUG](execute_support_gis_sql_string) parse ok");
+#endif
     /* All output from SELECTs goes to the bit bucket */
     dest = CreateDestReceiver(DestNone);
 
@@ -4153,11 +4248,14 @@ execute_support_gis_sql_string(ExtensionControlFile *control, const char *sql, c
                  */
                 if (IS_PGXC_LOCAL_COORDINATOR)
                 {
+                   
                     qdesc = CreateQueryDesc(stmt,
                                         sql,
                                         GetActiveSnapshot(), NULL,
                                         dest, NULL, NULL, 0);
-
+#ifdef XZ_DEBUG
+                    elog(WARNING,"[DEBUG](CreateQueryDesc)"); 
+#endif 
                     ExecutorStart(qdesc, 0);
                     ExecutorRun(qdesc, ForwardScanDirection, 0, true);
                     ExecutorFinish(qdesc);
@@ -4220,6 +4318,13 @@ execute_support_gis_sql_string(ExtensionControlFile *control, const char *sql, c
                 }
                 else
                 {
+                    utility_sql = (char*)palloc(parsetree->stmt_len+1);
+                    memcpy(utility_sql, sql + parsetree->stmt_location, parsetree->stmt_len);
+                    utility_sql[parsetree->stmt_len] = '\0';
+#ifdef XZ_DEBUG
+                    elog(WARNING,"[DEBUG](ProcessUtility) call: %s",utility_sql); 
+                    elog(WARNING,"[DEBUG](ProcessUtility) NodeTag: %d",(int) nodeTag(stmt->utilityStmt)); 
+#endif 
                     ProcessUtility(stmt,
                                    sql,
                                    PROCESS_UTILITY_QUERY,
@@ -4228,6 +4333,10 @@ execute_support_gis_sql_string(ExtensionControlFile *control, const char *sql, c
                                    dest,
                                    true,/*sentToRemote*/
                                    NULL);
+
+#ifdef XZ_DEBUG
+                    elog(WARNING,"[DEBUG](ProcessUtility) call done"); 
+#endif 
                 }    
             }
 

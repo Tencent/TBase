@@ -120,6 +120,9 @@ CreateSchemaCommand(CreateSchemaStmt *stmt, const char *queryString,
                     bool sentToRemote,
                     int stmt_location, int stmt_len)
 {// #lizard forgives
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](CreateSchemaCommand) start | sTR: %s",sentToRemote ? "true" : "false");
+#endif
     const char *schemaName = stmt->schemaname;
     Oid            namespaceId;
     OverrideSearchPath *overridePath;

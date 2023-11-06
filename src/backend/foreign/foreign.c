@@ -62,8 +62,11 @@ GetForeignDataWrapper(Oid fdwid)
     if (isnull)
         fdw->options = NIL;
     else
+#ifdef XZ
+        fdw->options = untransformRelOptionsForNode(datum,false,false);
+#else
         fdw->options = untransformRelOptions(datum);
-
+#endif
     ReleaseSysCache(tp);
 
     return fdw;
@@ -133,8 +136,11 @@ GetForeignServer(Oid serverid)
     if (isnull)
         server->options = NIL;
     else
+#ifdef XZ
+        server->options = untransformRelOptionsForNode(datum,false,false);
+#else
         server->options = untransformRelOptions(datum);
-
+#endif
     ReleaseSysCache(tp);
 
     return server;
@@ -154,6 +160,35 @@ GetForeignServerByName(const char *srvname, bool missing_ok)
 
     return GetForeignServer(serverid);
 }
+
+#ifdef XZ
+/*
+ * GetForeignServer - look up the foreign server definition.
+ */
+char *
+GetForeignServerName(Oid serverid)
+{
+	Form_pg_foreign_server serverform;
+	ForeignServer *server;
+	HeapTuple	tp;
+	Datum		datum;
+	bool		isnull;
+	char	   *servername;
+
+	tp = SearchSysCache1(FOREIGNSERVEROID, ObjectIdGetDatum(serverid));
+
+	if (!HeapTupleIsValid(tp))
+		elog(ERROR, "cache lookup failed for foreign server %u", serverid);
+
+	serverform = (Form_pg_foreign_server) GETSTRUCT(tp);
+
+	servername = pstrdup(NameStr(serverform->srvname));
+ 
+	ReleaseSysCache(tp);
+
+	return servername;
+}
+#endif
 
 
 /*
@@ -201,8 +236,11 @@ GetUserMapping(Oid userid, Oid serverid)
     if (isnull)
         um->options = NIL;
     else
+#ifdef XZ
+        um->options = untransformRelOptionsForNode(datum,false,false);
+#else
         um->options = untransformRelOptions(datum);
-
+#endif
     ReleaseSysCache(tp);
 
     return um;
@@ -537,11 +575,17 @@ deflist_to_tuplestore(ReturnSetInfo *rsinfo, List *options)
 Datum
 pg_options_to_table(PG_FUNCTION_ARGS)
 {
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](pg_options_to_table) called");
+#endif
     Datum        array = PG_GETARG_DATUM(0);
 
     deflist_to_tuplestore((ReturnSetInfo *) fcinfo->resultinfo,
+#ifdef XZ
+                          untransformRelOptionsForNode(array,false,false));
+#else 
                           untransformRelOptions(array));
-
+#endif
     return (Datum) 0;
 }
 

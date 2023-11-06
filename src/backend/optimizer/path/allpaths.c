@@ -52,6 +52,9 @@
 #include "nodes/makefuncs.h"
 #include "miscadmin.h"
 #endif /* PGXC */
+#ifdef XZ
+#include "pgxc/pgxc.h"
+#endif
 #include "rewrite/rewriteManip.h"
 #include "utils/lsyscache.h"
 #include "utils/ruleutils.h"
@@ -368,6 +371,19 @@ set_rel_size(PlannerInfo *root, RelOptInfo *rel,
                 {
                     /* Foreign table */
                     set_foreign_size(root, rel, rte);
+#ifdef XZ
+#ifdef XZ_DEBUG
+                    elog(NOTICE, "[DEBUG](set_rel_size) called");
+#endif
+					/*
+					 * If we are on the coordinator, use the previously
+					 * analyzed statistics that we pulled up
+					 * Overwrite, but call after set_foreign_size so
+					 * it can allocate foreign state
+					 */
+					if (IS_PGXC_COORDINATOR)
+						set_plain_rel_size(root, rel, rte);
+#endif
                 }
                 else if (rte->relkind == RELKIND_PARTITIONED_TABLE)
                 {
@@ -520,12 +536,20 @@ set_rel_pathlist(PlannerInfo *root, RelOptInfo *rel,
      * relation.  It could add new paths (such as CustomPaths) by calling
      * add_path(), or delete or modify paths added by the core code.
      */
-    if (set_rel_pathlist_hook)
+    if (set_rel_pathlist_hook) {
+#ifdef XZ_DEBUG
+        elog(NOTICE,"[DEBUG](set_rel_pathlist) hook active");
+#endif
         (*set_rel_pathlist_hook) (root, rel, rti, rte);
-
+    }
     /* Now find the cheapest of the paths for this rel */
     set_cheapest(rel);
 
+/*
+#ifdef XZ_DEBUG
+    debug_print_rel(root, rel);
+#endif 
+*/
 #ifdef OPTIMIZER_DEBUG
     debug_print_rel(root, rel);
 #endif
@@ -871,8 +895,64 @@ set_foreign_size(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 static void
 set_foreign_pathlist(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 {
+#ifdef XZ
+	Path	*pathnode;
+#endif
     /* Call the FDW's GetForeignPaths function to generate path(s) */
     rel->fdwroutine->GetForeignPaths(root, rel, rte->relid);
+#ifdef XZ
+    if (IS_PGXC_COORDINATOR)	
+	{
+		double factor;
+		/*
+		 * We are expecting only one path here
+		 * Take the first element and update it
+		 */
+		pathnode = lfirst(rel->pathlist->head);
+		Assert(pathnode);
+	
+		/*
+		 * Unfortunately, if we are on the coordinator, we do not have
+		 * a good way of estimating based on the data nodes, unless
+		 * we would send down a new special message to the data nodes to
+		 * get required info, which would slow down planning (but we
+		 * may wish to make that configurable in the future).
+		 * For now, do our own estimating. 
+		 */
+		switch (list_length(rel->baserestrictinfo))
+		{
+			case 0:
+				factor = 1.0;
+				break;
+			case 1:
+				factor = .03;
+				break;
+			case 2:
+				factor = .001;
+				break;
+			default:
+				factor = .0001;
+				break;
+		}
+		
+			
+		pathnode->startup_cost = 100;
+		pathnode->total_cost = pathnode->startup_cost + rel->rows * .001;
+		pathnode->rows = rel->rows * factor;
+
+		/* update distribution info */
+		set_scanpath_distribution(root, rel, pathnode);
+		if (rel->baserestrictinfo)
+		{
+			ListCell *lc;
+			foreach (lc, rel->baserestrictinfo)
+			{
+				RestrictInfo *ri = (RestrictInfo *) lfirst(lc);
+				restrict_distribution(root, ri, pathnode);
+			}
+		}
+	}    
+#endif
 }
 
 /*
@@ -3576,7 +3656,8 @@ generate_partition_wise_join_paths(PlannerInfo *root, RelOptInfo *rel)
  *            DEBUG SUPPORT
  *****************************************************************************/
 
-#ifdef OPTIMIZER_DEBUG
+#ifdef XZ
+//#ifdef OPTIMIZER_DEBUG
 
 static void
 print_relids(PlannerInfo *root, Relids relids)

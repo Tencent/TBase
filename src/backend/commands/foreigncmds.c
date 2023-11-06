@@ -62,8 +62,15 @@ static void import_error_callback(void *arg);
  * conversion.
  */
 static Datum
+#ifdef XZ
+optionListToArray(List *options, bool strip_node)
+#else
 optionListToArray(List *options)
+#endif
 {
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](optionListToArray) called");
+#endif
     ArrayBuildState *astate = NULL;
     ListCell   *cell;
 
@@ -78,6 +85,26 @@ optionListToArray(List *options)
         len = VARHDRSZ + strlen(def->defname) + 1 + strlen(value);
         t = palloc(len + 1);
         SET_VARSIZE(t, len);
+#ifdef XZ
+        if (strip_node)
+        {
+            /*
+             * Ignore any node options not intended for our node
+             * Options are in node:option=value format
+             */
+            char *p = strchr(def->defname, ':');
+            if (p)
+            {
+                *p++;
+				sprintf(VARDATA(t), "%s=%s", p, value);
+            }
+			else
+			{
+				sprintf(VARDATA(t), "%s=%s", def->defname, value);
+			}
+        }
+		else     
+#endif
         sprintf(VARDATA(t), "%s=%s", def->defname, value);
 
         astate = accumArrayResult(astate, PointerGetDatum(t),
@@ -111,7 +138,16 @@ transformGenericOptions(Oid catalogId,
                         List *options,
                         Oid fdwvalidator)
 {// #lizard forgives
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](transformGenericOptions) called");  
+#endif
+
+#ifdef XZ
+    List	   *resultOptions = untransformRelOptionsForNode(oldOptions, false, false);
+	Datum	   *validateOptions;   /* list in a format for validating */
+#else
     List       *resultOptions = untransformRelOptions(oldOptions);
+#endif
     ListCell   *optcell;
     Datum        result;
 
@@ -177,13 +213,21 @@ transformGenericOptions(Oid catalogId,
                 break;
         }
     }
-
-    result = optionListToArray(resultOptions);
+#ifdef XZ
+    result = optionListToArray(resultOptions,false);
+    /* strip the node names for validation purposes */
+    validateOptions = optionListToArray(resultOptions, true);
+#else
+   result = optionListToArray(resultOptions);
+#endif
 
     if (OidIsValid(fdwvalidator))
     {
+#ifdef XZ
+        Datum        valarg = validateOptions;
+#else
         Datum        valarg = result;
-
+#endif
         /*
          * Pass a null options list as an empty array, so that validators
          * don't have to be declared non-strict to handle the case.

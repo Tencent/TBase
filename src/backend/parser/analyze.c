@@ -3142,16 +3142,23 @@ transformExecDirectStmt(ParseState *pstate, ExecDirectStmt *stmt)
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                  errmsg("EXECUTE DIRECT cannot be executed on a Datanode")));
 
+#ifndef XZ
+    // Allow for execute on multiple nodes
     if (list_length(nodelist) > 1)
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                  errmsg("Support for EXECUTE DIRECT on multiple nodes is not available yet")));
 
     Assert(list_length(nodelist) == 1);
+#endif
+
     Assert(IS_PGXC_COORDINATOR);
 
+#ifndef XZ
     /* There is a single element here */
     nodename = strVal(linitial(nodelist));
+
+
 #ifdef XCP
     nodetype = PGXC_NODE_NONE;
     nodeIndex = PGXCNodeGetNodeIdFromName(nodename, &nodetype);
@@ -3177,6 +3184,7 @@ transformExecDirectStmt(ParseState *pstate, ExecDirectStmt *stmt)
     /* Check if node is requested is the self-node or not */
     if (nodetype == PGXC_NODE_COORDINATOR && nodeIndex == PGXCNodeId - 1)
         is_local = true;
+#endif
 
     /* Transform the query into a raw parse list */
     raw_parsetree_list = pg_parse_query(query);
@@ -3206,14 +3214,15 @@ transformExecDirectStmt(ParseState *pstate, ExecDirectStmt *stmt)
     step->read_only = true;
     step->force_autocommit = false;
     step->cursor = NULL;
-
+    
     /* This is needed by executor */
     step->sql_statement = pstrdup(query);
+    #ifndef XZ
     if (nodetype == PGXC_NODE_COORDINATOR)
         step->exec_type = EXEC_ON_COORDS;
     else
         step->exec_type = EXEC_ON_DATANODES;
-
+    #endif
     step->reduce_level = 0;
     step->base_tlist = NIL;
     step->outer_alias = NULL;
@@ -3228,9 +3237,52 @@ transformExecDirectStmt(ParseState *pstate, ExecDirectStmt *stmt)
 
     /* Change the list of nodes that will be executed for the query and others */
     step->force_autocommit = false;
+    #ifndef XZ
     step->combine_type = COMBINE_TYPE_SAME;
+    #else
+    step->combine_type = COMBINE_TYPE_NONE;
+    #endif
     step->read_only = true;
     step->exec_direct_type = EXEC_DIRECT_NONE;
+
+
+    #ifndef XZ
+    /* Build Execute Node list, there is a unique node for the time being */
+    step->exec_nodes->nodeList = lappend_int(step->exec_nodes->nodeList, nodeIndex);
+    #else
+    
+    step->exec_type = EXEC_ON_DATANODES;
+    
+    /* Build execution node list */
+    ListCell *nodecell;
+    foreach( nodecell ,nodelist) {
+        nodename = strVal( nodecell->data.ptr_value );
+        nodetype = PGXC_NODE_NONE;
+        nodeIndex = PGXCNodeGetNodeIdFromName(nodename, &nodetype);
+        
+        if (nodetype == PGXC_NODE_NONE)
+            ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("PGXC Node %s: object not defined",
+                            nodename)));
+
+        if (nodetype == PGXC_NODE_COORDINATOR) {
+            step->exec_type = EXEC_ON_COORDS;
+            /* Check if node is requested is the self-node or not */
+            if (nodeIndex == PGXCNodeId - 1) {
+                is_local = true;
+            }
+            
+            if (list_length(nodelist) > 1) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Support for EXECUTE DIRECT on multiple nodes including coordinators is not available yet")));      
+            }
+        }
+        
+        step->exec_nodes->nodeList = lappend_int(step->exec_nodes->nodeList, nodeIndex);
+    }
+    #endif
 
     /* Set up EXECUTE DIRECT flag */
     if (is_local)
@@ -3264,12 +3316,14 @@ transformExecDirectStmt(ParseState *pstate, ExecDirectStmt *stmt)
         }
     }
 
+#ifndef XZ
     /* Build Execute Node list, there is a unique node for the time being */
     step->exec_nodes->nodeList = lappend_int(step->exec_nodes->nodeList, nodeIndex);
+#endif
 
     if (!is_local)
         result->utilityStmt = (Node *) step;
-
+    
     /*
      * Reset the queryId since the caller would do that anyways.
      */

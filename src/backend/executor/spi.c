@@ -2444,7 +2444,11 @@ _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, uint64 tcount)
         queryDesc->dest->mydest == DestSPI)
     {
         if (_SPI_checktuples())
-            elog(ERROR, "consistency check on SPI tuple count failed");
+#ifndef XZ
+        elog(ERROR, "consistency check on SPI tuple count failed");
+#else
+        elog(ERROR, "consistency check on SPI tuple count failed (_SPI_pquery)");
+#endif
     }
 
     ExecutorFinish(queryDesc);
@@ -2495,7 +2499,6 @@ _SPI_cursor_operation(Portal portal, FetchDirection direction, long count,
                       DestReceiver *dest)
 {
     uint64        nfetched;
-
     /* Check that the portal is valid */
     if (!PortalIsValid(portal))
         elog(ERROR, "invalid portal in SPI cursor operation");
@@ -2516,6 +2519,7 @@ _SPI_cursor_operation(Portal portal, FetchDirection direction, long count,
                               count,
                               dest);
 
+    
     /*
      * Think not to combine this store with the preceding function call. If
      * the portal contains calls to functions that use SPI, then SPI_stack is
@@ -2527,8 +2531,11 @@ _SPI_cursor_operation(Portal portal, FetchDirection direction, long count,
     _SPI_current->processed = nfetched;
 
     if (dest->mydest == DestSPI && _SPI_checktuples())
+#ifndef XZ
         elog(ERROR, "consistency check on SPI tuple count failed");
-
+#else
+        elog(ERROR, "consistency check on SPI tuple count failed (_SPI_cursor_operation)");
+#endif
     /* Put the result into place for access by caller */
     SPI_processed = _SPI_current->processed;
     SPI_tuptable = _SPI_current->tuptable;
@@ -2593,11 +2600,12 @@ _SPI_checktuples(void)
     SPITupleTable *tuptable = _SPI_current->tuptable;
     bool        failed = false;
 
-    if (tuptable == NULL)        /* spi_dest_startup was not called */
+    if (tuptable == NULL) {       /* spi_dest_startup was not called */
         failed = true;
-    else if (processed != (tuptable->alloced - tuptable->free))
+    }
+    else if (processed != (tuptable->alloced - tuptable->free)) {
         failed = true;
-
+    } 
     return failed;
 }
 

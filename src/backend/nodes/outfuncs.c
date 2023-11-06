@@ -41,7 +41,9 @@
 #ifdef PGXC
 #include "pgxc/planner.h"
 #endif
-
+#ifdef XZ
+#include "foreign/foreign.h"
+#endif
 #ifdef __AUDIT_FGA__
 #include "audit/audit_fga.h"
 #endif
@@ -207,6 +209,16 @@ static void outChar(StringInfo str, char c);
 #define WRITE_TYPID_FIELD(fldname) \
     (appendStringInfo(str, " :" CppAsString(fldname) " "), \
      WRITE_TYPID_INTERNAL(node->fldname))
+
+#ifdef XZ
+#define WRITE_SERVERID_INTERNAL(serverid) \
+	(outToken(str, OidIsValid(serverid) ? GetForeignServerName(serverid) : NULL))
+
+/* write an OID which is a data servere OID */
+#define WRITE_SERVERID_FIELD(fldname) \
+	(appendStringInfo(str, " :" CppAsString(fldname) " "), \
+	 WRITE_SERVERID_INTERNAL(node->fldname))
+#endif
 
 #define WRITE_TYPID_LIST_FIELD(fldname) \
     do { \
@@ -1176,6 +1188,11 @@ _outForeignScan(StringInfo str, const ForeignScan *node)
     _outScanInfo(str, (const Scan *) node);
 
     WRITE_ENUM_FIELD(operation, CmdType);
+#ifdef XZ
+	if (portable_output)
+		WRITE_SERVERID_FIELD(fs_server);
+	else
+#endif   
     WRITE_OID_FIELD(fs_server);
     WRITE_NODE_FIELD(fdw_exprs);
     WRITE_NODE_FIELD(fdw_private);

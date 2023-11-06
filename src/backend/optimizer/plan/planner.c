@@ -109,6 +109,7 @@ typedef struct
  * Data specific to grouping sets
  */
 
+#ifndef XZ
 typedef struct
 {
     List       *rollups;
@@ -120,6 +121,7 @@ typedef struct
     List       *unsortable_sets;
     int           *tleref_to_colnum_map;
 } grouping_sets_data;
+#endif
 
 /* Local functions */
 static Node *preprocess_expression(PlannerInfo *root, Node *expr, int kind);
@@ -139,10 +141,13 @@ static List *preprocess_groupclause(PlannerInfo *root, List *force);
 static List *extract_rollup_sets(List *groupingSets);
 static List *reorder_grouping_sets(List *groupingSets, List *sortclause);
 static void standard_qp_callback(PlannerInfo *root, void *extra);
+
+#ifndef XZ
 static double get_number_of_groups(PlannerInfo *root,
                      double path_rows,
 					 grouping_sets_data *gd,
 					 List *target_list);
+#endif
 static Size estimate_hashagg_tablesize(Path *path,
                            const AggClauseCosts *agg_costs,
                            double dNumGroups);
@@ -195,9 +200,13 @@ static RelOptInfo *create_ordered_paths(PlannerInfo *root,
                      double limit_tuples);
 static PathTarget *make_group_input_target(PlannerInfo *root,
                         PathTarget *final_target);
+
+#ifndef XZ
 static PathTarget *make_partial_grouping_target(PlannerInfo *root,
 							 PathTarget *grouping_target,
 							 Node *havingQual);
+#endif
+
 static List *postprocess_setop_tlist(List *new_tlist, List *orig_tlist);
 static List *select_active_windows(PlannerInfo *root, WindowFuncLists *wflists);
 static PathTarget *make_window_input_target(PlannerInfo *root,
@@ -214,7 +223,9 @@ static bool groupingsets_distribution_match(PlannerInfo *root, Query *parse,
                       Path *path);
 static Path *adjust_path_distribution(PlannerInfo *root, Query *parse,
                       Path *path);
+#ifndef XZ
 static bool can_push_down_grouping(PlannerInfo *root, Query *parse, Path *path);
+#endif
 static bool can_push_down_window(PlannerInfo *root, Path *path);
 static void adjust_paths_for_srfs(PlannerInfo *root, RelOptInfo *rel,
                       List *targets, List *targets_contain_srfs);
@@ -262,9 +273,12 @@ PlannedStmt *
 planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
 {
     PlannedStmt *result;
-
-    if (planner_hook)
+    if (planner_hook) {
+#ifdef XZ_DEBUG
+        elog(WARNING,"[DEBUG](planner) <- planner_hook active");
+#endif
         result = (*planner_hook) (parse, cursorOptions, boundParams);
+    }
     else
 #ifdef PGXC
         /*
@@ -291,6 +305,7 @@ standard_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
     Plan       *top_plan;
     ListCell   *lp,
                *lr;
+
 
 #ifdef XCP
     if (IS_PGXC_LOCAL_COORDINATOR && parse->utilityStmt &&
@@ -2656,10 +2671,13 @@ grouping_planner(PlannerInfo *root, bool inheritance_update,
                                                     current_rel, final_rel);
 
     /* Let extensions possibly add some more paths */
-    if (create_upper_paths_hook)
+    if (create_upper_paths_hook) {
+#ifdef XZ_DEBUG
+        elog(NOTICE,"[DEBUG](grouping_planner) <- create_upper_paths_hook active");
+#endif
         (*create_upper_paths_hook) (root, UPPERREL_FINAL,
                                     current_rel, final_rel);
-
+    }
     /* Note: currently, we leave it to callers to do set_cheapest() */
 }
 
@@ -3974,7 +3992,11 @@ standard_qp_callback(PlannerInfo *root, void *extra)
  * for each set and each individual rollup list, with a view to later
  * determining whether some combination of them could be hashed instead.
  */
+#ifndef XZ
 static double
+#else
+double
+#endif
 get_number_of_groups(PlannerInfo *root,
                      double path_rows,
 					 grouping_sets_data *gd,
@@ -5006,9 +5028,14 @@ create_ordinary_grouping_paths(PlannerInfo *root, RelOptInfo *input_rel,
 													  input_rel, grouped_rel);
 
 	/* Let extensions possibly add some more paths */
-	if (create_upper_paths_hook)
+    if (create_upper_paths_hook) {
+#ifdef XZ_DEBUG
+        elog(NOTICE,"[DEBUG](c_ord_grouping_planner) <- create_upper_paths_hook active");
+#endif
+
 		(*create_upper_paths_hook) (root, UPPERREL_GROUP_AGG,
 									input_rel, grouped_rel);
+    }
 }
 
 
@@ -5453,10 +5480,13 @@ create_window_paths(PlannerInfo *root,
 													 input_rel, window_rel);
 
 	/* Let extensions possibly add some more paths */
-	if (create_upper_paths_hook)
+	if (create_upper_paths_hook) {
+#ifdef XZ_DEBUG
+        elog(NOTICE,"[DEBUG](create_win_paths) <- create_upper_paths_hook active");
+#endif
 		(*create_upper_paths_hook) (root, UPPERREL_WINDOW,
 									input_rel, window_rel);
-
+    }
 	/* Now choose the best path(s) */
 	set_cheapest(window_rel);
 
@@ -5783,10 +5813,13 @@ create_distinct_paths(PlannerInfo *root,
 													   input_rel, distinct_rel);
 
 	/* Let extensions possibly add some more paths */
-	if (create_upper_paths_hook)
+	if (create_upper_paths_hook) {
+#ifdef XZ_DEBUG
+        elog(NOTICE,"[DEBUG](c_dist_paths) <- create_upper_paths_hook active");
+#endif
 		(*create_upper_paths_hook) (root, UPPERREL_DISTINCT,
 									input_rel, distinct_rel);
-
+    }
 	/* Now choose the best path(s) */
 	set_cheapest(distinct_rel);
 
@@ -5925,10 +5958,13 @@ create_ordered_paths(PlannerInfo *root,
 													  input_rel, ordered_rel);
 
     /* Let extensions possibly add some more paths */
-    if (create_upper_paths_hook)
+    if (create_upper_paths_hook) {
+#ifdef XZ_DEBUG
+        elog(NOTICE,"[DEBUG](c_ord_paths) <- create_upper_paths_hook active");
+#endif
 		(*create_upper_paths_hook) (root, UPPERREL_ORDERED,
 									input_rel, ordered_rel);
-
+    }
     /*
 	 * No need to bother with set_cheapest here; grouping_planner does not
 	 * need us to do it.
@@ -6053,7 +6089,11 @@ make_group_input_target(PlannerInfo *root, PathTarget *final_target)
  * grouping_target is the tlist to be emitted by the topmost aggregation step.
  * havingQual represents the HAVING clause.
              */
+#ifndef XZ
 static PathTarget *
+#else
+PathTarget *
+#endif
 make_partial_grouping_target(PlannerInfo *root,
 							 PathTarget *grouping_target,
 							 Node *havingQual)
@@ -8532,7 +8572,7 @@ can_distinct_agg_optimize(PlannerInfo *root, RelOptInfo *input_rel,
 }
 #endif
 
-static bool
+bool
 can_push_down_grouping(PlannerInfo *root, Query *parse, Path *path)
 {
     /* only called when constructing grouping paths */

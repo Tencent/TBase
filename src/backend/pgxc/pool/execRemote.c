@@ -7055,6 +7055,9 @@ ExecRemoteUtility(RemoteQuery *node)
 #ifdef __TBASE__
 	if (type == EXCLUED_LEADER_DDL)
 	{
+#ifdef XZ_DEBUG
+        elog(NOTICE,"[DEBUG](ExecRemoteUtility) EXCLUDE_LEADER_DDL");
+#endif
 		delete_leadercn_handle(pgxc_connections, leader_cn_conn);
 	}
 #endif
@@ -7080,6 +7083,9 @@ ExecRemoteUtility(RemoteQuery *node)
 	 */
     if (exec_direct_type == EXEC_DIRECT_UTILITY)
     {
+#ifdef XZ_DEBUG
+        elog(NOTICE,"[DEBUG](ExecRemoteUtility) EXECUTE DIRECT");
+#endif
         need_tran_block = false;
 
         /* This check is not done when analyzing to limit dependencies */
@@ -7095,6 +7101,9 @@ ExecRemoteUtility(RemoteQuery *node)
 #ifdef __TBASE__    
 	if (type == ONLY_LEADER_DDL)
     {
+#ifdef XZ_DEBUG
+        elog(NOTICE,"[DEBUG](ExecRemoteUtility) ONLY_LEADER_DDL");
+#endif
 		LeaderCnExecRemoteUtility(node, leader_cn_conn, combiner,
 									need_tran_block, gxid, snapshot, cid);
 		pfree_pgxc_all_handles(pgxc_connections);
@@ -7103,6 +7112,9 @@ ExecRemoteUtility(RemoteQuery *node)
     }
 	else
     {
+#ifdef XZ_DEBUG
+        elog(NOTICE,"[DEBUG](ExecRemoteUtility) Set plgqSQL BEGIN TRANSACTION");
+#endif
         /* Set node begin transaction in plpgsql function for CN/DN */
         for (i = 0; i < dn_conn_count; i++)
         {
@@ -7126,6 +7138,9 @@ ExecRemoteUtility(RemoteQuery *node)
      *
      * Send BEGIN control command to all coordinator nodes
      */
+#ifdef XZ_DEBUG
+    elog(NOTICE,"[DEBUG](ExecRemoteUtility) BEGIN coords");
+#endif
     if (pgxc_node_begin(co_conn_count,
                         pgxc_connections->coord_handles,
                         gxid,
@@ -7136,7 +7151,9 @@ ExecRemoteUtility(RemoteQuery *node)
                 (errcode(ERRCODE_INTERNAL_ERROR),
                         errmsg("Could not begin transaction on coordinators")));
     }
-
+#ifdef XZ_DEBUG
+    elog(NOTICE,"[DEBUG](ExecRemoteUtility) MSG coords");
+#endif
     /* Send other txn related messages to coordinator nodes */
     for (i = 0; i < co_conn_count; i++)
     {

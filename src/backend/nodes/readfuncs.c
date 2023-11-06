@@ -311,6 +311,32 @@ set_portable_input(bool value)
             local_node->fldname = NIL; \
     } while (0)
 
+#ifdef XZ
+/* Read data type identifier and lookup the OID */
+#define READ_SERVERID_INTERNAL(serverid) \
+	do { \
+		char	   *servername; /* data servere name */ \
+		token = pg_strtok(&length); /* get servername */ \
+		servername = nullable_string(token, length); \
+		if (servername) \
+		{ \
+			serverid = get_foreign_server_oid(servername, false); \
+			if (!OidIsValid((serverid))) \
+				elog(WARNING, "could not find OID for servere %s", servername); \
+		} \
+		else \
+			serverid = InvalidOid; \
+	} while (0)
+
+#define READ_SERVERID_FIELD(fldname) \
+	do { \
+		Oid serverid; \
+		token = pg_strtok(&length);	\
+		READ_SERVERID_INTERNAL(serverid); \
+		local_node->fldname = serverid; \
+	} while (0)
+#endif
+
 /* Read function identifier and lookup the OID */
 #define READ_FUNCID_FIELD(fldname) \
     do { \
@@ -2888,6 +2914,11 @@ _readForeignScan(void)
     ReadCommonScan(&local_node->scan);
 
     READ_ENUM_FIELD(operation, CmdType);
+#ifdef XZ
+	if (portable_input)
+		READ_SERVERID_FIELD(fs_server);
+	else
+#endif
     READ_OID_FIELD(fs_server);
     READ_NODE_FIELD(fdw_exprs);
     READ_NODE_FIELD(fdw_private);

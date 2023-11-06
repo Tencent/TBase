@@ -1713,8 +1713,9 @@ PortalRunSelect(Portal portal,
         if (count == FETCH_ALL)
             count = 0;
 
-        if (portal->holdStore)
+        if (portal->holdStore) {
             nprocessed = RunFromStore(portal, direction, (uint64) count, dest);
+        }
         else
         {
             PushActiveSnapshot(queryDesc->snapshot);

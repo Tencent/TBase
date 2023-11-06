@@ -2041,7 +2041,6 @@ ExecutePlan(EState *estate,
 	{
 		RewriteFuncNode(planstate);
 	}
-
     /*
      * Loop until we've processed the proper number of tuples from the plan.
      */
@@ -2054,7 +2053,6 @@ ExecutePlan(EState *estate,
          * Execute the plan and obtain a tuple
          */
         slot = ExecProcNode(planstate);
-
         /*
          * if the tuple is null, then we assume there is nothing more to
          * process so we just end the loop...
@@ -2065,7 +2063,6 @@ ExecutePlan(EState *estate,
             (void) ExecShutdownNode(planstate);
             break;
         }
-
         /*
          * If we have a junk filter, then project a new tuple with the junk
          * removed.
@@ -2074,9 +2071,9 @@ ExecutePlan(EState *estate,
          * (Formerly, we stored it back over the "dirty" tuple, which is WRONG
          * because that tuple slot has the wrong descriptor.)
          */
-        if (estate->es_junkFilter != NULL)
+        if (estate->es_junkFilter != NULL) {
             slot = ExecFilterJunk(estate->es_junkFilter, slot);
-
+        }
         /*
          * If we are supposed to send the tuple somewhere, do so. (In
          * practice, this is probably always the case at this point.)
@@ -2091,7 +2088,6 @@ ExecutePlan(EState *estate,
             if (!((*dest->receiveSlot) (slot, dest)))
                 break;
         }
-
         /*
          * Count tuples processed, if this is a SELECT.  (For other operation
          * types, the ModifyTable plan node must count the appropriate

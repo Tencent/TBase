@@ -1,9 +1,9 @@
 /*-------------------------------------------------------------------------
  *
  * pqformat.h
- *        Definitions for formatting and parsing frontend/backend messages
+ *		Definitions for formatting and parsing frontend/backend messages
  *
- * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2023, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/libpq/pqformat.h
@@ -28,6 +28,99 @@ extern void pq_sendint64(StringInfo buf, int64 i);
 extern void pq_sendfloat4(StringInfo buf, float4 f);
 extern void pq_sendfloat8(StringInfo buf, float8 f);
 extern void pq_endmessage(StringInfo buf);
+
+#ifdef XZ
+/*
+ * Append a [u]int8 to a StringInfo buffer, which already has enough space
+ * preallocated.
+ *
+ * The use of pg_restrict allows the compiler to optimize the code based on
+ * the assumption that buf, buf->len, buf->data and *buf->data don't
+ * overlap. Without the annotation buf->len etc cannot be kept in a register
+ * over subsequent pq_writeintN calls.
+ *
+ * The use of StringInfoData * rather than StringInfo is due to MSVC being
+ * overly picky and demanding a * before a restrict.
+ */
+static inline void
+pq_writeint8(StringInfoData *buf, uint8 i)
+{
+	uint8		ni = i;
+
+	Assert(buf->len + (int) sizeof(uint8) <= buf->maxlen);
+	memcpy((char *) (buf->data + buf->len), &ni, sizeof(uint8));
+	buf->len += sizeof(uint8);
+}
+
+/*
+ * Append a [u]int16 to a StringInfo buffer, which already has enough space
+ * preallocated.
+ */
+static inline void
+pq_writeint16(StringInfoData *buf, uint16 i)
+{
+	uint16		ni = pg_hton16(i);
+
+	Assert(buf->len + (int) sizeof(uint16) <= buf->maxlen);
+	memcpy((char *) (buf->data + buf->len), &ni, sizeof(uint16));
+	buf->len += sizeof(uint16);
+}
+
+/*
+ * Append a [u]int32 to a StringInfo buffer, which already has enough space
+ * preallocated.
+ */
+static inline void
+pq_writeint32(StringInfoData *buf, uint32 i)
+{
+	uint32		ni = pg_hton32(i);
+
+	Assert(buf->len + (int) sizeof(uint32) <= buf->maxlen);
+	memcpy((char *) (buf->data + buf->len), &ni, sizeof(uint32));
+	buf->len += sizeof(uint32);
+}
+
+/*
+ * Append a [u]int64 to a StringInfo buffer, which already has enough space
+ * preallocated.
+ */
+static inline void
+pq_writeint64(StringInfoData *buf, uint64 i)
+{
+	uint64		ni = pg_hton64(i);
+
+	Assert(buf->len + (int) sizeof(uint64) <= buf->maxlen);
+	memcpy((char *) (buf->data + buf->len), &ni, sizeof(uint64));
+	buf->len += sizeof(uint64);
+}
+
+/* append a binary [u]int8 to a StringInfo buffer */
+static inline void
+pq_sendint8(StringInfo buf, uint8 i)
+{
+	enlargeStringInfo(buf, sizeof(uint8));
+	pq_writeint8(buf, i);
+}
+
+/* append a binary [u]int16 to a StringInfo buffer */
+static inline void
+pq_sendint16(StringInfo buf, uint16 i)
+{
+	enlargeStringInfo(buf, sizeof(uint16));
+	pq_writeint16(buf, i);
+}
+
+/* append a binary [u]int32 to a StringInfo buffer */
+static inline void
+pq_sendint32(StringInfo buf, uint32 i)
+{
+	enlargeStringInfo(buf, sizeof(uint32));
+	pq_writeint32(buf, i);
+}
+
+
+
+#endif
 
 extern void pq_begintypsend(StringInfo buf);
 extern bytea *pq_endtypsend(StringInfo buf);

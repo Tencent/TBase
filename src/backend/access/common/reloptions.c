@@ -972,15 +972,34 @@ transformRelOptions(Datum oldOptions, List *defList, char *namspace,
  * Convert the text-array format of reloptions into a List of DefElem.
  * This is the inverse of transformRelOptions().
  */
+#ifdef XZ
 List *
 untransformRelOptions(Datum options)
 {
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](untransformRelOptions) called");
+#endif
+    return untransformRelOptionsForNode(options, IS_PGXC_DATANODE, true);
+}
+
+List *
+untransformRelOptionsForNode(Datum options, bool node_only, bool strip_all)
+#else
+List *
+untransformRelOptions(Datum options)
+#endif
+{
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](untransformRelOptionsForNode) called");
+#endif
     List       *result = NIL;
     ArrayType  *array;
     Datum       *optiondatums;
     int            noptions;
     int            i;
-
+#ifdef XZ
+    ListCell *cell;
+#endif
     /* Nothing to do if no options */
     if (!PointerIsValid(DatumGetPointer(options)))
         return result;
@@ -997,12 +1016,54 @@ untransformRelOptions(Datum options)
         Node       *val = NULL;
 
         s = TextDatumGetCString(optiondatums[i]);
+#ifdef XZ
+        if (node_only || strip_all)
+		{
+			/*
+			 * Ignore any node options not intended for our node
+			 * Options are in node:option=value format
+			 */
+			p = strchr(s, ':');
+			if (p)
+			{
+				*p++ = '\0';
+        		if (node_only && (strcasecmp(s, PGXCNodeName) != 0) )
+					continue;
+				s = p;
+			}
+		}
+#endif
         p = strchr(s, '=');
         if (p)
         {
             *p++ = '\0';
             val = (Node *) makeString(pstrdup(p));
         }
+#ifdef XZ
+		if (strip_all)
+		{
+			/*
+			 * Make sure list is unique, otherwise validation checks will fail.
+			 * If strip_all is true, we just take the first one to pass
+			 * coordinator validation checks.
+			 */
+			bool is_dupe = false;
+
+			foreach(cell, result)
+			{
+				DefElem    *def = (DefElem *) lfirst(cell);
+
+				/* If a duplicate, skip */
+				if (pg_strcasecmp(def->defname, s) == 0)
+				{
+					is_dupe = true;
+					break;
+				}
+			}
+			if (is_dupe)
+				continue;
+		}
+#endif
         result = lappend(result, makeDefElem(pstrdup(s), val, -1));
     }
 

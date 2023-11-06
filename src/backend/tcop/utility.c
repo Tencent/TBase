@@ -496,6 +496,9 @@ ProcessUtility(PlannedStmt *pstmt,
 #endif
                char *completionTag)
 {
+#ifdef XZ
+    Node *parsetree;
+#endif
     Assert(IsA(pstmt, PlannedStmt));
     Assert(pstmt->commandType == CMD_UTILITY);
     Assert(queryString != NULL);    /* required as of 8.4 */
@@ -510,12 +513,25 @@ ProcessUtility(PlannedStmt *pstmt,
      * control when ProcessUtility is called.  Such a plugin would normally
      * call standard_ProcessUtility().
      */
-    if (ProcessUtility_hook)
+#ifdef XZ
+	parsetree = pstmt->utilityStmt;
+	/*
+	 * Do not use any copy hook on coordinator, so data can flow down
+	 * to data nodes for FDWs
+	 */
+	if (ProcessUtility_hook && !(nodeTag(parsetree) == T_CopyStmt && IS_PGXC_COORDINATOR)) {
+#ifdef XZ_DEBUG
+        elog(NOTICE, "[DEBUG](PU hook) called");
+#endif
+#else    
+    if (ProcessUtility_hook) {
+#endif
         (*ProcessUtility_hook) (pstmt, queryString,
                                 context, params, queryEnv,
                                 dest,
                                 sentToRemote,
                                 completionTag);
+    }
     else
         standard_ProcessUtility(pstmt, queryString,
                                 context, params, queryEnv,
@@ -536,6 +552,10 @@ ProcessUtilityPre(PlannedStmt *pstmt,
                         bool sentToRemote,
                         char *completionTag)
 {// #lizard forgives
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](ProcessUtilityPre) enter");
+#endif
+
     Node       *parsetree = pstmt->utilityStmt;
     bool        isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
     bool        all_done = false;
@@ -766,9 +786,11 @@ ProcessUtilityPre(PlannedStmt *pstmt,
             break;
 
         case T_CreateEventTrigStmt:
+#ifdef XZ
             ereport(ERROR,            
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                      errmsg("EVENT TRIGGER not yet supported in Postgres-XL")));
+#endif
             break;
 
         case T_AlterEventTrigStmt:
@@ -1009,12 +1031,18 @@ ProcessUtilityPre(PlannedStmt *pstmt,
             break;
 
         case T_CreateForeignServerStmt:
+//#ifdef XZ
+#ifdef XZ_DEBUG
+            elog(NOTICE, "[DEBUG](T_CreateForeignServerStmt) entry");
+#endif
+//#else
             exec_type = EXEC_ON_ALL_NODES;
+//#endif
             break;
 
         case T_AlterForeignServerStmt:
             exec_type = EXEC_ON_ALL_NODES;
-            break;
+            break; 
 
         case T_CreateUserMappingStmt:
             exec_type = EXEC_ON_ALL_NODES;
@@ -1444,10 +1472,23 @@ ProcessUtilityPost(PlannedStmt *pstmt,
         case T_AlterFdwStmt:
         case T_CreateForeignServerStmt:
         case T_AlterForeignServerStmt:
+#ifdef XZ_DEBUG
+            elog(NOTICE, "[DEBUG](T_AlterForeignServerStmt) entry");
+#endif
+#ifdef XZ
+            //exec_type= EXEC_ON_ALL_NODES;
+            break;
+#endif
         case T_CreateUserMappingStmt:
         case T_AlterUserMappingStmt:
         case T_DropUserMappingStmt:
         case T_ImportForeignSchemaStmt:
+#ifdef XZ
+#ifdef XZ_DEBUG
+            elog(NOTICE, "[DEBUG](T_ImportForeignSchemaStmt) entry");
+#endif
+            break;
+#endif
         case T_RefreshMatViewStmt:
         case T_CreateTransformStmt:
         case T_AlterOperatorStmt:
@@ -1882,6 +1923,9 @@ ProcessUtilityPost(PlannedStmt *pstmt,
 
     if (IS_PGXC_LOCAL_COORDINATOR)
 	{
+#ifdef XZ_DEBUG
+        elog(NOTICE, "[DEBUG](ProcessUtilityPost) start %s",queryString);
+#endif
 		ExecUtilityStmtOnNodes(parsetree, queryString, exec_nodes, sentToRemote, auto_commit,
                 exec_type, is_temp, add_context);
 		
@@ -2072,11 +2116,11 @@ parallel_ddl_process(Node *node)
 			}
 			break;
 		case T_IndexStmt:
-    /* CONCURRENT INDEX is not supported */
-    if (IsA(node,IndexStmt) && castNode(IndexStmt,node)->concurrent)
-    {
-				return ;
-    }
+            /* CONCURRENT INDEX is not supported */
+            if (IsA(node,IndexStmt) && castNode(IndexStmt,node)->concurrent)
+            {
+                        return ;
+            }
 			break;
 		case T_TruncateStmt:
 		case T_ReindexStmt:
@@ -2111,6 +2155,9 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                         bool sentToRemote,
                         char *completionTag)
 {// #lizard forgives
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](standard_PU start");
+#endif
     Node       *parsetree = pstmt->utilityStmt;
     bool        isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
     ParseState *pstate;
@@ -2905,6 +2952,10 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 
         case T_DropStmt:
             {
+#ifdef XZ_DEBUG
+                elog(NOTICE, "[DEBUG](sPU.T_DropStmt) start");
+#endif
+
                 DropStmt   *stmt = (DropStmt *) parsetree;
 
                 if (EventTriggerSupportsObjectType(stmt->removeType))
@@ -3644,7 +3695,9 @@ standard_ProcessUtility(PlannedStmt *pstmt,
                                completionTag);
             break;
     }
-
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](standard_PU pre-Post)");
+#endif
     ProcessUtilityPost(pstmt, queryString, context, queryEnv, sentToRemote);
 
     free_parsestate(pstate);
@@ -3666,6 +3719,9 @@ ProcessUtilitySlow(ParseState *pstate,
                    bool sentToRemote,
                    char *completionTag)
 {// #lizard forgives
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](ProcessUtilitySlow enter");
+#endif
     Node       *parsetree = pstmt->utilityStmt;
     bool        isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
     bool        isCompleteQuery = (context <= PROCESS_UTILITY_QUERY);
@@ -3689,6 +3745,9 @@ ProcessUtilitySlow(ParseState *pstate,
                  * relation and attribute manipulation
                  */
             case T_CreateSchemaStmt:
+#ifdef XZ_DEBUG
+                 elog(NOTICE, "[DEBUG](ProcessUS) T_CreateSchemaStmt start");
+#endif
 #ifdef __TBASE__
 				/*
                  * If I am the main execute CN but not Leader CN,
@@ -3696,7 +3755,10 @@ ProcessUtilitySlow(ParseState *pstate,
                  */
 				if (!sentToRemote && LOCAL_PARALLEL_DDL)
 				{
-					SendLeaderCNUtility(queryString, false);
+#ifdef XZ_DEBUG
+                    elog(NOTICE, "[DEBUG](ProcessUS) !sentToRemote && LOCAL_PARALLEL_DDL");
+#endif
+                    SendLeaderCNUtility(queryString, false);
 				}
 #endif
                 CreateSchemaCommand((CreateSchemaStmt *) parsetree,
@@ -3714,6 +3776,9 @@ ProcessUtilitySlow(ParseState *pstate,
             case T_CreateStmt:
             case T_CreateForeignTableStmt:
                 {
+#ifdef XZ_DEBUG
+                    elog(NOTICE, "[DEBUG](T_CreateForeignTableStmt) start");
+#endif
                     List       *stmts;
                     ListCell   *l;
                     bool        is_temp = false;
@@ -3727,8 +3792,12 @@ ProcessUtilitySlow(ParseState *pstate,
 					Oid nspaceid;
 					bool exist_ok = true;
 
-					if (is_txn_has_parallel_ddl && IsConnFromCoord())
+					if (is_txn_has_parallel_ddl && IsConnFromCoord()) {
+#ifdef XZ_DEBUG
+                        elog(NOTICE, "[DEBUG](T_CreateForeignTableStmt) is_txn_has_parallel_ddl && IsConnFromCoord()");
+#endif
 						exist_ok = false;
+                    }
 
                     /* Run parse analysis ... */
                     /*
@@ -3755,6 +3824,9 @@ ProcessUtilitySlow(ParseState *pstate,
 
                     if (IS_PGXC_LOCAL_COORDINATOR)
                     {
+#ifdef XZ_DEBUG                        
+                        elog(NOTICE, "[DEBUG](T_CreateForeignTableStmt) IS_PGXC_LOCAL_COORDINATO");
+#endif
                         /*
                          * Scan the list of objects.
                          * Temporary tables are created on Datanodes only.
@@ -3847,7 +3919,10 @@ ProcessUtilitySlow(ParseState *pstate,
 					 */
 					if (!sentToRemote && LOCAL_PARALLEL_DDL)
 					{
-						PGXCNodeHandle *leader_cn = find_ddl_leader_cn();
+#ifdef XZ_DEBUG
+                        elog(NOTICE, "[DEBUG](T_CreateForeignTableStmt) !sentToRemote && LOCAL_PARALLEL_DDL");
+#endif		
+                        PGXCNodeHandle *leader_cn = find_ddl_leader_cn();
 						if (!is_ddl_leader_cn(leader_cn->nodename))
 						{
 							/*
@@ -3880,18 +3955,31 @@ ProcessUtilitySlow(ParseState *pstate,
                      * Add a RemoteQuery node for a query at top level on a remote
                      * Coordinator, if not already done so
                      */
-                    if (!sentToRemote)
+
+//#ifdef XZ
+#ifdef XZ_DEBUG
+    elog(NOTICE, "[DEBUG](T_CreateForeignTableStmt) skipping add remoteQuery node");
+#endif
+//#else
+                    if (!sentToRemote) {
+#ifdef XZ_DEBUG
+                        elog(NOTICE, "[DEBUG](T_CreateForeignTableStmt): Add a RemoteQuery node");
+#endif		
                         stmts = AddRemoteQueryNode(stmts, queryString, is_local
                                 ? EXEC_ON_NONE
                                 : (is_temp ? EXEC_ON_DATANODES : EXEC_ON_ALL_NODES));
-
+                    }
+//#endif
                     /* ... and do it */
                     foreach(l, stmts)
                     {
                         Node       *stmt = (Node *) lfirst(l);
-
+                        
                         if (IsA(stmt, CreateStmt))
                         {
+#ifdef XZ_DEBUG
+                            elog(NOTICE, "[DEBUG](T_CreateForeignTableStmt): Create statement");
+#endif	
                             Datum        toast_options;
                             static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
 #ifdef __TBASE__
@@ -3939,6 +4027,9 @@ ProcessUtilitySlow(ParseState *pstate,
 #ifdef __TBASE__
                             if (OidIsValid(address.objectId))
                             {
+#ifdef XZ_DEBUG
+                                elog(NOTICE, "[DEBUG](T_CreateForeignTableStmt) OidIsValid(address.objectId)");
+#endif	
                                 /* 
                                   *  interval partition's parent table has been created, we need to create
                                   *  child tables.
@@ -4001,6 +4092,9 @@ ProcessUtilitySlow(ParseState *pstate,
                         }
                         else if (IsA(stmt, CreateForeignTableStmt))
                         {
+#ifdef XZ_DEBUG
+                            elog(NOTICE, "[DEBUG](T_CreateForeignTableStmt) CreateForeignTable");
+#endif	
                             /* Create the table itself */
                             address = DefineRelation((CreateStmt *) stmt,
                                     RELKIND_FOREIGN_TABLE,
@@ -4014,6 +4108,9 @@ ProcessUtilitySlow(ParseState *pstate,
                         }
                         else
                         {
+#ifdef XZ_DEBUG
+                            elog(NOTICE, "[DEBUG](T_CreateForeignTableStmt) Recurse: %s",queryString);
+#endif
                             /*
                              * Recurse for anything else.  Note the recursive
                              * call will stash the objects so created into our
@@ -4287,6 +4384,9 @@ ProcessUtilitySlow(ParseState *pstate,
                  */
             case T_DefineStmt:
                 {
+#ifdef XZ_DEBUG
+                    elog(WARNING,"[DEBUG](PUslow) T_DefineStmt");
+#endif
                     DefineStmt *stmt = (DefineStmt *) parsetree;
 
                     switch (stmt->kind)
@@ -4303,7 +4403,11 @@ ProcessUtilitySlow(ParseState *pstate,
                                                      stmt->definition);
                             break;
                         case OBJECT_TYPE:
+#ifdef XZ_DEBUG
+                            elog(WARNING,"[DEBUG](PUslow) OBJECT_TYPE");
+#endif
                             Assert(stmt->args == NIL);
+
                             address = DefineType(pstate,
                                                  stmt->defnames,
                                                  stmt->definition);
@@ -4602,6 +4706,9 @@ ProcessUtilitySlow(ParseState *pstate,
 			case T_CreateExtensionStmt:
 #ifdef __TBASE__				
 				{
+#ifdef XZ_DEBUG
+                    elog(NOTICE, "[DEBUG](T_CreateExtensionStmt");
+#endif
 					CreateExtensionStmt *stmt = (CreateExtensionStmt *) parsetree;
 					char *extension_query_string = NULL;
 					if (IS_PGXC_LOCAL_COORDINATOR && CREATEEXT_CREATE == stmt->action)
@@ -4610,29 +4717,50 @@ ProcessUtilitySlow(ParseState *pstate,
 						/* stage 1 */
 						address = PrepareExtension(pstate, stmt);
 
-						if (ObjectAddressIsEqual(InvalidObjectAddress, address))
-							break;
+                   
 
+#ifdef XZ
+/*
+    Propagate for XZ as we may only want to create on specific nodes
+*/
+#else
+						if (ObjectAddressIsEqual(InvalidObjectAddress, address))
+    						break;
+#endif
 						qstring = makeStringInfo();
 						initStringInfo(qstring);
-					
+					/*
 						appendStringInfo(qstring, 
 										_("PREPARE %s"),
 										queryString);
 						/* Send prepare extension msg to all other cn and dn */
+/*
 						extension_query_string = qstring->data;
 						ExecUtilityStmtOnNodes(parsetree,
 												extension_query_string,
 												NULL, sentToRemote, false,
 												EXEC_ON_ALL_NODES,
 												false, false);
-						
+						*/
+#ifdef XZ_DEBUG
+                        elog(WARNING, "[DEBUG](T_CreateExtensionStmt) PrepExt done)");
+#endif
 						/* stage 2 */
+#ifdef XZ /* Execute only if valid */
+                        if (!ObjectAddressIsEqual(InvalidObjectAddress, address))
+#endif
 						ExecuteExtension(pstate, (CreateExtensionStmt *) parsetree);
+#ifdef XZ_DEBUG
+                        else elog(WARNING, "[DEBUG](T_CreateExtensionStmt) no valid addr");
+                        elog(WARNING, "[DEBUG](ExecuteExtension) local done");
+#endif
+
 						resetStringInfo(qstring);
 						appendStringInfo(qstring, 
-										_("EXECUTE %s"),
+									//	_("EXECUTE %s"),
+                                        _("%s"),
 										queryString);
+                                        
 						/* Send execute extension msg to all other cn and dn */
 						extension_query_string = qstring->data;
 						ExecUtilityStmtOnNodes(parsetree,
@@ -4643,17 +4771,29 @@ ProcessUtilitySlow(ParseState *pstate,
 
 						pfree(qstring->data);
 						pfree(qstring);
+#ifdef XZ_DEBUG
+                        elog(WARNING, "[DEBUG](ExecuteExtension) done");
+#endif
 					}
 					else if (CREATEEXT_PREPARE == stmt->action)
 					{
-						address = PrepareExtension(pstate, stmt);
+#ifdef XZ_DEBUG
+                        elog(WARNING, "[DEBUG](PUslow) PREPARE NON-LOCAL-COORD");
+#endif
+						address = PrepareExtension(pstate, stmt); 
 					}
 					else if (CREATEEXT_EXECUTE == stmt->action)
 					{
+#ifdef XZ_DEBUG
+                        elog(WARNING, "[DEBUG](PUslow) EXECUTE NON-LOCAL-COORD");
+#endif
 						ExecuteExtension(pstate, stmt);
 					}
 					else
 					{
+#ifdef XZ_DEBUG
+                        elog(WARNING, "[DEBUG](PUslow) ELSE");
+#endif
 						address = CreateExtension(pstate, (CreateExtensionStmt *) parsetree);
 					}
 					
@@ -4707,6 +4847,9 @@ ProcessUtilitySlow(ParseState *pstate,
 
             case T_CompositeTypeStmt:    /* CREATE TYPE (composite) */
                 {
+#ifdef XZ_DEBUG
+                    elog(WARNING,"[DEBUG](PUslow) T_CompositeTypeStmt entry");
+#endif
                     CompositeTypeStmt *stmt = (CompositeTypeStmt *) parsetree;
 #ifdef __TBASE__
 					/*
@@ -4715,6 +4858,9 @@ ProcessUtilitySlow(ParseState *pstate,
 					 */
 					if (!sentToRemote && LOCAL_PARALLEL_DDL)
 					{
+#ifdef XZ_DEBUG
+                        elog(WARNING,"[DEBUG](PUslow) T_CompositeTypeStmt entry <- LOCAL_PARALLEL_DDL");
+#endif
 						SendLeaderCNUtility(queryString, false);
 					}
 #endif
@@ -4798,6 +4944,9 @@ ProcessUtilitySlow(ParseState *pstate,
                 break;
 
             case T_CreateFunctionStmt:    /* CREATE FUNCTION */
+#ifdef XZ_DEBUG
+                elog(WARNING,"[DEBUG](PUslow) T_CreateFunctionStmt entry ");
+#endif
 #ifdef __TBASE__
 				/*
 				 * If I am the main execute CN but not Leader CN,
@@ -4805,8 +4954,16 @@ ProcessUtilitySlow(ParseState *pstate,
 				 */
 				if (!sentToRemote && LOCAL_PARALLEL_DDL)
 				{
+#ifdef XZ_DEBUG
+                    elog(WARNING,"[DEBUG](PUslow) T_CreateFunctionStmt entry -> LOCAL_PARALLEL_DDL, %d",(int)sentToRemote);
+#endif
 					SendLeaderCNUtility(queryString, false);
 				}
+                else {
+#ifdef XZ_DEBUG
+                    elog(WARNING,"[DEBUG](PUslow) T_CreateFunctionStmt entry -> NON LOCAL_PARALLEL_DDL, %d", (int)sentToRemote);
+#endif
+                }
 #endif
                 address = CreateFunction(pstate, (CreateFunctionStmt *) parsetree);
                 break;
@@ -5439,6 +5596,9 @@ ExecDropStmt(DropStmt *stmt, bool isTopLevel)
         case OBJECT_FOREIGN_TABLE:
 #ifdef PGXC
             {
+#ifdef XZ_DEBUG
+                elog(NOTICE, "[DEBUG](ExecDropStmt.T_OFT) start");
+#endif
                 bool        is_temp = false;
 				RemoteQueryExecType exec_type = EXEC_ON_ALL_NODES;
 #ifdef __TBASE__
@@ -5461,6 +5621,9 @@ ExecDropStmt(DropStmt *stmt, bool isTopLevel)
 				}
 				if (need_sendto_leadercn)
 				{
+#ifdef XZ_DEBUG
+                    elog(NOTICE, "[DEBUG](ExecDropStmt.T_OFT) need_sendto_leadercn");
+#endif
 					/*
 					 * For DROP TABLE/INDEX/VIEW/... IF EXISTS query, only 
 					 * notice is emitted, if the referred objects are not
@@ -5484,6 +5647,9 @@ ExecDropStmt(DropStmt *stmt, bool isTopLevel)
 															&heap_list);
 					if (need_drop)
 					{
+#ifdef XZ_DEBUG
+                        elog(NOTICE, "[DEBUG](ExecDropStmt.T_OFT) need_drop");
+#endif
 						/*
 						 * If I am the main execute CN but not Leader CN,
 						 * Notify the Leader CN to create firstly.
@@ -5511,10 +5677,18 @@ ExecDropStmt(DropStmt *stmt, bool isTopLevel)
 
 #ifdef PGXC
 #ifdef __TBASE__
+#ifdef XZ_DEBUG
+                elog(NOTICE, "[DEBUG](ExecDropStmt.T_OFT) old_qs: %s",queryString);
+                elog(NOTICE, "[DEBUG](ExecDropStmt.T_OFT) new_qs: %s",new_query_string);
+#endif
 				/* DROP is done depending on the object type and its temporary type */
-				if (IS_PGXC_LOCAL_COORDINATOR)
-					ExecUtilityStmtOnNodes(NULL, new_query_string, NULL, sentToRemote, false,
+				if (IS_PGXC_LOCAL_COORDINATOR) {
+//#ifdef XZ
+//#else
+                   ExecUtilityStmtOnNodes(NULL, new_query_string, NULL, sentToRemote, false,
 							exec_type, is_temp, false);
+//#endif                   
+                }
                 pfree(new_query_string);
 #else
                 /* DROP is done depending on the object type and its temporary type */
@@ -7600,11 +7774,19 @@ ExecUtilityStmtOnNodesInternal(Node* parsetree, const char *queryString,
 		if (LOCAL_PARALLEL_DDL &&
 			(exec_type == EXEC_ON_COORDS ||	exec_type == EXEC_ON_ALL_NODES))
 		{
+#ifdef XZ_DEBUG
+            elog(NOTICE,"[DEBUG](ExecUStmtOnNodesInt) LOCAL_PARALLEL_DDL %d",(int)LOCAL_PARALLEL_DDL);
+#endif
 			PGXCNodeHandle* leaderCnHandle = find_ddl_leader_cn();
-			ExecRemoteUtility(step,	leaderCnHandle, EXCLUED_LEADER_DDL);
-		}
-		else
+			
+            ExecRemoteUtility(step,	leaderCnHandle, EXCLUED_LEADER_DDL);
+   	}
+		else {
+#ifdef XZ_DEBUG
+            elog(NOTICE,"[DEBUG](ExecUStmtOnNodesInt) NON_PARALLEL_DDL");
+#endif
 			ExecRemoteUtility(step, NULL, NON_PARALLEL_DDL);
+        }
 #else
         ExecRemoteUtility(step);
 #endif

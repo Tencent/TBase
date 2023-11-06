@@ -259,6 +259,9 @@ extern Datum transformRelOptions(Datum oldOptions, List *defList,
                     char *namspace, char *validnsps[],
                     bool ignoreOids, bool isReset);
 extern List *untransformRelOptions(Datum options);
+#ifdef XZ
+extern List *untransformRelOptionsForNode(Datum options, bool node_only, bool strip_all);
+#endif
 extern bytea *extractRelOptions(HeapTuple tuple, TupleDesc tupdesc,
                   amoptions_function amoptions);
 extern relopt_value *parseRelOptions(Datum options, bool validate,
