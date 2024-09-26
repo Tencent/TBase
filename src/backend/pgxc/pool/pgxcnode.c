@@ -497,7 +497,7 @@ PGXCNodeConnStr(char *host, int port, char *dbname,
      * remote type can be Coordinator, Datanode or application.
      */
 #ifdef _MLS_
-    if (strcmp(user, MLS_USER) == 0 || strcmp(user, AUDIT_USER))
+    if (strcmp(user, MLS_USER) == 0 || strcmp(user, AUDIT_USER) == 0)
     {
         if (same_host)
         {
