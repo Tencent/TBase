@@ -44,7 +44,7 @@ typedef struct pgxc_var_hash {
 } pgxc_var_hash;
 
 
-pgxc_var_hash var_hash[NUM_HASH_BUCKET];
+extern pgxc_var_hash var_hash[NUM_HASH_BUCKET];
 
 void init_var_hash(void);
 void add_var_hash(pgxc_ctl_var *var);
