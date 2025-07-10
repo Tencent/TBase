@@ -54,7 +54,7 @@ extern int GTMServerPortNumber;
 extern int GTMProxyWorkerThreads;
 extern char *GTMProxyDataDir;
 extern char *GTMProxyConfigFileName;
-extern char *GTMConfigFileName;
+//extern char *GTMConfigFileName;
 
 
 /*

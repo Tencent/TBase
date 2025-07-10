@@ -17,6 +17,7 @@
 
 pgxc_ctl_var *var_head = NULL;
 pgxc_ctl_var *var_tail = NULL;
+pgxc_var_hash var_hash[NUM_HASH_BUCKET];
 
 static void clear_var(pgxc_ctl_var *var);
 /*
